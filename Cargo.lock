@@ -1019,6 +1019,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "mcp-system"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "capd",
+ "ed25519-dalek",
+ "egress",
+ "ledger",
+ "prophet-types",
+ "rand 0.8.8",
+ "serde",
+ "serde_json",
+ "sfs",
+ "tempfile",
+ "thiserror",
+ "time",
+ "tokio",
+ "tracing",
+ "vault",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

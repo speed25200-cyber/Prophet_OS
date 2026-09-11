@@ -1,0 +1,535 @@
+//! Registre des outils système et point de passage obligé de tout appel.
+//!
+//! Chaque appel suit la même séquence, sans exception ni raccourci :
+//! politique et jeton, puis approbation si la classe d'action l'exige, puis exécution, avec un
+//! événement au journal avant et après. Un outil ne peut pas court-circuiter cette séquence : il
+//! ne reçoit la main qu'après.
+
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
+use capd::{Broker, CheckRequest};
+use prophet_types::cap::{Act, Decision, DenyReason, Res, Token};
+use prophet_types::ledger::{Actor, Draft, EventKind};
+use serde_json::{Value, json};
+use time::OffsetDateTime;
+
+use crate::protocol::{CallResult, ErrorCode, ToolMeta, ToolSpec};
+
+/// Contexte d'exécution d'un appel d'outil.
+#[derive(Debug, Clone)]
+pub struct ToolContext {
+    /// Jeton de la tâche appelante.
+    pub token: Token,
+    /// Identifiant de tâche.
+    pub task: String,
+    /// Répertoire personnel de l'utilisateur.
+    pub home: String,
+    /// Répertoire de travail de la tâche.
+    pub workdir: String,
+    /// Niveau de sandbox courant.
+    pub sandbox_level: u8,
+    /// Étape de la boucle agentique.
+    pub step: u32,
+}
+
+/// Un outil système.
+pub trait Tool: Send + Sync {
+    /// Description destinée au modèle.
+    fn spec(&self) -> ToolSpec;
+
+    /// Cible concrète de l'appel, déduite des arguments, sur laquelle porte le contrôle d'accès.
+    ///
+    /// Retourner `None` signifie « aucune cible spécifique » : le contrôle porte alors sur le nom
+    /// de l'outil.
+    fn target(&self, args: &Value, context: &ToolContext) -> Option<String>;
+
+    /// Exécute l'appel. N'est appelé qu'après autorisation.
+    fn call(&self, args: &Value, context: &ToolContext) -> CallResult;
+}
+
+/// Journalisation des appels.
+pub trait Journal: Send + Sync {
+    /// Enregistre un événement.
+    fn record(&self, draft: Draft);
+}
+
+/// Journal en mémoire, utile aux tests et au mode dégradé.
+#[derive(Debug, Default)]
+pub struct MemoryJournal {
+    events: Mutex<Vec<Draft>>,
+}
+
+impl MemoryJournal {
+    /// Journal vide.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Événements enregistrés.
+    #[must_use]
+    pub fn events(&self) -> Vec<Draft> {
+        self.events.lock().map(|e| e.clone()).unwrap_or_default()
+    }
+
+    /// Types d'événements enregistrés, dans l'ordre.
+    #[must_use]
+    pub fn kinds(&self) -> Vec<EventKind> {
+        self.events().iter().map(|e| e.kind).collect()
+    }
+}
+
+impl Journal for MemoryJournal {
+    fn record(&self, draft: Draft) {
+        if let Ok(mut events) = self.events.lock() {
+            events.push(draft);
+        }
+    }
+}
+
+/// Registre d'outils.
+pub struct Registry {
+    tools: BTreeMap<String, Arc<dyn Tool>>,
+    broker: Arc<Mutex<Broker>>,
+    journal: Arc<dyn Journal>,
+}
+
+impl std::fmt::Debug for Registry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Registry")
+            .field("tools", &self.tools.keys().collect::<Vec<_>>())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Registry {
+    /// Registre vide.
+    #[must_use]
+    pub fn new(broker: Arc<Mutex<Broker>>, journal: Arc<dyn Journal>) -> Self {
+        Self {
+            tools: BTreeMap::new(),
+            broker,
+            journal,
+        }
+    }
+
+    /// Enregistre un outil.
+    ///
+    /// # Panics
+    /// Si deux outils portent le même nom : c'est une erreur de programmation, pas une condition
+    /// d'exécution.
+    pub fn register(&mut self, tool: Arc<dyn Tool>) {
+        let name = tool.spec().name;
+        assert!(
+            self.tools.insert(name.clone(), tool).is_none(),
+            "outil enregistré deux fois : {name}"
+        );
+    }
+
+    /// Outils visibles pour une tâche : ceux que son jeton lui permet d'appeler.
+    ///
+    /// Un modèle ne voit donc jamais un outil qu'il ne peut pas utiliser, ce qui économise du
+    /// contexte et évite des tentatives vouées à l'échec.
+    #[must_use]
+    pub fn visible_for(&self, token: &Token) -> Vec<ToolSpec> {
+        self.tools
+            .values()
+            .map(|t| t.spec())
+            .filter(|spec| {
+                token.grants.iter().any(|grant| {
+                    grant.res == Res::Tool
+                        && grant.act == Act::Call
+                        && prophet_types::pattern::matches(
+                            prophet_types::pattern::Family::Name,
+                            &grant.pattern,
+                            &spec.name,
+                            "",
+                        )
+                })
+            })
+            .collect()
+    }
+
+    /// Toutes les descriptions, sans filtrage.
+    #[must_use]
+    pub fn all(&self) -> Vec<ToolSpec> {
+        self.tools.values().map(|t| t.spec()).collect()
+    }
+
+    /// Appelle un outil, après contrôle complet.
+    pub fn call(
+        &self,
+        name: &str,
+        args: &Value,
+        context: &ToolContext,
+        now: OffsetDateTime,
+    ) -> CallResult {
+        let Some(tool) = self.tools.get(name) else {
+            return CallResult::error(ErrorCode::NotFound, format!("outil inconnu : {name}"));
+        };
+        let spec = tool.spec();
+        let Some(meta) = spec.meta.clone() else {
+            return CallResult::error(
+                ErrorCode::Internal,
+                format!("l'outil {name} ne déclare pas ses exigences"),
+            );
+        };
+
+        let args_digest = digest(args);
+        self.journal.record(
+            Draft::new(
+                now,
+                Actor::mcp(name),
+                EventKind::ToolCall,
+                json!({
+                    "tool": name,
+                    "args_digest": args_digest,
+                    "args_size": args.to_string().len(),
+                    "requires": meta.requires,
+                }),
+            )
+            .task(&context.task)
+            .step(context.step),
+        );
+
+        let decision = self.authorize(name, &meta, args, context, now);
+        if let Decision::Deny { reason, rule } = &decision {
+            self.journal.record(
+                Draft::new(
+                    now,
+                    Actor::daemon("capd"),
+                    EventKind::PolicyDeny,
+                    json!({
+                        "res": format!("{:?}", meta.requires),
+                        "act": "call",
+                        "tool": name,
+                        "reason": format!("{reason:?}"),
+                        "rule": rule,
+                    }),
+                )
+                .task(&context.task)
+                .step(context.step),
+            );
+            let code = if *reason == DenyReason::ApprovalRequired {
+                ErrorCode::ApprovalRequired
+            } else {
+                ErrorCode::PolicyDenied
+            };
+            let result = CallResult::error(
+                code,
+                format!(
+                    "{name} refusé : {reason:?}{}",
+                    rule.as_ref().map(|r| format!(" ({r})")).unwrap_or_default()
+                ),
+            );
+            self.record_result(name, &result, context, now);
+            return result;
+        }
+
+        let result = tool.call(args, context);
+        self.record_result(name, &result, context, now);
+        result
+    }
+
+    fn authorize(
+        &self,
+        name: &str,
+        meta: &ToolMeta,
+        args: &Value,
+        context: &ToolContext,
+        now: OffsetDateTime,
+    ) -> Decision {
+        let Ok(broker) = self.broker.lock() else {
+            return Decision::deny(DenyReason::PolicyDenied);
+        };
+
+        // Premier contrôle : le droit d'appeler cet outil.
+        let mut call_request =
+            CheckRequest::new(Res::Tool, Act::Call, name).sandbox_level(context.sandbox_level);
+        if meta.irreversible {
+            call_request = call_request.irreversible();
+        }
+        if meta.external {
+            call_request = call_request.external();
+        }
+        let decision = match broker.check(&context.token, &call_request, now) {
+            Ok(decision) => decision,
+            Err(_) => return Decision::deny(DenyReason::PolicyDenied),
+        };
+        if !decision.is_allow() {
+            return decision;
+        }
+
+        // Second contrôle : la ressource que l'outil va toucher. Le droit d'appeler `fs.read` ne
+        // dit rien sur le fichier visé ; c'est ici que le périmètre est vérifié.
+        let Some((res, act)) = parse_requires(&meta.requires) else {
+            return decision;
+        };
+        if res == Res::Tool {
+            return decision;
+        }
+        let Some(tool) = self.tools.get(name) else {
+            return Decision::deny(DenyReason::PolicyDenied);
+        };
+        let Some(target) = tool.target(args, context) else {
+            return decision;
+        };
+        let mut request = CheckRequest::new(res, act, target).sandbox_level(context.sandbox_level);
+        if meta.irreversible {
+            request = request.irreversible();
+        }
+        if meta.external {
+            request = request.external();
+        }
+        broker
+            .check(&context.token, &request, now)
+            .unwrap_or_else(|_| Decision::deny(DenyReason::PolicyDenied))
+    }
+
+    fn record_result(
+        &self,
+        name: &str,
+        result: &CallResult,
+        context: &ToolContext,
+        now: OffsetDateTime,
+    ) {
+        let code = result
+            .structured
+            .as_ref()
+            .and_then(|v| v.get("code"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        self.journal.record(
+            Draft::new(
+                now,
+                Actor::mcp(name),
+                EventKind::ToolResult,
+                json!({
+                    "tool": name,
+                    "ok": !result.is_error,
+                    "error_code": code,
+                    "result_digest": digest(&json!(result.structured)),
+                }),
+            )
+            .task(&context.task)
+            .step(context.step),
+        );
+    }
+}
+
+/// Empreinte d'une valeur, pour le journal. Le contenu n'y figure jamais.
+#[must_use]
+pub fn digest(value: &Value) -> String {
+    format!(
+        "blake3:{}",
+        blake3::hash(value.to_string().as_bytes()).to_hex()
+    )
+}
+
+/// Traduit `<res>.<act>` en couple typé.
+#[must_use]
+pub fn parse_requires(requires: &str) -> Option<(Res, Act)> {
+    prophet_types::manifest::parse_capability_key(requires).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use prophet_types::cap::{Grant, TokenBuilder};
+    use serde_json::json;
+
+    struct Faux;
+
+    impl Tool for Faux {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "test.faux".into(),
+                description: "Outil de test.".into(),
+                input_schema: json!({"type": "object"}),
+                meta: Some(ToolMeta {
+                    requires: "tool.call".into(),
+                    irreversible: false,
+                    external: false,
+                    sandbox_level_min: None,
+                }),
+            }
+        }
+
+        fn target(&self, _args: &Value, _context: &ToolContext) -> Option<String> {
+            None
+        }
+
+        fn call(&self, _args: &Value, _context: &ToolContext) -> CallResult {
+            CallResult::text("exécuté")
+        }
+    }
+
+    struct SansMeta;
+
+    impl Tool for SansMeta {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "test.sans-meta".into(),
+                description: "Outil sans exigences déclarées.".into(),
+                input_schema: json!({"type": "object"}),
+                meta: None,
+            }
+        }
+        fn target(&self, _args: &Value, _context: &ToolContext) -> Option<String> {
+            None
+        }
+        fn call(&self, _args: &Value, _context: &ToolContext) -> CallResult {
+            CallResult::text("ne devrait jamais s'exécuter")
+        }
+    }
+
+    const MANIFESTE: &str = r#"
+[agent]
+id = "org.test.agent"
+version = "1.0.0"
+name = "Test"
+publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+[model]
+preferred = ["local:test"]
+[capabilities.max]
+"tool.call" = ["test.*"]
+"#;
+
+    fn now() -> OffsetDateTime {
+        OffsetDateTime::from_unix_timestamp(1_789_000_000).unwrap()
+    }
+
+    fn contexte(broker: &mut Broker, patterns: &[&str]) -> ToolContext {
+        let manifest = prophet_types::manifest::Manifest::from_toml(MANIFESTE).unwrap();
+        let grants: Vec<Grant> = patterns
+            .iter()
+            .map(|p| Grant::new(Res::Tool, Act::Call, *p))
+            .collect();
+        let token = broker
+            .mint(&manifest, "task:01", "u", &grants, 1800, now())
+            .unwrap();
+        let _ = TokenBuilder::new("a", "b", "c", "d");
+        ToolContext {
+            token,
+            task: "task:01".into(),
+            home: "/home/u".into(),
+            workdir: "/home/u/.prophet/tasks/task:01/work".into(),
+            sandbox_level: 1,
+            step: 3,
+        }
+    }
+
+    fn registre() -> (Registry, Arc<MemoryJournal>, Arc<Mutex<Broker>>) {
+        let broker = Broker::new(
+            ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng),
+            "capd@test",
+            "/home/u",
+        )
+        .unwrap();
+        let broker = Arc::new(Mutex::new(broker));
+        let journal = Arc::new(MemoryJournal::new());
+        let mut registry = Registry::new(Arc::clone(&broker), journal.clone());
+        registry.register(Arc::new(Faux));
+        registry.register(Arc::new(SansMeta));
+        (registry, journal, broker)
+    }
+
+    #[test]
+    fn appel_autorise_et_journalise() {
+        let (registry, journal, broker) = registre();
+        let context = {
+            let mut b = broker.lock().unwrap();
+            contexte(&mut b, &["test.faux"])
+        };
+        let result = registry.call("test.faux", &json!({}), &context, now());
+        assert!(!result.is_error);
+        assert_eq!(
+            journal.kinds(),
+            vec![EventKind::ToolCall, EventKind::ToolResult],
+            "chaque appel laisse une trace avant et après"
+        );
+    }
+
+    #[test]
+    fn appel_non_couvert_par_le_jeton_refuse() {
+        let (registry, journal, broker) = registre();
+        let context = {
+            let mut b = broker.lock().unwrap();
+            contexte(&mut b, &["test.autre"])
+        };
+        let result = registry.call("test.faux", &json!({}), &context, now());
+        assert!(result.is_error);
+        assert_eq!(result.structured.unwrap()["code"], json!("PolicyDenied"));
+        assert!(journal.kinds().contains(&EventKind::PolicyDeny));
+    }
+
+    #[test]
+    fn outil_inconnu() {
+        let (registry, _, broker) = registre();
+        let context = {
+            let mut b = broker.lock().unwrap();
+            contexte(&mut b, &["test.faux"])
+        };
+        let result = registry.call("test.inexistant", &json!({}), &context, now());
+        assert_eq!(result.structured.unwrap()["code"], json!("NotFound"));
+    }
+
+    #[test]
+    fn outil_sans_exigences_declarees_refuse() {
+        let (registry, _, broker) = registre();
+        let context = {
+            let mut b = broker.lock().unwrap();
+            contexte(&mut b, &["test.*"])
+        };
+        let result = registry.call("test.sans-meta", &json!({}), &context, now());
+        assert!(
+            result.is_error,
+            "un outil qui ne déclare pas ses exigences ne doit jamais s'exécuter"
+        );
+    }
+
+    #[test]
+    fn la_liste_visible_depend_du_jeton() {
+        let (registry, _, broker) = registre();
+        let context = {
+            let mut b = broker.lock().unwrap();
+            contexte(&mut b, &["test.faux"])
+        };
+        let visibles = registry.visible_for(&context.token);
+        assert_eq!(visibles.len(), 1);
+        assert_eq!(visibles[0].name, "test.faux");
+        assert_eq!(registry.all().len(), 2);
+    }
+
+    #[test]
+    fn le_journal_ne_contient_pas_les_arguments() {
+        let (registry, journal, broker) = registre();
+        let context = {
+            let mut b = broker.lock().unwrap();
+            contexte(&mut b, &["test.faux"])
+        };
+        let _ = registry.call(
+            "test.faux",
+            &json!({"mot_de_passe_en_clair": "tres-secret"}),
+            &context,
+            now(),
+        );
+        let rendu = serde_json::to_string(
+            &journal
+                .events()
+                .iter()
+                .map(|e| e.payload.clone())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        assert!(!rendu.contains("tres-secret"), "{rendu}");
+    }
+
+    #[test]
+    #[should_panic(expected = "enregistré deux fois")]
+    fn doublon_refuse() {
+        let (mut registry, _, _) = registre();
+        registry.register(Arc::new(Faux));
+    }
+}
