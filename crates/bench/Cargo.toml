@@ -1,0 +1,29 @@
+[package]
+name = "bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Suites de mesure et suite adversariale de Prophet OS."
+
+[dependencies]
+prophet-types = { workspace = true }
+capd = { workspace = true }
+sfs = { workspace = true }
+egress = { workspace = true }
+vault = { workspace = true }
+sup = { workspace = true }
+mcp-system = { workspace = true }
+providers = { workspace = true }
+agentd = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+time = { workspace = true }
+ed25519-dalek = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,23 @@
+[package]
+name = "memoryd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Mémoire de Prophet OS : de travail, épisodique et sémantique, cloisonnée et éditable par l'humain."
+
+[dependencies]
+prophet-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+blake3 = { workspace = true }
+rusqlite = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
