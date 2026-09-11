@@ -23,6 +23,7 @@ agentd = { path = "crates/agentd" }
 providers = { path = "crates/providers" }
 memoryd = { path = "crates/memoryd" }
 sup = { path = "crates/sup" }
+shell = { path = "crates/shell" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

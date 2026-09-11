@@ -148,6 +148,35 @@ impl Workspace {
         Ok(workspace)
     }
 
+    /// Liste les espaces de travail présents sur le disque, avec leur état.
+    ///
+    /// Utilisable sans aucun daemon : c'est ce qui permet d'inspecter et d'annuler une tâche
+    /// après un incident, quand plus rien d'autre ne tourne.
+    ///
+    /// # Errors
+    /// Si le répertoire des tâches est illisible.
+    pub fn list(home: &Path) -> Result<Vec<(String, WorkspaceState)>, SfsError> {
+        let racine = Self::root_for(home);
+        if !racine.exists() {
+            return Ok(Vec::new());
+        }
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(&racine)? {
+            let entry = entry?;
+            let meta_path = entry.path().join(META);
+            if !meta_path.exists() {
+                continue;
+            }
+            let Ok(meta) = serde_json::from_str::<Meta>(&std::fs::read_to_string(&meta_path)?)
+            else {
+                continue;
+            };
+            out.push((meta.task, meta.state));
+        }
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(out)
+    }
+
     /// Rouvre un espace de travail existant.
     ///
     /// # Erreurs
