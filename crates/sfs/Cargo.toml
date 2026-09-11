@@ -1,0 +1,23 @@
+[package]
+name = "sfs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Semantic FS : un espace de travail par tâche, diff lisible, validation et annulation."
+
+[dependencies]
+prophet-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+blake3 = { workspace = true }
+tracing = { workspace = true }
+xattr = "1"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
