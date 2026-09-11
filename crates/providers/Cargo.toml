@@ -1,0 +1,26 @@
+[package]
+name = "providers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pilotes d'agents : clients officiels par abonnement, moteurs locaux, boucle native."
+
+[dependencies]
+prophet-types = { workspace = true }
+capd = { workspace = true }
+mcp-system = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+blake3 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[lints]
+workspace = true

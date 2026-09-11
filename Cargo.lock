@@ -13,6 +13,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentd"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "capd",
+ "ed25519-dalek",
+ "ledger",
+ "mcp-system",
+ "prophet-types",
+ "providers",
+ "rand 0.8.8",
+ "sandboxd",
+ "serde",
+ "serde_json",
+ "sfs",
+ "tempfile",
+ "thiserror",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1303,6 +1326,23 @@ dependencies = [
  "time",
  "toml",
  "ulid",
+]
+
+[[package]]
+name = "providers"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "capd",
+ "mcp-system",
+ "prophet-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "time",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

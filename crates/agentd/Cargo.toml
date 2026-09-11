@@ -1,0 +1,31 @@
+[package]
+name = "agentd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Agent Runtime de Prophet OS : cycle de vie des tâches, budgets, hiérarchie."
+
+[dependencies]
+prophet-types = { workspace = true }
+capd = { workspace = true }
+sfs = { workspace = true }
+ledger = { workspace = true }
+sandboxd = { workspace = true }
+blake3 = { workspace = true }
+providers = { workspace = true }
+mcp-system = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+ed25519-dalek = { workspace = true }
+rand = { workspace = true }
+
+[lints]
+workspace = true
