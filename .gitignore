@@ -1,0 +1,6 @@
+/target
+/result
+/result-*
+*.profraw
+.direnv/
+/bench/results/*.json

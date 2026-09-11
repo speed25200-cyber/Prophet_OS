@@ -1,0 +1,53 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/speed25200-cyber/Prophet_OS"
+rust-version = "1.90"
+
+[workspace.dependencies]
+prophet-types = { path = "crates/prophet-types" }
+prophet-ipc = { path = "crates/prophet-ipc" }
+capd = { path = "crates/capd" }
+ledger = { path = "crates/ledger" }
+sfs = { path = "crates/sfs" }
+sandboxd = { path = "crates/sandboxd" }
+vault = { path = "crates/vault" }
+egress = { path = "crates/egress" }
+mcp-system = { path = "crates/mcp-system" }
+agentd = { path = "crates/agentd" }
+providers = { path = "crates/providers" }
+memoryd = { path = "crates/memoryd" }
+sup = { path = "crates/sup" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "process", "fs", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+blake3 = "1"
+ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8"] }
+rand = "0.8"
+base64 = "0.22"
+globset = "0.4"
+time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
+ulid = "1"
+clap = { version = "4", features = ["derive"] }
+toml = "0.8"
+rusqlite = { version = "0.32", features = ["bundled"] }
+libc = "0.2"
+tempfile = "3"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+todo = "deny"
+dbg_macro = "deny"
