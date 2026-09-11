@@ -72,7 +72,7 @@ Un OS « pour l'IA » n'est pas un OS avec un chatbot dedans. C'est un OS où **
 4. **Tout est réversible.** Fichiers, configuration, état des applications : tout ce qu'un agent touche est snapshoté avant, diffable après, et annulable en un geste.
 5. **Tout est observable.** Chaque action d'agent produit un événement structuré dans un journal inaltérable. On peut rejouer, auditer, expliquer.
 6. **Local d'abord, cloud si utile.** L'OS fonctionne sans réseau avec des modèles locaux. Les modèles distants sont un choix par tâche, selon le coût, la latence, la confidentialité.
-7. **Agnostique du modèle.** Claude, GPT, Gemini, Llama, Qwen, Mistral, DeepSeek, un modèle maison : même interface, même outils, même permissions.
+7. **Agnostique du modèle et de l'abonnement.** Claude, GPT, Gemini, Llama, Qwen, Mistral, DeepSeek, un modèle maison : mêmes outils, mêmes permissions, même journal. L'abonnement grand public de l'utilisateur suffit ; une clé API n'est jamais requise.
 8. **Déterminisme et reproductibilité.** Système de base immuable, mises à jour atomiques, environnements d'exécution reproductibles.
 9. **L'humain garde le dernier mot.** Approbation graduée, interruption immédiate, explication de chaque action, budget plafonné.
 10. **Minimalisme.** Tout ce qui ne sert ni l'humain ni l'agent est retiré. Moins de surface, moins de bruit, moins de bugs.
@@ -105,7 +105,7 @@ C'est exactement la stratégie qui a fait le succès d'Android, ChromeOS, SteamO
 | Sandbox | KVM, Firecracker, gVisor, bubblewrap | Orchestrateur de sandbox à niveaux, snapshots |
 | Fichiers | btrfs ou ZFS | FS sémantique, provenance, index, transactions |
 | Graphique | Wayland, wlroots, Mesa, Vulkan | Compositeur agent-natif, protocole d'UI sémantique |
-| Inférence | llama.cpp, vLLM, TensorRT-LLM, ONNX Runtime | Routeur de modèles, planificateur GPU, cache KV persistant |
+| Modèles | clients officiels (Claude Code, Codex CLI, Gemini CLI), llama.cpp, vLLM, ONNX Runtime | Pilotes d'agents, Prophet Agent, planificateur GPU, cache KV persistant |
 | Outils | Protocole MCP | Tous les services système exposés en MCP natif |
 | Applications | Chromium (moteur), Flatpak, Wine | Navigateur agent-natif, terminal, éditeur, gestionnaire de tâches |
 
@@ -136,7 +136,7 @@ flowchart TB
         SBX["Sandbox Manager\n(bwrap → gVisor → microVM)"]
         BUS["Event Bus\n& Ledger d'audit"]
         SCHED["Scheduler\n(budgets tokens / GPU / temps)"]
-        ROUTER["Model Router\n& Inference Engine"]
+        ROUTER["Provider Layer\n(pilotes d'agents, moteurs locaux)"]
         MEM["Memory & Context\nService"]
         TOOLS["Tool / Skill Registry\n(MCP natif)"]
         SFS["Semantic FS\n(snapshots, provenance, index)"]
@@ -165,10 +165,10 @@ flowchart TB
 
 1. **Intention** : l'humain (ou un autre agent, ou un déclencheur) exprime « prépare le rapport de ventes Q3 à partir des CSV dans `~/ventes` et envoie-le à Marie ».
 2. **Planification** : l'Agent Runtime crée une **Tâche** (objet OS) avec un identifiant, un budget (tokens, argent, GPU-secondes, temps), une politique de permissions dérivée de l'intention.
-3. **Capacités** : le Capability Broker émet des jetons : lecture `~/ventes`, écriture `~/ventes/out`, outil `mail.send` limité au destinataire « Marie », modèle « local par défaut, Claude si dépassement ».
+3. **Capacités** : le Capability Broker émet des jetons : lecture `~/ventes`, écriture `~/ventes/out`, outil `mail.send` limité au destinataire « Marie », fournisseur « modèle local par défaut, Claude via l'abonnement de l'utilisateur si la tâche dépasse ses capacités ».
 4. **Snapshot** : la Semantic FS crée un sous-volume de travail (copy-on-write) pour la tâche.
 5. **Sandbox** : le Sandbox Manager démarre le niveau d'isolation requis (ici : gVisor, car pas de code arbitraire ; microVM si l'agent doit exécuter du code téléchargé).
-6. **Boucle agentique** : le modèle (choisi par le Router) reçoit l'état sémantique, appelle des outils MCP (lire fichiers, calculer, générer un document), chaque appel étant vérifié par le Policy Engine et journalisé dans le Ledger.
+6. **Boucle agentique** : le pilote choisi (client officiel de l'éditeur connecté par abonnement, ou Prophet Agent sur un modèle local) reçoit l'état sémantique, appelle des outils MCP (lire fichiers, calculer, générer un document), chaque appel étant vérifié par le Policy Engine et journalisé dans le Ledger.
 7. **Point de contrôle** : l'action `mail.send` est classée « irréversible externe » : elle est mise en file d'approbation ; l'humain voit le mail, le diff des fichiers créés, le coût consommé, et approuve ou modifie.
 8. **Commit** : le sous-volume de travail est fusionné dans l'espace de l'utilisateur, un point de restauration est conservé (« annuler cette tâche » reste possible pendant N jours).
 9. **Mémoire** : le Memory Service enregistre ce qui a été appris (où sont les données de ventes, format préféré du rapport) pour les tâches futures.
@@ -244,7 +244,7 @@ flowchart TB
 - **Snapshots chauds** : des microVM pré-démarrées avec les runtimes courants (Python, Node, Rust, navigateur) sont maintenues en pool ; restaurer prend 100 ms au lieu de démarrer en 2 s.
 - **Système de fichiers** : overlay sur le sous-volume de tâche ; l'agent voit un FS normal, tout est capturé.
 - **Réseau** : pas d'accès direct. Toute sortie passe par le **Egress Proxy** (5.11) qui applique la politique, journalise, injecte les secrets, et peut bloquer l'exfiltration.
-- **GPU** : accès partagé via vGPU / SR-IOV quand disponible, sinon via un service d'inférence hors sandbox (l'agent ne touche jamais le GPU directement, il appelle le Router).
+- **GPU** : accès partagé via vGPU / SR-IOV quand disponible, sinon via un service d'inférence hors sandbox (l'agent ne touche jamais le GPU directement, il passe par la couche fournisseurs).
 - **Horloge et aléa** contrôlés pour la reproductibilité (rejeu de tâche).
 
 ### 5.4 Semantic FS — le système de fichiers qui comprend les tâches
@@ -303,30 +303,73 @@ flowchart TB
 - Le compositeur (base wlroots ou Smithay en Rust) agrège les arbres, gère les droits (un agent ne voit que les fenêtres de sa tâche ou celles autorisées), et projette pour l'humain.
 - Latence cible observation → action : **< 20 ms** hors inférence.
 
-### 5.6 Model Router & Inference Engine — n'importe quel modèle, au meilleur endroit
+### 5.6 Couche fournisseurs — abonnements d'abord, local en cible, API en option
 
-**Rôle** : présenter à tous les agents une interface unique et choisir, pour chaque appel, le modèle optimal.
+**Exigence** : utiliser Claude et ChatGPT via les abonnements grand public (Claude Pro / Max, ChatGPT Plus / Pro / Team), **sans clé API ni facturation au token**, et pouvoir brancher plus tard des modèles locaux (Qwen, Llama, Mistral, DeepSeek, Gemma…).
 
-**Interface unifiée** : une API locale (socket Unix, HTTP local) compatible avec le format Messages d'Anthropic et le format Chat Completions d'OpenAI, plus une API native plus riche (streaming d'outils, cache, budgets). Les agents écrits pour Claude, GPT ou Ollama fonctionnent sans modification.
+**Conséquence architecturale** : Prophet OS n'appelle pas les modèles lui-même. Il **héberge les clients officiels des éditeurs**, dans une sandbox, et leur fournit le système via MCP. C'est le principe « apporte ton agent » : le client de l'éditeur apporte le modèle et l'abonnement, l'OS apporte les outils, les permissions, la sandbox, l'interface sémantique, le journal et l'annulation. Chaque éditeur reste maître de son client, l'OS reste maître de la machine.
 
-**Fournisseurs** :
+#### 5.6.1 Les trois classes de fournisseurs
 
-| Type | Backends | Notes |
+| Classe | Comment le modèle est joint | Exemples | Compte nécessaire |
+|---|---|---|---|
+| **A — Abonnement, client officiel** | l'OS lance le client officiel de l'éditeur, connecté par le compte de l'utilisateur (OAuth), et le pilote via ses mécanismes documentés (mode non interactif, MCP, hooks, outil de permission) | Claude Code (Claude Pro / Max), Codex CLI (ChatGPT Plus / Pro), Gemini CLI (compte Google) | abonnement grand public, pas de clé API |
+| **B — Moteur local** | l'OS charge le modèle sur GPU / NPU / CPU et l'expose en local ; il est piloté par la boucle agentique native de l'OS (« Prophet Agent ») ou par un client de classe A qui accepte un endpoint local | Qwen, Llama, Mistral, DeepSeek, Gemma via llama.cpp, vLLM, SGLang, ONNX Runtime | aucun |
+| **C — API (optionnel)** | clé API ou compte entreprise, appels directs par « Prophet Agent » | Anthropic API, OpenAI API, endpoint vLLM d'entreprise | clé API |
+
+Les classes A et B couvrent l'exigence. La classe C existe pour les entreprises et les développeurs, elle n'est jamais requise.
+
+#### 5.6.2 Le contrat « Agent Driver »
+
+Chaque client hébergé est enveloppé dans un **pilote** qui présente au reste de l'OS une interface unique, quelle que soit la marque :
+
+- `start(task, manifest)` : lance une tâche avec son sous-volume, ses capacités et ses serveurs MCP.
+- flux d'événements : étape, appel d'outil, demande d'approbation, coût ou quota consommé, fin.
+- `approve(id)` / `deny(id)` : les demandes de permission du client sont routées vers le Centre d'approbations de l'OS, pas vers un prompt dans un terminal.
+- `pause` / `resume` / `cancel` / `resume(session)` : reprise de session quand le client le permet.
+
+Les pilotes n'utilisent que des mécanismes **officiels et documentés** de chaque client : mode non interactif (headless), configuration des serveurs MCP, hooks avant et après appel d'outil (journalisation dans le Ledger), délégation des demandes de permission à un outil externe, reprise de session. Le client tourne **sans modification** et se met à jour par son propre canal.
+
+#### 5.6.3 Règles non négociables
+
+1. **Aucune automatisation des applications grand public.** L'OS ne pilote jamais l'interface de claude.ai ou de chatgpt.com par capture d'écran ou injection de clics pour en faire un moteur d'agent. C'est contraire aux conditions d'utilisation et fragile.
+2. **Aucune extraction des identifiants.** Les jetons de session des clients officiels restent dans les fichiers de ces clients, sur un sous-volume chiffré du Vault. L'OS ne les lit pas, ne les réutilise pas ailleurs, ne les met pas dans le contexte d'un modèle.
+3. **L'application des capacités est sous le client.** Landlock, seccomp, cgroups et l'Egress Proxy encadrent le processus du client officiel. Même si son propre système de permissions est contourné ou mal configuré, la couche noyau et le proxy tiennent.
+4. **Respect des conditions de chaque éditeur.** Si un éditeur restreint l'usage de l'abonnement à son propre client, l'OS ne fait tourner que ce client. Le pilote est une enveloppe, pas un substitut.
+
+#### 5.6.4 Applications de bureau et web des éditeurs
+
+Claude Desktop et l'application ChatGPT de bureau ne sont pas publiées pour Linux à ce jour. Trois voies, dans l'ordre de préférence :
+
+| Voie | Description | Statut |
 |---|---|---|
-| Local GPU | llama.cpp (GGUF), vLLM, SGLang, TensorRT-LLM, ExLlama | choix automatique selon le matériel |
-| Local NPU/CPU | ONNX Runtime, OpenVINO, Vulkan compute, AMD XDNA, Intel NPU | petits modèles, embeddings, vision, parole |
-| Distant | Anthropic, OpenAI, Google, Mistral, OpenRouter, endpoint auto-hébergé (vLLM sur un serveur) | via l'Egress Proxy, secrets dans le Vault |
+| Client en ligne de commande officiel | Claude Code, Codex CLI, Gemini CLI : natifs Linux, connexion par abonnement, MCP, mode non interactif. C'est la voie principale pour les tâches agentiques. | disponible aujourd'hui |
+| Application web en mode PWA | claude.ai et chatgpt.com ouverts dans le navigateur agent-natif, profil dédié, session normale de l'utilisateur. Pour le chat, les projets, les artefacts. Les connecteurs MCP de ces applications exigent une URL joignable : l'OS fournit un **relais MCP** optionnel (auto-hébergé ou service), tunnel authentifié vers les serveurs MCP locaux de l'utilisateur. | disponible aujourd'hui, relais en phase 2 |
+| Application de bureau native | si l'éditeur publie une version Linux, elle s'installe en Flatpak et se connecte aux serveurs MCP de l'OS en local (stdio), sans relais. | dépend des éditeurs |
 
-**Routage** : chaque appel porte des contraintes (`privacy: local-only`, `max_cost`, `max_latency`, `min_capability`) et le routeur choisit. Stratégies : cascade (petit modèle local d'abord, escalade si incertitude), spécialisation (vision, code, embeddings), fallback en cas de panne réseau.
+#### 5.6.5 Modèles locaux : la cible de fond
 
-**Optimisations système** (là où l'OS apporte quelque chose qu'aucune application ne peut faire seule) :
+- **Moteurs** : llama.cpp (GGUF), vLLM, SGLang, ONNX Runtime, OpenVINO, choisis selon le matériel (5.15).
+- **Endpoints locaux** aux deux formats dominants (Messages d'Anthropic, Chat Completions d'OpenAI) pour que n'importe quel client ou pilote s'y branche.
+- **« Prophet Agent »** : la boucle agentique native de l'OS, en Rust, qui pilote les modèles locaux (et les API de classe C). Elle exploite tout ce qu'un client hébergé ne peut pas offrir : cache KV persistant et partagé, routage par appel, checkpoints et fork de tâche, rejeu exact, budgets au token.
+- **Cascade** : petit modèle local pour le tri, la classification et la complétion (toujours chaud, aucun compte requis), modèle local moyen pour les tâches courantes, client d'abonnement pour les tâches difficiles, selon la politique de l'utilisateur.
+- **Catalogue signé** de modèles avec empreintes, quantification à la volée, préchargement selon l'usage.
 
-- **Cache KV persistant et partagé** : le préfixe système + les outils + le contexte de l'utilisateur sont pré-calculés une fois, stockés en mémoire GPU / RAM / NVMe, réutilisés par tous les agents. Gain : 3 à 10× sur le temps au premier token pour les modèles locaux.
-- **Planificateur GPU** : la boucle interactive (l'humain attend) a priorité sur les tâches de fond ; time-slicing et préemption des batches ; multi-GPU et mémoire unifiée (Strix Halo, Apple-like, Grace) exploités via HMM/CXL.
-- **Décodage spéculatif** avec un petit modèle brouillon local, y compris pour accélérer certains modèles distants (quand le fournisseur le permet).
-- **Mémoire** : mmap des poids avec pages partagées entre processus, préchargement au démarrage selon l'usage, éviction intelligente.
-- **Quantification à la volée** selon la VRAM disponible ; catalogue de modèles avec empreintes signées.
-- **Modèles « toujours chauds »** : un petit modèle (1 à 8 milliards de paramètres) est toujours résident pour la classification d'intention, la complétion, le tri des événements, la parole. Latence < 100 ms.
+#### 5.6.6 Ce que l'on gagne et ce que l'on perd selon la classe
+
+| Capacité de l'OS | Client d'abonnement (A) | Prophet Agent sur modèle local (B) ou API (C) |
+|---|---|---|
+| Capacités, sandbox, Egress Proxy, Ledger, undo | complet | complet |
+| Outils système via MCP, SUP | complet | complet |
+| Approbations dans le Centre de l'OS | via l'outil de permission du client | natif |
+| Routage par appel entre modèles | par tâche seulement | par appel |
+| Cache KV partagé, planificateur GPU | sans objet (inférence distante) | complet |
+| Checkpoint, fork, rejeu exact | limité à ce que le client expose | complet |
+| Coût | forfait de l'abonnement, fenêtres de quota | électricité, ou facturation au token en classe C |
+
+#### 5.6.7 Quotas d'abonnement
+
+Les abonnements ne facturent pas au token : ils imposent des **fenêtres d'usage** (par exemple quelques heures glissantes) et des plafonds hebdomadaires. Le Scheduler (5.10) les traite comme une ressource à part : estimation de la consommation par tâche, avertissement avant épuisement, bascule automatique sur un modèle local ou mise en file d'attente jusqu'à la fenêtre suivante, selon la politique choisie par l'utilisateur.
 
 ### 5.7 Memory & Context Service — la mémoire de l'OS
 
@@ -359,7 +402,7 @@ flowchart TB
 
 ### 5.10 Scheduler — budgets et priorités
 
-- **Budgets multidimensionnels** par tâche : tokens, coût monétaire (pour les modèles distants), GPU-secondes, temps mur, nombre d'approbations demandées.
+- **Budgets multidimensionnels** par tâche : tokens, coût monétaire (pour les API), fenêtres de quota des abonnements (5.6.7), GPU-secondes, temps mur, nombre d'approbations demandées.
 - **Priorités** : interactif (l'humain regarde) > différé (l'humain attend un résultat) > fond (veille, indexation, apprentissage).
 - **Files d'approbation** : les tâches en attente d'un humain ne consomment rien ; l'humain les traite par lot quand il veut.
 - **Fenêtres** : « les tâches de fond ne tournent que sur secteur, la nuit, si le GPU est libre ».
@@ -432,6 +475,7 @@ Le **navigateur agent-natif** est un fork minimal de Chromium (ou Servo à terme
 | Graphique | Wayland, Smithay (Rust) ou wlroots, Mesa, Vulkan | |
 | Toolkit natif | Rust (iced / egui / Slint) avec SUP natif ; bindings GTK4 et Qt6 | Flutter |
 | Navigateur | Chromium fork minimal | Servo (long terme) |
+| Accès aux modèles par abonnement | clients officiels hébergés : Claude Code, Codex CLI, Gemini CLI (pilotes via MCP, hooks, outil de permission) | |
 | Inférence locale | llama.cpp, vLLM, ONNX Runtime, OpenVINO | SGLang, MLC |
 | Protocole d'outils | MCP (Model Context Protocol) | A2A pour l'inter-agents |
 | IPC | sockets Unix + Cap'n Proto | D-Bus (compatibilité), varlink |
@@ -471,7 +515,7 @@ Le **navigateur agent-natif** est un fork minimal de Chromium (ou Servo à terme
 ### Phase 0 — Fondations et preuves (mois 1 à 3)
 
 - Spécification détaillée de SUP v0, du manifeste d'agent, du format de jeton de capacité, du Ledger.
-- Prototype : Linux minimal + Firecracker + runtime d'agent en Rust + 5 outils MCP système + routeur vers Claude / OpenAI / llama.cpp.
+- Prototype : Linux minimal + Firecracker + runtime d'agent en Rust + 5 outils MCP système + pilotes Claude Code et Codex CLI (connexion par abonnement) + llama.cpp local avec Qwen.
 - Preuve de valeur : une suite de 30 tâches (fichiers, web, mail) exécutées d'un côté par « computer use » sur Ubuntu, de l'autre par le prototype. Cible : ×3 sur la vitesse, ×2 sur le taux de réussite, tokens divisés par 5.
 - Décisions gelées : btrfs vs ZFS, Smithay vs wlroots, Cedar vs Rego, Nix vs Yocto.
 
@@ -484,7 +528,7 @@ Livrable : une image bootable, utilisable au quotidien par des développeurs et 
 - Capability Broker + Landlock/seccomp + Cedar ; classes d'actions ; consentement.
 - Sandbox niveaux 0, 1, 2 avec pool de microVM chaudes.
 - Semantic FS : sous-volume par tâche, diff, undo, provenance.
-- Model Router : Anthropic, OpenAI, OpenRouter, llama.cpp, vLLM ; cache KV persistant v1.
+- Couche fournisseurs : pilotes Claude Code, Codex CLI, Gemini CLI par abonnement ; Prophet Agent v1 sur llama.cpp et vLLM (Qwen, Llama, Mistral) ; API en option ; cache KV persistant v1.
 - Egress Proxy + Vault.
 - Ledger + timeline en ligne de commande.
 - Shell structuré + terminal partagé ; compositeur Wayland basique (fenêtres classiques).
@@ -584,7 +628,7 @@ Ces montants sont ceux d'une équipe expérimentée en Europe / Amérique du Nor
 |---|---|---|---|
 | Aucune application tierce n'adopte SUP | élevée au début | fort | adaptateurs AT-SPI / DOM / UIA de qualité pour que la valeur existe dès le jour 1 ; SDK trivial ; applications natives de référence |
 | Pilotes GPU propriétaires (NVIDIA) et noyau custom | moyenne | moyen | rester proche du LTS, tester avec les pilotes ouverts (NVIDIA open kernel modules, Mesa) |
-| Les fournisseurs de modèles changent leurs API | certaine | faible | couche d'abstraction du routeur, adaptateurs versionnés |
+| Les éditeurs changent leurs clients, leurs API ou leurs conditions d'usage des abonnements | certaine | moyen | pilotes isolés par éditeur, mécanismes officiels uniquement, jamais d'automatisation des applications grand public ; les modèles locaux garantissent que l'OS reste utile sans aucun éditeur |
 | Complexité perçue par l'utilisateur (approbations) | moyenne | fort | consentement progressif, bons défauts, règles apprises, UX testée |
 | Fatigue d'approbation → l'utilisateur dit oui à tout | élevée | fort | regrouper, expliquer, limiter le nombre de demandes par tâche, auto-approuver le réversible |
 | Sous-estimation du travail « OS de bureau » (veille, Bluetooth, imprimantes…) | élevée | moyen | réutiliser systemd, NetworkManager, PipeWire, CUPS ; ne pas réinventer |
@@ -612,7 +656,7 @@ Ces montants sont ceux d'une équipe expérimentée en Europe / Amérique du Nor
 
 1. **Le manifeste d'agent et le jeton de capacité** (spécification + bibliothèque Rust). Tout le reste en dépend.
 2. **Le runtime de tâche** avec sandbox niveau 2 (Firecracker) et sous-volume btrfs par tâche. Démo : « une tâche modifie 50 fichiers, on annule tout en une commande ».
-3. **Le routeur de modèles** avec Anthropic + llama.cpp, API compatible. Démo : le même agent tourne en local ou sur Claude sans changer une ligne.
+3. **La couche fournisseurs** : pilote Claude Code et pilote Codex CLI connectés par l'abonnement de l'utilisateur, plus Prophet Agent sur llama.cpp avec Qwen. Démo : la même tâche, avec les mêmes outils MCP et les mêmes permissions, tourne sur Claude, sur ChatGPT et sur Qwen local sans changer une ligne, sans clé API.
 4. **Dix outils MCP système** (fs, process, http via proxy, search, memory). Démo : une tâche réelle de bout en bout, journalisée.
 5. **Le proxy de sortie et le Vault.** Démo : injection de prompt qui tente d'exfiltrer → bloquée et visible dans le Ledger.
 6. **Le navigateur agent-natif v0** (Chromium + CDP → arbre JSON). Démo : réserver un billet sans une seule capture d'écran.
@@ -634,7 +678,7 @@ prophet_os/
 ├── capd/                    # Capability Broker + Policy Engine (Rust, Cedar)
 ├── sandboxd/                # Sandbox Manager (Rust, Firecracker/gVisor/bwrap)
 ├── sfs/                     # Semantic FS : snapshots, provenance, index (Rust)
-├── router/                  # Model Router + backends d'inférence (Rust)
+├── providers/               # pilotes d'agents (Claude Code, Codex, Gemini), Prophet Agent, moteurs locaux (Rust)
 ├── memoryd/                 # Memory & Context Service (Rust, SQLite)
 ├── ledger/                  # Event Bus + Ledger (Rust)
 ├── egress/                  # Egress Proxy + Vault (Rust)
@@ -668,14 +712,14 @@ name = "Analyste ventes"
 publisher_key = "ed25519:3f9a…"
 
 [model]
-preferred = ["local:qwen3-14b", "anthropic:claude-fable-5-1"]
+preferred = ["local:qwen3-14b", "driver:claude-code", "driver:codex"]   # local d'abord, puis abonnements
 privacy = "local-preferred"        # local-only | local-preferred | any
 max_cost_per_task_eur = 2.00
 
 [capabilities.max]                  # plafond, jamais dépassé, même sur demande
 fs.read = ["~/ventes/**", "~/modeles/**"]
 fs.write = ["~/ventes/out/**"]
-net.egress = ["api.anthropic.com", "*.exemple.fr"]
+net.egress = ["driver:claude-code", "driver:codex", "*.exemple.fr"]
 tools = ["fs.*", "sheet.*", "doc.render", "mail.send"]
 
 [sandbox]
@@ -702,7 +746,7 @@ approvals = 3
   "grants": [
     { "res": "fs", "act": "read",  "match": "~/ventes/**" },
     { "res": "fs", "act": "write", "match": "~/ventes/out/**" },
-    { "res": "net", "act": "egress", "match": "api.anthropic.com:443" },
+    { "res": "net", "act": "egress", "match": "driver:claude-code" },   // le client officiel, pas une clé API
     { "res": "tool", "act": "call", "match": "mail.send",
       "constraints": { "to": ["marie@exemple.fr"], "max_calls": 1, "approval": "required" } }
   ],
@@ -740,7 +784,7 @@ approvals = 3
 | Permissions | celles de l'utilisateur | capacités fines par tâche |
 | Erreur | irréversible | undo global |
 | Audit | inexistant | Ledger signé, rejeu |
-| Modèle | un fournisseur | n'importe lequel, routé |
+| Modèle | un fournisseur | n'importe lequel : abonnement Claude ou ChatGPT, modèle local, API |
 | Secrets | visibles par le modèle | jamais dans le contexte |
 | Isolation | aucune | bwrap / gVisor / microVM |
 | Contexte inter-applications | aucun | Memory Service + Semantic FS |
@@ -755,6 +799,8 @@ approvals = 3
 - **MicroVM** : machine virtuelle minimale (Firecracker) démarrant en ~100 ms depuis un snapshot.
 - **Ledger** : journal en ajout seul, chaîné par hachage, signé, de toutes les actions d'agents.
 - **Semantic FS** : couche au-dessus de btrfs ajoutant sous-volumes par tâche, provenance, index et transactions.
+- **Agent Driver** : enveloppe qui pilote un client officiel d'éditeur (Claude Code, Codex CLI…) connecté par abonnement, via ses mécanismes documentés, et l'intègre aux capacités, au Ledger et aux approbations de l'OS.
+- **Prophet Agent** : boucle agentique native de l'OS, utilisée pour les modèles locaux et les API.
 
 ---
 
