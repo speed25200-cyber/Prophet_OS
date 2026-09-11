@@ -1,0 +1,28 @@
+[package]
+name = "capd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Capability Broker et Policy Engine de Prophet OS."
+
+[dependencies]
+prophet-types = { workspace = true }
+prophet-ipc = { workspace = true }
+ledger = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+ed25519-dalek = { workspace = true }
+rand = { workspace = true }
+base64 = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+cedar-policy = "4"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

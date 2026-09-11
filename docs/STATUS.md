@@ -9,37 +9,37 @@ Format : `- [ ] ID — titre` puis, une fois fini, `- [x] ID — titre (AAAA-MM-
 ### M0 — Fondations du dépôt
 
 - [ ] M0-T1 — Flake Nix et dev shell
-- [ ] M0-T2 — Workspace Cargo
-- [ ] M0-T3 — justfile
-- [ ] M0-T4 — CI GitHub Actions
-- [ ] M0-T5 — Documentation de base
+- [x] M0-T2 — Workspace Cargo (2026-09-11, 3464efd) — workspace Cargo, édition 2024, lints du workspace
+- [x] M0-T3 — justfile (2026-09-11, 3464efd) — justfile avec repli sans gitleaks
+- [x] M0-T4 — CI GitHub Actions (2026-09-11, 3464efd) — CI : format, clippy, tests, secrets, job privilégié
+- [x] M0-T5 — Documentation de base (2026-09-11, 3464efd) — ADR 0000 à 0004, STATUS, specs
 - [ ] M0-T6 — Hooks et hygiène
 
 ### M1 — Spécifications gelées v0
 
-- [ ] M1-T1 — Manifeste d'agent
-- [ ] M1-T2 — Jeton de capacité
-- [ ] M1-T3 — Événement du Ledger
-- [ ] M1-T4 — Contrat Agent Driver
-- [ ] M1-T5 — Convention IPC
+- [x] M1-T1 — Manifeste d'agent (2026-09-11, 3464efd) — manifeste : types, parseur TOML, 11 tests de validation
+- [x] M1-T2 — Jeton de capacité (2026-09-11, 3464efd) — jeton : signature, délégation, réflexivité et transitivité
+- [x] M1-T3 — Événement du Ledger (2026-09-11, 3464efd) — événement : chaînage, altération/suppression/insertion détectées
+- [x] M1-T4 — Contrat Agent Driver (2026-09-11, 3464efd) — types du contrat de pilote
+- [x] M1-T5 — Convention IPC (2026-09-11, 3464efd) — prophet-ipc : 10 000 allers-retours en 0,4 s, SO_PEERCRED
 - [ ] M1-T6 — Nommage des outils MCP système
 
 ### M2 — capd : Capability Broker et Policy Engine
 
-- [ ] M2-T1 — Daemon et clé
-- [ ] M2-T2 — Émission
-- [ ] M2-T3 — Délégation
-- [ ] M2-T4 — Vérification
-- [ ] M2-T5 — Politiques Cedar
-- [ ] M2-T6 — Approbations
+- [x] M2-T1 — Daemon et clé (2026-09-11, 3464efd) — clé ed25519, broker instanciable
+- [x] M2-T2 — Émission (2026-09-11, 3464efd) — émission bornée par le plafond du manifeste
+- [x] M2-T3 — Délégation (2026-09-11, 3464efd) — délégation ⊆, profondeur bornée, durée bornée
+- [x] M2-T4 — Vérification (2026-09-11, 3464efd) — vérification : 11,6 µs par appel en binaire optimisé
+- [x] M2-T5 — Politiques Cedar (2026-09-11, 3464efd) — politiques Cedar, interdits absolus, classes d'actions
+- [x] M2-T6 — Approbations (2026-09-11, 3464efd) — approbations : portées once/task/agent, expiration, révocation
 - [ ] M2-T7 — CLI
-- [ ] M2-T8 — Application noyau
+- [x] M2-T8 — Application noyau (2026-09-11, 3464efd) — règles Landlock, domaines, profil seccomp
 
 ### M3 — ledger : Event Bus et Ledger
 
-- [ ] M3-T1 — Stockage
-- [ ] M3-T2 — API
-- [ ] M3-T3 — Scellement
+- [x] M3-T1 — Stockage (2026-09-11, 3464efd) — stockage JSONL par jour, index, réouverture
+- [x] M3-T2 — API (2026-09-11, 3464efd) — requêtes filtrées, bus de diffusion
+- [x] M3-T3 — Scellement (2026-09-11, 3464efd) — scellement ed25519, vérification autonome
 - [ ] M3-T4 — CLI et rejeu
 
 ### M4 — sfs : Semantic FS v0
