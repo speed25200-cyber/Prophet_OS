@@ -7,3 +7,5 @@ Un système d'exploitation PC conçu pour que des agents IA (Claude, GPT, Gemini
 **Comment ?** Noyau Linux LTS durci et configuré sur mesure ; tout l'espace utilisateur repensé de zéro (runtime d'agents, broker de capacités, sandbox graduée, système de fichiers sémantique, protocole d'UI sémantique, routeur de modèles, mémoire, ledger).
 
 📄 **[Plan complet](docs/PLAN.md)** : diagnostic, principes, architecture, spécification des composants, sécurité, feuille de route, équipe, métriques, risques, MVP.
+
+🛠️ **[Plan d'exécution pour l'agent constructeur](docs/BUILD_PLAN.md)** : 14 jalons, 79 tâches avec critères d'acceptation vérifiables, à suivre dans l'ordre de [`docs/STATUS.md`](docs/STATUS.md). Instructions de travail dans [`CLAUDE.md`](CLAUDE.md), décisions dans [`docs/adr/`](docs/adr/), spécifications gelées dans [`docs/specs/`](docs/specs/).
