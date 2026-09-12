@@ -168,6 +168,37 @@ fn part_eclairee_dans(pixels: &[u8], largeur: u32, region: (u32, u32, u32, u32),
     clairs as f32 / (l * h) as f32
 }
 
+/// Deux scènes dont **seule** la présence d'une décision diffère.
+///
+/// La scène ordinaire change davantage : la tâche concernée passe en « attend », elle réclame donc
+/// le regard, elle passe en tête, et les filaments échangent leurs hauteurs. Comparer ces deux
+/// scènes-là revient à comparer deux champs différents — ce que le premier correctif faisait
+/// encore, une fois la mesure pourtant recentrée sur le champ.
+fn rendre_a_champ_constant(avec_decision: bool) -> Vec<u8> {
+    let contexte = Contexte::hors_ecran().expect("un adaptateur est exigé par ce test");
+    let mut rendu = Rendu::nouveau(&contexte).expect("les pipelines doivent se construire");
+    let cible = Cible::nouvelle(&contexte, 960, 540);
+
+    let mut scene = scene(false);
+    if avec_decision {
+        scene.decision = Some(Decision {
+            question: "Envoyer le paiement ?".to_owned(),
+            consequence: "L'argent part.".to_owned(),
+            tache: "t2".to_owned(),
+            depuis_secondes: 14,
+            irreversible: true,
+        });
+    }
+    // Pas de `ordonner` ici : l'ordre est déjà fixé par `scene(false)`, et le refaire
+    // réintroduirait précisément ce qu'on cherche à écarter.
+    rendu
+        .dessiner(&contexte, &cible, &scene, 8.0)
+        .expect("le rendu doit aboutir");
+    cible
+        .pixels(&contexte)
+        .expect("l'image doit être relisible")
+}
+
 #[test]
 #[ignore = "needs_gpu"]
 fn une_decision_fait_reculer_le_champ() {
@@ -178,8 +209,8 @@ fn une_decision_fait_reculer_le_champ() {
     // confondait le recul du champ avec l'apparition du panneau de décision, qui ajoute au centre
     // plus de lumière que le champ n'en perd : le premier passage a ainsi declaré en échec un
     // comportement parfaitement correct.
-    let sans = part_eclairee_dans(&rendre(false, 8.0), 960, BANDE_DU_CHAMP, 24);
-    let avec = part_eclairee_dans(&rendre(true, 8.0), 960, BANDE_DU_CHAMP, 24);
+    let sans = part_eclairee_dans(&rendre_a_champ_constant(false), 960, BANDE_DU_CHAMP, 24);
+    let avec = part_eclairee_dans(&rendre_a_champ_constant(true), 960, BANDE_DU_CHAMP, 24);
     assert!(
         avec < sans,
         "le champ doit reculer devant une question : {avec:.4} contre {sans:.4}"
