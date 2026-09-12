@@ -149,6 +149,11 @@ lancer() {
   ko "$titre"
   echo '```' >> "$RAPPORT"
   echo >> "$RAPPORT"
+  # Le diagnostic doit atteindre celui qui lit, et il ne lit pas toujours le fichier : sur une
+  # machine distante, dans un journal d'intégration, le rapport est parfois hors d'atteinte. Ce
+  # qui a échoué est donc répété ici, borné pour rester lisible.
+  echo "    ↓ ce que l'étape a dit (30 dernières lignes) :"
+  tail -30 "$RAPPORT" | grep -v '^```$' | sed 's/^/    | /'
   return 1
 }
 
