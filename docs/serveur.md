@@ -47,7 +47,7 @@ tort que tout va bien : c'est exactement ADR-0006.
 |---|---|---|
 | Poser le secret `VPS_PASSWORD` | vous | **fait** — la sonde s'est connectée le 12 septembre |
 | Poser la variable `VPS_HOST` | vous | **fait** |
-| Rendre le workflow visible depuis la branche par défaut | **vous** | reste à faire — un menu déroulant, ou un fichier ; pas une fusion (voir plus bas) |
+| Déclencher le travail qui agit | **fait** | par l'API, sur la branche de travail : aucun réglage du dépôt n'était nécessaire — voir la correction plus bas |
 
 Les deux premiers suffisaient pour que la **sonde** tourne — elle se connecte, regarde, et repart
 sans rien toucher. Elle est partie, elle a abouti, et ce qu'elle a rapporté est dans la section
@@ -97,7 +97,32 @@ dépôt public, écrire la règle de dérivation d'un mot de passe revient à en
 À défaut de secret, l'entrée `root_password` du déclenchement accepte une saisie à la main. Elle
 convient pour un essai ; le secret convient pour la suite.
 
-### 2. Rendre le workflow visible depuis la branche par défaut
+### 2. ~~Rendre le workflow visible depuis la branche par défaut~~ — ce n'était pas nécessaire
+
+**Correction du 12 septembre 2026, en fin d'après-midi.** Tout ce qui suit dans cette section était
+fondé sur une règle que je n'avais pas vérifiée. L'API de GitHub **accepte** un déclenchement
+manuel sur une branche qui n'est pas celle par défaut :
+
+```
+POST /repos/.../actions/workflows/verifier-sur-le-serveur.yml/dispatches
+  ref = claude/ai-optimized-os-design-djq7iw
+→ 204 No Content, « Workflow run has been queued »
+```
+
+L'exécution est partie, sur la branche de travail, sans qu'on touche au moindre réglage du dépôt.
+
+D'où venait le `404` que j'avais constaté des heures plus tôt ? Très probablement de ceci : GitHub
+n'enregistre un workflow qu'à partir du moment où son fichier est apparu dans une poussée. Au
+moment de mon premier essai, il venait d'être écrit et n'avait jamais tourné. Depuis, il est parti
+plusieurs fois sur `push`, donc il est enregistré — et déclenchable par `ref`.
+
+Ce que j'en ai tiré à l'époque — « GitHub exige le fichier sur la branche par défaut » — est une
+règle générale que ce `404` ne permettait pas de conclure. Je l'ai répétée toute la journée, et
+elle a coûté à celui qui lit ce document plusieurs demandes inutiles. Le reste de la section est
+conservé : le bouton *Run workflow* de l'interface web, lui, n'apparaît bel et bien que pour les
+workflows présents sur la branche par défaut. C'est l'interface qui l'exige, pas l'API.
+
+### Si vous préférez le bouton de l'interface
 
 GitHub ne propose le bouton *Run workflow* que pour les workflows présents sur la branche par
 défaut, et son API répond `404` pour les autres. `main` n'a aujourd'hui qu'un **commit initial** :
