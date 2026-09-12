@@ -298,6 +298,84 @@ jobs:
         run: |
           echo "fermeture : $(nix path-info -Sh ./systeme | awk '{print $2}')"
 
+      # --- Et maintenant, l'installer pour de vrai ---
+      #
+      # Entre « l'ISO démarre » et « le système installé démarre », il restait un maillon que
+      # personne n'avait jamais exercé : `nixos-install` lui-même, sur la disposition que
+      # l'installeur crée. Le travail « installeur » s'arrête au montage ; celui-ci reprend là où
+      # il s'arrête, avec la fermeture qu'on vient de construire — `--system` plutôt que `--flake`,
+      # donc sans la reconstruire.
+      #
+      # `--no-bootloader` : un coureur GitHub ne démarre pas en UEFI, et `bootctl` refuserait
+      # d'écrire les variables du micrologiciel. Que le chargeur fonctionne est vérifié ailleurs,
+      # par le travail qui démarre la configuration installée et lit `bootctl status`.
+      - name: Outils de disque
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get -y -qq install gdisk cryptsetup-bin btrfs-progs dosfstools parted whois
+
+      - name: Préparer un disque, comme l'installeur le ferait
+        id: disque
+        run: |
+          truncate -s 100G /tmp/cible.img
+          BOUCLE=$(sudo losetup --find --show --partscan /tmp/cible.img)
+          echo "boucle=$BOUCLE" >> "$GITHUB_OUTPUT"
+          printf '%s\nphrase-de-passe-de-test\nphrase-de-passe-de-test\nmot-de-passe-de-test\nmot-de-passe-de-test\n' "$BOUCLE" \
+            | sudo ./image/installateur/prophet-installer.sh --disque "$BOUCLE" --jusqu-au-montage
+
+      - name: Installer le système sur ce disque
+        timeout-minutes: 60
+        run: |
+          # Le haché du mot de passe, que l'installeur pose sur le chemin complet. Ici on reprend
+          # à mi-parcours, donc on le pose nous-mêmes — sans quoi le compte serait verrouillé et
+          # l'installation, inutilisable.
+          sudo mkdir -p /mnt/etc/prophet
+          printf '%s\n' "$(mkpasswd -m yescrypt -s <<< 'mot-de-passe-de-test')" \
+            | sudo install -m 0600 /dev/stdin /mnt/etc/prophet/motdepasse
+          # `nixos-install` ne fait pas partie de l'installation de base de Nix : il vient de
+          # `nixos-install-tools`. On le construit explicitement plutôt que d'espérer le trouver
+          # dans le PATH — et `sudo` remet le PATH à zéro, donc on l'appelle par son chemin.
+          OUTILS=$(nix build --no-link --print-out-paths nixpkgs#nixos-install-tools)
+          echo "nixos-install : $OUTILS/bin/nixos-install"
+          sudo "$OUTILS/bin/nixos-install" \
+            --root /mnt \
+            --system "$(readlink -f ./systeme)" \
+            --no-bootloader \
+            --no-root-password \
+            --no-channel-copy
+
+      - name: Ce qui a réellement été posé sur le disque
+        run: |
+          manque=0
+          verifier() {
+            if sudo test -e "$1"; then echo "  ✓ $1"; else echo "  ✗ $1 absent"; manque=1; fi
+          }
+          verifier /mnt/nix/store
+          verifier /mnt/run/current-system
+          verifier /mnt/etc/passwd
+          echo "--- le compte humain est-il dans /etc/passwd du système installé ? ---"
+          if sudo grep -q '^prophet:' /mnt/etc/passwd; then
+            echo "  ✓ $(sudo grep '^prophet:' /mnt/etc/passwd)"
+          else
+            echo "  ✗ aucun compte « prophet » : personne ne pourrait ouvrir de session"
+            manque=1
+          fi
+          echo "--- le haché du mot de passe est-il là, et fermé ? ---"
+          mode=$(sudo stat -c %a /mnt/etc/prophet/motdepasse 2>/dev/null || echo absent)
+          if [ "$mode" = "600" ]; then echo "  ✓ 0600"; else echo "  ✗ mode $mode"; manque=1; fi
+          echo "--- poids réel de ce qui a été copié ---"
+          sudo du -sh /mnt/nix/store 2>/dev/null | awk '{print "  "$1}'
+          [ "$manque" = "0" ] || { echo "::error::l'installation n'a pas posé ce qu'elle devait"; exit 1; }
+          echo "le système est installé sur la disposition que l'installeur crée"
+
+      - name: Ranger
+        if: always()
+        run: |
+          sudo umount -R /mnt 2>/dev/null || true
+          sudo cryptsetup close prophet-home 2>/dev/null || true
+          sudo cryptsetup close prophet-state 2>/dev/null || true
+          sudo losetup -D 2>/dev/null || true
+
   # --- Voir l'image démarrer ---
   #
   # M9-T6. Jusqu'ici l'ISO se construisait sans que personne ne l'ait jamais vue démarrer : on

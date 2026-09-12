@@ -260,6 +260,15 @@ Les trois ont un test qui échoue sur le code d'avant : trois dans `crates/proph
   avec elle `{"task": "task:confirme", "pid": 792, "level": 0}`. Noté en ADR-0005, ajouté au
   garde-fou, et le refus lui-même nomme désormais laquelle de ses quatre causes s'applique
 
+- [ ] **Le maillon jamais exercé : `nixos-install` lui-même.** Le travail « installeur » s'arrête
+  au montage ; le travail « système installé » démarre une configuration que le cadre de test
+  fabrique. Entre les deux, personne n'avait jamais posé ce système sur la disposition que
+  l'installeur crée. Le travail `systeme` reprend maintenant là où l'installeur s'arrête, avec la
+  fermeture qu'il vient de construire (`--system`, donc sans la reconstruire), et vérifie ce qui
+  atterrit réellement sur le disque : le magasin, `run/current-system`, le compte `prophet` dans
+  `/etc/passwd`, et le haché du mot de passe en `0600`. `--no-bootloader` parce qu'un coureur
+  GitHub ne démarre pas en UEFI — que le chargeur fonctionne est vérifié ailleurs
+
 ### Le compte sans lequel personne ne se connecte (12 septembre 2026)
 
 - [x] La machine installée ne créait **aucun** compte humain. `nixos-install --no-root-password`
