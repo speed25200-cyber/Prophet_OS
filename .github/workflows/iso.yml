@@ -34,7 +34,9 @@ jobs:
       - name: Outils de disque
         run: |
           sudo apt-get update -qq
-          sudo apt-get -y -qq install gdisk cryptsetup-bin btrfs-progs dosfstools parted
+          # `whois` apporte `mkpasswd`, dont l'installeur se sert pour hacher le mot de passe du
+          # compte. Sur l'image, il vient de l'enveloppe Nix ; ici, le script tourne nu.
+          sudo apt-get -y -qq install gdisk cryptsetup-bin btrfs-progs dosfstools parted whois
 
       - name: Un disque de 100 Gio, creux
         id: disque
@@ -96,9 +98,33 @@ jobs:
       - name: Préparer le disque pour de vrai
         run: |
           BOUCLE='${{ steps.disque.outputs.boucle }}'
-          # La confirmation puis la phrase de passe, deux fois : exactement ce qu'un humain tape.
-          printf '%s\nphrase-de-passe-de-test\nphrase-de-passe-de-test\n' "$BOUCLE" \
+          # La confirmation, la phrase de passe deux fois, puis le mot de passe du compte deux
+          # fois : exactement ce qu'un humain tape, dans l'ordre où le script le demande.
+          printf '%s\nphrase-de-passe-de-test\nphrase-de-passe-de-test\nmot-de-passe-de-test\nmot-de-passe-de-test\n' "$BOUCLE" \
             | sudo ./image/installateur/prophet-installer.sh --disque "$BOUCLE" --jusqu-au-montage
+
+      - name: Refuser un mot de passe de compte trop court
+        run: |
+          # Une installation sans mot de passe utilisable produit une machine où personne ne peut
+          # ouvrir de session : `root` est verrouillé et `systemd-boot` n'a pas d'éditeur. Il n'y
+          # a donc pas de rattrapage après coup, et le refus doit avoir lieu ici.
+          truncate -s 100G /tmp/court.img
+          COURT=$(sudo losetup --find --show --partscan /tmp/court.img)
+          set +e
+          printf '%s\nphrase-de-passe-de-test\nphrase-de-passe-de-test\ncourt\ncourt\n' "$COURT" \
+            | timeout 60 sudo ./image/installateur/prophet-installer.sh \
+                --disque "$COURT" --jusqu-au-montage >/tmp/court.txt 2>&1
+          code=$?
+          set -e
+          cat /tmp/court.txt
+          sudo losetup -d "$COURT" 2>/dev/null || true
+          if [ "$code" -eq 0 ]; then
+            echo "::error::un mot de passe de cinq caractères a été accepté"
+            exit 1
+          fi
+          grep -q "huit caractères au minimum" /tmp/court.txt \
+            || { echo "::error::le refus n'a pas dit ce qui manquait"; exit 1; }
+          echo "refus correct"
 
       - name: Vérifier ce qui a été posé
         run: |

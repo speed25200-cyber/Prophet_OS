@@ -193,6 +193,23 @@ Les trois ont un test qui échoue sur le code d'avant : trois dans `crates/proph
 (`sondes::*`), deux dans `crates/prophet-daemon`, et quatre sous-tests dans
 `image/tests/services.nix`.
 
+### Le compte sans lequel personne ne se connecte (12 septembre 2026)
+
+- [x] La machine installée ne créait **aucun** compte humain. `nixos-install --no-root-password`
+  laisse `root` verrouillé, `systemd-boot` est configuré sans éditeur, et `cfg.user` — « prophet »
+  — était référencé dans `ReadWritePaths` sans avoir jamais été déclaré. On installait donc un
+  système sur lequel il était impossible d'ouvrir une session, et impossible de se rattraper.
+  Rien ne pouvait le voir : seul le support d'amorçage avait jamais démarré, et lui ouvre une
+  session automatiquement. Le compte est maintenant déclaré, dans `wheel` et `prophet-system` ;
+  l'installeur demande son mot de passe **avant** d'écrire quoi que ce soit sur le disque, refuse
+  en dessous de huit caractères, et ne pose que le haché, en `0600`
+
+Ce que cela laisse ouvert : la racine est montée en lecture seule par `immutable.nix`, et
+l'activation de NixOS écrit `/etc/passwd` et `/etc/shadow` à chaque démarrage. Le système installé
+n'a **jamais été démarré** — l'image d'amorçage l'a été, pas lui. C'est la prochaine chose à
+vérifier, et elle demande un test qui démarre la configuration installée depuis un disque, par son
+chargeur d'amorçage.
+
 ## Blocages
 
 Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le

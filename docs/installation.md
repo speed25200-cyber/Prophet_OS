@@ -65,7 +65,18 @@ la seule erreur irréparable de cette procédure.
 
 L'installeur vous montre ce qu'il va effacer, nomme les systèmes d'exploitation qu'il détecte, et
 **vous demande de recopier le nom du disque**. Rien n'est écrit avant cette confirmation. Il
-demande ensuite une phrase de passe pour le chiffrement, deux fois.
+demande ensuite deux choses, chacune deux fois : la **phrase de passe du chiffrement**, puis le
+**mot de passe de votre compte**.
+
+Ce sont deux secrets différents, et il faut les deux. La phrase ouvre les volumes chiffrés au
+démarrage ; le mot de passe ouvre votre session et sert à `sudo`. Le compte `root` reste
+verrouillé, et le chargeur d'amorçage n'a pas d'éditeur : il n'y a donc pas de démarrage de
+secours, et une installation sans mot de passe utilisable donnerait une machine à réinstaller.
+L'installeur refuse plutôt que de la produire — huit caractères au minimum.
+
+Le mot de passe n'est écrit nulle part en clair : seul son haché est posé sur le disque installé,
+en `0600`. Ce dépôt est public, et un mot de passe écrit dans une configuration versionnée est un
+mot de passe connu.
 
 Comptez vingt minutes à une heure : le système est téléchargé depuis `cache.nixos.org` et
 assemblé sur place.
@@ -78,7 +89,12 @@ sudo prophet-installer --disque /dev/VOTRE_DISQUE --jusqu-au-montage
 
 ## 4. Premier démarrage
 
-Retirez la clé, redémarrez. La phrase de passe vous est demandée pour ouvrir les volumes chiffrés.
+Retirez la clé, redémarrez. La phrase de passe vous est demandée pour ouvrir les volumes chiffrés,
+puis une invite de connexion apparaît.
+
+Identifiant : **`prophet`**. Mot de passe : celui que vous avez choisi à l'installation. Ce compte
+appartient à `wheel` — donc `sudo` — et à `prophet-system`, ce qui lui permet de parler aux sept
+daemons.
 
 ```sh
 prophet status                        # les services, l'isolation, les limites de la machine

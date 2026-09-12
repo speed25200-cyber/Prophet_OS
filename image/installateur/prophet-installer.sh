@@ -160,6 +160,41 @@ if [ "$CHIFFRER" = "1" ]; then
   vert "✓ phrase retenue"
 fi
 
+# --- 3 bis. Le mot de passe du compte, avant toute écriture ---
+#
+# Sans lui, la machine installée n'a aucune session ouvrable : `root` n'a pas de mot de passe et
+# `systemd-boot` est configuré sans éditeur, donc il n'y a pas non plus de démarrage de secours.
+# Une installation sans mot de passe produirait une machine à réinstaller. On le demande donc ici,
+# avant que quoi que ce soit ne soit écrit sur le disque, et on refuse de continuer sans.
+
+titre "Mot de passe de votre compte"
+info "Il ouvre votre session et sert à « sudo ». Le compte root reste verrouillé : c'est celui-ci"
+info "qui administre la machine."
+info "Il n'est pas écrit dans le dépôt — seul son haché est posé sur le disque installé."
+echo
+MOTDEPASSE=""
+while :; do
+  printf '  mot de passe : '; read -rs MOTDEPASSE; echo
+  printf '  répétez      : '; read -rs MOTDEPASSE2; echo
+  [ "$MOTDEPASSE" = "$MOTDEPASSE2" ] || { rouge "  ils diffèrent."; continue; }
+  [ ${#MOTDEPASSE} -ge 8 ] || { rouge "  huit caractères au minimum."; continue; }
+  break
+done
+unset MOTDEPASSE2
+command -v mkpasswd >/dev/null || mourir "mkpasswd est absent ; impossible de hacher le mot de passe."
+# `yescrypt` est le défaut des distributions récentes ; `sha512crypt` existe partout. On essaie le
+# meilleur, et on retombe sur l'autre plutôt que d'échouer — mais jamais sur rien.
+HACHE="$(printf '%s' "$MOTDEPASSE" | mkpasswd -m yescrypt -s 2>/dev/null || true)"
+if [ -z "$HACHE" ]; then
+  HACHE="$(printf '%s' "$MOTDEPASSE" | mkpasswd -m sha-512 -s 2>/dev/null || true)"
+fi
+unset MOTDEPASSE
+case "$HACHE" in
+  '$'*) : ;;
+  *) mourir "le hachage du mot de passe a échoué ; rien n'a été écrit." ;;
+esac
+vert "✓ mot de passe retenu"
+
 # --- 4. Partitionnement ---
 
 titre "Partitionnement"
@@ -255,6 +290,12 @@ echo
 mkdir -p "$CIBLE/etc/prophet"
 cp -r "$DEPOT" "$CIBLE/etc/prophet/source"
 
+# Le haché, et lui seul. `install -m 0600` pose le mode à la création : l'écrire puis le corriger
+# laisserait une fenêtre où le fichier est lisible.
+printf '%s\n' "$HACHE" | install -m 0600 /dev/stdin "$CIBLE/etc/prophet/motdepasse"
+unset HACHE
+[ -s "$CIBLE/etc/prophet/motdepasse" ] || mourir "le fichier de mot de passe est vide ; un compte sans mot de passe se connecterait sans en taper."
+
 # Le matériel de cette machine, détecté ici : c'est le seul fichier qui lui soit propre.
 nixos-generate-config --root "$CIBLE" --no-filesystems
 
@@ -275,6 +316,7 @@ info "Retirez le support, puis redémarrez."
 echo
 info "Au premier démarrage :"
 info "  • la phrase de passe vous sera demandée pour ouvrir les volumes chiffrés ;"
+info "  • ouvrez une session avec l'identifiant « prophet » et le mot de passe choisi ;"
 info "  • « prophet status » dira ce que cette machine sait isoler ;"
 info "  • « prophet provider login claude-code » connectera votre abonnement."
 echo

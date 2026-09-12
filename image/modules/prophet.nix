@@ -79,6 +79,23 @@ in
       description = "Utilisateur humain pour le compte duquel les agents travaillent.";
     };
 
+    motDePasseHache = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = "/etc/prophet/motdepasse";
+      description = ''
+        Fichier contenant le mot de passe **haché** du compte humain, posé par l'installeur.
+
+        Jamais le mot de passe lui-même, et jamais dans le dépôt : ce dépôt est public, et un
+        mot de passe écrit dans une configuration versionnée est un mot de passe connu. Le
+        fichier est écrit à l'installation, en `0600`, et n'est lu que par l'activation de
+        NixOS.
+
+        `null` laisse le compte sans mot de passe défini par ce module ; il faut alors en
+        fournir un autrement, sans quoi personne ne peut ouvrir de session. Les tests s'en
+        servent.
+      '';
+    };
+
     maxSandboxLevel = lib.mkOption {
       type = lib.types.ints.between 0 2;
       default = 2;
@@ -92,6 +109,18 @@ in
   config = lib.mkIf cfg.enable {
     # --- Utilisateurs et groupes ---
     users.groups.prophet-system = { };
+
+    # Le compte humain est déclaré plus bas, avec les daemons. Sans lui, la machine installée n'a
+    # **aucune** session ouvrable : `root` n'a pas de mot de passe (`nixos-install
+    # --no-root-password`), et aucun autre compte n'existait. On installait donc un système sur
+    # lequel personne ne pouvait se connecter. Aucun test ne pouvait le voir : seul le support
+    # d'amorçage avait jamais été démarré, et lui ouvre une session automatiquement.
+
+    # Les comptes viennent de la configuration, pas d'un `useradd` local : sur une racine en
+    # lecture seule, une modification faite à la main serait perdue au prochain démarrage sans
+    # que rien ne le dise.
+    users.mutableUsers = lib.mkDefault false;
+
     users.users = lib.genAttrs
       [ "capd" "ledger" "sfs" "sandboxd" "egress" "vault" "agentd" "memoryd" ]
       (name: {
@@ -100,7 +129,26 @@ in
         # Pas de deux-points : ce texte va dans le champ GECOS de /etc/passwd, dont le
         # deux-points est le separateur. NixOS le refuse, a juste titre.
         description = "Daemon Prophet OS ${name}";
-      });
+      })
+    // {
+      # Le compte humain, dans la même définition que les daemons : deux affectations de
+      # `users.users` dans le même ensemble seraient une redéfinition d'attribut, que Nix refuse.
+      #
+      # `wheel` lui donne `sudo` avec son propre mot de passe ; `root` reste verrouillé. C'est
+      # l'arrangement habituel, et le bon : un compte administrateur sans mot de passe ne se
+      # connecte pas, il ne s'ouvre pas non plus par accident.
+      ${cfg.user} = {
+        isNormalUser = true;
+        description = "Propriétaire de cette machine";
+        home = "/home/${cfg.user}";
+        # `networkmanager` n'existe que si NetworkManager est activé — il l'est par
+        # `hardware.nix`, pas par ce module. L'écrire en dur ferait échouer toute configuration
+        # qui n'importe que celui-ci, à commencer par le test des services.
+        extraGroups = [ "wheel" "prophet-system" "video" "input" "render" ]
+          ++ lib.optional config.networking.networkmanager.enable "networkmanager";
+        hashedPasswordFile = lib.mkIf (cfg.motDePasseHache != null) cfg.motDePasseHache;
+      };
+    };
 
     # --- Services ---
     systemd.services = {

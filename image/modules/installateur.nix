@@ -26,6 +26,7 @@ let
     gnused
     iputils # ping
     nixos-install-tools # nixos-install, nixos-generate-config
+    mkpasswd # le haché du mot de passe du compte, jamais le mot de passe
   ];
 
   prophet-installer = pkgs.stdenv.mkDerivation {

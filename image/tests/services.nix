@@ -83,6 +83,11 @@ pkgs.testers.runNixOSTest {
   nodes.machine = { ... }: {
     imports = [ module ];
     prophet.enable = true;
+    # Le fichier de mot de passe est posé par l'installeur sur une machine réelle ; il n'existe
+    # pas ici. On le débranche et on donne un mot de passe au compte, faute de quoi il serait
+    # verrouillé et le test ne pourrait rien en dire.
+    prophet.motDePasseHache = null;
+    users.users.prophet.password = "essai-prophet";
     # Pas de surface : elle exige un écran et un adaptateur graphique, qui n'ont rien à faire ici.
     # Ce qu'on vérifie est ce qui tourne en dessous.
     environment.systemPackages = [ essai ];
@@ -140,6 +145,26 @@ pkgs.testers.runNixOSTest {
         assert "n'appartient pas" not in vu, (
             f"un membre déclaré du groupe système doit être servi :\n{vu}"
         )
+
+    with subtest("le compte humain existe, et peut se servir de la machine"):
+        # Sans lui, le système installé n'a aucune session ouvrable : `root` est verrouillé par
+        # `nixos-install --no-root-password`, et `systemd-boot` est configuré sans éditeur. Rien
+        # ne le montrait, parce que seul le support d'amorçage avait jamais été démarré — et lui
+        # ouvre une session automatiquement.
+        machine.succeed("id prophet")
+        machine.succeed("test -d /home/prophet")
+        groupes = machine.succeed("id -nG prophet")
+        for groupe in ["wheel", "prophet-system"]:
+            assert groupe in groupes, f"prophet devrait être dans {groupe} : {groupes}"
+        vu = machine.succeed("su - prophet -c 'timeout 30 prophet task ls'")
+        assert "n'appartient pas" not in vu, (
+            f"le propriétaire de la machine doit pouvoir voir ses tâches :\n{vu}"
+        )
+        # Et il doit pouvoir ouvrir une session : un compte sans mot de passe utilisable est un
+        # compte qui n'existe pas, du point de vue de celui qui est devant l'écran.
+        etat = machine.succeed("passwd -S prophet").strip()
+        print(etat)
+        assert etat.split()[1] == "P", f"le compte prophet doit avoir un mot de passe : {etat}"
 
     with subtest("root administre sa machine"):
         # Le refuser ne protégeait rien — `root` lit les clés de signature dans `/var/lib/prophet`
