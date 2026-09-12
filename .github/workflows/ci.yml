@@ -41,6 +41,58 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # La surface d'observation, rendue pour de vrai.
+  #
+  # Le conteneur de développement n'a aucun adaptateur graphique : la surface y compile mais ne s'y
+  # dessine jamais. Un coureur avec `lavapipe` — le rastériseur logiciel de Mesa — suffit à
+  # l'exercer, et le rendu hors écran rend l'image téléchargeable. Une interface qu'on ne peut
+  # montrer qu'en la faisant tourner ne se vérifie pas et ne se discute pas.
+  surface:
+    name: Surface d'observation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Chaîne d'outils du dépôt
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Rendu logiciel et polices
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get -y -qq install mesa-vulkan-drivers vulkan-tools fonts-dejavu-core
+
+      # Sans adaptateur, les tests marqués needs_gpu se contenteraient d'être ignorés et le
+      # travail passerait au vert sans avoir rien dessiné. Sans police, le texte disparaîtrait
+      # d'une image qui paraîtrait correcte. Les deux sont donc exigés.
+      - name: Exiger un adaptateur et une police
+        run: |
+          if ! vulkaninfo --summary 2>/dev/null | grep -qi "llvmpipe\|lavapipe"; then
+            echo "::error::aucun rastériseur logiciel Vulkan : la surface ne serait pas exercée."
+            vulkaninfo --summary 2>&1 | head -30
+            exit 1
+          fi
+          fc-list | head -3
+          test "$(fc-list | wc -l)" -gt 0 || { echo "::error::aucune police installée"; exit 1; }
+
+      - name: Exercer la surface
+        run: cargo test -p surface --release -- --ignored --test-threads=1 --nocapture
+
+      - name: Capturer les deux états
+        run: |
+          cargo run --release -p surface --bin prophet-surface -- \
+            --capture surface-contemplation.png
+          cargo run --release -p surface --bin prophet-surface -- \
+            --capture surface-decision.png --decision
+          ls -lh surface-*.png
+
+      - name: Publier les images
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surface
+          path: surface-*.png
+          retention-days: 30
+
   # Les tests matériels tournent ici et nulle part ailleurs : le conteneur de développement n'a ni
   # gVisor ni KVM, et les coureurs GitHub ont les deux une fois gVisor installé. C'est donc la
   # seule machine où les niveaux 1 et 2 sont réellement exercés.

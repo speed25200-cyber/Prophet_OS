@@ -210,8 +210,14 @@ materiel_pour() {
       [ -z "$manquants" ] && return 0
       echo "il manque${manquants}"; return 1 ;;
     needs_gpu)
+      # Un rastériseur logiciel suffit à exercer la surface : exiger un GPU matériel écarterait
+      # une machine parfaitement capable de la dessiner, et donc de la vérifier.
       { [ -d /dev/dri ] || [ -e /dev/nvidiactl ]; } && return 0
-      echo "aucun GPU exposé"; return 1 ;;
+      if command -v vulkaninfo >/dev/null 2>&1 \
+         && vulkaninfo --summary 2>/dev/null | grep -qi "llvmpipe\|lavapipe"; then
+        return 0
+      fi
+      echo "ni GPU exposé, ni rastériseur logiciel Vulkan"; return 1 ;;
     needs_claude_login|needs_codex_login|needs_gemini_login)
       # Une session de compte ne se sonde pas : l'affirmer serait deviner.
       echo "exige un compte connecté, ce qu'aucune sonde ne peut établir"; return 1 ;;
