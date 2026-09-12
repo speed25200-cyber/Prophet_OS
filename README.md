@@ -14,7 +14,7 @@ Un système d'exploitation PC conçu pour que des agents IA (Claude, GPT, Gemini
 
 ## État du code
 
-Le système est construit. **374 tests** verts, **21 773 lignes** de Rust, aucun avertissement de `clippy`.
+Le système est construit. **433 tests** verts, aucun avertissement de `clippy`. **81 des 88 tâches du plan** sont faites ; les 9 restantes exigent du matériel absent de l'environnement de construction et sont nommées dans [`docs/STATUS.md`](docs/STATUS.md).
 
 ```
 prophet status          # ce que la machine sait faire, et ce qu'elle ne sait pas
@@ -51,6 +51,7 @@ Le détail, y compris **ce qui n'est pas vérifié et pourquoi**, est dans [`doc
 | `mcp-system` | outils système, contrôlés au même endroit pour tous |
 | `agentd`, `providers` | cycle de vie des tâches, pilotes d'abonnement et boucle native |
 | `sup`, `browser-bridge` | interface sémantique, navigation sans pixels |
-| `memoryd` | mémoire cloisonnée par espace |
+| `memoryd` | mémoire cloisonnée par espace, épisodes dérivés du journal |
+| `app-editor` | application de référence publiant SUP nativement |
 | `shell`, `prophet-cli` | vues et binaire destinés à l'humain |
 | `bench` | suite adversariale et mesure de coût |

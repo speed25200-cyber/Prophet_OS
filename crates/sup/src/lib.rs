@@ -17,10 +17,12 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod adapter;
 pub mod diff;
 pub mod registry;
 pub mod tree;
 
+pub use adapter::{AccessibleNode, Provenance, convert_tree};
 pub use diff::{Change, TreeDiff};
 pub use registry::{Registry, RegistryError, WindowId};
 pub use tree::{Action, ActionArg, ArgType, Detail, Node, Role, Tree};

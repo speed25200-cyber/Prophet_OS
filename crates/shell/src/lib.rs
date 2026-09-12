@@ -6,6 +6,10 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod intent;
+
+pub use intent::{Proposal, propose, render_proposal};
+
 use agentd::{State, Task};
 use prophet_types::ledger::{Event, EventKind};
 use serde_json::Value;

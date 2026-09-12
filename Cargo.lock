@@ -122,6 +122,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "app-editor"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sup",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "ar_archive_writer"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2057,6 +2068,7 @@ dependencies = [
  "capd",
  "prophet-types",
  "sandboxd",
+ "serde",
  "serde_json",
  "sfs",
  "tempfile",

@@ -67,11 +67,20 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 - [x] M6-T3 — Vault (2026-09-12, 24b8338) — coffre chiffré, références jamais valeurs
 - [x] M6-T4 — Injection dans le proxy (2026-09-12, 24b8338) — substitution au dernier moment, hôte vérifié
 - [x] M6-T5 — Sous-volumes d'identifiants des clients officiels (2026-09-12, 24b8338) — répertoires privés par pilote et par utilisateur
-- [ ] M6-T6 — Identité réseau d'agent
+- [x] M6-T6 — Identité réseau d'agent (2026-09-12, 8091f4d) — en-tête signé, utilisateur sous empreinte salée par machine
 
 ### M7 — mcp-system : serveurs MCP système
 
-- [x] M7-T10 — Registre (2026-09-12, 24b8338) — registre, visibilité selon le jeton
+- [x] M7-T1 — `fs` (2026-09-12, 8091f4d) — lecture, écriture, liste, stat, recherche ; double contrôle outil puis cible
+- [x] M7-T2 — `proc` (2026-09-12, 8091f4d) — exécution et arrêt ; microVM imposée hors liste blanche
+- [x] M7-T3 — `http` (2026-09-12, 8091f4d) — sortie par le proxy uniquement
+- [x] M7-T4 — `task` (2026-09-12, 8091f4d) — état et diff de la tâche courante
+- [x] M7-T5 — `approval` (2026-09-12, 8091f4d) — demande et attente ; résumé obligatoire
+- [x] M7-T6 — `ledger` (2026-09-12, 8091f4d) — lecture limitée à la tâche courante
+- [x] M7-T7 — `memory` (2026-09-12, 8091f4d) — enregistrement et recherche par espace
+- [x] M7-T8 — `secrets` (2026-09-12, 8091f4d) — références seules, valeurs jamais rendues
+- [x] M7-T9 — `clock`, `notify` (2026-09-12, 8091f4d) — horloge rejouable, notification hors bande
+- [x] M7-T10 — Registre (2026-09-12, 8091f4d) — couverture de la spécification vérifiée par un test
 
 ### M8 — agentd et providers
 
@@ -101,20 +110,20 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 - [x] M10-T1 — Spécification SUP v0 (2026-09-12, 24b8338) — arbre, actions typées, niveaux de détail
 - [x] M10-T2 — Registre SUP (2026-09-12, 24b8338) — registre cloisonné, différentiels
 - [x] M10-T3 — Pont navigateur (2026-09-12, 24b8338) — réservation sans capture d'écran, 1 929 octets
-- [ ] M10-T4 — Adaptateur AT-SPI
-- [ ] M10-T5 — Application native de référence
+- [x] M10-T4 — Adaptateur AT-SPI (2026-09-12, 8091f4d) — correspondance des rôles, confiance annoncée, actions réellement offertes seulement
+- [x] M10-T5 — Application native de référence (2026-09-12, 8091f4d) — éditeur publiant SUP nativement, `send` irréversible et externe
 - [x] M10-T6 — Repli vision (2026-09-12, 24b8338) — capture d'écran réservée, hors défaut
 
 ### M11 — memoryd
 
 - [x] M11-T1 — Stockage (2026-09-12, 24b8338) — espaces cloisonnés, provenance
 - [x] M11-T2 — API MCP (2026-09-12, 24b8338) — recherche hybride, rappel vérifié
-- [ ] M11-T3 — Mémoire épisodique
+- [x] M11-T3 — Mémoire épisodique (2026-09-12, 8091f4d) — résumé dérivé du journal, refus retenus, confiance selon l'issue
 - [x] M11-T4 — Édition humaine (2026-09-12, 24b8338) — `prophet memory ls|search|forget`
 
 ### M12 — shell-tui
 
-- [ ] M12-T1 — Barre d'intentions
+- [x] M12-T1 — Barre d'intentions (2026-09-12, 8091f4d) — proposition étroite, élargissements posés en questions
 - [x] M12-T2 — Timeline (2026-09-12, 24b8338) — timeline groupée par étape
 - [x] M12-T3 — Centre d'approbations (2026-09-12, 24b8338) — centre d'approbations lisible en cinq secondes
 - [x] M12-T4 — Undo (2026-09-12, 24b8338) — `prophet task undo`, sans daemon
@@ -122,7 +131,7 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 
 ### M13 — bench et adversarial
 
-- [ ] M13-T1 — Suite de tâches
+- [x] M13-T1 — Suite de tâches (2026-09-12, 8091f4d) — 8 tâches, 5 familles, vérificateur par tâche
 - [ ] ⛔ M13-T2 — Ligne de base « pixels » — bloqué : exige un agent de référence exécutable
 - [x] M13-T3 — Suite adversariale (2026-09-12, 24b8338) — 20 scénarios, 20 sans conséquence
 - [x] M13-T4 — Rapport de phase 0 (2026-09-12, 24b8338) — docs/reports/phase0.md

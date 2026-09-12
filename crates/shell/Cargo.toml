@@ -12,6 +12,7 @@ capd = { workspace = true }
 sfs = { workspace = true }
 sandboxd = { workspace = true }
 agentd = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 time = { workspace = true }
 

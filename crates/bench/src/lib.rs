@@ -15,6 +15,8 @@
 
 pub mod adversarial;
 pub mod cost;
+pub mod tasks;
 
 pub use adversarial::{Attack, Outcome, Scenario, Verdict};
 pub use cost::{Measurement, compare};
+pub use tasks::{Family, Requires, Run, Task, suite};

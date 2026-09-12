@@ -14,17 +14,21 @@
 | M3 | `ledger` : journal chaîné et scellé | fait | 13 tests |
 | M4 | `sfs` : espace de travail par tâche, diff, annulation | fait | 23 tests |
 | M5 | `sandboxd` : isolation graduée | niveau 0 vérifié ; 1 et 2 écrits, non exerçables ici | 17 tests |
-| M6 | `vault` et `egress` : secrets et sortie réseau | fait | 48 tests |
-| M7 | `mcp-system` : serveurs MCP système | fait | 24 tests |
+| M6 | `vault` et `egress` : secrets, sortie réseau, identité d'agent | fait | 54 tests |
+| M7 | `mcp-system` : serveurs MCP système | fait, liste normative couverte | 34 tests |
 | M8 | `agentd` et `providers` : runtime et pilotes | fait | 38 tests |
 | M9 | Image amorçable | écrite, non construite | — |
-| M10 | `sup` et `browser-bridge` : interface sémantique | fait | 32 tests |
-| M11 | `memoryd` : mémoire cloisonnée | fait | 18 tests |
-| M12 | `shell` et `prophet` : interface humaine | fait | 30 tests |
-| M13 | `bench` : suite adversariale et mesure de coût | fait | 15 tests |
+| M10 | `sup`, `browser-bridge`, `app-editor` : interface sémantique | fait | 51 tests |
+| M11 | `memoryd` : mémoire cloisonnée et épisodique | fait | 25 tests |
+| M12 | `shell` et `prophet` : interface humaine | fait | 42 tests |
+| M13 | `bench` : suite de tâches, adversariale, coût | fait ; ligne de base pixels non mesurable ici | 22 tests |
 
-**374 tests**, tous verts. **21 773 lignes** de Rust. Aucun avertissement de `clippy`, aucun
-`unsafe` hors d'une sonde d'appel système documentée.
+**433 tests**, tous verts. **24 471 lignes** de Rust. Aucun avertissement de `clippy`, aucun `unsafe` hors d'une sonde
+d'appel système documentée.
+
+**81 des 88 tâches du plan sont faites.** Les 9 restantes, marquées ⛔ dans `docs/STATUS.md`,
+dépendent de matériel ou de logiciel absents de l'environnement de construction ; la section 5 dit
+pour chacune ce qu'il faut pour la vérifier.
 
 ## 2. Mesures
 
