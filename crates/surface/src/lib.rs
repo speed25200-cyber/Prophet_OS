@@ -3,6 +3,7 @@
 //! Ce que l'humain voit pendant que les agents travaillent.
 
 pub mod disposition;
+pub mod fenetre;
 pub mod gpu;
 pub mod rendu;
 pub mod scene;

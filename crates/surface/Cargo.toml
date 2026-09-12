@@ -19,6 +19,8 @@ glyphon = "0.12"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
 png = "0.17"
+# Fenêtre et évènements. Wayland seul : Prophet OS n'embarque pas de serveur X.
+winit = { version = "0.30", default-features = false, features = ["wayland", "wayland-dlopen", "rwh_06"] }
 
 [lints]
 workspace = true

@@ -22,6 +22,7 @@
           nixosModules.prophet
           ./image/modules/hardware.nix
           ./image/modules/immutable.nix
+          ./image/modules/surface.nix
           { prophet.enable = true; }
         ];
       };

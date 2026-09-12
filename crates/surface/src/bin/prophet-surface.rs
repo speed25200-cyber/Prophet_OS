@@ -6,15 +6,18 @@
 
 use std::process::ExitCode;
 
+use surface::fenetre::{Reponse, Source};
 use surface::gpu::{Cible, Contexte};
 use surface::rendu::Rendu;
 use surface::scene::{Courant, Decision, Etat, Isolation, Scene};
 
 fn usage() {
     eprintln!(
-        "Usage : prophet-surface --capture FICHIER.png [options]
+        "Usage : prophet-surface [--capture FICHIER.png] [options]
 
-  --capture FICHIER    où écrire l'image (obligatoire)
+Sans --capture, ouvre la surface en plein écran. C'est ainsi que Prophet OS l'affiche.
+
+  --capture FICHIER    écrire une image au lieu d'ouvrir la fenêtre
   --largeur N          défaut 1920
   --hauteur N          défaut 1080
   --temps SECONDES     instant du champ ; la même valeur donne toujours la même image (défaut 8)
@@ -61,8 +64,16 @@ fn main() -> ExitCode {
     }
 
     let Some(fichier) = fichier else {
-        usage();
-        return ExitCode::FAILURE;
+        // Le mode ordinaire : la surface occupe l'écran, et n'en sort pas.
+        return match surface::fenetre::tenir(Box::new(Demonstration {
+            avec_decision: decision,
+        })) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(erreur) => {
+                eprintln!("surface impossible à tenir : {erreur}");
+                ExitCode::FAILURE
+            }
+        };
     };
 
     match capturer(&fichier, largeur, hauteur, temps, decision) {
@@ -110,6 +121,25 @@ fn ecrire_png(
     encodeur.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
     encodeur.write_header()?.write_image_data(pixels)?;
     Ok(())
+}
+
+/// La source de démonstration : elle rend toujours la même scène.
+///
+/// C'est le seul endroit qui sait d'où vient l'état. Le branchement au ledger remplacera cette
+/// structure sans toucher ni à la fenêtre ni au rendu — c'est tout l'objet du trait `Source`.
+struct Demonstration {
+    avec_decision: bool,
+}
+
+impl Source for Demonstration {
+    fn scene(&mut self) -> Scene {
+        demonstration(self.avec_decision)
+    }
+
+    fn repond(&mut self, reponse: Reponse) {
+        // Une démonstration n'a rien à trancher ; on le dit plutôt que de faire semblant.
+        eprintln!("réponse ignorée en démonstration : {reponse:?}");
+    }
 }
 
 /// Une scène représentative, pour montrer la surface sans machine en marche.

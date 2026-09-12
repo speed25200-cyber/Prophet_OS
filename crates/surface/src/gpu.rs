@@ -24,10 +24,26 @@ pub enum ErreurGpu {
     /// La lecture de l'image rendue a échoué.
     #[error("l'image rendue n'a pas pu être relue : {0}")]
     Lecture(String),
+    /// La surface d'affichage n'a pas pu être créée.
+    #[error("surface d'affichage impossible : {0}")]
+    Surface(String),
+}
+
+/// L'instance, configurée de la même façon pour tous les usages.
+fn instance() -> wgpu::Instance {
+    wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::all(),
+        flags: wgpu::InstanceFlags::default(),
+        memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+        backend_options: wgpu::BackendOptions::default(),
+        display: None,
+    })
 }
 
 /// Le contexte graphique, partagé par tous les rendus.
 pub struct Contexte {
+    /// L'instance, retenue parce qu'une surface d'affichage en naît.
+    pub instance: wgpu::Instance,
     /// Périphérique logique.
     pub device: Arc<wgpu::Device>,
     /// File de commandes.
@@ -56,23 +72,45 @@ impl Contexte {
     /// # Errors
     /// Si aucun adaptateur n'est disponible, ou si le pilote refuse un périphérique.
     pub fn hors_ecran() -> Result<Self, ErreurGpu> {
-        pollster::block_on(Self::ouvrir())
+        pollster::block_on(Self::ouvrir(None))
     }
 
-    async fn ouvrir() -> Result<Self, ErreurGpu> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
-            flags: wgpu::InstanceFlags::default(),
-            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
-            backend_options: wgpu::BackendOptions::default(),
-            display: None,
-        });
+    /// Ouvre un contexte et la surface d'affichage qui va avec.
+    ///
+    /// La cible est passée telle que wgpu l'attend : ce module ignore donc quelle bibliothèque de
+    /// fenêtrage l'a produite, et reste compilable sans elle.
+    ///
+    /// # Errors
+    /// Si aucun adaptateur ne convient à cette surface, ou si le pilote refuse un périphérique.
+    pub fn avec_surface(
+        cible: wgpu::SurfaceTarget<'static>,
+    ) -> Result<(Self, wgpu::Surface<'static>), ErreurGpu> {
+        pollster::block_on(async {
+            // L'instance doit exister avant la surface, et la surface avant le choix de
+            // l'adaptateur : c'est elle qui dit lesquels savent dessiner sur cet écran.
+            let instance = instance();
+            let surface = instance
+                .create_surface(cible)
+                .map_err(|e| ErreurGpu::Surface(e.to_string()))?;
+            let contexte = Self::depuis(instance, Some(&surface)).await?;
+            Ok((contexte, surface))
+        })
+    }
 
+    async fn ouvrir(surface: Option<&wgpu::Surface<'static>>) -> Result<Self, ErreurGpu> {
+        let instance = instance();
+        Self::depuis(instance, surface).await
+    }
+
+    async fn depuis(
+        instance: wgpu::Instance,
+        surface: Option<&wgpu::Surface<'_>>,
+    ) -> Result<Self, ErreurGpu> {
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 force_fallback_adapter: false,
-                compatible_surface: None,
+                compatible_surface: surface,
                 apply_limit_buckets: false,
             })
             .await
@@ -94,6 +132,7 @@ impl Contexte {
             .map_err(|e| ErreurGpu::Peripherique(e.to_string()))?;
 
         Ok(Self {
+            instance,
             device: Arc::new(device),
             queue: Arc::new(queue),
             adaptateur,
