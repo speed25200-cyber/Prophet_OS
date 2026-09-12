@@ -1,4 +1,4 @@
-# ADR-0006 — La restriction des espaces de noms par la distribution est une dépendance déclarée
+# ADR-0006 — Les réglages de sécurité de l'hôte sont déclarés, jamais changés en douce
 
 - Statut : accepté
 - Date : 2026-09-12
@@ -36,6 +36,18 @@ dedans. Une capacité vérifiée à moitié est une capacité non vérifiée.
 3. L'intégration continue la lève explicitement, parce que le coureur est jetable et qu'on y
    cherche à exercer l'isolation, pas à protéger la machine.
 
+## Le même raisonnement vaut pour `/dev/kvm`
+
+Le niveau 2 a buté sur le jumeau exact de ce défaut. La sonde vérifiait que `/dev/kvm` **existe**,
+jamais qu'il est **ouvrable**. Le nœud appartient au groupe `kvm` ; un utilisateur qui n'en fait
+pas partie obtient `EACCES` au moment de démarrer la machine virtuelle, sous la forme d'une erreur
+du moniteur qui n'en est pas la cause — `StartMicroVM(Kvm(Kvm(Error(13))))`.
+
+La sonde ouvre désormais le nœud, et `missing_for` distingue « absent » de « présent mais refusé »,
+puisque les deux appellent des gestes différents. Comme pour les espaces de noms, l'installateur
+n'élargit cet accès que si `PROPHET_AUTORISER_KVM=1` est posé, et recommande l'appartenance au
+groupe plutôt que l'ouverture du nœud sur une machine durable.
+
 ## Conséquences
 
 - Sur une Ubuntu 24.04 récente installée telle quelle — le cas de la plupart des serveurs loués —
@@ -45,6 +57,11 @@ dedans. Une capacité vérifiée à moitié est une capacité non vérifiée.
   AppArmor** pour `prophet-sandbox-helper` et `runsc`, qui rende à ces deux binaires le droit
   qu'Ubuntu accorde déjà à `unshare` et `bwrap`. Cette tâche reste à faire, et ce document est là
   pour qu'on ne l'oublie pas.
+- La règle générale, dont ces deux cas sont des instances : **une sonde qui constate une présence
+  n'a rien vérifié**. Elle doit tenter le geste dont la capacité dépend — créer l'espace de noms
+  et exécuter dedans, ouvrir le nœud —, faute de quoi elle annonce une protection que le système
+  ne saura pas mettre en place, et l'échec ressortira ailleurs, plus tard, dans un composant
+  innocent.
 - Les images Prophet OS construites par Nix ne sont pas concernées : elles n'embarquent pas cette
   politique. Le problème n'existe que lorsque Prophet OS tourne **au-dessus** d'une distribution
   hôte.

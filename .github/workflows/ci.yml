@@ -106,7 +106,10 @@ jobs:
       # — ce qui est dit dans le rapport, jamais compté réussi.
       - name: Installer Firecracker et les images d'invité (au mieux)
         continue-on-error: true
-        run: sudo ./tools/install-isolation.sh microvm
+        # /dev/kvm est présent sur ce coureur mais appartient au groupe kvm, dont l'utilisateur
+        # courant ne fait pas partie : Firecracker mourait sur EACCES. Le coureur est jetable,
+        # l'accès est donc accordé explicitement.
+        run: PROPHET_AUTORISER_KVM=1 sudo -E ./tools/install-isolation.sh microvm
 
       - name: Niveaux d'isolation
         run: ./tools/verify-on-host.sh --niveaux

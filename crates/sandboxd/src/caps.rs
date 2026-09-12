@@ -74,7 +74,7 @@ impl Capabilities {
             user_namespaces: probe_user_namespaces(),
             userns_restreint_par_politique: probe_userns_restreint(),
             cgroups_v2: Path::new("/sys/fs/cgroup/cgroup.controllers").exists(),
-            kvm: Path::new("/dev/kvm").exists(),
+            kvm: probe_kvm(),
             runsc: which("runsc"),
             firecracker: which("firecracker"),
             microvm_images: find_microvm_images(),
@@ -104,7 +104,12 @@ impl Capabilities {
         match level {
             2 => {
                 if !self.kvm {
-                    manques.push("/dev/kvm".to_owned());
+                    manques.push(if Path::new("/dev/kvm").exists() {
+                        "l'accès à /dev/kvm (présent mais refusé : appartenance au groupe kvm)"
+                            .to_owned()
+                    } else {
+                        "/dev/kvm".to_owned()
+                    });
                 }
                 if self.firecracker.is_none() {
                     manques.push("le binaire firecracker".to_owned());
@@ -182,7 +187,13 @@ impl Capabilities {
         ));
         lines.push(format!(
             "  /dev/kvm      : {}",
-            if self.kvm { "présent" } else { "absent" }
+            if self.kvm {
+                "accessible"
+            } else if Path::new("/dev/kvm").exists() {
+                "présent mais inaccessible (groupe kvm)"
+            } else {
+                "absent"
+            }
         ));
         lines.push(format!(
             "  images microVM: {}",
@@ -261,6 +272,20 @@ fn probe_user_namespaces() -> bool {
         }
         essayer_un_espace_de_noms_utilisateur()
     })
+}
+
+/// `/dev/kvm` est-il réellement utilisable par ce processus ?
+///
+/// Constater que le fichier existe ne dit rien du droit de l'ouvrir : il appartient au groupe
+/// `kvm`, et un utilisateur qui n'en fait pas partie obtient `EACCES` — au moment de démarrer la
+/// machine virtuelle, c'est-à-dire bien trop tard, et sous la forme d'une erreur du moniteur qui
+/// n'en est pas la cause. On l'ouvre donc pour de bon.
+fn probe_kvm() -> bool {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/kvm")
+        .is_ok()
 }
 
 /// La distribution restreint-elle l'usage des espaces de noms non privilégiés ?

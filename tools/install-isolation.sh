@@ -163,6 +163,41 @@ installer_images() {
   ok "racine invitée : $(basename "$cle_racine")"
 }
 
+# Le droit d'ouvrir /dev/kvm, distinct de sa présence.
+#
+# Le fichier appartient au groupe kvm. Un utilisateur qui n'en fait pas partie obtient EACCES au
+# moment de démarrer la machine virtuelle — trop tard, et sous la forme d'une erreur du moniteur
+# qui n'en est pas la cause.
+kvm_accessible() {
+  [ -r /dev/kvm ] && [ -w /dev/kvm ]
+}
+
+traiter_l_acces_kvm() {
+  if kvm_accessible; then
+    ok "/dev/kvm accessible"
+    return 0
+  fi
+  ko "/dev/kvm existe mais n'est pas ouvrable par $(id -un)"
+  if [ "${PROPHET_AUTORISER_KVM:-}" != "1" ]; then
+    info "rien n'est modifié : élargir l'accès à l'hyperviseur est une décision qui vous revient."
+    info "Pour l'accorder, au choix :"
+    info "  sudo usermod -aG kvm $(id -un)    puis rouvrir une session (propre et durable)"
+    info "  PROPHET_AUTORISER_KVM=1 sudo -E ./tools/install-isolation.sh microvm   (immédiat)"
+    return 1
+  fi
+  sudo_si_besoin usermod -aG kvm "$(id -un)" 2>/dev/null || true
+  # L'appartenance à un groupe ne prend effet qu'à la session suivante ; sur une machine jetable
+  # on ouvre le nœud directement, faute de quoi l'autorisation ne servirait à rien aujourd'hui.
+  sudo_si_besoin chmod 0666 /dev/kvm || { ko "l'accès a été refusé"; return 1; }
+  if kvm_accessible; then
+    ok "/dev/kvm rendu accessible"
+    info "sur une machine durable, préférez l'appartenance au groupe kvm à ce mode d'accès"
+    return 0
+  fi
+  ko "/dev/kvm reste inaccessible"
+  return 1
+}
+
 installer_microvm() {
   echo "Firecracker et images d'invité — débloquent le niveau 2"
   if [ ! -e /dev/kvm ]; then
@@ -175,6 +210,7 @@ installer_microvm() {
     return 1
   fi
   ok "/dev/kvm présent"
+  traiter_l_acces_kvm || return 1
   installer_firecracker || return 1
   installer_images || return 1
 }
@@ -206,7 +242,7 @@ else
   echo "  niveau 0 : oui (espaces de noms)"
 fi
 if command -v runsc >/dev/null 2>&1; then echo "  niveau 1 : oui"; else echo "  niveau 1 : non (gVisor absent)"; fi
-if [ -e /dev/kvm ] && command -v firecracker >/dev/null 2>&1 \
+if kvm_accessible && command -v firecracker >/dev/null 2>&1 \
    && [ -f "$MICROVM_DIR/vmlinux" ] && [ -f "$MICROVM_DIR/rootfs.ext4" ]; then
   echo "  niveau 2 : oui"
 else
