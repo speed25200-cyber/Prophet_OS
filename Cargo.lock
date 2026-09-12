@@ -460,6 +460,7 @@ dependencies = [
  "cedar-policy",
  "ed25519-dalek",
  "ledger",
+ "prophet-daemon",
  "prophet-ipc",
  "prophet-types",
  "rand 0.8.8",
@@ -470,7 +471,6 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -1045,15 +1045,19 @@ dependencies = [
 name = "egress"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "base64 0.22.1",
  "blake3",
  "ed25519-dalek",
+ "prophet-daemon",
+ "prophet-ipc",
  "prophet-types",
  "rand 0.8.8",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.20",
+ "time",
  "tokio",
  "tracing",
  "vault",
@@ -1818,9 +1822,12 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 name = "ledger"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "base64 0.22.1",
  "blake3",
  "ed25519-dalek",
+ "prophet-daemon",
+ "prophet-ipc",
  "prophet-types",
  "rand 0.8.8",
  "serde",
@@ -2024,7 +2031,10 @@ dependencies = [
 name = "memoryd"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "blake3",
+ "prophet-daemon",
+ "prophet-ipc",
  "prophet-types",
  "rusqlite",
  "serde",
@@ -2032,6 +2042,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "time",
+ "tokio",
  "tracing",
 ]
 
@@ -2797,6 +2808,22 @@ dependencies = [
  "tempfile",
  "time",
  "vault",
+]
+
+[[package]]
+name = "prophet-daemon"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "prophet-ipc",
+ "rand 0.8.8",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4125,14 +4152,18 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 name = "vault"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "base64 0.22.1",
  "blake3",
  "chacha20poly1305",
+ "prophet-daemon",
+ "prophet-ipc",
  "rand 0.8.8",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.20",
+ "tokio",
  "tracing",
 ]
 

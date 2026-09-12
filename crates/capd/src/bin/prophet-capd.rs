@@ -13,7 +13,8 @@ use std::sync::Arc;
 use capd::{ApprovalScope, Broker, CheckRequest, PolicyEngine};
 use prophet_daemon as commun;
 use prophet_ipc::{Error, ErrorCode, Handler, PeerIdentity, Server};
-use prophet_types::cap::{Act, Res, Token};
+use prophet_types::cap::{Act, Grant, Res, Token};
+use prophet_types::manifest::Manifest;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
@@ -79,6 +80,27 @@ impl Handler for Capd {
                 let approbation = broker.request_approval(&jeton, &demande, resume, maintenant);
                 tracing::info!(id = %approbation.id, "approbation demandée");
                 commun::repondre(&approbation)
+            }
+
+            // Émettre le jeton racine d'une tâche : l'intersection de ce qu'elle demande et de ce
+            // que son manifeste plafonne. Une tâche n'obtient jamais plus que son manifeste, même
+            // si elle demande plus — et `capd` est le seul endroit où cette intersection est
+            // faite, pour qu'il n'y ait pas deux réponses possibles à la même question.
+            "cap.mint" => {
+                let manifeste: Manifest = lire(&params, "manifest")?;
+                let grants: Vec<Grant> = lire(&params, "grants")?;
+                let tache = commun::texte(&params, "task")?;
+                let utilisateur = commun::texte(&params, "user")?;
+                let duree = params
+                    .get("ttl_seconds")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(1800);
+                let mut broker = self.broker.lock().await;
+                let jeton = broker
+                    .mint(&manifeste, &tache, &utilisateur, &grants, duree, maintenant)
+                    .map_err(|e| Error::new(ErrorCode::PolicyDenied, e.to_string()))?;
+                tracing::info!(%tache, grants = jeton.grants.len(), "jeton émis");
+                commun::repondre(&jeton)
             }
 
             "approval.pending" => {

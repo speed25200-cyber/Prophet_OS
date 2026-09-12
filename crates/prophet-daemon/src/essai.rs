@@ -94,4 +94,68 @@ impl Daemon {
             self.socket.display()
         );
     }
+
+    /// Attend qu'un daemon qui ne parle **pas** JSON-RPC réponde à une requête brute.
+    ///
+    /// Le proxy de sortie parle HTTP sur son socket ; `ping` n'y veut rien dire. On lui envoie donc
+    /// la sonde donnée, et on attend une réponse — pas la simple existence du socket, qui ne dirait
+    /// que « le bind a eu lieu ».
+    ///
+    /// # Panics
+    /// Au bout de dix secondes, en disant ce qui a échoué en dernier.
+    pub async fn attendre_reponse(&self, sonde: &[u8]) -> String {
+        use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
+        use tokio::net::UnixStream;
+
+        let limite = Instant::now() + Duration::from_secs(10);
+        let mut derniere = "aucune tentative n'a encore eu lieu".to_owned();
+        while Instant::now() < limite {
+            match UnixStream::connect(&self.socket).await {
+                Ok(mut flux) => match flux.write_all(sonde).await {
+                    Ok(()) => {
+                        let mut ligne = String::new();
+                        match BufReader::new(flux).read_line(&mut ligne).await {
+                            Ok(n) if n > 0 => return ligne,
+                            Ok(_) => derniere = "connecté, mais aucune réponse".to_owned(),
+                            Err(e) => derniere = format!("lecture impossible : {e}"),
+                        }
+                    }
+                    Err(e) => derniere = format!("écriture impossible : {e}"),
+                },
+                Err(e) => derniere = format!("connexion impossible : {e}"),
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!(
+            "{} n'a pas répondu en 10 s — {derniere}",
+            self.socket.display()
+        );
+    }
+}
+
+/// Le chemin d'un binaire de l'atelier depuis un test d'un **autre** crate.
+///
+/// `CARGO_BIN_EXE_<nom>` n'est défini que pour les binaires du paquet qui contient le test. Un test
+/// qui fait dialoguer deux daemons — le proxy de sortie et le broker, par exemple — doit donc
+/// trouver l'autre autrement. Le binaire de test vit dans `target/<profil>/deps/` ; ses voisins
+/// sont un cran au-dessus.
+///
+/// # Panics
+/// Si le binaire est introuvable, avec le chemin cherché. Un test qui continuerait sans lui
+/// mesurerait autre chose que ce qu'il croit.
+#[must_use]
+pub fn binaire_voisin(nom: &str) -> PathBuf {
+    let exe = std::env::current_exe().expect("le test a bien un chemin");
+    let chemin = exe
+        .parent()
+        .and_then(std::path::Path::parent)
+        .map(|repertoire| repertoire.join(nom))
+        .unwrap_or_default();
+    assert!(
+        chemin.is_file(),
+        "binaire « {nom} » introuvable en {} — construisez-le avant \
+         (`cargo build --bin {nom}`), plutôt que de tester sans lui",
+        chemin.display()
+    );
+    chemin
 }

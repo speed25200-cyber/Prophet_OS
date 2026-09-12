@@ -12,6 +12,7 @@ rust-version = "1.90"
 [workspace.dependencies]
 prophet-types = { path = "crates/prophet-types" }
 prophet-ipc = { path = "crates/prophet-ipc" }
+prophet-daemon = { path = "crates/prophet-daemon" }
 capd = { path = "crates/capd" }
 ledger = { path = "crates/ledger" }
 sfs = { path = "crates/sfs" }

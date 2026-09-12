@@ -7,6 +7,9 @@ repository.workspace = true
 description = "Proxy de sortie de Prophet OS : unique voie réseau des tâches, avec politique, substitution de secrets et détection d'exfiltration."
 
 [dependencies]
+anyhow = { workspace = true }
+prophet-daemon = { workspace = true }
+prophet-ipc = { workspace = true }
 prophet-types = { workspace = true }
 vault = { workspace = true }
 serde = { workspace = true }
@@ -20,7 +23,9 @@ rand = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+prophet-daemon = { workspace = true, features = ["essai"] }
 tempfile = { workspace = true }
+time = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 [lints]
