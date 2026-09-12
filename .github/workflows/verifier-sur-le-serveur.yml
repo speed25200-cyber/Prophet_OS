@@ -1,0 +1,180 @@
+# Vérifie Prophet OS sur le serveur de l'utilisateur, depuis un runner GitHub.
+#
+# Pourquoi passer par ici. Une session Claude n'atteint pas ce serveur : la politique de sortie de
+# l'organisation refuse l'hôte (« no rule or allowlist entry allows host »). Un runner GitHub n'est
+# pas soumis à cette politique — c'est déjà par ce chemin que le dépôt Hermes déploie sur la même
+# machine.
+#
+# Ce que ce workflow ne fait jamais. Le serveur fait tourner Hermes en production. Rien ici ne
+# touche /root/hermes, ne redémarre un service, ni ne modifie une configuration qui le concerne.
+# Prophet OS vit dans /root/prophet_os et nulle part ailleurs.
+#
+# Ce qui modifie la machine est désactivé par défaut. Installer des paquets et lever une
+# restriction du noyau sont des décisions qui appartiennent au propriétaire de la machine, pas à un
+# workflow qui se déclenche. Chaque étape invasive a son interrupteur, et la sonde seule — qui ne
+# modifie rien — suffit à savoir où l'on en est.
+
+name: Vérifier Prophet OS sur le serveur
+
+on:
+  workflow_dispatch:
+    inputs:
+      root_password:
+        description: "Mot de passe root (inutile si le secret VPS_PASSWORD est posé)"
+        required: false
+      arreter_hermes:
+        description: "ARRÊTER le moteur Hermes et libérer la machine pour Prophet OS. Irréversible sans le relancer à la main."
+        required: false
+        default: "false"
+      preparer:
+        description: "Installer les dépendances de compilation et gVisor sur le serveur"
+        required: false
+        default: "false"
+      lever_userns:
+        description: "Lever la restriction AppArmor des espaces de noms (ADR-0006). Sans elle, les niveaux 0 et 1 échouent."
+        required: false
+        default: "false"
+      verifier_niveaux:
+        description: "Compiler sandboxd et exercer les niveaux d'isolation (long sur 2 Gio)"
+        required: false
+        default: "false"
+
+concurrency:
+  group: serveur-prophet
+  cancel-in-progress: false
+
+jobs:
+  verifier:
+    runs-on: ubuntu-latest
+    env:
+      VPS: ${{ vars.VPS_HOST || '178.104.191.79' }}
+      DISTANT: /root/prophet_os
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Outils de connexion
+        run: sudo apt-get update -qq && sudo apt-get -y -qq install sshpass rsync
+
+      - name: Établir la connexion
+        env:
+          PW_SECRET: ${{ secrets.VPS_PASSWORD }}
+          PW_INPUT: ${{ inputs.root_password }}
+        run: |
+          set -u
+          if [ -n "${PW_SECRET:-}" ]; then MDP="$PW_SECRET"
+          elif [ -n "${PW_INPUT:-}" ]; then MDP="$PW_INPUT"
+          else
+            echo "::error::aucun identifiant : posez le secret VPS_PASSWORD ou remplissez root_password"
+            exit 1
+          fi
+          SSHOPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+          essai() { timeout 25 sshpass -p "$1" ssh $SSHOPTS "root@$VPS" "echo __ok__" 2>/dev/null | grep -q __ok__; }
+          # Hetzner impose un changement à la première connexion. Le dépôt Hermes documente que son
+          # propre outillage a fait tourner le mot de passe vers « <original>.Hermes1 » ; les deux
+          # formes sont donc essayées, et aucune autre.
+          if essai "$MDP"; then RETENU="$MDP"
+          elif essai "${MDP}.Hermes1"; then RETENU="${MDP}.Hermes1"
+          else
+            echo "::error::connexion refusée. Si le mot de passe a changé depuis, mettez à jour le secret VPS_PASSWORD."
+            exit 1
+          fi
+          echo "::add-mask::$RETENU"
+          echo "SSHPASS=$RETENU" >> "$GITHUB_ENV"
+          echo "SSHOPTS=$SSHOPTS" >> "$GITHUB_ENV"
+          echo "connexion établie"
+
+      - name: Ce que le serveur offre aujourd'hui
+        run: |
+          sshpass -e ssh $SSHOPTS "root@$VPS" 'bash -s' <<'DISTANT_SONDE'
+            echo "hote    : $(hostname)"
+            echo "systeme : $(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME")"
+            echo "noyau   : $(uname -r)"
+            echo "memoire : $(awk '/MemTotal/{printf "%d Mio", $2/1024}' /proc/meminfo), echange $(awk '/SwapTotal/{printf "%d Mio", $2/1024}' /proc/meminfo)"
+            echo "disque  : $(df -h / | awk 'NR==2{print $4" libres"}')"
+            echo "kvm     : $([ -e /dev/kvm ] && echo present || echo absent)"
+            echo "userns  : $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 'pas de restriction')"
+            echo "hermes  : laisse intact (ce workflow ne touche pas /root/hermes)"
+          DISTANT_SONDE
+
+      # Le propriétaire de la machine a demandé que Prophet OS y prenne la place d'Hermes. Le
+      # moteur est arrêté et désactivé au démarrage ; ses fichiers et sa configuration restent en
+      # place, pour qu'un `systemctl enable --now` suffise à revenir en arrière.
+      - name: Arrêter Hermes
+        if: ${{ inputs.arreter_hermes == 'true' }}
+        run: |
+          sshpass -e ssh $SSHOPTS "root@$VPS" 'bash -s' <<'DISTANT_ARRET'
+          for unite in $(systemctl list-units --type=service --all --no-legend 'hermes*' 2>/dev/null | awk '{print $1}'); do
+            echo "arrêt de $unite"
+            systemctl disable --now "$unite" 2>&1 | sed 's/^/  /'
+          done
+          # Le moteur peut aussi tourner hors systemd (lancé à la main, ou par un crontab).
+          pkill -f 'node .*hermes' 2>/dev/null && echo "processus node hermes arrêtés" || true
+          crontab -l 2>/dev/null | grep -i hermes && echo "ATTENTION : une entrée cron le relancera" || true
+          echo "--- ce qui écoute encore ---"
+          ss -ltnp 2>/dev/null | head -15
+          echo "Les fichiers d'Hermes sont intacts dans /root/hermes."
+          DISTANT_ARRET
+
+      - name: Déposer Prophet OS sur le serveur
+        run: |
+          sshpass -e ssh $SSHOPTS "root@$VPS" \
+            "command -v rsync >/dev/null || (apt-get update -qq && apt-get -y -qq install rsync); mkdir -p $DISTANT"
+          # Le dépôt est privé : on pousse depuis le runner plutôt que de donner un accès au serveur.
+          sshpass -e rsync -az --delete \
+            --exclude '.git' --exclude 'target' \
+            -e "ssh $SSHOPTS" ./ "root@$VPS:$DISTANT/"
+          echo "déposé dans $DISTANT"
+
+      - name: Sonde, sans rien modifier
+        run: |
+          sshpass -e ssh $SSHOPTS "root@$VPS" \
+            "cd $DISTANT && ./tools/verify-on-host.sh --probe" || true
+
+      - name: Préparer la machine
+        if: ${{ inputs.preparer == 'true' }}
+        timeout-minutes: 40
+        run: |
+          sshpass -e ssh $SSHOPTS "root@$VPS" "cd $DISTANT && bash -s" <<'DISTANT_PREP'
+            set -e
+            # 2 Gio ne suffisent pas a compiler sans echange.
+            if [ "$(awk '/SwapTotal/{print int($2/1024)}' /proc/meminfo)" -lt 3072 ] && [ ! -f /swapfile.prophet ]; then
+              fallocate -l 4G /swapfile.prophet && chmod 600 /swapfile.prophet
+              mkswap /swapfile.prophet >/dev/null && swapon /swapfile.prophet
+              echo "echange de 4 Gio ajoute (/swapfile.prophet)"
+            fi
+            apt-get update -qq
+            apt-get -y -qq install build-essential pkg-config libssl-dev curl git >/dev/null
+            command -v cargo >/dev/null || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null
+            . "$HOME/.cargo/env"
+            ./tools/install-isolation.sh gvisor
+          DISTANT_PREP
+
+      - name: Lever la restriction des espaces de noms
+        if: ${{ inputs.lever_userns == 'true' }}
+        run: |
+          sshpass -e ssh $SSHOPTS "root@$VPS" \
+            "cd $DISTANT && PROPHET_AUTORISER_USERNS=1 ./tools/install-isolation.sh userns"
+
+      - name: Exercer les niveaux d'isolation
+        if: ${{ inputs.verifier_niveaux == 'true' }}
+        timeout-minutes: 90
+        run: |
+          sshpass -e ssh $SSHOPTS "root@$VPS" "cd $DISTANT && bash -s" <<'DISTANT_NIVEAUX'
+            . "$HOME/.cargo/env" 2>/dev/null || true
+            RAPPORT=rapport-serveur.md ./tools/verify-on-host.sh --niveaux
+          DISTANT_NIVEAUX
+
+      - name: Rapatrier le rapport
+        if: ${{ always() && inputs.verifier_niveaux == 'true' }}
+        run: |
+          sshpass -e scp $SSHOPTS "root@$VPS:$DISTANT/rapport-serveur.md" . 2>/dev/null \
+            || echo "aucun rapport à rapatrier"
+          if [ -f rapport-serveur.md ]; then cat rapport-serveur.md; fi
+
+      - name: Conserver le rapport
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapport-serveur
+          path: rapport-serveur.md
+          if-no-files-found: ignore
