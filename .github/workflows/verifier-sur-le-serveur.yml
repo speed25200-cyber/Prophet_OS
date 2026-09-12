@@ -283,11 +283,20 @@ jobs:
         run: |
           sshpass -e ssh $SSHOPTS "root@$VPS" "cd $DISTANT && bash -s" <<'DISTANT_PREP'
             set -e
-            # 2 Gio ne suffisent pas a compiler sans echange.
-            if [ "$(awk '/SwapTotal/{print int($2/1024)}' /proc/meminfo)" -lt 3072 ] && [ ! -f /swapfile.prophet ]; then
+            # De l'echange, seulement si la machine en a besoin.
+            #
+            # La condition ne regardait que l'echange, et pas la memoire : la sonde a montre
+            # 7740 Mio de RAM et 2047 Mio d'echange sur cette machine, dont le nom dit « 2gb ».
+            # Elle y aurait ajoute 4 Gio d'echange inutiles sur 21 Gio de disque libre. Le nom
+            # d'une machine n'est pas une mesure.
+            MEM_MIO="$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)"
+            ECH_MIO="$(awk '/SwapTotal/{print int($2/1024)}' /proc/meminfo)"
+            if [ "$((MEM_MIO + ECH_MIO))" -lt 6144 ] && [ ! -f /swapfile.prophet ]; then
               fallocate -l 4G /swapfile.prophet && chmod 600 /swapfile.prophet
               mkswap /swapfile.prophet >/dev/null && swapon /swapfile.prophet
               echo "echange de 4 Gio ajoute (/swapfile.prophet)"
+            else
+              echo "echange inutile : ${MEM_MIO} Mio de memoire et ${ECH_MIO} Mio d'echange"
             fi
             apt-get update -qq
             apt-get -y -qq install build-essential pkg-config libssl-dev curl git >/dev/null

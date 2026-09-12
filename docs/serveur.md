@@ -15,20 +15,54 @@ Le workflow `.github/workflows/verifier-sur-le-serveur.yml` est donc l'endroit o
 sur matériel réel peut avoir lieu — comme c'est déjà le cas pour gVisor et Firecracker, vérifiés
 par le job `isolation` de l'intégration continue.
 
+## Ce que la sonde a trouvé (12 septembre 2026)
+
+Elle a tourné, et c'est la première fois que cette machine est décrite par une mesure plutôt que
+par son nom.
+
+| | Mesuré | Ce que cela veut dire |
+|---|---|---|
+| Système | Ubuntu 26.04 LTS, noyau 7.0.0 | récent, rien à faire |
+| Mémoire | **7740 Mio**, plus 2047 Mio d'échange | le nom de la machine dit « 2gb » ; il a tort. Rien à ajouter pour compiler |
+| Disque | 21 Gio libres | suffisant pour l'atelier, pas pour des images de microVM |
+| `/dev/kvm` | **absent** | le niveau 2 est hors d'atteinte sur ce serveur, définitivement : c'est une machine virtuelle sans virtualisation imbriquée |
+| Espaces de noms | restreints par AppArmor (`= 1`) | **les niveaux 0 et 1 échouent aussi**, tant que la case `lever_userns` n'a pas été cochée une fois (ADR-0006) |
+| Rust, gVisor | absents | la case `preparer` les installe |
+| Hermes | intact | la sonde n'a rien touché |
+
+Deux conséquences pour ce que « Prophet OS tourne sur ce serveur » peut vouloir dire.
+
+**Le niveau 2 n'y sera jamais disponible.** Pas de `/dev/kvm`, donc pas de microVM Firecracker.
+`sandboxd` le dira plutôt que de faire semblant — c'est précisément ce que `max_level` existe pour
+annoncer. Une tâche qui exige le niveau 2 sera refusée sur cette machine, et acceptée sur un PC
+avec KVM.
+
+**Aucun niveau ne fonctionne avant `lever_userns`.** La restriction d'Ubuntu laisse créer l'espace
+de noms puis refuse d'y exécuter quoi que ce soit. Une sonde qui s'arrête à la création conclut à
+tort que tout va bien : c'est exactement ADR-0006.
+
 ## Ce qu'il reste à faire, et par qui
 
-| | Qui | Pourquoi pas moi |
+| | Qui | État |
 |---|---|---|
-| Poser le secret `VPS_PASSWORD` | **vous** | Un agent ne doit pas écrire un mot de passe dans un dépôt, un commit, ni un champ qu'il remplit lui-même |
-| Porter le workflow sur `main` | **vous** | GitHub refuse `workflow_dispatch` pour un fichier absent de la branche par défaut : son API répond 404 |
+| Poser le secret `VPS_PASSWORD` | vous | **fait** — la sonde s'est connectée le 12 septembre |
+| Poser la variable `VPS_HOST` | vous | **fait** |
+| Porter le workflow sur `main` | **vous** | reste à faire |
 
-Le premier suffit pour que la **sonde** tourne — elle se connecte, regarde, et repart sans rien
-toucher. Elle part à chaque poussée touchant le workflow, et dit si le chemin fonctionne. Le
-découvrir au moment où l'on veut arrêter un moteur de production serait le pire moment.
+Les deux premiers suffisaient pour que la **sonde** tourne — elle se connecte, regarde, et repart
+sans rien toucher. Elle est partie, elle a abouti, et ce qu'elle a rapporté est dans la section
+précédente. Le chemin fonctionne : le découvrir au moment où l'on veut arrêter un moteur de
+production aurait été le pire moment.
 
-Le second est nécessaire pour **agir** : arrêter Hermes, installer, vérifier. Ce travail-là ne
-part jamais sur une poussée, et la garde est posée sur le travail entier plutôt que sur chaque
-étape — une condition oubliée sur une seule étape suffirait à faire ce qu'on voulait empêcher.
+Le troisième est nécessaire pour **agir** : arrêter Hermes, installer, vérifier. GitHub ne propose
+`workflow_dispatch` que pour un fichier présent sur la branche par défaut, et son API répond `404`
+pour les autres. Ce travail-là ne part jamais sur une poussée, et la garde est posée sur le travail
+entier plutôt que sur chaque étape — une condition oubliée sur une seule étape suffirait à faire ce
+qu'on voulait empêcher.
+
+Ce n'est pas moi qui l'amène sur `main` : la consigne de cette session est de ne pousser que sur
+`claude/ai-optimized-os-design-djq7iw`, et amener la branche sur `main` est une décision qui se
+prend, pas un effet de bord d'un commit.
 
 ## Les deux choses à faire, une fois
 
