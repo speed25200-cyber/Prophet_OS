@@ -9,6 +9,8 @@ description = "La surface d'observation de Prophet OS : ce que l'humain voit pen
 
 [dependencies]
 prophet-types = { workspace = true }
+agentd = { workspace = true }
+capd = { workspace = true }
 shell = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

@@ -3589,7 +3589,9 @@ dependencies = [
 name = "surface"
 version = "0.1.0"
 dependencies = [
+ "agentd",
  "bytemuck",
+ "capd",
  "glyphon",
  "png",
  "pollster",
