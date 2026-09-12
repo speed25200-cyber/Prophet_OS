@@ -30,6 +30,9 @@ pkgs.testers.runNixOSTest {
       module
       ../modules/hardware.nix
       ../modules/immutable.nix
+      # La surface fait partie de ce qu'on installe : `nixosConfigurations.prophet` l'inclut.
+      # L'omettre ici reviendrait à tester une machine que personne ne recevra.
+      ../modules/surface.nix
     ];
     prophet.enable = true;
 
@@ -100,6 +103,30 @@ pkgs.testers.runNixOSTest {
         for nom in ["capd", "ledger", "vault", "egress", "sandboxd", "memoryd", "agentd"]:
             machine.wait_for_unit(f"prophet-{nom}.service")
             machine.succeed(f"test -S /run/prophet/{nom}.sock")
+
+    with subtest("la surface a au moins été tentée"):
+        # Sans écran ni adaptateur graphique, elle échouera : c'est attendu, et le service de repli
+        # est là pour ça. Ce qui est vérifié ici est autre chose, et personne ne l'a jamais vérifié
+        # — qu'elle soit **lancée**.
+        #
+        # `wantedBy = [ "graphical.target" ]` suppose que cette cible est atteinte. Sur cette
+        # machine, `services.xserver.enable` vaut `false` et il n'y a pas de gestionnaire de
+        # session : la cible par défaut est `multi-user.target`. Si c'est bien le cas, la surface
+        # n'est jamais démarrée du tout, et l'écran d'un PC fraîchement installé montre une invite
+        # de connexion au lieu de ce que la machine existe pour montrer.
+        #
+        # « jamais tentée » et « tentée et échouée » se ressemblent quand on regarde l'écran. Elles
+        # ne se ressemblent pas du tout quand on cherche pourquoi.
+        cible = machine.succeed("systemctl get-default").strip()
+        print(f"cible par défaut : {cible}")
+        etat = machine.succeed("systemctl show -p ActiveState -p Result --value prophet-surface.service || true").strip()
+        print(f"prophet-surface : {etat}")
+        journal = machine.succeed("journalctl -u prophet-surface.service --no-pager | tail -30 || true")
+        print(journal)
+        assert "inactive" not in etat.splitlines()[0], (
+            "la surface n'a jamais été lancée — elle est voulue par « graphical.target », "
+            f"et la cible atteinte est « {cible} »"
+        )
 
     with subtest("le propriétaire ouvre une session et voit sa machine"):
         # Le test qui compte pour celui qui installera ce système sur son PC : il tape son
