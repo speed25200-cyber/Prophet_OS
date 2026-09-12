@@ -146,6 +146,30 @@ pkgs.testers.runNixOSTest {
             f"un membre déclaré du groupe système doit être servi :\n{vu}"
         )
 
+    with subtest("agentd peut écrire là où sa configuration le prétend"):
+        # `ReadWritePaths = [ "/home/prophet" "/var/lib/prophet" ]` est une promesse, et
+        # `ProtectHome = true` — hérité du modèle commun — rend `/home` inaccessible et vide dans
+        # l'espace de montage du service. Les deux se contredisent en apparence ; c'est systemd qui
+        # tranche, et le fichier ne dit pas dans quel sens.
+        #
+        # Le jour où la promesse serait fausse, une tâche qui ouvre son espace de travail
+        # échouerait sur « Read-only file system » ou « No such file or directory », loin d'ici, et
+        # personne ne remonterait jusqu'à cette ligne. On regarde donc depuis l'intérieur de
+        # l'espace de montage du service, plutôt que depuis la machine.
+        pid = machine.succeed(
+            "systemctl show -p MainPID --value prophet-agentd.service"
+        ).strip()
+        for chemin in ["/home/prophet", "/var/lib/prophet"]:
+            vu = machine.succeed(
+                f"nsenter -t {pid} -m -- sh -c "
+                f"'test -d {chemin} && test -w {chemin} && echo inscriptible || echo refusé'"
+            ).strip()
+            print(f"agentd voit {chemin} : {vu}")
+            assert vu == "inscriptible", (
+                f"agentd déclare {chemin} en écriture et ne l'a pas : {vu}. "
+                "Une tâche qui ouvre son espace de travail échouerait loin d'ici."
+            )
+
     with subtest("le compte humain existe, et peut se servir de la machine"):
         # Sans lui, le système installé n'a aucune session ouvrable : `root` est verrouillé par
         # `nixos-install --no-root-password`, et `systemd-boot` est configuré sans éditeur. Rien

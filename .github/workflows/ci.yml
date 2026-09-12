@@ -9,6 +9,13 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
+# Une poussée remplace la précédente. Chaque exécution occupe six coureurs pendant une demi-heure ;
+# les laisser s'empiler fait attendre celle qui compte — la dernière — derrière des versions que
+# plus personne ne regarde. Les travaux annulés n'apprennent rien à personne.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest

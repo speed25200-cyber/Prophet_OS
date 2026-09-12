@@ -230,6 +230,13 @@ Les trois ont un test qui échoue sur le code d'avant : trois dans `crates/proph
   seul exerce le durcissement réel — mais il évite d'y aller pour une faute qui se lit dans le
   fichier. Ajouté à `just check` et au travail `check` de l'intégration continue
 
+- [ ] `image/tests/services.nix` demande aussi, désormais, si `agentd` peut écrire là où sa
+  configuration le prétend. `ReadWritePaths = [ "/home/prophet" … ]` et `ProtectHome = true` se
+  contredisent en apparence, et c'est systemd qui tranche sans que le fichier dise dans quel sens.
+  Le contrôle regarde depuis l'intérieur de l'espace de montage du service, par `nsenter` : le
+  jour où la promesse serait fausse, une tâche échouerait sur « Read-only file system » loin de
+  cette ligne, et personne ne remonterait jusqu'à elle
+
 ### Le compte sans lequel personne ne se connecte (12 septembre 2026)
 
 - [x] La machine installée ne créait **aucun** compte humain. `nixos-install --no-root-password`
