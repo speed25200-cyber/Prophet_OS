@@ -53,8 +53,15 @@ in
 
     systemd.services.prophet-surface = {
       description = "Prophet OS — surface d'observation";
+      # Un écran qui ne peut pas s'allumer ne doit pas réessayer toutes les deux secondes jusqu'à
+      # la fin des temps : cinq tentatives en une minute, puis l'unité s'arrête en échec et le
+      # repli ci-dessous écrit pourquoi, à l'écran. Marteler remplirait le journal d'une seule
+      # erreur répétée, ce qui la rend plus difficile à trouver, pas plus facile.
+      startLimitIntervalSec = 60;
+      startLimitBurst = 5;
       wantedBy = [ "graphical.target" ];
       after = [ "systemd-user-sessions.service" "prophet-agentd.service" ];
+      onFailure = [ "prophet-surface-repli.service" ];
       serviceConfig = {
         User = "surface";
         Group = "surface";
@@ -88,6 +95,46 @@ in
         # détail — et de découvrir au premier démarrage sur une vraie machine que l'écran reste
         # vide — on le déclare.
         ReadWritePaths = [ "/run/prophet" ];
+      };
+    };
+
+    # Quand la surface ne peut pas démarrer, quelque chose doit apparaître.
+    #
+    # Sans cela, une machine sans pilote graphique montre un écran noir et rien d'autre : le
+    # diagnostic part au journal, que personne ne peut lire puisqu'il n'y a pas d'écran. C'est le
+    # pire résultat possible pour un système conçu pour qu'on ait à s'en occuper le moins possible.
+    #
+    # Ce service ne se déclenche que sur l'échec du premier, et écrit sur le terminal lui-même.
+    systemd.services.prophet-surface-repli = {
+      description = "Prophet OS — dire pourquoi l'écran est resté noir";
+      after = [ "prophet-surface.service" ];
+      unitConfig.ConditionPathExists = "/dev/tty1";
+      serviceConfig = {
+        Type = "oneshot";
+        StandardOutput = "tty";
+        TTYPath = "/dev/tty1";
+        # Un heredoc cité : le texte passe tel quel, sans qu'une apostrophe française ne devienne
+        # un problème de guillemets.
+        ExecStart = pkgs.writeShellScript "prophet-surface-repli" ''
+          cat <<'MESSAGE'
+
+  Prophet OS — la surface graphique n'a pas pu démarrer.
+
+  Le système fonctionne. C'est l'affichage qui manque, pas le reste.
+
+  Pour savoir pourquoi :
+      journalctl -u prophet-surface -n 40
+
+  Les deux causes les plus fréquentes :
+      aucun pilote Vulkan utilisable    vulkaninfo --summary
+      aucune police installée           fc-list | head
+
+  En attendant, tout se fait en ligne de commande :
+      prophet status      les services, l'isolation, les limites de la machine
+      prophet task ls     ce qui travaille en ce moment
+
+MESSAGE
+        '';
       };
     };
 

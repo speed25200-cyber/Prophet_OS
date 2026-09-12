@@ -37,6 +37,16 @@ joindrait aucun daemon et afficherait un champ vide en permanence. Cela lui donn
 socket, le même accès qu'un daemon — plus qu'elle n'en utilise. Le restreindre demande une notion
 de méthode autorisée par pair que `prophet-ipc` n'a pas encore.
 
+## Si l'écran reste noir
+
+La surface réessaie cinq fois en une minute, puis s'arrête — marteler toutes les deux secondes
+remplirait le journal d'une seule erreur répétée, ce qui la rend plus difficile à trouver, pas plus
+facile.
+
+Un second service prend alors le relais et **écrit sur le terminal** ce qui s'est passé, où
+chercher, et les deux commandes qui marchent quand même. Sans lui, le diagnostic partirait au
+journal — que personne ne peut lire, puisqu'il n'y a pas d'écran.
+
 ## Diagnostic d'un écran noir
 
 ```sh
