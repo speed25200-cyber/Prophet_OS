@@ -132,6 +132,29 @@ enum CapAction {
 enum ProviderAction {
     /// Liste les pilotes et leur état.
     Ls,
+    /// Modèles réellement chargés par un moteur local.
+    Models {
+        /// Base d'API du moteur local.
+        #[arg(long, default_value = "http://127.0.0.1:8080/v1")]
+        endpoint: String,
+    },
+    /// Adresse un message à un LLM local, sans lui donner d'outils système.
+    Chat {
+        /// Identifiant annoncé par le moteur.
+        #[arg(long)]
+        model: String,
+        /// Message envoyé au modèle.
+        prompt: String,
+        /// Base d'API du moteur local.
+        #[arg(long, default_value = "http://127.0.0.1:8080/v1")]
+        endpoint: String,
+        /// Durée maximale de la requête, en secondes.
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
+        /// Nombre maximal de tokens générés.
+        #[arg(long, default_value_t = 2048)]
+        max_tokens: u32,
+    },
     /// Explique comment connecter un pilote.
     Login {
         /// Nom du pilote.
@@ -190,11 +213,13 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
             ))
         }
         Command::Freeze => {
-            let manager = sandboxd::Manager::new("prophet-sandbox-helper");
-            let gelees = manager.freeze_all();
-            Ok(format!("{gelees} sandbox(es) gelée(s)\n"))
+            let socket = std::env::var("PROPHET_SANDBOXD_SOCKET").map_or_else(
+                |_| prophet_ipc::socket_path("sandboxd"),
+                std::path::PathBuf::from,
+            );
+            freeze(&socket, cli.json)
         }
-        Command::Provider { action } => provider(action),
+        Command::Provider { action } => provider(action, cli.json),
         Command::Memory { action } => memory(action),
         Command::Log { action } => log(action),
         Command::Task { action } => task(action),
@@ -204,6 +229,37 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
             "les approbations exigent capd en service. \
              Lancez `prophet status` pour voir ce qui est disponible sur cette machine."
         ),
+    }
+}
+
+fn freeze(socket: &std::path::Path, as_json: bool) -> anyhow::Result<String> {
+    let result = sous_delai(async {
+        let client = prophet_ipc::Client::connect(socket)
+            .await
+            .map_err(|e| format!("gel non effectué : sandboxd injoignable ({e})"))?;
+        client
+            .call("sandbox.freeze_all", serde_json::json!({}))
+            .await
+            .map_err(|e| format!("gel non confirmé : {}", e.message))
+    })
+    .map_err(anyhow::Error::msg)?;
+    let frozen = result["frozen"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("réponse de gel invalide"))?;
+    let errors = result["errors"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("réponse de gel invalide"))?;
+    if !errors.is_empty() {
+        anyhow::bail!(
+            "gel partiel : {} sandbox(es) gelée(s), {} échec(s) : {errors:?}",
+            frozen.len(),
+            errors.len()
+        );
+    }
+    if as_json {
+        Ok(format!("{result}\n"))
+    } else {
+        Ok(format!("{} sandbox(es) gelée(s)\n", frozen.len()))
     }
 }
 
@@ -501,11 +557,50 @@ fn task(action: &TaskAction) -> anyhow::Result<String> {
     }
 }
 
-fn provider(action: &ProviderAction) -> anyhow::Result<String> {
+fn provider(action: &ProviderAction, as_json: bool) -> anyhow::Result<String> {
+    use providers::local::LocalModel;
+    use providers::native::{ModelClient as _, ModelTurn};
     use providers::official::{ClientProfile, OfficialDriver};
     let racine = std::path::Path::new("/var/lib/prophet");
     let utilisateur = std::env::var("USER").unwrap_or_else(|_| "inconnu".to_owned());
     match action {
+        ProviderAction::Models { endpoint } => {
+            let client = LocalModel::new(endpoint, "discovery", std::time::Duration::from_secs(5))?;
+            let models = client.models()?;
+            if as_json {
+                Ok(format!("{}\n", serde_json::to_string(&models)?))
+            } else if models.is_empty() {
+                Ok("aucun modèle chargé\n".into())
+            } else {
+                Ok(format!("{}\n", models.join("\n")))
+            }
+        }
+        ProviderAction::Chat {
+            model,
+            prompt,
+            endpoint,
+            timeout,
+            max_tokens,
+        } => {
+            let mut client =
+                LocalModel::new(endpoint, model, std::time::Duration::from_secs(*timeout))?
+                    .with_max_tokens(*max_tokens)?;
+            let started = std::time::Instant::now();
+            let (turn, usage) =
+                client.next_turn(&[serde_json::json!({"role":"user", "content":prompt})])?;
+            let ModelTurn::Final { text } = turn else {
+                anyhow::bail!("aucun outil n'est disponible dans cette conversation");
+            };
+            if as_json {
+                Ok(format!(
+                    "{}\n",
+                    serde_json::json!({"model":model, "text":text,
+                    "usage":usage, "elapsed_ms":started.elapsed().as_millis()})
+                ))
+            } else {
+                Ok(format!("{text}\n"))
+            }
+        }
         ProviderAction::Ls => {
             let mut out = format!(
                 "{:<16} {:<16} {:<14} {}\n",
@@ -845,6 +940,47 @@ mod sondes {
         let erreur = repond_en_temps_borne("capd", Path::new("/nulle/part/capd.sock"))
             .expect_err("rien n'écoute là");
         assert!(erreur.contains("injoignable"), "{erreur}");
+    }
+
+    #[test]
+    fn le_gel_utilise_le_gestionnaire_du_daemon() {
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("sandboxd.sock");
+        let recu = faux_service(
+            &socket,
+            Some(
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"frozen\":[\"task:1\",\"task:2\"],\"errors\":[]}}\n",
+            ),
+        );
+        let result = super::freeze(&socket, true).unwrap();
+        let request: serde_json::Value = serde_json::from_str(&recu.recv().unwrap()).unwrap();
+        assert_eq!(request["method"], "sandbox.freeze_all");
+        let response: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(response["frozen"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn un_gel_partiel_ou_un_daemon_absent_ne_passe_pas_pour_un_succes() {
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("sandboxd.sock");
+        assert!(
+            super::freeze(&socket, false)
+                .unwrap_err()
+                .to_string()
+                .contains("injoignable")
+        );
+        let _recu = faux_service(
+            &socket,
+            Some(
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"frozen\":[\"task:1\"],\"errors\":[{\"task\":\"task:2\",\"error\":\"refus\"}]}}\n",
+            ),
+        );
+        assert!(
+            super::freeze(&socket, false)
+                .unwrap_err()
+                .to_string()
+                .contains("gel partiel")
+        );
     }
 }
 

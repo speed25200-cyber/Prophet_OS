@@ -1,0 +1,9 @@
+# Les sources de cette distribution Linux doivent aussi fonctionner après un clone Windows.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.woff2 binary
+*.ttf binary

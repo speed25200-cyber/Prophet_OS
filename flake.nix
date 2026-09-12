@@ -4,7 +4,7 @@
   inputs = {
     # Épinglé à une révision, et non à la branche `nixos-unstable`.
     #
-    # Ce dépôt n'a pas de `flake.lock` : sans épinglage, `nixos-unstable` est résolu au moment de
+    # `flake.lock` fige aussi les entrées transitives. Sans épinglage, `nixos-unstable` est résolu au moment de
     # chaque construction. Deux gravures de la même ISO à quinze jours d'écart installaient donc
     # deux systèmes différents, et un travail d'intégration continue vert la veille pouvait être
     # rouge le lendemain sans qu'une seule ligne du dépôt ait changé. Pour un système qu'on
@@ -16,9 +16,7 @@
     # les tests en machine virtuelle sont verts ce jour-là. La remonter est un geste explicite,
     # suivi d'une construction complète.
     nixpkgs.url = "github:NixOS/nixpkgs/8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe";
-    # `flake-utils` reste sur sa branche : il n'apporte que `eachDefaultSystem`, dont rien
-    # n'entre dans le système installé. L'épingler demanderait une révision que cette session
-    # n'a pas pu lire, et deviner une étiquette pour faire joli serait pire que de le dire.
+    # La référence déclarée suit le dépôt ; sa résolution exacte est conservée dans flake.lock.
     flake-utils.url = "github:numtide/flake-utils";
   };
 

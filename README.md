@@ -14,11 +14,21 @@ Un système d'exploitation PC conçu pour que des agents IA (Claude, GPT, Gemini
 
 ## État du code
 
-Le système est construit. **439 tests** verts, aucun avertissement de `clippy`. **81 des 88 tâches du plan** sont faites ; les 9 restantes exigent du matériel absent de l'environnement de construction et sont nommées dans [`docs/STATUS.md`](docs/STATUS.md).
+Prophet OS est **en développement**. L'ISO démarre en machine virtuelle et les composants ont
+des tests automatisés, mais la chaîne complète interface → agent → outils n'est pas encore
+opérationnelle. Des intégrations restent à écrire : ce ne sont pas uniquement des vérifications
+matérielles manquantes. Les critères de la version complète sont suivis dans
+[`docs/FRONTIER.md`](docs/FRONTIER.md).
+
+Le pilote local parle maintenant à un vrai serveur d'inférence. Une boucle avec Qwen3 sur CPU,
+appel d'outil et fichier vérifié, a été exercée ; le [rapport reproductible](docs/reports/local-inference-2026-09-12.md)
+précise ce que cet essai prouve et ce qu'il ne prouve pas.
 
 ```
 prophet status          # ce que la machine sait faire, et ce qu'elle ne sait pas
 prophet provider ls     # pilotes disponibles et sessions d'abonnement
+prophet provider models # modèles du moteur local (port 8080 par défaut)
+prophet provider chat --model qwen3-0.6b "Bonjour /no_think"
 prophet task ls         # tâches, même sans daemon en service
 prophet task undo <id>  # défaire une tâche déjà validée
 prophet log verify      # vérifier l'intégrité du journal
@@ -33,13 +43,15 @@ prophet log verify      # vérifier l'intégrité du journal
 | Gel d'urgence de toutes les tâches | 124 µs |
 | Observation d'une page web | 1 929 octets, contre environ 900 Ko pour une capture d'écran |
 | Suite adversariale | 20 attaques sur 20 sans conséquence |
-| La même tâche sur Claude, ChatGPT et un modèle local | mêmes outils, mêmes permissions, aucune clé d'API |
+| Démonstration multi-pilotes M8 | contrat exercé avec simulacres ; clients officiels non exécutés |
 
 Le détail, y compris **ce qui n'est pas vérifié et pourquoi**, est dans [`docs/reports/phase0.md`](docs/reports/phase0.md).
 
 ### Vérifier sur une machine complète
 
-Cet environnement de construction n'a ni KVM, ni gVisor, ni Landlock, ni cgroups v2. Neuf tâches en dépendent. Sur une machine qui les a :
+Les capacités matérielles dépendent de la machine qui construit ou exécute le système. Les
+tests de composants ne prouvent pas à eux seuls que chaque mécanisme est appliqué aux tâches.
+Sur une machine Linux dédiée :
 
 ```
 just probe-host    # dit ce qui manque, sans rien exécuter

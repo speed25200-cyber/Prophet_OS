@@ -15,6 +15,7 @@
 #![warn(missing_docs)]
 
 pub mod conformance;
+pub mod local;
 pub mod mock;
 pub mod native;
 pub mod official;
