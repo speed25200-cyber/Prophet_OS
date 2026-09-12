@@ -155,6 +155,25 @@ pkgs.testers.runNixOSTest {
     with subtest("le propriétaire ouvre une session et voit sa machine"):
         # Le test qui compte pour celui qui installera ce système sur son PC : il tape son
         # identifiant, son mot de passe, et il est devant quelque chose d'utilisable.
+        #
+        # On attend d'abord que la surface ait fini de se débattre. Elle réclame `/dev/tty1` avec
+        # `TTYVHangup`, donc chacune de ses tentatives raccroche le terminal — et il n'y a pas
+        # d'adaptateur graphique ici, donc elle en fait cinq avant de renoncer. Se connecter
+        # pendant ce temps échouerait pour une raison qui n'a rien à voir avec la connexion.
+        #
+        # Ce n'est pas qu'un artefact de test : sur une machine réelle dont le pilote graphique
+        # refuse, l'invite de connexion du propriétaire serait raccrochée cinq fois en une minute.
+        # C'est noté dans `docs/components/surface.md`.
+        machine.wait_until_succeeds(
+            "test \"$(systemctl show -p ActiveState --value prophet-surface.service)\" "
+            "!= activating",
+            timeout=120,
+        )
+        etat_final = machine.succeed(
+            "systemctl show -p ActiveState --value prophet-surface.service"
+        ).strip()
+        print(f"la surface s'est arrêtée sur : {etat_final}")
+
         machine.wait_for_unit("getty@tty1.service")
         machine.wait_until_tty_matches("1", "login:")
         machine.send_chars("prophet\n")

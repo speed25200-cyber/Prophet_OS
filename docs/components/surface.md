@@ -54,11 +54,21 @@ n'échoue pas, ne journalise rien, et ne déclenche pas son service de repli.
 `image/tests/installe.nix` démarre une vraie machine et vérifie que la surface est bien lancée.
 C'est ce qui empêche qu'une des deux lignes parte sans l'autre.
 
-**Question restée ouverte :** la surface réclame `/dev/tty1` avec `StandardInput = "tty-force"`,
-et `getty@tty1` le réclame aussi. Sur une machine sans écran, `cage` échoue et le conflit ne dure
-que le temps des cinq tentatives ; sur une machine avec écran, personne ne l'a encore vu. Retirer
-le getty de `tty1` rendrait la machine plus cohérente et moins rattrapable — c'est le seul
-terminal où l'on puisse taper quand tout le reste manque.
+**Question restée ouverte : le terminal disputé.** La surface réclame `/dev/tty1` avec
+`StandardInput = "tty-force"` et `TTYVHangup = true`, et `getty@tty1` le réclame aussi. Chaque
+tentative de la surface raccroche donc le terminal.
+
+Sur une machine dont le pilote graphique refuse, cela veut dire une chose précise et désagréable :
+l'invite de connexion du propriétaire est raccrochée **cinq fois en une minute** avant que la
+surface renonce. Ensuite seulement il peut taper. Ce n'est pas un blocage — le service de repli
+écrit alors son diagnostic au même endroit — mais c'est une minute pendant laquelle la machine a
+l'air cassée à quelqu'un qui vient d'installer son système.
+
+Deux sorties, aucune prise pour l'instant : retirer le getty de `tty1` (plus cohérent, moins
+rattrapable — c'est le seul terminal où l'on puisse taper quand tout le reste manque), ou donner à
+la surface son propre terminal virtuel et laisser `tty1` à la connexion. La seconde demande de
+savoir comment `cage` bascule de terminal, ce qu'aucun test de ce dépôt ne peut vérifier sans
+adaptateur graphique.
 
 ## Si l'écran reste noir
 
