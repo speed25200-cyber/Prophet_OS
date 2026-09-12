@@ -24,6 +24,21 @@
 
   outputs = { self, nixpkgs, flake-utils }:
     let
+      # Les seuls paquets propriétaires que cette image accepte, nommés un par un.
+      #
+      # Claude Code est distribué sous les conditions de son éditeur ; nixpkgs le marque
+      # « unfree » et refuse de l'évaluer sans autorisation. Celle-ci est nominative, et non
+      # `allowUnfree = true` : la forme globale laisserait entrer n'importe quel paquet
+      # propriétaire, aujourd'hui ou dans six mois, sans que personne ne s'en aperçoive.
+      #
+      # Elle est posée ici, et non dans `image/modules/prophet.nix`, parce que ce module est aussi
+      # importé par les tests en machine virtuelle — lesquels reçoivent un `pkgs` déjà construit,
+      # et NixOS refuse qu'un module touche à `nixpkgs.config` dans ce cas. Un seul endroit, qui
+      # sert aux deux.
+      clientsProprietaires = [ "claude-code" "gemini-cli" ];
+      autoriserLesClients = paquet:
+        builtins.elem (nixpkgs.lib.getName paquet) clientsProprietaires;
+
       # Modules réutilisables, indépendants du système hôte.
       nixosModules.prophet = import ./image/modules/prophet.nix;
     in
@@ -39,7 +54,10 @@
           ./image/modules/hardware.nix
           ./image/modules/immutable.nix
           ./image/modules/surface.nix
-          { prophet.enable = true; }
+          {
+            prophet.enable = true;
+            nixpkgs.config.allowUnfreePredicate = autoriserLesClients;
+          }
         ];
       };
 
@@ -49,13 +67,21 @@
         system = "x86_64-linux";
         modules = [
           ./image/modules/iso.nix
-          { prophet.installateur.source = self; }
+          {
+            prophet.installateur.source = self;
+            nixpkgs.config.allowUnfreePredicate = autoriserLesClients;
+          }
         ];
       };
     }
     // flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = import nixpkgs { inherit system; };
+        # Le même `pkgs` sert au shell de développement et aux tests en machine virtuelle ; les
+        # seconds démarrent une machine qui embarque les clients officiels.
+        pkgs = import nixpkgs {
+          inherit system;
+          config.allowUnfreePredicate = autoriserLesClients;
+        };
       in
       {
         # Environnement de développement : tout ce dont l'agent constructeur a besoin, et rien
