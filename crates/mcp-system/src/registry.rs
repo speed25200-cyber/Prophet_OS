@@ -46,6 +46,57 @@ pub trait Tool: Send + Sync {
 
     /// Exécute l'appel. N'est appelé qu'après autorisation.
     fn call(&self, args: &Value, context: &ToolContext) -> CallResult;
+
+    /// Exécute en pouvant recontrôler les ressources découvertes pendant l'appel.
+    fn call_checked(
+        &self,
+        args: &Value,
+        context: &ToolContext,
+        _access: &dyn ResourceAccess,
+    ) -> CallResult {
+        self.call(args, context)
+    }
+}
+
+/// Contrôle de ressources supplémentaires, fourni par le registre à l'outil.
+pub trait ResourceAccess {
+    /// Vérifie un droit sur un chemin logique, avec le jeton et les révocations courants.
+    fn permits(&self, act: Act, path: &str) -> bool;
+}
+
+struct FileAccess<'a> {
+    registry: &'a Registry,
+    context: &'a ToolContext,
+    tool: &'a str,
+    now: OffsetDateTime,
+    started: std::time::Instant,
+}
+
+impl ResourceAccess for FileAccess<'_> {
+    fn permits(&self, act: Act, path: &str) -> bool {
+        let Ok(broker) = self.registry.broker.lock() else {
+            return false;
+        };
+        let now = self.now.saturating_add(
+            time::Duration::try_from(self.started.elapsed()).unwrap_or(time::Duration::MAX),
+        );
+        // La recherche peut durer : une révocation ou une expiration doit arrêter les accès
+        // suivants. Le droit d'appeler l'outil est lui aussi revérifié.
+        [
+            CheckRequest::new(Res::Tool, Act::Call, self.tool),
+            CheckRequest::new(Res::Fs, act, path),
+        ]
+        .into_iter()
+        .all(|r| {
+            broker
+                .check(
+                    &self.context.token,
+                    &r.sandbox_level(self.context.sandbox_level),
+                    now,
+                )
+                .is_ok_and(|d| d.is_allow())
+        })
+    }
 }
 
 /// Journalisation des appels.
@@ -227,7 +278,14 @@ impl Registry {
             return result;
         }
 
-        let result = tool.call(args, context);
+        let access = FileAccess {
+            registry: self,
+            context,
+            tool: name,
+            now,
+            started: std::time::Instant::now(),
+        };
+        let result = tool.call_checked(args, context, &access);
         self.record_result(name, &result, context, now);
         result
     }

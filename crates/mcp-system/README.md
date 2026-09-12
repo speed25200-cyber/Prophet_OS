@@ -18,12 +18,43 @@ appel d'outil. Les réponses sont exclusivement du JSON-RPC ; les diagnostics vo
 nix develop --command cargo test -p mcp-system
 ```
 
-Les tests couvrent les droits, les écritures en espace de travail, le refus hors périmètre,
-le protocole, les entrées invalides et les limites du transport. Ils ne prouvent pas encore
-un accès sûr en présence de liens symboliques ou de modifications concurrentes du système de
-fichiers. Les outils utilisent encore des chemins ordinaires, et la recherche récursive ne
-refait pas le contrôle de capacité pour chaque descendant. Corriger ces accès, raccorder capd
-et le journal en service, puis exercer le binaire avec les vrais daemons sont les prochaines
-étapes avant de le relier à agentd et aux modèles locaux.
+Les outils fichiers ouvrent les racines `home` et `home/.prophet/tasks/<tâche>/work` sans lien
+symbolique, puis résolvent les chemins relativement à leurs descripteurs avec `openat2`.
+Les traversées de liens, sorties de racine et passages vers des montages descendants sont
+refusés. Les lectures refusent aussi les fichiers spéciaux et les fichiers ayant plusieurs
+liens physiques. Les écritures publient un fichier temporaire par remplacement atomique dans
+le travail de la tâche. Elles ne tronquent jamais la cible d'un lien physique existant.
+
+La recherche et la liste refont le contrôle des droits sur chaque descendant ; la révocation
+et l'expiration sont revérifiées pendant le parcours. Les deux vues sont fusionnées, avec
+priorité au travail. Un lien de travail invalide ne provoque pas de repli vers le fichier
+d'origine. Les noms privés `.prophet` et `.prophet-write-*` sont inaccessibles.
+
+Une lecture rend au plus 256 Kio ; une écriture accepte au plus 1 Mio de contenu. Les parcours
+ont des bornes de nombre, de profondeur, de volume lu et de résultats, ainsi qu'un budget de
+temps vérifié entre les opérations. `truncated` signale un plafond atteint ; `scoped` rappelle
+que liste et recherche ne portent que sur le périmètre autorisé. Ce budget ne constitue pas
+un délai maximal pour un appel noyau bloqué. Voir les [bornes exactes](../../docs/specs/mcp-system-tools.md).
+
+`native::RegistryExecutor` permet à `providers::NativeDriver` de passer par ce même registre.
+Un test explicite avec Qwen3 réel vérifie un appel contrôlé, la création dans le travail et le
+diff SFS correspondant, sans appliquer le changement au fichier utilisateur. Chaque exécuteur
+doit être créé pour une seule tâche par un lanceur de confiance : le modèle ne fournit jamais
+son jeton, ses racines ou son niveau d'isolation.
+
+```sh
+PROPHET_TEST_ENDPOINT=http://127.0.0.1:18080/v1 PROPHET_TEST_MODEL=qwen3-0.6b \
+  nix develop --command cargo test -p mcp-system --test fichiers_isoles \
+  un_modele_reel_ecrit -- --ignored --nocapture
+```
+
+Ces garanties supposent des racines fournies et protégées par le lanceur de confiance. Elles
+ne remplacent pas une identité de service authentifiée, des espaces de noms privés, ni le
+durcissement des commits/undo SFS face aux modifications concurrentes. Un descripteur reste
+attaché à son répertoire même si un acteur privilégié déplace celui-ci. Le contrôleur et le
+journal de cet essai sont en processus ; le journal n'est pas durable. Raccorder les vrais
+services, les contextes de tâche et la reprise reste nécessaire avant d'activer `prophet-mcp`
+et le lancement depuis l'interface. Voir l'[ADR 0012](../../docs/adr/0012-acces-fichiers-mcp.md)
+et le [rapport de vérification](../../docs/reports/mcp-fichiers-2026-09-13.md).
 
 La négociation suit le [cycle de vie MCP 2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle).

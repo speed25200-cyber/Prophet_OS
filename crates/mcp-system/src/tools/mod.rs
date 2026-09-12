@@ -1,10 +1,11 @@
 //! Les outils système livrés avec Prophet OS.
 //!
 //! Chacun est écrit pour être appelé par un modèle : description courte, arguments typés,
-//! résultat structuré, erreurs nommées. Aucun n'applique lui-même la politique : c'est le
-//! registre qui le fait avant de leur passer la main.
+//! résultat structuré, erreurs nommées. Le registre applique la politique ; les outils
+//! fichiers utilisent aussi son contrôleur pour chaque descendant du parcours.
 
 mod clock;
+mod confined;
 mod fs;
 mod http;
 mod system;

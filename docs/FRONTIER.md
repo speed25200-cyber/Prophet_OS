@@ -57,8 +57,11 @@ La demande suivante remplace Iris par un [espace de supervision des missions](re
 sélection et filtres, contexte, examen volontaire des décisions et thème clair sans sculpture.
 Les diffs, livrables, commandes d'agents et permissions détaillées restent à raccorder.
 Le registre MCP refuse maintenant les exigences impossibles à vérifier et la session applique
-le cycle d'initialisation. Son binaire reste à raccorder aux services ; les accès fichiers doivent
-être durcis contre les liens symboliques et la recherche contrôlée pour chaque descendant.
+le cycle d'initialisation. Le 13 septembre, les accès fichiers sont ancrés sur des descripteurs
+Linux, les liens refusés et les descendants recontrôlés. Un [essai Qwen3 réel avec le registre](reports/mcp-fichiers-2026-09-13.md)
+produit un fichier de travail et un diff SFS. Le binaire reste à raccorder aux services, avec
+des contextes de tâche fiables, des racines privées et un journal durable ; les commits SFS
+concurrents et le lancement depuis l'interface restent à sécuriser et à intégrer.
 Codex et Claude Code sont maintenant obligatoires dans la configuration de l'image ; leurs vrais
 binaires répondent aux sondes de version et d'authentification en profils vierges. Le diagnostic
 ne confond plus fichiers présents, connexion et pilote agentique disponible. Le paquet expérimental

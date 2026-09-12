@@ -71,6 +71,24 @@ révision en CI reste à réaliser. Voir le [rapport de supervision](reports/sup
 et l'[ADR 0011](adr/0011-supervision-humaine.md). La qualité visuelle reste à apprécier par
 l'utilisateur ; ce jalon ne constitue pas une certification SOTA ni une équivalence avec Apple.
 
+Jalon fichiers MCP du 13 septembre 2026, après `bee035d` : accès Linux relatifs à des descripteurs,
+refus des liens et fichiers spéciaux, remplacement atomique dans le travail, descendants
+recontrôlés et parcours bornés. Les six régressions initiales ont échoué avant correction ; les
+douze nouveaux tests ordinaires passent désormais. `RegistryExecutor` raccorde les outils à la
+boucle native : un vrai Qwen3 écrit un fichier, reçoit son résultat et termine ; SFS expose le
+changement sans modifier le home. **`just check` réussi : 589 tests, aucun échec, 21 ignorés**,
+format, clippy et contrôles du dépôt réussis. L'essai modèle ignoré par défaut a été exécuté
+séparément et réussit en 10,57 secondes. Le Broker et le journal sont en mémoire dans cet essai.
+Le binaire MCP, le contexte de service fiable, les racines privées, les commits/undo SFS
+concurrents et le parcours depuis l'interface restent à intégrer. Voir le
+[rapport MCP](reports/mcp-fichiers-2026-09-13.md) et l'[ADR 0012](adr/0012-acces-fichiers-mcp.md).
+
+Résultats CI relus pour `bee035d` : composants, isolation et rendu réussis ; ChatGPT en échec.
+Le workflow d'image réussit les services, l'installeur, les constructions et les deux démarrages
+(ISO et système installé). Le délai de session de `f132518` ne s'est pas reproduit dans ce run,
+sans que sa cause soit établie. Le rapport MCP référence ces exécutions. Ces observations ne
+valident pas encore le nouveau correctif MCP en CI.
+
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 
 Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'environnement de construction** ; le détail est dans `docs/reports/phase0.md` section 5.
