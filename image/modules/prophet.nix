@@ -199,7 +199,6 @@ in
       "init_on_free=1"
     ];
 
-    # cgroups v2 seuls : les quotas de ressources par tâche en dépendent.
     # Les cgroups v2 sont le seul mode que systemd accepte désormais, et `sandboxd` en dépend
     # pour ses quotas. L'option qui les demandait a disparu parce que ce qu'elle demandait est
     # devenu le comportement par défaut ; la déclarer fait maintenant échouer l'évaluation.

@@ -1,0 +1,25 @@
+[package]
+name = "surface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "La surface d'observation de Prophet OS : ce que l'humain voit pendant que les agents travaillent"
+
+[dependencies]
+prophet-types = { workspace = true }
+shell = { workspace = true }
+serde = { workspace = true }
+time = { workspace = true }
+
+wgpu = "30"
+glyphon = "0.12"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "0.4"
+
+[dev-dependencies]
+png = "0.17"
+
+[lints]
+workspace = true

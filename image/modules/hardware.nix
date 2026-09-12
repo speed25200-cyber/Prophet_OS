@@ -14,9 +14,14 @@
   virtualisation.libvirtd.enable = false; # Firecracker n'en a pas besoin.
 
   # Accélération : pilotes ouverts uniquement, pour rester compatibles avec un noyau verrouillé.
+  #
+  # La liste ne contient que ce que Mesa n'apporte pas déjà. `amdvlk` a été retiré de nixpkgs —
+  # AMD l'a abandonné au profit de RADV, qui vient avec Mesa et est actif par défaut —, et
+  # redéclarer `mesa` ou `vulkan-loader` ici ne fait que répéter ce qui est acquis. La surface
+  # graphique de Prophet OS s'appuie sur Vulkan par Mesa ; c'est donc ce chemin-là qui compte.
   hardware.graphics = {
     enable = true;
-    extraPackages = with pkgs; [ mesa amdvlk intel-media-driver vulkan-loader ];
+    extraPackages = with pkgs; [ intel-media-driver ];
   };
 
   # Les modules NVIDIA propriétaires ne se chargent pas sous `lockdown=integrity`. Rien n'est
