@@ -42,6 +42,29 @@ let
         "capabilities": {"max": {"fs.read": ["~/essai/**"]}},
     }
 
+    if len(sys.argv) > 1 and sys.argv[1] == "sandbox":
+        caps = appeler("/run/prophet/sandboxd.sock", "sandbox.capabilities", {})
+        print(json.dumps(caps, ensure_ascii=False, indent=2))
+        niveau = caps["max_level"]
+        if niveau < 0:
+            raise SystemExit(0)
+        # On demande le niveau que la machine dit tenir, et rien de plus : demander plus haut
+        # testerait le refus, qui l'est déjà ailleurs.
+        lancee = appeler("/run/prophet/sandboxd.sock", "sandbox.start", {
+            "task": "task:essai-sandbox",
+            "spec": {
+                "level": niveau,
+                "program": "/run/current-system/sw/bin/true",
+                "args": [],
+                "workdir": "/tmp",
+                "env": [],
+                "rules": {"paths": [], "egress": [], "exec": [], "min_sandbox_level": 0},
+                "read_only_mounts": ["/nix/store", "/run/current-system/sw"],
+            },
+        })
+        print(json.dumps(lancee, ensure_ascii=False))
+        raise SystemExit(0)
+
     plan = appeler("/run/prophet/agentd.sock", "task.spawn", {
         "id": "task:essai-vm",
         "intent": "vérifier que la chaîne tourne sous systemd",
@@ -138,6 +161,24 @@ pkgs.testers.runNixOSTest {
         taches = machine.succeed("prophet task ls")
         print(taches)
         assert "task:essai-vm" in taches, taches
+
+    with subtest("sandboxd peut réellement isoler, et pas seulement le dire"):
+        # Le module donne à `sandboxd` les capacités CAP_SETUID et CAP_SYS_ADMIN, puis lui laisse
+        # le filtre d'appels système hérité des autres daemons, qui retire `@privileged` et
+        # `@resources`. Accorder une capacité qu'un filtre refuse ensuite est précisément le genre
+        # de contradiction qui ne se voit qu'à l'exécution — et que `sandbox.capabilities` ne peut
+        # pas signaler, puisqu'il sonde le noyau et non ses propres entraves.
+        #
+        # On lui demande donc de lancer vraiment quelque chose, au niveau qu'il dit tenir.
+        sortie = machine.succeed("prophet-essai-tache sandbox")
+        print(sortie)
+        assert "task:essai-sandbox" in sortie, sortie
+
+        journal = machine.succeed("journalctl -u prophet-sandboxd -n 30 --no-pager")
+        print(journal)
+        assert "Bad system call" not in journal and "SIGSYS" not in journal, (
+            f"le filtre d'appels système refuse ce que les capacités autorisent :\n{journal}"
+        )
 
     with subtest("le journal a vu passer la tâche"):
         journal = machine.succeed("prophet log tail -n 20")
