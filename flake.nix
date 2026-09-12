@@ -2,7 +2,23 @@
   description = "Prophet OS — un système d'exploitation natif pour l'IA";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # Épinglé à une révision, et non à la branche `nixos-unstable`.
+    #
+    # Ce dépôt n'a pas de `flake.lock` : sans épinglage, `nixos-unstable` est résolu au moment de
+    # chaque construction. Deux gravures de la même ISO à quinze jours d'écart installaient donc
+    # deux systèmes différents, et un travail d'intégration continue vert la veille pouvait être
+    # rouge le lendemain sans qu'une seule ligne du dépôt ait changé. Pour un système qu'on
+    # installe après avoir formaté son disque, « ce qu'on installe est ce qu'on a gravé » n'est
+    # pas une formule : c'est la propriété qui permet de revenir en arrière.
+    #
+    # La révision retenue est celle du canal `nixos-unstable` du 12 septembre 2026 — un instantané
+    # que Hydra a construit et testé, et celui-là même contre lequel l'ISO, le système installé et
+    # les tests en machine virtuelle sont verts ce jour-là. La remonter est un geste explicite,
+    # suivi d'une construction complète.
+    nixpkgs.url = "github:NixOS/nixpkgs/8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe";
+    # `flake-utils` reste sur sa branche : il n'apporte que `eachDefaultSystem`, dont rien
+    # n'entre dans le système installé. L'épingler demanderait une révision que cette session
+    # n'a pas pu lire, et deviner une étiquette pour faire joli serait pire que de le dire.
     flake-utils.url = "github:numtide/flake-utils";
   };
 
