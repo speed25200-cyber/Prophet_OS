@@ -536,6 +536,46 @@ Ce qui reste inconnu et n'est pas réglé : que `cage` bascule réellement sur `
 quelque chose. Aucun coureur n'a d'adaptateur graphique, et c'était déjà invérifiable sur `tty1`.
 Le déménagement ne dégrade rien de vérifié ; il supprime un mal, lui, mesuré.
 
+### Hermes est supprimé ; mon propre garde a empêché le lancement (12 septembre 2026, 17 h 06)
+
+Le run `34707083853` a fait ce qu'on lui demandait d'abord : **`/root/hermes` est supprimé**, après
+archivage et relecture. Les unités systemd et les entrées cron à son nom sont parties avec.
+
+Puis le lancement a échoué — sur mon propre contrôle, et pour la faute exacte qu'il existe pour
+empêcher. `systemd-analyze verify` ne relit pas une unité isolée : il charge tout le graphe de
+dépendances et rapporte au passage ce qu'il a à reprocher aux unités de la distribution. Sur ce
+serveur :
+
+```
+/usr/lib/systemd/system/xfs_scrub_all.service:26: Support for option CPUAccounting= has been
+removed and it is ignored
+```
+
+Rien à voir avec Prophet OS. Mon filtre ne retirait que les lignes `not found`, donc il a pris ces
+reproches pour les siens et refusé de démarrer les sept services. **Une sonde qui conclut sur autre
+chose que ce qu'elle prétend mesurer** — c'est la faute que ce dépôt traque partout, écrite cette
+fois dans l'outil chargé de l'attraper.
+
+Corrigé : seules les lignes qui **nomment l'unité examinée** sont retenues ; les autres sont
+comptées et signalées, parce qu'un avertissement qu'on écarte sans le montrer est un avertissement
+qu'on a caché. Vérifié des deux côtés sur une machine : une unité portant
+`SystemCallFilter=~@privileged ~@resources` est toujours refusée, et la sortie exacte du serveur
+ne bloque plus rien.
+
+Ce que la machine a répondu malgré l'échec, et qui vaut d'être noté :
+
+```
+  Isolation
+  niveau maximal atteignable : 1 (0 confiné, 1 noyau utilisateur, 2 microVM)
+    Landlock      : ABI 8
+    gVisor        : /usr/bin/runsc
+    /dev/kvm      : absent
+```
+
+Et `prophet log tail` a répondu « journal vide » au lieu de « aucun journal sur cette machine » : le
+correctif de la recherche du journal fonctionne sur une vraie machine — il a trouvé
+`/var/lib/prophet/ledger`, que le script venait de créer.
+
 ### L'adresse du serveur était publique (12 septembre 2026, 17 h)
 
 Elle était posée en **variable** de dépôt `VPS_HOST`. GitHub masque la valeur d'un secret, pas

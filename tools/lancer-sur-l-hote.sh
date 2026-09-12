@@ -246,15 +246,31 @@ ok "sept unités écrites dans $UNITES"
 # ligne `SystemCallFilter=`, par exemple — n'est pas une erreur pour lui : il l'ignore avec un
 # avertissement et démarre le service avec un filtre plus large que celui qu'on croyait poser.
 # Personne ne le verrait jamais. Ici, on le lit et on refuse de continuer.
+#
+# **Ne juger que ce qui nous concerne.** `verify` ne relit pas une unité isolée : il charge tout le
+# graphe de dépendances, et rapporte au passage les reproches qu'il a à faire aux unités de la
+# distribution. Sur le serveur, ce furent celles-ci :
+#
+#     /usr/lib/systemd/system/xfs_scrub_all.service:26: Support for option CPUAccounting= has been
+#     removed and it is ignored
+#
+# Rien à voir avec Prophet OS, et pourtant ce contrôle a refusé de démarrer les sept services. Il a
+# fait exactement la faute qu'il existe pour empêcher : conclure sur autre chose que ce qu'il
+# prétendait mesurer. On ne retient donc que les lignes qui **nomment l'unité examinée** ; les
+# autres sont comptées et affichées, parce qu'un avertissement qu'on écarte sans le montrer est un
+# avertissement qu'on a caché.
 if command -v systemd-analyze >/dev/null 2>&1; then
   PLAINTES=0
+  AILLEURS=0
   for d in $DAEMONS; do
+    brut=$(systemd-analyze verify "$UNITES/prophet-$d.service" 2>&1 || true)
     # `Unit … not found` : les dépendances entre unités ne sont pas résolues hors du gestionnaire.
-    # Ce n'est pas ce qu'on cherche ici.
-    sortie=$(systemd-analyze verify "$UNITES/prophet-$d.service" 2>&1 | grep -v 'not found' || true)
-    if [ -n "$sortie" ]; then
+    nous=$(printf '%s\n' "$brut" | grep -F "prophet-$d.service" | grep -v 'not found' || true)
+    autres=$(printf '%s\n' "$brut" | grep -vF "prophet-$d.service" | grep -v '^$' || true)
+    [ -n "$autres" ] && AILLEURS=$((AILLEURS + 1))
+    if [ -n "$nous" ]; then
       ko "prophet-$d — systemd a des réserves sur cette unité"
-      printf '%s\n' "$sortie" | sed 's/^/      /'
+      printf '%s\n' "$nous" | sed 's/^/      /'
       PLAINTES=$((PLAINTES + 1))
     fi
   done
@@ -263,6 +279,10 @@ if command -v systemd-analyze >/dev/null 2>&1; then
     exit 1
   fi
   ok "systemd relit les sept unités telles qu'elles sont écrites"
+  if [ "$AILLEURS" -gt 0 ]; then
+    info "systemd a par ailleurs des reproches à faire à des unités de cette distribution,"
+    info "qui ne nous concernent pas : « systemd-analyze verify » les montre."
+  fi
 else
   info "systemd-analyze absent : les unités ne sont pas relues avant d'être démarrées"
 fi
