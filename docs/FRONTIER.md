@@ -49,6 +49,10 @@ Le 12 septembre : le client local a passé une génération avec un modèle Qwen
 de fichier décidée par le modèle. Cela valide le pilote, pas encore la chaîne installée entière.
 Le transport en flux et l'espace natif de conversation sont maintenant implémentés. Le raccordement
 de cette interface à l'exécution agentique complète via MCP/agentd reste à réaliser.
+Le 13 septembre, la direction visuelle Iris remplace l'accueil et la navigation : dock flottant,
+sculpture 3D, typographie embarquée et composition adaptée à la taille de fenêtre. Les
+[captures et contrôles de cette refonte](reports/interface-iris-2026-09-13.md) portent sur le
+binaire natif ; la session humaine avec plusieurs applications reste à intégrer.
 Le registre MCP refuse maintenant les exigences impossibles à vérifier et la session applique
 le cycle d'initialisation. Son binaire reste à raccorder aux services ; les accès fichiers doivent
 être durcis contre les liens symboliques et la recherche contrôlée pour chaque descendant.

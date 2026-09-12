@@ -8,6 +8,7 @@ pub mod depuis;
 pub mod disposition;
 pub mod fenetre;
 pub mod gpu;
+mod iris;
 pub mod reel;
 pub mod rendu;
 pub mod scene;

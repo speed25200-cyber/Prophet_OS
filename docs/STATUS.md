@@ -45,6 +45,21 @@ Jalons d'intégration réellement exercés le 12 septembre 2026 :
   Les résultats de cette révision ne valident pas les correctifs suivants. Voir le
   [rapport ChatGPT Linux](reports/chatgpt-linux-2026-09-12.md).
 
+La CI de `f132518` a depuis réussi les composants, l'isolation, le rendu de la surface, les
+services, l'installeur, les constructions et le démarrage de l'ISO. Le travail ChatGPT reste en
+échec. Le test du système installé a aussi échoué lors de l'ouverture de session du propriétaire
+après son délai de 900 secondes ; sa cause reste à diagnostiquer. Cette observation précède la
+refonte Iris et ne constitue pas une validation du système installé pour cette révision.
+
+Jalon d'interface du 13 septembre 2026 : **Iris** remplace la présentation de l'espace natif
+par une composition centrée, une sculpture irisée native, un dock flottant, Inter embarquée
+et des contrôles adaptés à la taille de la fenêtre. Les captures finales incluent une vraie
+conversation Qwen locale et des formats de 640 × 480 à 1920 × 1080. Validation locale :
+`just check`, 576 tests réussis, aucun échec, 18 ignorés ; dix tests graphiques explicites
+réussis et première image soumise à Wayland sous WSLg. La nouvelle révision reste à valider
+en CI. Ce jalon ne résout pas les échecs installés et ChatGPT décrits ci-dessus. Voir le
+[rapport Iris et ses captures](reports/interface-iris-2026-09-13.md).
+
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 
 Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'environnement de construction** ; le détail est dans `docs/reports/phase0.md` section 5.

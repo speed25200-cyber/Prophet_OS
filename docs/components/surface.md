@@ -7,7 +7,8 @@
 
 La surface propose un accueil, une conversation en flux, une sélection de modèle et les tâches
 des services. La saisie, le presse-papiers, le défilement et les événements d'accessibilité passent
-par egui/winit ; wgpu dessine l'interface. La sculpture dorée de l'accueil est décorative. Les
+par egui/winit ; wgpu dessine l'interface. La direction visuelle Iris utilise une sculpture 3D
+irisée, un dock flottant et la police Inter embarquée. La sculpture est décorative. Les
 compteurs viennent du moteur et des services, et les réponses du modèle sélectionné.
 
 ## Ce qu'elle montre, et ce qu'elle ne montre pas
@@ -91,14 +92,12 @@ courir contre une relance : « la surface ne prend pas en otage le terminal de c
 Le service de repli, lui, **reste sur `tty1`** : c'est là que le propriétaire regarde. Expliquer un
 écran noir sur cet écran noir n'aurait servi à personne.
 
-**Ce qui reste inconnu, et qu'il ne faut pas croire réglé.** Que `cage` bascule effectivement sur
-`tty7` et y affiche quelque chose n'est vérifié nulle part : aucun coureur d'intégration continue
-n'a d'adaptateur graphique utilisable, et les six tests de la surface sont marqués `needs_gpu`.
-C'était déjà vrai quand elle était sur `tty1` — on n'a jamais vu cette surface à l'écran. Le
-déménagement ne dégrade donc rien de vérifié ; il supprime un mal, lui, mesuré. Si la bascule ne se
-fait pas sur une machine réelle, le propriétaire aura sous les yeux une invite de connexion
-utilisable et le message du service de repli, ce qui est très exactement le comportement voulu
-quand l'écran ne peut pas s'allumer.
+Le rendu Vulkan hors écran et une fenêtre Wayland sous WSLg ont depuis été exercés ; les tests
+graphiques tournent aussi sur llvmpipe dans la CI. Ces preuves sont décrites dans le
+[rapport de l'espace natif](../reports/espace-natif-2026-09-12.md) et le
+[rapport Iris](../reports/interface-iris-2026-09-13.md). La bascule de Cage vers tty7 et le rendu
+sur les pilotes d'un PC physique restent à vérifier. Le repli conserve une invite de connexion
+et un message utilisable lorsque l'écran graphique ne peut pas démarrer.
 
 ## Si l'écran reste noir
 

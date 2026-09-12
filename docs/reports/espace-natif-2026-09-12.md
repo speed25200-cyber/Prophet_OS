@@ -1,5 +1,8 @@
 # Espace natif et conversation locale — 12 septembre 2026
 
+Ce rapport conserve les captures du premier jalon. L'interface a depuis été remplacée par la
+[direction Iris, avec ses nouvelles captures](interface-iris-2026-09-13.md).
+
 L'espace de travail possède maintenant quatre pages natives : accueil, conversation, modèles
 et activité. Il découvre les modèles d'un moteur local déjà lancé, reçoit le texte en flux,
 copie les réponses et permet d'interrompre une génération. Les tâches et les décisions affichées
