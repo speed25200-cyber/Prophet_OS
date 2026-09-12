@@ -454,6 +454,20 @@ lever la restriction a donc été sautée, alors qu'elle était demandée. Corri
 levée **avant** la préparation, et la préparation juge sur `command -v runsc` plutôt que sur le
 code de sortie d'un outil qui répond à deux questions.
 
+### À corriger dès que le run en cours aura rendu son verdict
+
+- [ ] `image/tests/installe.nix`, sous-test « ce que ce test ne vérifie PAS » : son commentaire dit
+  encore que `immutable.nix` déclare la racine en `ro` et que « la question reste ouverte ». Les
+  deux sont faux depuis la correction de 16 h 00 — l'option est retirée, la réponse est acquise.
+  Un commentaire périmé dans un test est une consigne périmée : il enverra le prochain lecteur
+  chercher une contradiction qui n'existe plus. Non corrigé tout de suite parce que toucher à
+  `image/` annule l'exécution dont on attend le verdict
+- [ ] Le travail « Question ouverte : la racine en lecture seule » restera rouge — sa réponse est
+  acquise et `immutable.nix` ne monte plus la racine ainsi. Il est en `continue-on-error`, donc il
+  ne bloque rien, mais il occupe un coureur huit minutes à chaque poussée pour re-répondre à une
+  question tranchée. À passer en déclenchement manuel, pour qu'il redevienne le garde-fou du jour
+  où la conception permettra la racine en lecture seule
+
 ## Blocages
 
 Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le
