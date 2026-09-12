@@ -1,27 +1,29 @@
 [package]
-name = "capd"
+name = "prophet-daemon"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Capability Broker et Policy Engine de Prophet OS."
+description = "Ce que tout daemon Prophet OS fait pareil : son socket, sa clé, et à qui il accepte de parler."
 
 [dependencies]
-prophet-types = { workspace = true }
 prophet-ipc = { workspace = true }
-prophet-daemon = { workspace = true }
-ledger = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-thiserror = { workspace = true }
 time = { workspace = true }
 ed25519-dalek = { workspace = true }
 rand = { workspace = true }
-base64 = { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
-anyhow = { workspace = true }
-cedar-policy = "4"
+tracing-subscriber = { workspace = true }
+
+[features]
+# Le harnais de test des daemons. Hors de ce drapeau, il ne part pas dans l'image :
+# un programme installé n'a aucune raison de savoir lancer des daemons.
+essai = ["dep:tokio"]
+
+[dependencies.tokio]
+workspace = true
+optional = true
 
 [dev-dependencies]
 tempfile = { workspace = true }

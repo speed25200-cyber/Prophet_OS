@@ -73,7 +73,10 @@ impl Filter {
 }
 
 /// Résultat d'une vérification d'intégrité.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Sérialisable : c'est une réponse que `prophet-ledger` renvoie et que `prophet log verify`
+/// affiche. Un rapport d'intégrité qu'on ne peut pas transmettre ne sert qu'à celui qui l'a fait.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct VerifyReport {
     /// Vrai si la chaîne et les sceaux sont intacts.
     pub ok: bool,

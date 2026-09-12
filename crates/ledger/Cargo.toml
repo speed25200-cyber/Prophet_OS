@@ -8,6 +8,8 @@ description = "Journal d'audit inaltérable de Prophet OS : stockage en ajout se
 
 [dependencies]
 prophet-types = { workspace = true }
+prophet-ipc = { workspace = true }
+prophet-daemon = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -18,9 +20,11 @@ rand = { workspace = true }
 base64 = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+anyhow = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+prophet-daemon = { workspace = true, features = ["essai"] }
 
 [lints]
 workspace = true
