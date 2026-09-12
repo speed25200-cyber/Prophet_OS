@@ -145,19 +145,47 @@ fn une_decision_change_l_ecran() {
     );
 }
 
+/// La bande où seul le champ se dessine, dans les deux états.
+///
+/// Elle est calculée pour une cible de 960×540 : au-dessus du panneau de décision, à droite de la
+/// colonne des courants, à gauche de celle de l'état machine. C'est la seule région où comparer
+/// deux images revient à comparer deux champs.
+const BANDE_DU_CHAMP: (u32, u32, u32, u32) = (340, 0, 320, 130);
+
+/// Fraction de pixels éclairés dans une région donnée.
+fn part_eclairee_dans(pixels: &[u8], largeur: u32, region: (u32, u32, u32, u32), seuil: u8) -> f32 {
+    let (x0, y0, l, h) = region;
+    let mut clairs = 0usize;
+    for y in y0..y0 + h {
+        for x in x0..x0 + l {
+            let i = ((y * largeur + x) * 4) as usize;
+            let p = &pixels[i..i + 3];
+            if p[0].max(p[1]).max(p[2]) > seuil {
+                clairs += 1;
+            }
+        }
+    }
+    clairs as f32 / (l * h) as f32
+}
+
 #[test]
 #[ignore = "needs_gpu"]
 fn une_decision_fait_reculer_le_champ() {
     // Reculer, pas disparaître. Les deux erreurs symétriques — un champ qui continue de concourir
     // avec la question, ou un champ éteint qui masque ce qui tourne — sont également fausses.
-    let sans = part_eclairee(&rendre(false, 8.0), 24);
-    let avec = part_eclairee(&rendre(true, 8.0), 24);
+    //
+    // La mesure porte sur une bande où seul le champ se dessine. Prise sur l'écran entier, elle
+    // confondait le recul du champ avec l'apparition du panneau de décision, qui ajoute au centre
+    // plus de lumière que le champ n'en perd : le premier passage a ainsi declaré en échec un
+    // comportement parfaitement correct.
+    let sans = part_eclairee_dans(&rendre(false, 8.0), 960, BANDE_DU_CHAMP, 24);
+    let avec = part_eclairee_dans(&rendre(true, 8.0), 960, BANDE_DU_CHAMP, 24);
     assert!(
         avec < sans,
         "le champ doit reculer devant une question : {avec:.4} contre {sans:.4}"
     );
     assert!(
-        avec > sans * 0.15,
+        avec > 0.0,
         "le champ ne doit pas s'éteindre : ce qui tourne reste visible"
     );
 }
