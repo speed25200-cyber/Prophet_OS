@@ -17,6 +17,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  chatgpt:
+    name: ChatGPT sous NixOS (compatibilité)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Préparer la virtualisation du test
+        run: |
+          PROPHET_AUTORISER_KVM=1 sudo -E ./tools/install-isolation.sh kvm
+          python3 -c "open('/dev/kvm', 'r+b').close()"
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+            max-jobs = 2
+            cores = 2
+      - name: Ouvrir le client officiel dans une session Sway et XWayland
+        run: nix build .#checks.x86_64-linux.chatgpt-desktop --print-build-logs --out-link result-chatgpt
+      - name: Publier la capture de la VM sans compte connecté
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-nixos
+          path: result-chatgpt/*.png
+          if-no-files-found: error
+          retention-days: 14
+
   check:
     runs-on: ubuntu-latest
     steps:

@@ -179,12 +179,10 @@ impl ClientProfile {
             .cloned()
             .collect();
         if let Some(flag) = &self.mcp_config_arg {
-            args.push(flag.clone());
-            args.push(mcp_config.to_owned());
+            args.push(format!("{flag}={mcp_config}"));
         }
         if let (Some(flag), Some(session)) = (&self.resume_arg, resume) {
-            args.push(flag.clone());
-            args.push(session.to_owned());
+            args.push(format!("{flag}={session}"));
         }
         args.extend(["--".into(), intent.into()]);
         args
@@ -503,16 +501,24 @@ mod tests {
         let args = profile.command_line("prépare le rapport", "/run/prophet/mcp.json", None);
         assert_eq!(args[0], "-p");
         assert_eq!(args.last().unwrap(), "prépare le rapport");
-        assert!(args.contains(&"--mcp-config".to_owned()));
-        assert!(args.contains(&"/run/prophet/mcp.json".to_owned()));
+        assert!(args.contains(&"--mcp-config=/run/prophet/mcp.json".to_owned()));
     }
 
     #[test]
     fn reprise_de_session() {
         let profile = ClientProfile::claude_code();
         let args = profile.command_line("suite", "/x.json", Some("sess-42"));
-        assert!(args.contains(&"--resume".to_owned()));
-        assert!(args.contains(&"sess-42".to_owned()));
+        assert!(args.contains(&"--resume=sess-42".to_owned()));
+    }
+
+    #[test]
+    fn les_valeurs_de_claude_ne_deviennent_pas_des_options() {
+        let flag = "--dangerously-skip-permissions";
+        let args = ClientProfile::claude_code().command_line("bonjour", flag, Some(flag));
+        assert!(
+            !args.iter().any(|arg| arg == flag),
+            "une valeur ne doit pas devenir une option autonome : {args:?}"
+        );
     }
 
     #[test]

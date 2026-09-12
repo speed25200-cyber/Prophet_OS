@@ -49,6 +49,8 @@ Le profil Codex construit `codex exec --json -- <intention>` ou
 le séparateur, même lorsqu'ils commencent par un tiret. Le profil Claude Code inclut `-p`,
 `--output-format stream-json`, `--verbose` et `--include-partial-messages`, et place le prompt
 après les options. Aucun contournement des permissions n'est ajouté.
+Les valeurs de configuration MCP et de reprise Claude sont liées à leur option avec `=` :
+une valeur commençant par `--` ne devient pas une nouvelle option du client.
 
 L'intégration Codex interactive visera son
 [App Server](https://learn.chatgpt.com/docs/app-server), pour pouvoir acheminer les événements
@@ -79,3 +81,6 @@ le compte humain. Une exécution VM de la nouvelle révision est nécessaire pou
 Pour la suite : [décision de bureau](../adr/0009-clients-officiels-et-bureau.md) et
 [exigences de version complète](../FRONTIER.md). Aucune conversation authentifiée ni mesure
 de performance de ces clients dans Prophet OS installé n'est revendiquée ici.
+
+Le [rapport du paquet ChatGPT Linux](../reports/chatgpt-linux-2026-09-12.md) décrit la source
+épinglée, le runtime de compatibilité et la vérification graphique dédiée.

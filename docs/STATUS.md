@@ -20,17 +20,25 @@ Jalons d'intégration réellement exercés le 12 septembre 2026 :
   accès fichiers et les raccordements aux daemons qui restent à corriger avant activation.
   Validation locale après correction : `nix develop --command just check`, 569 tests réussis,
   aucun échec, 16 ignorés ; format, clippy et contrôles du dépôt réussis.
-- Clients officiels — Codex et Claude Code exigés par la configuration d'image. Versions et
+- `0f3f307` — clients officiels : Codex et Claude Code exigés par la configuration d'image. Versions et
   connexion sondées par les vrais clients, sans inspection des fichiers d'identifiants ; profils
   privés dans le répertoire utilisateur, reprise Codex et options de flux Claude corrigées.
   Les capacités ne déclarent plus des fonctionnalités agentiques non raccordées. Validation
   locale : `nix develop --command just check`, 575 tests réussis, aucun échec, 17 ignorés.
   Test explicite supplémentaire sur les vrais binaires : Codex 0.153.4 et Claude Code 2.1.266,
   versions reconnues et connexion requise dans des profils vierges ; commandes CLI doctor,
-  login et ls JSON exercées avec succès. Évaluation du test VM NixOS
-  réussie ; exécution VM de cette révision encore à vérifier. Le bureau humain, l'application
+  login et ls JSON exercées avec succès. La CI de cette révision a réussi ses trois travaux,
+  puis la construction de l'ISO, son démarrage, la construction du système installé, son
+  démarrage et les tests des services. Le bureau humain, l'application
   ChatGPT et les sessions authentifiées restent à intégrer. Voir le
   [guide des pilotes](components/providers.md) et l'[ADR 0009](adr/0009-clients-officiels-et-bureau.md).
+- ChatGPT Linux — paquet de compatibilité expérimental construit à partir du `.deb` officiel
+  26.908.40834 ; empreinte du binaire principal inchangée. Le test graphique NixOS/Sway/XWayland
+  et son travail CI sont ajoutés. Son exécution est en cours : aucune ouverture de fenêtre ni
+  connexion n'est encore validée. Le paquet reste hors de l'image installée. Un test de
+  régression supplémentaire protège les valeurs d'options de Claude Code. Validation locale
+  des composants : `just check` dans Nix, 576 tests réussis, aucun échec, 17 ignorés. Voir le
+  [rapport ChatGPT Linux](reports/chatgpt-linux-2026-09-12.md).
 
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 

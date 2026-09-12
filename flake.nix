@@ -33,7 +33,7 @@
       # importé par les tests en machine virtuelle — lesquels reçoivent un `pkgs` déjà construit,
       # et NixOS refuse qu'un module touche à `nixpkgs.config` dans ce cas. Un seul endroit, qui
       # sert aux deux.
-      clientsProprietaires = [ "claude-code" "gemini-cli" ];
+      clientsProprietaires = [ "claude-code" "gemini-cli" "chatgpt-linux" "chatgpt-linux-payload" ];
       autoriserLesClients = paquet:
         builtins.elem (nixpkgs.lib.getName paquet) clientsProprietaires;
 
@@ -113,6 +113,10 @@
             inherit pkgs;
             module = nixosModules.prophet;
           };
+          chatgpt-desktop = import ./image/tests/chatgpt-desktop.nix {
+            inherit pkgs;
+            chatgpt = pkgs.callPackage ./image/packages/chatgpt-linux.nix { };
+          };
           # Et une vraie machine **installée** : racine en lecture seule, chargeur d'amorçage,
           # noyau verrouillé. Le support d'amorçage a démarré ; ce qu'il installe, jamais.
           installe = import ./image/tests/installe.nix {
@@ -138,6 +142,7 @@
         # pas produire serait la même faute que promettre une isolation qu'on ne sait pas mettre
         # en place. Absent vaut mieux que présent et cassé.
         // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          chatgpt-linux = pkgs.callPackage ./image/packages/chatgpt-linux.nix { };
           iso = self.nixosConfigurations.prophet-iso.config.system.build.isoImage;
         };
       });
