@@ -80,7 +80,9 @@ in
       (name: {
         isSystemUser = true;
         group = "prophet-system";
-        description = "Daemon Prophet OS : ${name}";
+        # Pas de deux-points : ce texte va dans le champ GECOS de /etc/passwd, dont le
+        # deux-points est le separateur. NixOS le refuse, a juste titre.
+        description = "Daemon Prophet OS ${name}";
       });
 
     # --- Services ---
