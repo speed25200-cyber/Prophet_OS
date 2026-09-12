@@ -202,16 +202,8 @@ impl ApplicationHandler<Evenement> for Application {
         if let Some(etat) = &self.etat {
             let maintenant = Instant::now();
             if maintenant >= self.prochain {
-                let anime = etat.bureau.atelier.page == Page::Accueil
-                    && !etat.bureau.atelier.mouvement_reduit;
-                self.prochain = maintenant
-                    + Duration::from_millis(if etat.cachee {
-                        1000
-                    } else if anime {
-                        33
-                    } else {
-                        250
-                    });
+                self.prochain =
+                    maintenant + Duration::from_millis(if etat.cachee { 1000 } else { 250 });
                 if !etat.cachee {
                     etat.fenetre.request_redraw();
                 }

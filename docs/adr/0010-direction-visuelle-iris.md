@@ -2,6 +2,9 @@
 
 Date : 13 septembre 2026. Statut : implémenté et vérifié localement à la demande de l'utilisateur.
 
+Remplacé par l'[ADR 0011 — supervision humaine](0011-supervision-humaine.md), après rejet
+de cette direction visuelle par l'utilisateur.
+
 L'interface précédente présente les commandes comme un tableau d'administration, avec de
 grandes zones vides et une hiérarchie visuelle trop uniforme. L'accueil devient un espace de
 création : composition centrée, typographie Inter, sculpture irisée dessinée par le moteur

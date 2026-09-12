@@ -47,7 +47,7 @@ fn frame_at(
 
 #[test]
 #[ignore = "needs_gpu"]
-fn le_mouvement_reduit_fige_la_sculpture_sans_supprimer_le_dessin() {
+fn la_supervision_au_repos_ne_produit_pas_d_animation_decorative() {
     let context = Contexte::hors_ecran().unwrap();
     let target = Cible::nouvelle(&context, 1280, 720);
     let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
@@ -68,15 +68,7 @@ fn le_mouvement_reduit_fige_la_sculpture_sans_supprimer_le_dessin() {
     let first = target.pixels(&context).unwrap();
     frame_at(&mut bureau, &context, &target, vec![], 48.0);
     let next = target.pixels(&context).unwrap();
-    assert!(
-        first
-            .iter()
-            .zip(next.iter())
-            .filter(|(a, b)| a != b)
-            .count()
-            > 1000,
-        "l'animation doit modifier la sculpture rendue"
-    );
+    assert_eq!(first, next, "un état inchangé reste visuellement stable");
 }
 
 fn click(x: f32, y: f32) -> Vec<Event> {
@@ -122,6 +114,10 @@ fn la_navigation_et_la_saisie_unicode_fonctionnent_dans_les_widgets_rendus() {
     let events = click_widget(&bureau, "nav-accueil");
     frame(&mut bureau, &context, &target, events);
     assert_eq!(bureau.atelier.page, Page::Accueil);
+    let events = click_widget(&bureau, "preparer-mission");
+    frame(&mut bureau, &context, &target, events);
+    assert_eq!(bureau.atelier.page, Page::Conversation);
+    frame(&mut bureau, &context, &target, vec![]);
     let events = click_widget(&bureau, "intention");
     frame(&mut bureau, &context, &target, events);
     frame(
@@ -176,12 +172,7 @@ fn chaque_page_se_rend_aux_tailles_annoncees() {
                 frame(&mut bureau, &context, &target, vec![]);
             }
             if page == Page::Accueil {
-                for id in [
-                    "intention",
-                    "Explorer une idée",
-                    "Comprendre un sujet",
-                    "Affiner un texte",
-                ] {
+                for id in ["preparer-mission", "filter-all", "filter-attention"] {
                     let control = bureau
                         .ctx
                         .read_response(egui::Id::new(id))
@@ -202,52 +193,246 @@ fn chaque_page_se_rend_aux_tailles_annoncees() {
     }
 }
 
+fn avec_scene(
+    bureau: &mut Bureau,
+    context: &Contexte,
+    target: &Cible,
+    scene: &Scene,
+    events: Vec<Event>,
+) -> (egui::FullOutput, Option<surface::fenetre::Reponse>) {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(target.largeur as f32, target.hauteur as f32),
+        )),
+        time: Some(8.0),
+        events,
+        focused: true,
+        ..Default::default()
+    };
+    let (mut output, decision) = bureau.composer(input, scene);
+    bureau.rendre(context, target, &mut output);
+    (output, decision)
+}
+
 #[test]
 #[ignore = "needs_gpu"]
-fn une_decision_capturee_est_lisible_et_fait_reculer_le_fond() {
+fn la_decision_exige_un_examen_puis_un_choix_explicite_aux_trois_tailles() {
     let context = Contexte::hors_ecran().unwrap();
-    let target = Cible::nouvelle(&context, 1920, 1080);
+    for (width, height) in [(640, 480), (1280, 720), (1920, 1080)] {
+        let target = Cible::nouvelle(&context, width, height);
+        let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+        bureau.figer_transitions();
+        let mut scene = scene();
+        scene.decision = Some(surface::scene::Decision {
+            question: "Autoriser cette action sur les fichiers sélectionnés ?".into(),
+            consequence: "Les fichiers sélectionnés seront modifiés après votre accord.".into(),
+            tache: "test".into(),
+            depuis_secondes: 12,
+            irreversible: false,
+        });
+        for _ in 0..3 {
+            assert!(
+                avec_scene(&mut bureau, &context, &target, &scene, vec![])
+                    .1
+                    .is_none()
+            );
+        }
+        assert!(
+            bureau
+                .ctx
+                .read_response(egui::Id::new("decision-autoriser"))
+                .is_none()
+        );
+        let before = target.pixels(&context).unwrap();
+        let events = click_widget(&bureau, "examiner-decision");
+        avec_scene(&mut bureau, &context, &target, &scene, events);
+        for _ in 0..3 {
+            assert!(
+                avec_scene(&mut bureau, &context, &target, &scene, vec![])
+                    .1
+                    .is_none()
+            );
+        }
+        let after = target.pixels(&context).unwrap();
+        let pixel = (2 * width as usize + 2) * 4;
+        assert!(
+            u16::from(after[pixel]) * 100 < u16::from(before[pixel]) * 95,
+            "le fond recule pendant l'examen à {width}×{height} : {} -> {}",
+            before[pixel],
+            after[pixel]
+        );
+        for id in ["decision-retour", "decision-refuser", "decision-autoriser"] {
+            let control = bureau
+                .ctx
+                .read_response(egui::Id::new(id))
+                .expect("choix visible");
+            assert!(
+                control
+                    .interact_rect
+                    .contains_rect(control.rect.shrink(1.0)),
+                "choix coupé à {width}×{height} : {id}"
+            );
+        }
+        let events = click_widget(&bureau, "decision-refuser");
+        assert_eq!(
+            avec_scene(&mut bureau, &context, &target, &scene, events).1,
+            Some(surface::fenetre::Reponse::Refuse)
+        );
+        for _ in 0..3 {
+            avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+        }
+        let events = click_widget(&bureau, "examiner-decision");
+        avec_scene(&mut bureau, &context, &target, &scene, events);
+        for _ in 0..3 {
+            avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+        }
+        scene.decision.as_mut().unwrap().consequence =
+            "Une autre conséquence, qui doit être relue.".into();
+        for _ in 0..3 {
+            assert!(
+                avec_scene(&mut bureau, &context, &target, &scene, vec![])
+                    .1
+                    .is_none()
+            );
+        }
+        assert!(
+            bureau
+                .ctx
+                .read_response(egui::Id::new("decision-autoriser"))
+                .is_none(),
+            "une conséquence modifiée referme l'examen"
+        );
+    }
+}
+
+#[test]
+#[ignore = "needs_gpu"]
+fn choisir_et_filtrer_une_mission_preserve_son_identite() {
+    use surface::scene::{Courant, Etat};
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1440, 900);
     let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
     bureau.figer_transitions();
-    for _ in 0..3 {
-        frame(&mut bureau, &context, &target, vec![]);
-    }
-    let before = target.pixels(&context).unwrap();
     let mut scene = scene();
-    scene.decision = Some(surface::scene::Decision {
-        question: "Autoriser cette action sur les fichiers sélectionnés ?".into(),
-        consequence: "Les fichiers sélectionnés seront modifiés après votre accord.".into(),
-        tache: "test".into(),
-        depuis_secondes: 12,
-        irreversible: false,
+    scene.courants = [("a", Etat::Court), ("b", Etat::Bloque)]
+        .into_iter()
+        .map(|(id, etat)| Courant {
+            tache: id.into(),
+            intitule: format!("Mission {id}"),
+            agent: "local".into(),
+            etat,
+            debit: 1.0,
+            budget_consomme: 0.2,
+            etapes: 12,
+        })
+        .collect();
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
+    let events = click_widget(&bureau, "mission-a");
+    avec_scene(&mut bureau, &context, &target, &scene, events);
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
+    let events = click_widget(&bureau, "copier-reference");
+    let (output, _) = avec_scene(&mut bureau, &context, &target, &scene, events);
+    assert!(
+        output
+            .platform_output
+            .commands
+            .iter()
+            .any(|c| matches!(c, egui::OutputCommand::CopyText(value) if value == "a"))
+    );
+    let events = click_widget(&bureau, "filter-attention");
+    avec_scene(&mut bureau, &context, &target, &scene, events);
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("mission-a"))
+            .is_none()
+    );
+    let events = click_widget(&bureau, "copier-reference");
+    let (output, _) = avec_scene(&mut bureau, &context, &target, &scene, events);
+    assert!(
+        output
+            .platform_output
+            .commands
+            .iter()
+            .any(|c| matches!(c, egui::OutputCommand::CopyText(value) if value == "b"))
+    );
+    scene.courants.clear();
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("copier-reference"))
+            .is_none(),
+        "une mission disparue ne reste pas dans l'inspecteur"
+    );
+}
+
+#[test]
+#[ignore = "needs_gpu"]
+fn une_petite_fenetre_ouvre_le_contexte_sans_le_cacher_sous_la_liste() {
+    use surface::scene::{Courant, Etat};
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 640, 480);
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.figer_transitions();
+    let mut scene = scene();
+    scene.courants.push(Courant {
+        tache: "a".into(),
+        intitule: "Examiner une mission".into(),
+        agent: "local".into(),
+        etat: Etat::Court,
+        debit: 2.0,
+        budget_consomme: 0.2,
+        etapes: 3,
     });
     for _ in 0..3 {
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1920.0, 1080.0),
-            )),
-            time: Some(8.0),
-            ..Default::default()
-        };
-        let (mut output, decision) = bureau.composer(input, &scene);
-        assert!(decision.is_none());
-        bureau.rendre(&context, &target, &mut output);
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
     }
-    let after = target.pixels(&context).unwrap();
-    let pixel = (160 * 1920 + 100) * 4;
+    let events = click_widget(&bureau, "mission-a");
+    avec_scene(&mut bureau, &context, &target, &scene, events);
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
+    for id in ["retour-missions", "copier-reference"] {
+        let control = bureau
+            .ctx
+            .read_response(egui::Id::new(id))
+            .expect("contexte accessible");
+        assert!(
+            control
+                .interact_rect
+                .contains_rect(control.rect.shrink(1.0)),
+            "contrôle coupé : {id}"
+        );
+    }
+    let events = click_widget(&bureau, "copier-reference");
+    let (output, _) = avec_scene(&mut bureau, &context, &target, &scene, events);
     assert!(
-        u16::from(after[pixel]) * 10 < u16::from(before[pixel]) * 8,
-        "le fond doit être atténué"
+        output
+            .platform_output
+            .commands
+            .iter()
+            .any(|c| matches!(c, egui::OutputCommand::CopyText(value) if value == "a"))
     );
-    let bright = |pixels: &[u8]| {
-        (370..710)
-            .flat_map(|y| (630..1290).map(move |x| (y * 1920 + x) * 4))
-            .filter(|&i| pixels[i] > 180 && pixels[i + 1] > 150)
-            .count()
-    };
+    let events = click_widget(&bureau, "retour-missions");
+    avec_scene(&mut bureau, &context, &target, &scene, events);
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
     assert!(
-        bright(&after) > bright(&before) + 300,
-        "le texte de la décision doit être lisible à instant constant"
+        bureau
+            .ctx
+            .read_response(egui::Id::new("mission-a"))
+            .is_some()
     );
 }

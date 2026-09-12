@@ -60,6 +60,17 @@ réussis et première image soumise à Wayland sous WSLg. La nouvelle révision 
 en CI. Ce jalon ne résout pas les échecs installés et ChatGPT décrits ci-dessus. Voir le
 [rapport Iris et ses captures](reports/interface-iris-2026-09-13.md).
 
+Le même jour, l'utilisateur rejette Iris et demande un espace réellement conçu pour les agents
+et la supervision humaine. La nouvelle direction supprime la sculpture, adopte un thème clair
+et place les missions, leur contexte et les décisions au premier plan. Les filtres, la sélection,
+le retour aux missions sur petit écran et l'examen explicite sont implémentés. Validation locale :
+`just check`, 577 tests réussis, aucun échec, 20 ignorés ; douze tests graphiques explicites
+réussis (six parcours natifs et six tests du rendu historique). Les commandes d'agents, livrables,
+diffs, permissions détaillées et acquittements restent à intégrer. La validation de cette nouvelle
+révision en CI reste à réaliser. Voir le [rapport de supervision](reports/supervision-2026-09-13.md)
+et l'[ADR 0011](adr/0011-supervision-humaine.md). La qualité visuelle reste à apprécier par
+l'utilisateur ; ce jalon ne constitue pas une certification SOTA ni une équivalence avec Apple.
+
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 
 Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'environnement de construction** ; le détail est dans `docs/reports/phase0.md` section 5.

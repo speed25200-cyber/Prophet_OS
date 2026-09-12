@@ -7,9 +7,15 @@
 
 La surface propose un accueil, une conversation en flux, une sélection de modèle et les tâches
 des services. La saisie, le presse-papiers, le défilement et les événements d'accessibilité passent
-par egui/winit ; wgpu dessine l'interface. La direction visuelle Iris utilise une sculpture 3D
-irisée, un dock flottant et la police Inter embarquée. La sculpture est décorative. Les
+par egui/winit ; wgpu dessine l'interface. L'espace principal rassemble les missions reçues,
+leur contexte et les décisions à examiner, dans un thème clair avec Inter embarquée. Les
 compteurs viennent du moteur et des services, et les réponses du modèle sélectionné.
+
+Les filtres et la sélection pilotent l'inspecteur. À petite taille, celui-ci remplace la liste
+avec un retour aux missions. Une décision attend dans une bande persistante ; l'humain ouvre
+son examen, lit les conséquences puis choisit. Les [captures et limites de la supervision](../reports/supervision-2026-09-13.md)
+remplacent la direction Iris précédente. Les livrables, diffs et droits détaillés ne sont pas
+encore fournis par cette interface.
 
 ## Ce qu'elle montre, et ce qu'elle ne montre pas
 

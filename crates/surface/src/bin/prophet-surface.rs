@@ -40,6 +40,9 @@ struct Args {
     /// Ajoute une décision à la scène d'exemple.
     #[arg(long, requires = "demonstration")]
     decision: bool,
+    /// Ouvre le panneau d'examen dans une capture de démonstration, sans répondre.
+    #[arg(long, requires_all = ["capture", "decision"])]
+    examen: bool,
     /// Capture l'ancienne surface de courants pour ses tests visuels.
     #[arg(long, requires = "capture")]
     observation: bool,
@@ -150,13 +153,38 @@ fn executer(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             };
         }
         // Laisser les tailles des panneaux et l'atlas des polices se stabiliser.
-        for _ in 0..3 {
+        for frame in 0..if args.examen { 6 } else { 3 } {
+            let events = if args.examen && frame == 3 {
+                let response = bureau
+                    .ctx
+                    .read_response(egui::Id::new("examiner-decision"))
+                    .ok_or("contrôle d'examen absent")?;
+                let pos = response.rect.center();
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::default(),
+                    },
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::default(),
+                    },
+                ]
+            } else {
+                vec![]
+            };
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
                     egui::vec2(args.largeur as f32, args.hauteur as f32),
                 )),
                 time: Some(f64::from(args.temps)),
+                events,
                 ..Default::default()
             };
             let (mut output, _) = bureau.composer(input, &source.scene());

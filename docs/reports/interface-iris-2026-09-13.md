@@ -1,5 +1,8 @@
 # Interface native Iris — 13 septembre 2026
 
+Direction remplacée à la demande de l'utilisateur par l'[espace de supervision](supervision-2026-09-13.md).
+Les captures ci-dessous documentent le jalon historique `72545c0`.
+
 L'accueil, la conversation, la bibliothèque et l'activité partagent une nouvelle direction
 visuelle : fond nuit éclairé, sculpture 3D irisée, dock flottant, pictogrammes vectoriels,
 typographie Inter et panneaux arrondis. L'accueil intègre directement la saisie et les points

@@ -53,6 +53,9 @@ Le 13 septembre, la direction visuelle Iris remplace l'accueil et la navigation 
 sculpture 3D, typographie embarquée et composition adaptée à la taille de fenêtre. Les
 [captures et contrôles de cette refonte](reports/interface-iris-2026-09-13.md) portent sur le
 binaire natif ; la session humaine avec plusieurs applications reste à intégrer.
+La demande suivante remplace Iris par un [espace de supervision des missions](reports/supervision-2026-09-13.md) :
+sélection et filtres, contexte, examen volontaire des décisions et thème clair sans sculpture.
+Les diffs, livrables, commandes d'agents et permissions détaillées restent à raccorder.
 Le registre MCP refuse maintenant les exigences impossibles à vérifier et la session applique
 le cycle d'initialisation. Son binaire reste à raccorder aux services ; les accès fichiers doivent
 être durcis contre les liens symboliques et la recherche contrôlée pour chaque descendant.

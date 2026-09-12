@@ -7,11 +7,12 @@ pub mod bureau;
 pub mod depuis;
 pub mod disposition;
 pub mod fenetre;
+mod glyphes;
 pub mod gpu;
-mod iris;
 pub mod reel;
 pub mod rendu;
 pub mod scene;
+mod supervision;
 pub mod theme;
 
 #[cfg(test)]
