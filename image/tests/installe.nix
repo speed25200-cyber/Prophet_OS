@@ -82,22 +82,25 @@ pkgs.testers.runNixOSTest {
     with subtest("ce que ce test ne vérifie PAS : la racine en lecture seule"):
         # À dire franchement, plutôt que de laisser croire le contraire.
         #
-        # `immutable.nix` déclare `fileSystems."/"` avec l'option `ro`, en `mkDefault`. Le cadre de
-        # test NixOS fournit son propre disque et redéfinit `fileSystems` à une priorité qui gagne
-        # (`mkVMOverride`). La racine est donc **en lecture-écriture** ici, quoi qu'en dise la
-        # configuration installée.
+        # `immutable.nix` ne monte plus la racine en lecture seule : l'expérience du 12 septembre
+        # 2026 (`racine-en-lecture-seule.nix`) a montré qu'une machine ainsi montée ne garde même
+        # pas un interpréteur vivant, l'activation de NixOS écrivant `/etc` à chaque démarrage.
+        # L'option a donc été retirée, et l'immuabilité reste une promesse à tenir — c'est écrit
+        # dans `docs/installation.md`, à la section des manques.
         #
-        # Affirmer « racine en lecture seule vérifiée » sur cette base serait la faute que ce dépôt
-        # traque partout ailleurs : une sonde qui constate autre chose que ce qu'elle annonce. La
-        # question reste donc ouverte, et elle est notée comme telle dans `docs/STATUS.md`.
+        # Ce sous-test survit au retrait parce qu'il ne mesurait pas l'option mais le montage
+        # réel. Il dit maintenant ce que la machine fait, sans rien affirmer : le jour où la
+        # conception permettra une racine fermée, cette ligne changera d'elle-même. Et si le cadre
+        # de test NixOS imposait sa propre racine, il le dirait aussi, au lieu de laisser croire
+        # qu'on a vérifié la configuration installée.
         monte = machine.succeed("findmnt -no OPTIONS /").strip()
-        print(f"/ (imposée par le cadre de test) : {monte}")
+        print(f"/ sur la machine installée : {monte}")
         if monte.split(",")[0] == "ro":
-            print("racine en lecture seule : le cadre de test ne l'a pas remplacée, tant mieux")
+            print("racine en lecture seule : la promesse est tenue, ce test peut devenir un garde")
         else:
             print(
-                "racine en lecture-écriture : le cadre de test a remplacé le montage déclaré. "
-                "Ce que `immutable.nix` demande n'est donc pas exercé ici."
+                "racine en lecture-écriture, comme `immutable.nix` la déclare depuis le retrait "
+                "de l'option `ro`. L'immuabilité n'est donc pas vérifiée ici, ni ailleurs."
             )
 
     with subtest("l'activation de NixOS a écrit les comptes"):

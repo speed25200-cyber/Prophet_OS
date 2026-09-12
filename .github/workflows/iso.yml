@@ -22,6 +22,11 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
   workflow_dispatch:
+    inputs:
+      reposer_la_question_de_la_racine:
+        description: "Rejouer l'expérience de la racine en lecture seule (réponse connue : non)"
+        required: false
+        default: "false"
 
 # Une poussée remplace la précédente. Chaque exécution occupe six coureurs pendant une demi-heure ;
 # les laisser s'empiler fait attendre celle qui compte — la dernière — derrière des versions que
@@ -348,24 +353,76 @@ jobs:
             --no-channel-copy
 
       - name: Ce qui a réellement été posé sur le disque
+        # Ce qu'un `nixos-install --no-bootloader` produit, et rien de plus.
+        #
+        # La première version de cette étape cherchait `/mnt/run/current-system` et
+        # `/mnt/etc/passwd`, et déclarait l'installation ratée de ne pas les trouver. Elle avait
+        # tort sur les deux : `/run` est un tmpfs créé au démarrage, il n'existe sur aucun disque ;
+        # et `/etc/passwd` est écrit par l'**activation**, que `--no-bootloader` ne lance pas — ce
+        # drapeau ne se contente pas de sauter `bootctl`, il saute le
+        # `switch-to-configuration boot` tout entier. Le travail échouait donc sur une installation
+        # parfaitement réussie, ce qui est la pire sorte de contrôle : il use la confiance qu'on
+        # accorde aux verts.
+        #
+        # Ce que cette étape ne vérifie donc PAS, et qu'il ne faut pas croire vérifié ici :
+        # les comptes, `/etc`, et l'ouverture de session. C'est le travail « Le système installé
+        # démarre » qui en répond — il démarre la configuration, tape un mot de passe à l'invite et
+        # lit `getent shadow prophet`. Ce qui se vérifie ici est l'autre moitié, que lui ne voit
+        # pas : que `nixos-install` sait écrire cette fermeture sur la disposition que l'installeur
+        # crée, chiffrement et sous-volumes compris.
         run: |
           manque=0
           verifier() {
             if sudo test -e "$1"; then echo "  ✓ $1"; else echo "  ✗ $1 absent"; manque=1; fi
           }
+          PROFIL=/mnt/nix/var/nix/profiles/system
           verifier /mnt/nix/store
-          verifier /mnt/run/current-system
-          verifier /mnt/etc/passwd
-          echo "--- le compte humain est-il dans /etc/passwd du système installé ? ---"
-          if sudo grep -q '^prophet:' /mnt/etc/passwd; then
-            echo "  ✓ $(sudo grep '^prophet:' /mnt/etc/passwd)"
+          verifier "$PROFIL"
+
+          echo "--- le profil désigne-t-il la fermeture qu'on vient de construire ? ---"
+          # La question que « /mnt/nix/store existe » ne pose pas : un magasin peut être là et
+          # contenir autre chose. On compare au chemin exact.
+          ATTENDU=$(readlink -f ./systeme)
+          OBTENU=$(sudo readlink -f "$PROFIL" 2>/dev/null || echo absent)
+          # Le profil est résolu depuis /mnt : son lien pointe vers /nix/store/… tel que le verra
+          # la machine installée, pas tel que le voit le coureur.
+          if [ "${OBTENU#/mnt}" = "$ATTENDU" ] || [ "$OBTENU" = "$ATTENDU" ]; then
+            echo "  ✓ $ATTENDU"
           else
-            echo "  ✗ aucun compte « prophet » : personne ne pourrait ouvrir de session"
+            echo "  ✗ attendu $ATTENDU, obtenu $OBTENU"
             manque=1
           fi
+
+          echo "--- les sept services sont-ils dans ce qui a été copié ? ---"
+          # Le contrôle plus haut lit les unités du système **construit**, sur le coureur. Ici on
+          # les lit sur le **disque cible** : c'est la copie qui peut manquer, pas la construction.
+          trouves=0
+          for nom in capd ledger vault egress sandboxd memoryd agentd; do
+            if sudo test -e "$PROFIL/etc/systemd/system/prophet-$nom.service"; then
+              trouves=$((trouves + 1))
+            else
+              echo "  ✗ prophet-$nom.service absent du système copié"
+              manque=1
+            fi
+          done
+          [ "$trouves" = "7" ] && echo "  ✓ sept unités"
+
+          echo "--- la ligne de commande est-elle installée ? ---"
+          if sudo test -x "$PROFIL/sw/bin/prophet"; then
+            echo "  ✓ $PROFIL/sw/bin/prophet"
+          else
+            echo "  ✗ le binaire prophet n'est pas dans le système copié"
+            manque=1
+          fi
+
           echo "--- le haché du mot de passe est-il là, et fermé ? ---"
           mode=$(sudo stat -c %a /mnt/etc/prophet/motdepasse 2>/dev/null || echo absent)
           if [ "$mode" = "600" ]; then echo "  ✓ 0600"; else echo "  ✗ mode $mode"; manque=1; fi
+
+          echo "--- ce que l'activation écrira au premier démarrage, et qui n'est pas ici ---"
+          echo "  /etc/passwd, /etc/shadow, /etc/group : écrits par switch-to-configuration,"
+          echo "  que --no-bootloader ne lance pas. Vérifiés par « Le système installé démarre »."
+
           echo "--- poids réel de ce qui a été copié ---"
           sudo du -sh /mnt/nix/store 2>/dev/null | awk '{print "  "$1}'
           [ "$manque" = "0" ] || { echo "::error::l'installation n'a pas posé ce qu'elle devait"; exit 1; }
@@ -589,6 +646,19 @@ jobs:
   # écrite dans `docs/STATUS.md`.
   racine-ro:
     name: "Question ouverte : la racine en lecture seule"
+    # À la demande, et non à chaque poussée.
+    #
+    # `continue-on-error` empêchait ce travail de barrer la route, mais pas d'être rouge : il l'est
+    # à chaque exécution, puisque la réponse est « non » et qu'elle est connue depuis le 12
+    # septembre 2026. Un rouge permanent dans un tableau que le guide d'installation demande de
+    # lire avant de graver une image n'est pas une information, c'est un entraînement à ignorer le
+    # rouge — et le jour où un vrai contrôle tombe, il tombe au milieu de ce bruit.
+    #
+    # L'expérience garde tout son intérêt : c'est elle qui dira que la réponse a changé, le jour où
+    # `system.etc.overlay` et un `/var` inscriptible seront en place. Elle se rejoue alors d'un
+    # clic, en cochant l'entrée de ce workflow. Deux heures de coureur, à la demande de quelqu'un
+    # qui veut la réponse, plutôt qu'à chaque poussée sans que personne ne la lise.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.reposer_la_question_de_la_racine == 'true' }}
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 120

@@ -1,8 +1,11 @@
 # Une question ouverte, posée à la machine plutôt que raisonnée.
 #
-# `immutable.nix` déclare `fileSystems."/"` avec l'option `ro`. Personne n'a jamais démarré un
-# système Prophet OS avec cette option effectivement appliquée : le test `installe.nix` ne le peut
-# pas, parce que le cadre de test NixOS redéfinit `fileSystems` à une priorité qui l'emporte.
+# `immutable.nix` a déclaré `fileSystems."/"` avec l'option `ro`, et personne n'avait jamais
+# démarré un système Prophet OS avec cette option effectivement appliquée : le test `installe.nix`
+# ne le peut pas, parce que le cadre de test NixOS redéfinit `fileSystems` à une priorité qui
+# l'emporte. Ce fichier a posé la question ; la réponse est « non », et l'option a été retirée le
+# 12 septembre 2026. Ce qui suit est donc l'expérience telle qu'elle se rejoue, à la demande — pas
+# un garde-fou de l'état actuel.
 #
 # Ce fichier force la racine en lecture seule là où le cadre la pose — `virtualisation.fileSystems`
 # — et regarde ce qui arrive. Ce qui est en jeu tient en une phrase : l'activation de NixOS écrit
