@@ -273,6 +273,7 @@ mod tests {
             landlock_abi: None,
             seccomp: true,
             user_namespaces: true,
+            userns_restreint_par_politique: false,
             cgroups_v2: false,
             kvm: false,
             runsc: None,

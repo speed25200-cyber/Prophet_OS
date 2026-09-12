@@ -16,6 +16,29 @@ pub enum ConfineError {
     /// Erreur d'appel système.
     #[error("appel système en échec : {0}")]
     Syscall(#[from] nix::Error),
+    /// Appel système refusé, avec son nom.
+    ///
+    /// Un « EACCES » nu ne dit pas si c'est la création de l'espace de noms, un montage ou le
+    /// changement de racine qui a été refusé. Sur une machine qu'on ne voit qu'à travers un
+    /// journal, ce nom est la moitié du diagnostic — et les politiques de sécurité des
+    /// distributions récentes refusent précisément certains de ces appels et pas d'autres.
+    #[error("{appel} refusé : {source}")]
+    AppelRefuse {
+        /// Nom de l'appel système.
+        appel: &'static str,
+        /// Erreur rendue par le noyau.
+        #[source]
+        source: nix::Error,
+    },
+    /// Montage lié refusé, avec le chemin concerné.
+    #[error("montage de {source_path} refusé : {source}")]
+    MontageRefuse {
+        /// Chemin que l'on cherchait à rendre visible dans la sandbox.
+        source_path: String,
+        /// Erreur rendue par le noyau.
+        #[source]
+        source: nix::Error,
+    },
     /// Erreur d'entrée-sortie.
     #[error("erreur d'entrée-sortie : {0}")]
     Io(#[from] std::io::Error),
@@ -25,6 +48,11 @@ pub enum ConfineError {
     /// Étape de confinement identifiée en échec.
     #[error("{0} : {1}")]
     Step(&'static str, #[source] std::io::Error),
+}
+
+/// Attache le nom de l'appel système à son échec.
+fn nomme(appel: &'static str) -> impl Fn(nix::Error) -> ConfineError {
+    move |source| ConfineError::AppelRefuse { appel, source }
 }
 
 /// Ce qui a effectivement été appliqué. Sert à prouver, dans les tests et dans le journal, que le
@@ -60,7 +88,7 @@ pub fn enter_namespaces(handshake: Option<&Handshake>) -> Result<Vec<&'static st
         | CloneFlags::CLONE_NEWNET
         | CloneFlags::CLONE_NEWIPC
         | CloneFlags::CLONE_NEWUTS;
-    unshare(flags)?;
+    unshare(flags).map_err(nomme("unshare(CLONE_NEWUSER|NEWNS|NEWNET|NEWIPC|NEWUTS)"))?;
     if let Some(handshake) = handshake {
         handshake.signal_ready()?;
         handshake.wait_for_mapping()?;
@@ -233,14 +261,16 @@ pub fn pivot_to_minimal_root(spec: &SandboxSpec, new_root: &Path) -> Result<(), 
         None::<&str>,
         MsFlags::MS_REC | MsFlags::MS_PRIVATE,
         None::<&str>,
-    )?;
+    )
+    .map_err(nomme("mount(/, MS_REC|MS_PRIVATE)"))?;
     mount(
         Some("tmpfs"),
         new_root,
         Some("tmpfs"),
         MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
         None::<&str>,
-    )?;
+    )
+    .map_err(nomme("mount(tmpfs, nouvelle racine)"))?;
 
     // Montages en lecture seule : bibliothèques et binaires.
     for source in &spec.read_only_mounts {
@@ -282,9 +312,9 @@ pub fn pivot_to_minimal_root(spec: &SandboxSpec, new_root: &Path) -> Result<(), 
 
     let old_root = new_root.join(".ancienne-racine");
     std::fs::create_dir_all(&old_root)?;
-    nix::unistd::pivot_root(new_root, &old_root)?;
-    nix::unistd::chdir("/")?;
-    umount2("/.ancienne-racine", MntFlags::MNT_DETACH)?;
+    nix::unistd::pivot_root(new_root, &old_root).map_err(nomme("pivot_root"))?;
+    nix::unistd::chdir("/").map_err(nomme("chdir"))?;
+    umount2("/.ancienne-racine", MntFlags::MNT_DETACH).map_err(nomme("umount2"))?;
     let _ = std::fs::remove_dir("/.ancienne-racine");
     Ok(())
 }
@@ -310,7 +340,11 @@ fn bind(source: &Path, new_root: &Path, read_only: bool) -> Result<(), ConfineEr
         None::<&str>,
         MsFlags::MS_BIND | MsFlags::MS_REC,
         None::<&str>,
-    )?;
+    )
+    .map_err(|source_err| ConfineError::MontageRefuse {
+        source_path: source.display().to_string(),
+        source: source_err,
+    })?;
     if read_only {
         mount(
             None::<&str>,

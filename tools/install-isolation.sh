@@ -8,6 +8,7 @@
 # Usage :
 #   sudo ./tools/install-isolation.sh gvisor    # niveau 1
 #   sudo ./tools/install-isolation.sh microvm   # niveau 2 — exige /dev/kvm
+#   sudo ./tools/install-isolation.sh userns    # lève la restriction AppArmor, si autorisé
 #   sudo ./tools/install-isolation.sh all
 #
 # Idempotent : ce qui est déjà là n'est pas réinstallé.
@@ -40,6 +41,40 @@ installer_gvisor() {
   sudo_si_besoin apt-get update -qq || { ko "apt-get update a échoué"; return 1; }
   sudo_si_besoin apt-get install -y -qq runsc >/dev/null || { ko "installation de runsc refusée"; return 1; }
   ok "$(runsc --version 2>&1 | head -1)"
+}
+
+# --- Restriction des espaces de noms par la distribution ---
+#
+# Ubuntu 24.04 et suivantes refusent, par AppArmor, qu'un programme absent de leurs profils exécute
+# quoi que ce soit dans l'espace de noms qu'il vient de créer. La création réussit, l'exécution
+# non : le système paraît capable et ne l'est pas, et l'échec arrive sous la forme d'un EACCES nu
+# dans un composant qui n'y est pour rien. Les niveaux 0 et 1 en dépendent tous les deux.
+RESTRICTION=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+
+restriction_active() {
+  [ -f "$RESTRICTION" ] && [ "$(cat "$RESTRICTION" 2>/dev/null)" = "1" ]
+}
+
+traiter_la_restriction() {
+  if ! restriction_active; then
+    return 0
+  fi
+  echo "Restriction des espaces de noms (AppArmor)"
+  ko "cette distribution interdit d'exécuter dans un espace de noms non privilégié"
+  info "les niveaux 0 et 1 échoueront sur EACCES tant qu'elle est active"
+  if [ "${PROPHET_AUTORISER_USERNS:-}" != "1" ]; then
+    info "rien n'est modifié : cette restriction protège la machine, et la lever est une"
+    info "décision qui vous revient. Pour la lever, au choix :"
+    info "  sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0        (jusqu'au redémarrage)"
+    info "  PROPHET_AUTORISER_USERNS=1 sudo -E ./tools/install-isolation.sh all  (et de façon durable)"
+    return 1
+  fi
+  sudo_si_besoin sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null \
+    || { ko "le réglage a été refusé"; return 1; }
+  echo "kernel.apparmor_restrict_unprivileged_userns = 0" \
+    | sudo_si_besoin tee /etc/sysctl.d/99-prophet-userns.conf >/dev/null
+  ok "restriction levée, et rendue durable par /etc/sysctl.d/99-prophet-userns.conf"
+  info "pour revenir en arrière : supprimez ce fichier et remettez le réglage à 1"
 }
 
 installer_firecracker() {
@@ -129,15 +164,27 @@ installer_microvm() {
 # ce projet passe son temps à traquer ailleurs.
 RESULTAT=0
 case "$CIBLE" in
-  gvisor)  installer_gvisor || RESULTAT=1 ;;
+  gvisor)  installer_gvisor || RESULTAT=1; echo; traiter_la_restriction || RESULTAT=1 ;;
   microvm) installer_microvm || RESULTAT=1 ;;
-  all)     installer_gvisor || RESULTAT=1; echo; installer_microvm || RESULTAT=1 ;;
-  *) echo "cible inconnue : $CIBLE (attendues : gvisor, microvm, all)" >&2; exit 2 ;;
+  userns)  traiter_la_restriction || RESULTAT=1 ;;
+  all)     installer_gvisor || RESULTAT=1; echo; installer_microvm || RESULTAT=1
+           echo; traiter_la_restriction || RESULTAT=1 ;;
+  *) echo "cible inconnue : $CIBLE (attendues : gvisor, microvm, userns, all)" >&2; exit 2 ;;
 esac
 
 echo
+if restriction_active; then
+  echo
+  echo "Aucun niveau ne fonctionnera tant que la restriction AppArmor est active :"
+  echo "  l'espace de noms se crée, mais rien ne s'exécute dedans (EACCES)."
+fi
+
 echo "Niveaux atteignables après cette installation :"
-echo "  niveau 0 : toujours (espaces de noms)"
+if restriction_active; then
+  echo "  niveau 0 : non (restriction AppArmor)"
+else
+  echo "  niveau 0 : oui (espaces de noms)"
+fi
 if command -v runsc >/dev/null 2>&1; then echo "  niveau 1 : oui"; else echo "  niveau 1 : non (gVisor absent)"; fi
 if [ -e /dev/kvm ] && command -v firecracker >/dev/null 2>&1 \
    && [ -f "$MICROVM_DIR/vmlinux" ] && [ -f "$MICROVM_DIR/rootfs.ext4" ]; then

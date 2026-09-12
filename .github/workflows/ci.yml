@@ -20,6 +20,12 @@ jobs:
       - name: Chaîne d'outils du dépôt
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
+      # Ubuntu 24.04 interdit par AppArmor d'exécuter quoi que ce soit dans un espace de noms
+      # créé par un programme non listé. La création réussit, l'exécution non, et l'échec sort
+      # sous la forme d'un EACCES nu dans un composant qui n'y est pour rien. C'est la cause
+      # unique des échecs des niveaux 0 et 1 sur ce coureur.
+      - name: Lever la restriction des espaces de noms
+        run: PROPHET_AUTORISER_USERNS=1 sudo -E ./tools/install-isolation.sh userns
       - name: Format
         run: cargo fmt --all --check
       - name: Lints
@@ -47,6 +53,13 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
 
+      # Ubuntu 24.04 interdit par AppArmor d'exécuter quoi que ce soit dans un espace de noms
+      # créé par un programme non listé. La création réussit, l'exécution non, et l'échec sort
+      # sous la forme d'un EACCES nu dans un composant qui n'y est pour rien. C'est la cause
+      # unique des échecs des niveaux 0 et 1 sur ce coureur.
+      - name: Lever la restriction des espaces de noms
+        run: PROPHET_AUTORISER_USERNS=1 sudo -E ./tools/install-isolation.sh userns
+
       # Les tests de niveau 0 se taisent et passent quand les espaces de noms manquent : c'est le
       # bon comportement dans un conteneur de développement, mais sur ce coureur il ferait verdir
       # la suite de « check » sans que rien ait été confiné. On exige donc ce que le silence
@@ -62,7 +75,16 @@ jobs:
             echo "::error::contenteraient de se taire, et le vert de « check » ne prouverait rien."
             exit 1
           fi
-          echo "espaces de noms utilisateur disponibles"
+          # `unshare` figure dans les profils AppArmor livrés par Ubuntu : il passe même sous
+          # restriction. La garde le vérifierait donc avec succès pendant que tout le reste
+          # échoue. On contrôle aussi le réglage lui-même.
+          restriction=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [ -f "$restriction" ] && [ "$(cat "$restriction")" = "1" ]; then
+            echo "::error::la restriction AppArmor des espaces de noms est toujours active :"
+            echo "::error::les niveaux 0 et 1 échoueront sur EACCES, quoi que dise unshare."
+            exit 1
+          fi
+          echo "espaces de noms utilisateur disponibles, sans restriction de politique"
 
       - name: Installer gVisor
         run: sudo ./tools/install-isolation.sh gvisor

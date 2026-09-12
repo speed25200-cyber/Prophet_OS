@@ -45,6 +45,13 @@ pub struct Capabilities {
     pub seccomp: bool,
     /// Espaces de noms utilisateur non privilégiés utilisables.
     pub user_namespaces: bool,
+    /// La politique de sécurité de la distribution restreint-elle les espaces de noms ?
+    ///
+    /// Ubuntu 24.04 et suivantes refusent, par AppArmor, qu'un programme non listé exécute quoi
+    /// que ce soit après avoir créé un espace de noms utilisateur. Créer l'espace reste permis,
+    /// exécuter dedans ne l'est pas — d'où un système qui paraît capable et ne l'est pas. Le
+    /// distinguer évite de chercher le défaut dans le mauvais composant.
+    pub userns_restreint_par_politique: bool,
     /// cgroups v2 monté.
     pub cgroups_v2: bool,
     /// `/dev/kvm` accessible.
@@ -65,6 +72,7 @@ impl Capabilities {
             landlock_abi: probe_landlock(),
             seccomp: probe_seccomp(),
             user_namespaces: probe_user_namespaces(),
+            userns_restreint_par_politique: probe_userns_restreint(),
             cgroups_v2: Path::new("/sys/fs/cgroup/cgroup.controllers").exists(),
             kvm: Path::new("/dev/kvm").exists(),
             runsc: which("runsc"),
@@ -147,6 +155,15 @@ impl Capabilities {
                 "absents"
             }
         ));
+        if self.userns_restreint_par_politique {
+            lines.push(
+                "  ATTENTION     : la politique AppArmor de cette distribution interdit d'exécuter\n\
+                 \x20                 quoi que ce soit dans un espace de noms créé par un programme\n\
+                 \x20                 non listé. Les niveaux 0 et 1 échoueront sur EACCES. Remède :\n\
+                 \x20                 sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"
+                    .to_owned(),
+            );
+        }
         lines.push(format!(
             "  cgroups v2    : {}",
             if self.cgroups_v2 {
@@ -246,6 +263,16 @@ fn probe_user_namespaces() -> bool {
     })
 }
 
+/// La distribution restreint-elle l'usage des espaces de noms non privilégiés ?
+///
+/// Ubuntu expose ce réglage depuis la 24.04. Sa valeur `1` signifie qu'un programme absent des
+/// profils AppArmor livrés ne peut rien exécuter dans l'espace de noms qu'il vient de créer. La
+/// création, elle, réussit : une sonde qui s'arrête là conclut à tort que tout va bien.
+fn probe_userns_restreint() -> bool {
+    std::fs::read_to_string("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+        .is_ok_and(|v| v.trim() == "1")
+}
+
 /// Crée un espace de noms utilisateur dans un enfant jetable et dit si le noyau l'a permis.
 fn essayer_un_espace_de_noms_utilisateur() -> bool {
     // SAFETY: `fork` n'a pas de précondition. L'enfant n'appelle ensuite que `unshare` et
@@ -305,6 +332,7 @@ mod tests {
             landlock_abi: None,
             seccomp: true,
             user_namespaces: true,
+            userns_restreint_par_politique: false,
             cgroups_v2: false,
             kvm: false,
             runsc: None,
@@ -327,6 +355,7 @@ mod tests {
             landlock_abi: Some(4),
             seccomp: true,
             user_namespaces: true,
+            userns_restreint_par_politique: false,
             cgroups_v2: true,
             kvm: true,
             runsc: Some("/usr/bin/runsc".to_owned()),

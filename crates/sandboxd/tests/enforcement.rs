@@ -263,10 +263,22 @@ fn gel_global_rapide() {
     }
     std::thread::sleep(std::time::Duration::from_millis(150));
 
+    // Geler zéro sandbox est instantané. Sans cette vérification, le test mesurait la vitesse à
+    // laquelle on ne fait rien, et la déclarait conforme à l'objectif du plan.
+    for handle in &mut handles {
+        if let Some(enfant) = handle.child_mut() {
+            assert!(
+                enfant.try_wait().unwrap().is_none(),
+                "les sandboxes doivent encore tourner au moment du gel"
+            );
+        }
+    }
+
     let start = std::time::Instant::now();
     let frozen = manager.freeze_all();
     let elapsed = start.elapsed();
     eprintln!("gel de {frozen} sandboxes en {elapsed:?}");
+    assert_eq!(frozen, 8, "les huit sandboxes doivent avoir été gelées");
     assert!(
         elapsed < std::time::Duration::from_millis(50),
         "le gel d'urgence doit rester sous 50 ms, mesuré {elapsed:?}"
@@ -291,7 +303,14 @@ fn demarrage_du_niveau_zero_sous_dix_millisecondes() {
         let start = std::time::Instant::now();
         let mut handle = manager.run("task:test", &spec).unwrap();
         durees.push(start.elapsed());
-        let _ = handle.wait();
+        // Une sandbox qui meurt au démarrage démarre très vite. Sans cette vérification, ce test
+        // décernait sa médaille de vitesse à un confinement qui n'avait pas eu lieu.
+        let code = handle.wait().unwrap();
+        assert_eq!(
+            code,
+            Some(0),
+            "la sandbox doit réellement exécuter /bin/true, code obtenu : {code:?}"
+        );
     }
     durees.sort();
     let mediane = durees[durees.len() / 2];
