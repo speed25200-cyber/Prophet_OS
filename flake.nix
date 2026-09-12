@@ -64,6 +64,14 @@
           };
         };
 
+        # Ce que `nix flake check` exerce : une vraie machine, avec de vrais services.
+        checks = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          services = import ./image/tests/services.nix {
+            inherit pkgs;
+            module = nixosModules.prophet;
+          };
+        };
+
         packages = {
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "prophet-os";

@@ -359,3 +359,44 @@ jobs:
           name: demarrage-vm
           path: demarrage.log
           if-no-files-found: warn
+
+  # --- Les services, sur une vraie machine ---
+  #
+  # Les tests Rust lancent chaque binaire à la main, sous le compte de celui qui teste. Sur la
+  # machine installée, chaque daemon tourne sous son utilisateur, avec ProtectSystem strict, un
+  # filtre d'appels système, des capacités retirées et un socket en 0660. Rien de tout cela n'est
+  # exercé par un test Rust — et c'est exactement la forme du défaut qui a occupé cette journée.
+  services:
+    name: Les sept services sous systemd
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Faire de la place
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean
+          echo "$(df -h / | awk 'NR==2{print $4}') libres"
+
+      - name: KVM
+        # Un test NixOS sans KVM est si lent qu'il expirerait. On regarde si on peut l'ouvrir,
+        # pas s'il existe.
+        run: |
+          if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+            echo "KVM utilisable"
+          else
+            echo "::error::/dev/kvm inutilisable : ce test a besoin de virtualisation"
+            exit 1
+          fi
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+            max-jobs = auto
+
+      - name: Démarrer la machine et exercer les services
+        run: nix build .#checks.x86_64-linux.services --print-build-logs

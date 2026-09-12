@@ -56,9 +56,10 @@ iso:
     @echo "image : $(readlink -f result)/iso/"
     @ls -lh $(readlink -f result)/iso/*.iso
 
-# Tests NixOS en machine virtuelle.
+# Tests NixOS en machine virtuelle : les sept services, sous systemd, avec leur durcissement.
+# Exige Nix et KVM.
 test-vm:
-    @echo "pas encore disponible (M9)" && exit 2
+    nix build .#checks.x86_64-linux.services --print-build-logs
 
 # Démarre l'image dans QEMU.
 vm:

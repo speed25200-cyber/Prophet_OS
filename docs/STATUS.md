@@ -192,9 +192,11 @@ elle aussi en faire partie pour lire les tâches — et elle obtient du même co
 n'utilise pas. Restreindre demanderait une notion de méthode autorisée par pair que `prophet-ipc`
 n'a pas. À faire avant qu'un programme moins fiable qu'un afficheur ne parle à un daemon.
 
-**Rien de tout cela n'a démarré sous systemd.** Les sept daemons sont exercés par des tests qui
-lancent le binaire et lui parlent ; aucun n'a encore tourné dans une unité, avec le durcissement
-du module et les permissions réelles des sockets. C'est M9-T6 qui le dira.
+**Les sept daemons tournent sous systemd**, dans une machine NixOS de test que `just test-vm`
+démarre et que l'intégration continue exerce : chacun sous son utilisateur, avec le durcissement
+du module, ses sockets en 0660 dans un répertoire en 0750, et la chaîne complète qui planifie une
+tâche. Ce qui reste non vérifié est le matériel réel — la carte graphique, la carte réseau et le
+micrologiciel d'un PC donné.
 
 **Le serveur de l'utilisateur reste inatteint** (12 septembre). Le workflow qui l'atteindrait
 existe et est poussé — `.github/workflows/verifier-sur-le-serveur.yml` — mais il ne peut pas
