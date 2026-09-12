@@ -43,14 +43,24 @@ jobs:
       - name: Refuser sans confirmation
         run: |
           # La première propriété à vérifier n'est pas qu'il formate, c'est qu'il refuse.
+          #
+          # La sortie est capturée dans un fichier plutôt que passée à `tee` : le code de sortie
+          # d'un tube est celui de sa dernière commande, donc `if script | tee` mesurait `tee` et
+          # concluait au succès quoi que fasse l'installeur. Le premier essai de ce travail a
+          # ainsi déclaré en échec un refus parfaitement correct.
           BOUCLE='${{ steps.disque.outputs.boucle }}'
-          if printf 'nimporte quoi\n' | sudo ./image/installateur/prophet-installer.sh \
-               --disque "$BOUCLE" --jusqu-au-montage 2>&1 | tee /tmp/refus.txt; then
+          set +e
+          printf 'nimporte quoi\n' | sudo ./image/installateur/prophet-installer.sh \
+            --disque "$BOUCLE" --jusqu-au-montage >/tmp/refus.txt 2>&1
+          code=$?
+          set -e
+          cat /tmp/refus.txt
+          if [ "$code" -eq 0 ]; then
             echo "::error::l'installeur a accepté une confirmation qui ne correspondait pas"
             exit 1
           fi
           grep -q "confirmation refusée" /tmp/refus.txt \
-            || { echo "::error::le refus n'a pas été motivé"; cat /tmp/refus.txt; exit 1; }
+            || { echo "::error::le refus n'a pas été motivé"; exit 1; }
           # Et surtout : rien ne doit avoir été écrit.
           if sudo sgdisk --print "$BOUCLE" 2>/dev/null | grep -qE "^ +[0-9]+ "; then
             echo "::error::des partitions existent alors que la confirmation a été refusée"
@@ -62,14 +72,19 @@ jobs:
         run: |
           truncate -s 40G /tmp/petit.img
           PETIT=$(sudo losetup --find --show --partscan /tmp/petit.img)
-          if printf '%s\n' "$PETIT" | sudo ./image/installateur/prophet-installer.sh \
-               --disque "$PETIT" --jusqu-au-montage 2>&1 | tee /tmp/petit.txt; then
+          set +e
+          printf '%s\n' "$PETIT" | sudo ./image/installateur/prophet-installer.sh \
+            --disque "$PETIT" --jusqu-au-montage >/tmp/petit.txt 2>&1
+          code=$?
+          set -e
+          cat /tmp/petit.txt
+          sudo losetup -d "$PETIT"
+          if [ "$code" -eq 0 ]; then
             echo "::error::un disque de 40 Gio a été accepté"
             exit 1
           fi
           grep -q "il en faut au moins 80" /tmp/petit.txt \
-            || { echo "::error::le refus n'a pas dit la taille attendue"; cat /tmp/petit.txt; exit 1; }
-          sudo losetup -d "$PETIT"
+            || { echo "::error::le refus n'a pas dit la taille attendue"; exit 1; }
           echo "refus correct"
 
       - name: Préparer le disque pour de vrai
