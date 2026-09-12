@@ -8,6 +8,7 @@
 //!
 //! Ils exigent un adaptateur graphique, fût-il logiciel, et portent donc le marqueur `needs_gpu`.
 
+use surface::disposition::{Rect, disposer};
 use surface::gpu::{Cible, Contexte};
 use surface::rendu::Rendu;
 use surface::scene::{Courant, Decision, Etat, Isolation, Scene};
@@ -145,19 +146,35 @@ fn une_decision_change_l_ecran() {
     );
 }
 
-/// La bande où seul le champ se dessine, dans les deux états.
+/// Fraction de pixels éclairés partout où aucun panneau ne se pose.
 ///
-/// Elle est calculée pour une cible de 960×540 : au-dessus du panneau de décision, à droite de la
-/// colonne des courants, à gauche de celle de l'état machine. C'est la seule région où comparer
-/// deux images revient à comparer deux champs.
-const BANDE_DU_CHAMP: (u32, u32, u32, u32) = (340, 0, 320, 130);
-
-/// Fraction de pixels éclairés dans une région donnée.
-fn part_eclairee_dans(pixels: &[u8], largeur: u32, region: (u32, u32, u32, u32), seuil: u8) -> f32 {
-    let (x0, y0, l, h) = region;
+/// Une bande étroite choisie à la main s'était révélée presque vide : les filaments ont leur base
+/// aux trois dixièmes et aux quatre dixièmes de la hauteur, et la bande n'en attrapait qu'une
+/// lisière de quelques pixels — assez pour que l'atténuation la ramène à zéro et fasse échouer
+/// l'assertion qui vérifie que le champ ne s'éteint pas.
+///
+/// On masque donc les panneaux et on mesure tout le reste, ce qui couvre le champ là où il est.
+/// Les mêmes rectangles sont masqués dans les deux images, décision comprise, de sorte que la
+/// comparaison porte sur des surfaces identiques.
+fn part_eclairee_hors_panneaux(
+    pixels: &[u8],
+    largeur: u32,
+    hauteur: u32,
+    panneaux: &[Rect],
+    seuil: u8,
+) -> f32 {
     let mut clairs = 0usize;
-    for y in y0..y0 + h {
-        for x in x0..x0 + l {
+    let mut regardes = 0usize;
+    for y in 0..hauteur {
+        for x in 0..largeur {
+            let px = x as f32;
+            let py = y as f32;
+            if panneaux.iter().any(|r| {
+                px >= r.x - 2.0 && px <= r.droite() + 2.0 && py >= r.y - 2.0 && py <= r.bas() + 2.0
+            }) {
+                continue;
+            }
+            regardes += 1;
             let i = ((y * largeur + x) * 4) as usize;
             let p = &pixels[i..i + 3];
             if p[0].max(p[1]).max(p[2]) > seuil {
@@ -165,7 +182,11 @@ fn part_eclairee_dans(pixels: &[u8], largeur: u32, region: (u32, u32, u32, u32),
             }
         }
     }
-    clairs as f32 / (l * h) as f32
+    assert!(
+        regardes > 0,
+        "les panneaux ne peuvent pas couvrir tout l'écran"
+    );
+    clairs as f32 / regardes as f32
 }
 
 /// Deux scènes dont **seule** la présence d'une décision diffère.
@@ -209,8 +230,25 @@ fn une_decision_fait_reculer_le_champ() {
     // confondait le recul du champ avec l'apparition du panneau de décision, qui ajoute au centre
     // plus de lumière que le champ n'en perd : le premier passage a ainsi declaré en échec un
     // comportement parfaitement correct.
-    let sans = part_eclairee_dans(&rendre_a_champ_constant(false), 960, BANDE_DU_CHAMP, 24);
-    let avec = part_eclairee_dans(&rendre_a_champ_constant(true), 960, BANDE_DU_CHAMP, 24);
+    // Les rectangles de l'état le plus charge : masquer aussi le panneau de décision dans l'image
+    // qui ne l'a pas garantit que les deux mesures portent sur la même surface.
+    let mut avec_decision = scene(false);
+    avec_decision.decision = Some(Decision {
+        question: "Envoyer le paiement ?".to_owned(),
+        consequence: "L'argent part.".to_owned(),
+        tache: "t2".to_owned(),
+        depuis_secondes: 14,
+        irreversible: true,
+    });
+    let panneaux: Vec<Rect> = disposer(&avec_decision, 960.0, 540.0)
+        .into_iter()
+        .map(|p| p.rect)
+        .collect();
+
+    let sans =
+        part_eclairee_hors_panneaux(&rendre_a_champ_constant(false), 960, 540, &panneaux, 24);
+    let avec = part_eclairee_hors_panneaux(&rendre_a_champ_constant(true), 960, 540, &panneaux, 24);
+    eprintln!("champ éclairé — sans décision {sans:.4}, avec {avec:.4}");
     assert!(
         avec < sans,
         "le champ doit reculer devant une question : {avec:.4} contre {sans:.4}"
