@@ -25,6 +25,11 @@ let
         StateDirectoryMode = "0700";
         RuntimeDirectory = "prophet";
         RuntimeDirectoryMode = "0750";
+        # Les sept services partagent ce répertoire. Sans cette ligne, systemd le supprime quand
+        # l'un d'eux s'arrête — et emporte les six autres sockets avec lui. Un `systemctl restart
+        # prophet-memoryd` couperait tout le reste, ce qui est une façon remarquable de rendre un
+        # système fragile sans qu'aucun test de daemon ne s'en aperçoive.
+        RuntimeDirectoryPreserve = true;
 
         # Durcissement : ce qu'un daemon n'a pas besoin de faire, il ne peut pas le faire.
         NoNewPrivileges = true;

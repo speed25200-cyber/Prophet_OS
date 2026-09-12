@@ -101,6 +101,20 @@ pkgs.testers.runNixOSTest {
         machine.succeed("useradd -m intrus")
         machine.fail("su intrus -c 'test -r /run/prophet/capd.sock'")
 
+    with subtest("redémarrer un service n'en coupe pas six autres"):
+        # Les sept partagent `/run/prophet`. Sans `RuntimeDirectoryPreserve`, systemd supprime ce
+        # répertoire quand l'un s'arrête et emporte les sockets des autres : un
+        # `systemctl restart prophet-memoryd` couperait tout le reste. Aucun test de daemon pris
+        # isolément ne peut voir cela.
+        machine.succeed("systemctl restart prophet-memoryd.service")
+        machine.wait_for_unit("prophet-memoryd.service")
+        for nom in services:
+            machine.succeed(f"test -S /run/prophet/{nom}.sock")
+        statut = machine.succeed("prophet status")
+        assert "muet" not in statut, (
+            f"un redémarrage isolé ne doit rien couper :\n{statut}"
+        )
+
     with subtest("prophet status voit ses services"):
         statut = machine.succeed("prophet status")
         print(statut)
