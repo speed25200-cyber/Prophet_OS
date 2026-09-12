@@ -391,11 +391,15 @@ effectivement changé sur la machine, et comment le défaire :
 | Les unités `hermes*` sont **arrêtées et désactivées** | `systemctl enable --now hermes…` — le journal du workflow nomme les unités. Les fichiers de `/root/hermes` n'ont pas été touchés |
 | Prophet OS est déposé dans `/root/prophet_os` | `rm -rf /root/prophet_os` |
 | gVisor est installé — `runsc release-20260907.0` | le paquet reste ; `runsc` s'enlève à la main |
-| La restriction AppArmor des espaces de noms est **toujours active** | rien à défaire : l'étape a été sautée |
+| La restriction AppArmor des espaces de noms est **levée** (15 h 54, après la correction d'ordre) | `sysctl -w kernel.apparmor_restrict_unprivileged_userns=1`, et retirer le fichier posé sous `/etc/sysctl.d/` |
 
-**Aucun niveau d'isolation n'est donc utilisable pour l'instant** : la restriction les bloque tous,
-y compris le niveau 0. Le niveau 1 le deviendra dès qu'elle sera levée, gVisor étant en place. Le
-niveau 2 restera hors d'atteinte — pas de `/dev/kvm` sur ce VPS.
+Les niveaux 0 et 1 sont donc désormais atteignables sur cette machine : les espaces de noms sont
+utilisables, et gVisor est en place. Le niveau 2 restera hors d'atteinte — pas de `/dev/kvm` sur ce
+VPS, c'est une machine virtuelle sans virtualisation imbriquée.
+
+« Atteignables » est ce que la configuration permet. Ce que la machine **tient réellement** est
+une autre question, et c'est celle que l'étape « Exercer les niveaux d'isolation » pose en
+compilant `sandboxd` et en lançant pour de vrai. C'est la seule réponse qui compte.
 
 La cause de l'étape sautée était dans le workflow, pas sur la machine :
 `install-isolation.sh gvisor` répond à deux questions — installer gVisor, et signaler la
