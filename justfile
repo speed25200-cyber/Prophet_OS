@@ -49,6 +49,12 @@ probe-host:
 verify-levels:
     ./tools/verify-on-host.sh --niveaux
 
+# Construit le support d'amorçage à graver sur une clé USB.
+iso:
+    nix build .#iso --print-build-logs
+    @echo "image : $(readlink -f result)/iso/"
+    @ls -lh $(readlink -f result)/iso/*.iso
+
 # Tests NixOS en machine virtuelle.
 test-vm:
     @echo "pas encore disponible (M9)" && exit 2

@@ -102,8 +102,8 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 - [x] M9-T2 — Noyau (2026-09-12, 24b8338) — exigences noyau documentées et conséquences d'une absence
 - [x] M9-T3 — Immuabilité et A/B (2026-09-12, 24b8338) — racine A/B, bascule automatique
 - [x] M9-T4 — Chiffrement (2026-09-12, 24b8338) — LUKS2, TPM avec repli par phrase de passe
-- [ ] ⛔ M9-T5 — Installeur — bloqué : exige Nix et la virtualisation
-- [ ] ⛔ M9-T6 — Démo M9 — bloqué : exige une image construite
+- [x] M9-T5 — Installeur (2026-09-12) — `image/installateur/prophet-installer.sh` : partitionnement GPT, LUKS2 sur l'état et les données, deux racines A/B, montage. Exercé en intégration continue sur un disque en boucle, y compris ses refus
+- [ ] ⛔ M9-T6 — Démo M9 — bloqué : exige une image construite et démarrée en machine virtuelle
 
 ### M10 — browser-bridge et SUP v0
 

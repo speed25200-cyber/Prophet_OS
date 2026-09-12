@@ -19,12 +19,11 @@
     extraPackages = with pkgs; [ mesa amdvlk intel-media-driver vulkan-loader ];
   };
 
-  # Les modules NVIDIA propriétaires ne se chargent pas sous `lockdown=integrity` ; c'est le
-  # module noyau ouvert qui est utilisé, quand il est disponible.
-  hardware.nvidia = lib.mkDefault {
-    open = true;
-    modesetting.enable = true;
-  };
+  # Les modules NVIDIA propriétaires ne se chargent pas sous `lockdown=integrity`. Rien n'est
+  # déclaré ici : `hardware.nvidia` est un ensemble d'options, et lui affecter un attributaire
+  # enveloppé dans `lib.mkDefault` n'est pas une assignation valide — c'était la seconde raison
+  # pour laquelle la configuration refusait d'évaluer. Une machine à NVIDIA ajoutera le module
+  # ouvert dans sa propre configuration, en connaissance de cause.
 
   # Stockage : NVMe pour le cache de poids et les snapshots.
   boot.initrd.availableKernelModules = [ "nvme" "xhci_pci" "ahci" "usb_storage" "sd_mod" ];

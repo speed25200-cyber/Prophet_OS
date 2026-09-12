@@ -17,10 +17,11 @@
 
   # Secure Boot avec les clés du projet, remplaçables par celles de l'utilisateur : une machine
   # dont le propriétaire ne peut pas changer les clés ne lui appartient pas vraiment.
-  boot.lanzaboote = lib.mkDefault {
-    enable = false; # activé par l'installeur une fois les clés enrôlées
-    pkiBundle = "/var/lib/sbctl";
-  };
+  #
+  # `boot.lanzaboote` vient d'un flake externe qui n'est pas dans nos entrées. Le déclarer ici
+  # empêchait toute évaluation de la configuration — défaut invisible tant que l'image n'était pas
+  # construite, et qui est apparu au premier essai. Le Secure Boot reste à faire : il exige
+  # d'ajouter lanzaboote aux entrées du flake et d'enrôler les clés depuis l'installeur.
 
   # --- Racine immuable ---
   # NixOS rend déjà /nix/store immuable ; on ferme ce qui reste.
@@ -34,6 +35,14 @@
   # repart sur l'autre emplacement.
   systemd.targets.boot-complete.wantedBy = [ "multi-user.target" ];
   boot.initrd.systemd.enable = true;
+
+  # La partition d'amorçage, que l'installeur étiquette. Sans elle, systemd-boot n'a nulle part
+  # où écrire ses entrées.
+  fileSystems."/boot" = lib.mkDefault {
+    device = "/dev/disk/by-label/PROPHET-BOOT";
+    fsType = "vfat";
+    options = [ "fmask=0077" "dmask=0077" ];
+  };
 
   # --- Données, chiffrées ---
   fileSystems."/home" = lib.mkDefault {

@@ -25,6 +25,16 @@
           { prophet.enable = true; }
         ];
       };
+
+      # Le support d'amorçage. Il porte sa propre source : ce qu'on installe est ce qu'on a
+      # gravé, et non ce qui se trouvera sur GitHub au moment de l'installation.
+      nixosConfigurations.prophet-iso = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [
+          ./image/modules/iso.nix
+          { prophet.installateur.source = self; }
+        ];
+      };
     }
     // flake-utils.lib.eachDefaultSystem (system:
       let
@@ -53,14 +63,24 @@
           };
         };
 
-        packages.default = pkgs.rustPlatform.buildRustPackage {
-          pname = "prophet-os";
-          version = "0.1.0";
-          src = ./.;
-          cargoLock.lockFile = ./Cargo.lock;
-          # Les tests d'intégration exigent des espaces de noms et un navigateur ; ils tournent
-          # par `just test-privileged`, pas pendant la construction du paquet.
-          doCheck = false;
+        packages = {
+          default = pkgs.rustPlatform.buildRustPackage {
+            pname = "prophet-os";
+            version = "0.1.0";
+            src = ./.;
+            cargoLock.lockFile = ./Cargo.lock;
+            # Les tests d'intégration exigent des espaces de noms et un navigateur ; ils tournent
+            # par `just test-privileged`, pas pendant la construction du paquet.
+            doCheck = false;
+          };
+        }
+        # `nix build .#iso` produit le fichier à graver. L'attribut n'existe que sur
+        # x86_64-linux : construire une image amorçable pour une architecture depuis une autre
+        # exige une émulation qu'on n'a pas mise en place, et annoncer une cible qu'on ne sait
+        # pas produire serait la même faute que promettre une isolation qu'on ne sait pas mettre
+        # en place. Absent vaut mieux que présent et cassé.
+        // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          iso = self.nixosConfigurations.prophet-iso.config.system.build.isoImage;
         };
       });
 }

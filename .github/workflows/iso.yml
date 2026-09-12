@@ -1,0 +1,178 @@
+# Construit le support d'amorçage de Prophet OS, et exerce l'installeur avant de le livrer.
+#
+# Deux travaux, dans cet ordre de valeur. L'installeur est le programme le plus dangereux du
+# projet : il formate un disque entier. Il est donc exercé pour de vrai — sur un disque en boucle,
+# avec partitionnement, chiffrement LUKS2, systèmes de fichiers et montage — avant qu'une image
+# qui le contient ne soit publiée. Une ISO dont l'installeur n'a jamais tourné ne vaut rien.
+
+name: Support d'amorçage
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "image/**"
+      - ".github/workflows/iso.yml"
+  workflow_dispatch:
+
+jobs:
+  # --- L'installeur, exercé sur un disque factice ---
+  installeur:
+    name: Installeur sur disque en boucle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Outils de disque
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get -y -qq install gdisk cryptsetup-bin btrfs-progs dosfstools parted
+
+      - name: Un disque de 100 Gio, creux
+        id: disque
+        run: |
+          # Creux : le fichier n'occupe que ce que les systèmes de fichiers y écrivent vraiment,
+          # soit quelques centaines de mégaoctets, et non cent gigaoctets.
+          truncate -s 100G /tmp/disque.img
+          BOUCLE=$(sudo losetup --find --show --partscan /tmp/disque.img)
+          echo "boucle=$BOUCLE" >> "$GITHUB_OUTPUT"
+          echo "disque factice : $BOUCLE"
+
+      - name: Refuser sans confirmation
+        run: |
+          # La première propriété à vérifier n'est pas qu'il formate, c'est qu'il refuse.
+          BOUCLE='${{ steps.disque.outputs.boucle }}'
+          if printf 'nimporte quoi\n' | sudo ./image/installateur/prophet-installer.sh \
+               --disque "$BOUCLE" --jusqu-au-montage 2>&1 | tee /tmp/refus.txt; then
+            echo "::error::l'installeur a accepté une confirmation qui ne correspondait pas"
+            exit 1
+          fi
+          grep -q "confirmation refusée" /tmp/refus.txt \
+            || { echo "::error::le refus n'a pas été motivé"; cat /tmp/refus.txt; exit 1; }
+          # Et surtout : rien ne doit avoir été écrit.
+          if sudo sgdisk --print "$BOUCLE" 2>/dev/null | grep -qE "^ +[0-9]+ "; then
+            echo "::error::des partitions existent alors que la confirmation a été refusée"
+            exit 1
+          fi
+          echo "refus correct, disque intact"
+
+      - name: Refuser un disque trop petit
+        run: |
+          truncate -s 40G /tmp/petit.img
+          PETIT=$(sudo losetup --find --show --partscan /tmp/petit.img)
+          if printf '%s\n' "$PETIT" | sudo ./image/installateur/prophet-installer.sh \
+               --disque "$PETIT" --jusqu-au-montage 2>&1 | tee /tmp/petit.txt; then
+            echo "::error::un disque de 40 Gio a été accepté"
+            exit 1
+          fi
+          grep -q "il en faut au moins 80" /tmp/petit.txt \
+            || { echo "::error::le refus n'a pas dit la taille attendue"; cat /tmp/petit.txt; exit 1; }
+          sudo losetup -d "$PETIT"
+          echo "refus correct"
+
+      - name: Préparer le disque pour de vrai
+        run: |
+          BOUCLE='${{ steps.disque.outputs.boucle }}'
+          # La confirmation puis la phrase de passe, deux fois : exactement ce qu'un humain tape.
+          printf '%s\nphrase-de-passe-de-test\nphrase-de-passe-de-test\n' "$BOUCLE" \
+            | sudo ./image/installateur/prophet-installer.sh --disque "$BOUCLE" --jusqu-au-montage
+
+      - name: Vérifier ce qui a été posé
+        run: |
+          BOUCLE='${{ steps.disque.outputs.boucle }}'
+          echo "--- disposition ---"
+          lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT "$BOUCLE"
+          echo "--- étiquettes attendues par immutable.nix ---"
+          manque=0
+          for etiquette in prophet-a prophet-b PROPHET-BOOT; do
+            if lsblk -no LABEL "$BOUCLE" | grep -qx "$etiquette"; then
+              echo "  ✓ $etiquette"
+            else
+              echo "  ✗ $etiquette absente"; manque=1
+            fi
+          done
+          # Les volumes chiffrés portent leur étiquette dans l'en-tête LUKS2, pas dans un système
+          # de fichiers : c'est par elle qu'immutable.nix les désigne.
+          for nom in prophet-state prophet-home; do
+            if sudo cryptsetup luksDump "$(sudo blkid -t PARTLABEL="$nom" -o device)" \
+                 | grep -q "Label:.*${nom}-luks"; then
+              echo "  ✓ ${nom}-luks (en-tête LUKS2)"
+            else
+              echo "  ✗ ${nom}-luks absente de l'en-tête"; manque=1
+            fi
+          done
+          echo "--- montages ---"
+          for point in /mnt /mnt/boot /mnt/home /mnt/var/lib/prophet; do
+            if mountpoint -q "$point"; then echo "  ✓ $point"; else echo "  ✗ $point"; manque=1; fi
+          done
+          [ "$manque" = "0" ] || { echo "::error::la disposition ne correspond pas à immutable.nix"; exit 1; }
+          echo "la disposition correspond à ce que le système attend au démarrage"
+
+      - name: Ranger
+        if: always()
+        run: |
+          sudo umount -R /mnt 2>/dev/null || true
+          sudo cryptsetup close prophet-home 2>/dev/null || true
+          sudo cryptsetup close prophet-state 2>/dev/null || true
+          sudo losetup -D 2>/dev/null || true
+
+  # --- L'image elle-même ---
+  iso:
+    name: Construire l'ISO
+    needs: installeur
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Faire de la place
+        # Une image amorçable et son magasin Nix ne tiennent pas dans ce qu'un coureur laisse
+        # libre par défaut.
+        run: |
+          echo "avant : $(df -h / | awk 'NR==2{print $4}') libres"
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean
+          echo "après : $(df -h / | awk 'NR==2{print $4}') libres"
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+            max-jobs = auto
+
+      - name: Évaluer la configuration avant de construire
+        # Évaluer coûte des secondes, construire coûte une heure. Une option mal écrite doit
+        # arrêter le travail au début, pas à la fin.
+        run: |
+          nix eval --raw .#nixosConfigurations.prophet-iso.config.system.build.isoImage.drvPath
+          echo
+          echo "évaluation de la configuration installée (celle que l'installeur posera) :"
+          nix eval --raw .#nixosConfigurations.prophet.config.system.build.toplevel.drvPath
+
+      - name: Construire l'image
+        run: nix build .#iso --print-build-logs
+
+      - name: Ce qui a été produit
+        id: image
+        run: |
+          CHEMIN=$(readlink -f result)/iso
+          FICHIER=$(ls "$CHEMIN"/*.iso | head -1)
+          NOM=$(basename "$FICHIER")
+          cp "$FICHIER" "./$NOM"
+          sha256sum "$NOM" | tee "$NOM.sha256"
+          ls -lh "$NOM"
+          echo "nom=$NOM" >> "$GITHUB_OUTPUT"
+
+      - name: Publier l'image
+        uses: actions/upload-artifact@v4
+        with:
+          name: prophet-os-iso
+          path: |
+            *.iso
+            *.iso.sha256
+          retention-days: 30
+          compression-level: 0
