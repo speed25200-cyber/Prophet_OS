@@ -210,6 +210,21 @@ Les trois ont un test qui échoue sur le code d'avant : trois dans `crates/proph
   l'installeur demande son mot de passe **avant** d'écrire quoi que ce soit sur le disque, refuse
   en dessous de huit caractères, et ne pose que le haché, en `0600`
 
+### Ce qui rendait l'ISO non reproductible (12 septembre 2026)
+
+- [x] `flake.nix` suivait la **branche** `nixos-unstable`, et le dépôt n'a pas de `flake.lock`.
+  Deux gravures de la même ISO à quinze jours d'écart installaient donc deux systèmes différents,
+  et un travail d'intégration continue vert la veille pouvait être rouge le lendemain sans qu'une
+  ligne du dépôt ait changé. Pour un système qu'on installe après avoir formaté son disque, « ce
+  qu'on installe est ce qu'on a gravé » est la propriété qui permet de revenir en arrière.
+  Épinglé à `8ce4ef6`, la révision du canal du 12 septembre — celle contre laquelle tout est vert
+- [x] Le travail `services` échouait à l'étape qui rend `/dev/kvm` ouvrable, **après** l'avoir
+  rendu ouvrable : il demandait la cible `microvm`, qui installe aussi Firecracker et interroge
+  l'API de GitHub, laquelle répond `403` sur un coureur partagé quand la limite est atteinte. Une
+  cible `kvm` existe maintenant pour ceux qui veulent seulement faire tourner une machine
+  virtuelle, et la recherche de version de Firecracker se rabat sur la redirection de
+  `releases/latest` quand l'API se tait
+
 ### Le système installé, démarré pour la première fois (12 septembre 2026)
 
 M9-T6 a montré le **support d'amorçage** démarrer. Ce que ce support installe est une autre

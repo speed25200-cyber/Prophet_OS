@@ -8,8 +8,15 @@
 # Usage :
 #   sudo ./tools/install-isolation.sh gvisor    # niveau 1
 #   sudo ./tools/install-isolation.sh microvm   # niveau 2 — exige /dev/kvm
+#   sudo ./tools/install-isolation.sh kvm       # l'accès à /dev/kvm, et rien d'autre
 #   sudo ./tools/install-isolation.sh userns    # lève la restriction AppArmor, si autorisé
 #   sudo ./tools/install-isolation.sh all
+#
+# `kvm` existe pour ceux qui veulent seulement **faire tourner** une machine virtuelle vite — les
+# tests NixOS, par exemple. Demander `microvm` pour cela revenait à demander aussi Firecracker et
+# ses images d'invité, donc un appel à l'API de GitHub ; sur un coureur partagé, cet appel est
+# limité en fréquence et répond `403`. Le travail échouait alors après avoir obtenu l'accès à
+# `/dev/kvm` qu'il était venu chercher, pour une raison qui ne le concernait pas.
 #
 # Idempotent : ce qui est déjà là n'est pas réinstallé.
 
@@ -83,9 +90,29 @@ installer_firecracker() {
     return 0
   fi
   local tag url tmp
-  tag=$(curl -fsSL https://api.github.com/repos/firecracker-microvm/firecracker/releases/latest \
-        | grep -m1 '"tag_name"' | cut -d'"' -f4)
-  [ -z "$tag" ] && { ko "version de Firecracker introuvable"; return 1; }
+  # L'API de GitHub limite les requêtes anonymes par adresse. Sur un coureur partagé, la limite
+  # est souvent déjà atteinte par quelqu'un d'autre : la requête répond `403` et la version
+  # cherchée arrive vide. Le jeton du travail, quand il existe, lève la limite ; sinon on suit la
+  # redirection de `releases/latest`, qui n'est pas une requête d'API et n'est pas comptée.
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    tag=$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+          https://api.github.com/repos/firecracker-microvm/firecracker/releases/latest \
+          | grep -m1 '"tag_name"' | cut -d'"' -f4)
+  else
+    tag=$(curl -fsSL https://api.github.com/repos/firecracker-microvm/firecracker/releases/latest \
+          | grep -m1 '"tag_name"' | cut -d'"' -f4)
+  fi
+  if [ -z "$tag" ]; then
+    # `releases/latest` sans API : GitHub redirige vers l'URL de la version, dont le dernier
+    # segment est l'étiquette. On lit l'en-tête de redirection plutôt que de rien faire.
+    tag=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+          https://github.com/firecracker-microvm/firecracker/releases/latest 2>/dev/null \
+          | sed 's#.*/tag/##')
+  fi
+  case "$tag" in
+    v*) : ;;
+    *) ko "version de Firecracker introuvable (API et redirection muettes)"; return 1 ;;
+  esac
   url="https://github.com/firecracker-microvm/firecracker/releases/download/${tag}/firecracker-${tag}-${ARCH}.tgz"
   tmp=$(mktemp -d)
   curl -fsSL "$url" -o "$tmp/fc.tgz" || { ko "téléchargement de Firecracker ${tag} impossible"; rm -rf "$tmp"; return 1; }
@@ -235,10 +262,20 @@ RESULTAT=0
 case "$CIBLE" in
   gvisor)  installer_gvisor || RESULTAT=1; echo; traiter_la_restriction || RESULTAT=1 ;;
   microvm) installer_microvm || RESULTAT=1 ;;
+  # L'accès à l'hyperviseur, et rien d'autre : ni Firecracker, ni images, ni récapitulatif des
+  # niveaux, qui n'apprendrait rien à qui ne cherche qu'à démarrer une machine virtuelle.
+  kvm)
+    if [ ! -e /dev/kvm ]; then
+      ko "/dev/kvm absent : cette machine ne sait pas faire tourner de machine virtuelle accélérée"
+      exit 1
+    fi
+    traiter_l_acces_kvm || exit 1
+    exit 0
+    ;;
   userns)  traiter_la_restriction || RESULTAT=1 ;;
   all)     installer_gvisor || RESULTAT=1; echo; installer_microvm || RESULTAT=1
            echo; traiter_la_restriction || RESULTAT=1 ;;
-  *) echo "cible inconnue : $CIBLE (attendues : gvisor, microvm, userns, all)" >&2; exit 2 ;;
+  *) echo "cible inconnue : $CIBLE (attendues : gvisor, microvm, kvm, userns, all)" >&2; exit 2 ;;
 esac
 
 echo
