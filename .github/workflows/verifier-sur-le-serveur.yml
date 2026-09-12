@@ -17,6 +17,19 @@
 name: Vérifier Prophet OS sur le serveur
 
 on:
+  # Une sonde, et rien d'autre.
+  #
+  # Ce travail se connecte, regarde, et repart. Il n'écrit rien, n'installe rien, n'arrête rien.
+  # Il existe pour une raison précise : tant que le secret `VPS_PASSWORD` n'est pas posé, personne
+  # ne sait si ce chemin fonctionne — et le découvrir au moment où l'on veut arrêter un moteur de
+  # production est le pire moment.
+  #
+  # Tout ce qui modifie la machine est dans l'autre travail, qui ne se déclenche qu'à la main.
+  # La séparation est structurelle, pas conditionnelle : une poussée ne peut pas atteindre ces
+  # étapes, quels que soient les paramètres.
+  push:
+    paths:
+      - ".github/workflows/verifier-sur-le-serveur.yml"
   workflow_dispatch:
     inputs:
       root_password:
@@ -44,7 +57,66 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # --- Regarder, sans rien toucher ---
+  sonde:
+    name: Ce que le serveur offre
+    runs-on: ubuntu-latest
+    env:
+      VPS: ${{ vars.VPS_HOST || '178.104.191.79' }}
+    steps:
+      - name: Outils de connexion
+        run: sudo apt-get update -qq && sudo apt-get -y -qq install sshpass
+
+      - name: Se connecter et regarder
+        env:
+          PW_SECRET: ${{ secrets.VPS_PASSWORD }}
+          PW_INPUT: ${{ inputs.root_password }}
+        run: |
+          set -u
+          if [ -n "${PW_SECRET:-}" ]; then MDP="$PW_SECRET"
+          elif [ -n "${PW_INPUT:-}" ]; then MDP="$PW_INPUT"
+          else
+            echo "::warning::aucun identifiant : posez le secret VPS_PASSWORD (Settings → Secrets and variables → Actions)."
+            echo "La sonde ne peut rien regarder sans lui. Rien d'autre n'est requis de votre part."
+            exit 0
+          fi
+          SSHOPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+          essai() { timeout 25 sshpass -p "$1" ssh $SSHOPTS "root@$VPS" "echo __ok__" 2>/dev/null | grep -q __ok__; }
+          # Hetzner impose un changement à la première connexion. Le dépôt Hermes documente que son
+          # propre outillage a fait tourner le mot de passe vers « <original>.Hermes1 » ; les deux
+          # formes sont donc essayées, et aucune autre.
+          if essai "$MDP"; then RETENU="$MDP"
+          elif essai "${MDP}.Hermes1"; then RETENU="${MDP}.Hermes1"
+          else
+            echo "::error::connexion refusée. Si le mot de passe a changé depuis, mettez à jour le secret VPS_PASSWORD."
+            exit 1
+          fi
+          echo "::add-mask::$RETENU"
+          export SSHPASS="$RETENU"
+
+          sshpass -e ssh $SSHOPTS "root@$VPS" 'bash -s' <<'DISTANT'
+            echo "hote    : $(hostname)"
+            echo "systeme : $(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME")"
+            echo "noyau   : $(uname -r)"
+            echo "memoire : $(awk '/MemTotal/{printf "%d Mio", $2/1024}' /proc/meminfo), echange $(awk '/SwapTotal/{printf "%d Mio", $2/1024}' /proc/meminfo)"
+            echo "disque  : $(df -h / | awk 'NR==2{print $4" libres"}')"
+            echo "kvm     : $([ -e /dev/kvm ] && echo present || echo absent)"
+            echo "userns  : $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 'pas de restriction')"
+            echo "rust    : $(command -v cargo >/dev/null && cargo --version || echo absent)"
+            echo "gvisor  : $(command -v runsc >/dev/null && echo present || echo absent)"
+            echo
+            echo "hermes  : intact — cette sonde n'a rien touché"
+          DISTANT
+          echo
+          echo "La connexion fonctionne. Pour agir sur la machine, déclenchez ce workflow à la main"
+          echo "(onglet Actions), ce qui exige qu'il soit sur la branche par défaut."
+
   verifier:
+    name: Préparer et vérifier la machine
+    # Jamais sur une poussée. La garde est ici, sur le travail entier, plutôt que répétée sur
+    # chaque étape : une condition oubliée sur une seule étape suffirait à faire ce qu'on voulait
+    # empêcher.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       VPS: ${{ vars.VPS_HOST || '178.104.191.79' }}

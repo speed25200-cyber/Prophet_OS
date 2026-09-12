@@ -15,6 +15,21 @@ Le workflow `.github/workflows/verifier-sur-le-serveur.yml` est donc l'endroit o
 sur matériel réel peut avoir lieu — comme c'est déjà le cas pour gVisor et Firecracker, vérifiés
 par le job `isolation` de l'intégration continue.
 
+## Ce qu'il reste à faire, et par qui
+
+| | Qui | Pourquoi pas moi |
+|---|---|---|
+| Poser le secret `VPS_PASSWORD` | **vous** | Un agent ne doit pas écrire un mot de passe dans un dépôt, un commit, ni un champ qu'il remplit lui-même |
+| Porter le workflow sur `main` | **vous** | GitHub refuse `workflow_dispatch` pour un fichier absent de la branche par défaut : son API répond 404 |
+
+Le premier suffit pour que la **sonde** tourne — elle se connecte, regarde, et repart sans rien
+toucher. Elle part à chaque poussée touchant le workflow, et dit si le chemin fonctionne. Le
+découvrir au moment où l'on veut arrêter un moteur de production serait le pire moment.
+
+Le second est nécessaire pour **agir** : arrêter Hermes, installer, vérifier. Ce travail-là ne
+part jamais sur une poussée, et la garde est posée sur le travail entier plutôt que sur chaque
+étape — une condition oubliée sur une seule étape suffirait à faire ce qu'on voulait empêcher.
+
 ## Les deux choses à faire, une fois
 
 Elles demandent toutes deux la main d'un humain. La première pour une raison de plateforme, la
