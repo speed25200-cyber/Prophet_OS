@@ -9,47 +9,14 @@
 //! n'accepte. On attend donc qu'une connexion aboutisse *et* qu'un appel réponde.
 
 use std::path::Path;
-use std::process::{Child, Command};
-use std::time::{Duration, Instant};
 
-use prophet_ipc::Client;
+use prophet_daemon::essai::Daemon;
 use serde_json::json;
 
-/// Un daemon lancé pour la durée d'un test, tué à la fin quoi qu'il arrive.
-struct Daemon(Child);
-
-impl Drop for Daemon {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
+const PROGRAMME: &str = env!("CARGO_BIN_EXE_prophet-capd");
 
 fn lancer(socket: &Path, etat: &Path) -> Daemon {
-    let enfant = Command::new(env!("CARGO_BIN_EXE_prophet-capd"))
-        .env("PROPHET_SOCKET", socket)
-        .env("STATE_DIRECTORY", etat)
-        .env("RUST_LOG", "warn")
-        .spawn()
-        .expect("prophet-capd doit pouvoir être lancé");
-    Daemon(enfant)
-}
-
-/// Attend que le daemon réponde, et non qu'il paraisse prêt.
-async fn joindre(socket: &Path) -> Client {
-    let limite = Instant::now() + Duration::from_secs(10);
-    let mut derniere = String::new();
-    while Instant::now() < limite {
-        match Client::connect(socket).await {
-            Ok(client) => match client.call("ping", json!({})).await {
-                Ok(_) => return client,
-                Err(e) => derniere = format!("connecté, mais ping a échoué : {}", e.message),
-            },
-            Err(e) => derniere = format!("connexion impossible : {e}"),
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    panic!("le daemon n'a pas répondu en 10 s — {derniere}");
+    Daemon::lancer(PROGRAMME, socket, etat)
 }
 
 #[tokio::test]
@@ -57,9 +24,9 @@ async fn le_daemon_repond_sur_son_socket() {
     let temp = tempfile::tempdir().expect("répertoire temporaire");
     let socket = temp.path().join("capd.sock");
     let etat = temp.path().join("etat");
-    let _daemon = lancer(&socket, &etat);
+    let daemon = lancer(&socket, &etat);
 
-    let client = joindre(&socket).await;
+    let client = daemon.joindre().await;
 
     let pong = client.call("ping", json!({})).await.expect("ping");
     assert_eq!(pong, json!("pong"));
@@ -89,8 +56,8 @@ async fn le_daemon_repond_sur_son_socket() {
 async fn une_methode_inconnue_est_refusee_et_nommee() {
     let temp = tempfile::tempdir().expect("répertoire temporaire");
     let socket = temp.path().join("capd.sock");
-    let _daemon = lancer(&socket, &temp.path().join("etat"));
-    let client = joindre(&socket).await;
+    let daemon = lancer(&socket, &temp.path().join("etat"));
+    let client = daemon.joindre().await;
 
     let erreur = client
         .call("cap.tout_autoriser", json!({}))
@@ -110,8 +77,8 @@ async fn trancher_une_approbation_inconnue_ne_fabrique_rien() {
     // que personne n'a accordé.
     let temp = tempfile::tempdir().expect("répertoire temporaire");
     let socket = temp.path().join("capd.sock");
-    let _daemon = lancer(&socket, &temp.path().join("etat"));
-    let client = joindre(&socket).await;
+    let daemon = lancer(&socket, &temp.path().join("etat"));
+    let client = daemon.joindre().await;
 
     let erreur = client
         .call(
@@ -141,8 +108,8 @@ async fn la_cle_survit_a_un_redemarrage_et_reste_illisible_par_les_autres() {
     let etat = temp.path().join("etat");
 
     let premiere = {
-        let _daemon = lancer(&socket, &etat);
-        let client = joindre(&socket).await;
+        let daemon = lancer(&socket, &etat);
+        let client = daemon.joindre().await;
         client.call("cap.public_key", json!({})).await.expect("clé")["key"]
             .as_str()
             .expect("une chaîne")
@@ -157,8 +124,8 @@ async fn la_cle_survit_a_un_redemarrage_et_reste_illisible_par_les_autres() {
     assert_eq!(mode, 0o600, "la clé de signature ne se partage pas");
 
     // Le socket du premier daemon a été retiré à sa mort ; le second en pose un neuf.
-    let _daemon = lancer(&socket, &etat);
-    let client = joindre(&socket).await;
+    let daemon = lancer(&socket, &etat);
+    let client = daemon.joindre().await;
     let seconde = client.call("cap.public_key", json!({})).await.expect("clé")["key"]
         .as_str()
         .expect("une chaîne")
@@ -188,8 +155,8 @@ fn jeton_forge() -> serde_json::Value {
 async fn un_jeton_signe_par_un_autre_n_accorde_rien() {
     let temp = tempfile::tempdir().expect("répertoire temporaire");
     let socket = temp.path().join("capd.sock");
-    let _daemon = lancer(&socket, &temp.path().join("etat"));
-    let client = joindre(&socket).await;
+    let daemon = lancer(&socket, &temp.path().join("etat"));
+    let client = daemon.joindre().await;
 
     let decision = client
         .call(
@@ -222,8 +189,8 @@ async fn un_controle_sans_jeton_ne_passe_pas_pour_un_refus_ordinaire() {
     // appliquée.
     let temp = tempfile::tempdir().expect("répertoire temporaire");
     let socket = temp.path().join("capd.sock");
-    let _daemon = lancer(&socket, &temp.path().join("etat"));
-    let client = joindre(&socket).await;
+    let daemon = lancer(&socket, &temp.path().join("etat"));
+    let client = daemon.joindre().await;
 
     let erreur = client
         .call(
