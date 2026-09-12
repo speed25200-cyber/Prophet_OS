@@ -36,8 +36,14 @@ connaissance de cause, ce qui suppose que tout y soit.
 **Aucune tâche n'est planifiée.** Une tâche qui démarrerait sans jeton agirait sans qu'aucune
 capacité ne la borne. Le refus nomme la cause.
 
-## Limite connue
+## Persistance
 
-Les tâches vivent en mémoire. Un redémarrage du service les perd — le journal en garde la trace,
-mais rien ne les reconstruit encore. À traiter avant qu'une machine ne soit laissée sans
-surveillance.
+Les tâches et leurs jetons sont écrits dans `/var/lib/prophet/agentd/taches.json`, en mode 0600 —
+un fichier de jetons ne se partage pas. L'écriture passe par un fichier voisin puis un renommage,
+pour qu'un arrêt au mauvais moment ne laisse pas un fichier tronqué.
+
+Un état illisible **ne bloque pas le démarrage** : le daemon le signale et repart à vide. Refuser
+de démarrer emporterait bien plus que les tâches en cours.
+
+Les jetons repris ne sont pas revalidés : un jeton périmé le reste, et `capd` le refusera au
+premier contrôle. C'est lui qui décide, pas `agentd`.

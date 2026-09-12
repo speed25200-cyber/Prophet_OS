@@ -160,7 +160,7 @@ corrigées, et la liste est dans `docs/reports/phase0.md`.
   seulement la sortie. Un `capd` injoignable ferme la sortie
 - [x] `prophet-sandboxd` — un niveau que la machine ne tient pas est refusé, jamais abaissé
 - [x] `prophet-agentd` — demande ses jetons à `capd` et pousse son journal vers `ledger` ; il
-  n'émet ni n'écrit lui-même
+  n'émet ni n'écrit lui-même. Ses tâches survivent à un redémarrage, écriture atomique en 0600
 - [x] `surface::reel` — la surface lit `agentd`, `capd` et `sandboxd` au lieu d'afficher une scène
   d'exemple. Un daemon muet vide sa part du champ plutôt que de laisser la précédente : montrer
   d'anciennes tâches comme si elles couraient encore serait faux *et* crédible

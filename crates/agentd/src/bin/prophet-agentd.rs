@@ -14,8 +14,8 @@
 
 use std::sync::Arc;
 
-use agentd::Runtime;
 use agentd::runtime::PlanRequest;
+use agentd::{EtatPersistant, Runtime};
 use prophet_daemon as commun;
 use prophet_ipc::{Client, Error, ErrorCode, Handler, PeerIdentity, Server};
 use prophet_types::cap::{Grant, Token};
@@ -29,6 +29,8 @@ struct Agents {
     runtime: Mutex<Runtime>,
     capd: std::path::PathBuf,
     ledger: std::path::PathBuf,
+    /// Où l'état est écrit entre deux démarrages.
+    etat: std::path::PathBuf,
     pairs: commun::Pairs,
 }
 
@@ -89,6 +91,7 @@ impl Handler for Agents {
                         )
                         .map_err(runtime_erreur)?
                 };
+                self.enregistrer().await;
                 self.vider_le_journal().await;
                 tracing::info!(tache = %id, pilote = %plan.choice.reference, "tâche planifiée");
                 commun::repondre(&plan)
@@ -120,6 +123,7 @@ impl Handler for Agents {
                         .cancel(&id, None, &mut aucun, maintenant)
                         .map_err(runtime_erreur)?;
                 }
+                self.enregistrer().await;
                 self.vider_le_journal().await;
                 tracing::info!(tache = %id, "tâche annulée");
                 Ok(json!({ "cancelled": id }))
@@ -165,6 +169,23 @@ impl Agents {
                 format!("jeton illisible rendu par capd : {e}"),
             )
         })
+    }
+
+    /// Écrit l'état sur disque, pour qu'un redémarrage ne l'efface pas.
+    ///
+    /// L'écriture passe par un fichier temporaire puis un renommage : un `systemctl restart` au
+    /// mauvais moment laisserait sinon un fichier tronqué, et le daemon suivant refuserait de
+    /// démarrer sur un état qu'il ne sait pas lire — perdant tout au lieu d'une écriture.
+    async fn enregistrer(&self) {
+        let etat = {
+            let runtime = self.runtime.lock().await;
+            runtime.etat()
+        };
+        if let Err(erreur) = ecrire(&self.etat, &etat) {
+            // Bruyant, mais non fatal : la tâche existe et tourne. Ce qui est perdu, c'est la
+            // capacité à la retrouver après un redémarrage.
+            tracing::error!(%erreur, chemin = %self.etat.display(), "état non enregistré");
+        }
     }
 
     /// Pousse les événements accumulés vers le journal.
@@ -217,6 +238,44 @@ fn optionnel<T: serde::de::DeserializeOwned>(
     }
 }
 
+/// Écriture atomique : un fichier voisin, puis un renommage.
+fn ecrire(chemin: &std::path::Path, etat: &EtatPersistant) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    if let Some(parent) = chemin.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let provisoire = chemin.with_extension("tmp");
+    std::fs::write(
+        &provisoire,
+        serde_json::to_vec_pretty(etat).map_err(std::io::Error::other)?,
+    )?;
+    // Les jetons sont des capacités : le fichier ne se partage pas.
+    std::fs::set_permissions(&provisoire, std::fs::Permissions::from_mode(0o600))?;
+    std::fs::rename(&provisoire, chemin)
+}
+
+/// Relit l'état d'un démarrage précédent.
+///
+/// Un fichier absent est normal — premier démarrage. Un fichier illisible ne l'est pas : on le
+/// signale et on repart vide, plutôt que de refuser de démarrer. Un daemon qui ne démarre plus
+/// parce qu'il n'arrive pas à relire son état ferait perdre bien plus que les tâches en cours.
+fn relire(chemin: &std::path::Path) -> EtatPersistant {
+    match std::fs::read(chemin) {
+        Err(erreur) if erreur.kind() == std::io::ErrorKind::NotFound => EtatPersistant::default(),
+        Err(erreur) => {
+            tracing::error!(%erreur, chemin = %chemin.display(), "état illisible, départ à vide");
+            EtatPersistant::default()
+        }
+        Ok(octets) => match serde_json::from_slice(&octets) {
+            Ok(etat) => etat,
+            Err(erreur) => {
+                tracing::error!(%erreur, chemin = %chemin.display(), "état corrompu, départ à vide");
+                EtatPersistant::default()
+            }
+        },
+    }
+}
+
 fn lire<T: serde::de::DeserializeOwned>(params: &Value, nom: &str) -> Result<T, Error> {
     let brut = params
         .get(nom)
@@ -252,6 +311,15 @@ async fn main() -> anyhow::Result<()> {
     let capd = chemin("PROPHET_CAPD_SOCKET", "capd");
     let ledger = chemin("PROPHET_LEDGER_SOCKET", "ledger");
 
+    let fichier_etat = commun::etat("agentd").join("taches.json");
+    let repris = relire(&fichier_etat);
+    let nombre = repris.taches.len();
+    let mut runtime = Runtime::sans_broker(&maison);
+    runtime.reprendre(repris);
+    if nombre > 0 {
+        tracing::info!(nombre, "tâches reprises du démarrage précédent");
+    }
+
     let serveur = Server::bind(&socket)?;
     tracing::info!(
         socket = %socket.display(),
@@ -262,9 +330,10 @@ async fn main() -> anyhow::Result<()> {
 
     serveur
         .serve(Arc::new(Agents {
-            runtime: Mutex::new(Runtime::sans_broker(&maison)),
+            runtime: Mutex::new(runtime),
             capd,
             ledger,
+            etat: fichier_etat,
             pairs: commun::Pairs::detecter()?,
         }))
         .await?;

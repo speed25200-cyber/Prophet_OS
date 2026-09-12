@@ -141,6 +141,19 @@ pub struct Report {
     pub reason: Option<String>,
 }
 
+/// Ce qu'un runtime doit retenir d'un démarrage à l'autre.
+///
+/// Sans cela, redémarrer `prophet-agentd` — une mise à jour, un plantage, un simple
+/// `systemctl restart` — effacerait toutes les tâches en cours. L'écran se viderait, `prophet task
+/// ls` dirait « aucune tâche », et le travail en cours continuerait sans que rien ne le surveille.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EtatPersistant {
+    /// Les tâches connues.
+    pub taches: Vec<Task>,
+    /// Leurs jetons, indexés par tâche.
+    pub jetons: BTreeMap<String, Token>,
+}
+
 /// Le runtime.
 pub struct Runtime {
     /// Le broker, quand le runtime émet lui-même les jetons.
@@ -201,6 +214,30 @@ impl Runtime {
     pub const fn quota_policy(mut self, policy: QuotaPolicy) -> Self {
         self.quota_policy = policy;
         self
+    }
+
+    /// L'état persistable du runtime : les tâches et leurs jetons.
+    ///
+    /// Le journal n'en fait pas partie : il est poussé vers `ledger` au fur et à mesure, et le
+    /// conserver ici le ferait écrire deux fois.
+    #[must_use]
+    pub fn etat(&self) -> EtatPersistant {
+        EtatPersistant {
+            taches: self.tasks.values().cloned().collect(),
+            jetons: self.tokens.clone(),
+        }
+    }
+
+    /// Reprend un état écrit par [`Runtime::etat`].
+    ///
+    /// Ce que cette fonction ne fait pas : elle ne revalide pas les jetons. Un jeton périmé le
+    /// reste, et `capd` le refusera au premier contrôle — c'est lui qui décide, pas nous. Le
+    /// reconstituer ici serait se donner un droit qu'on n'a pas.
+    pub fn reprendre(&mut self, etat: EtatPersistant) {
+        for tache in etat.taches {
+            self.tasks.insert(tache.id.clone(), tache);
+        }
+        self.tokens.extend(etat.jetons);
     }
 
     /// Événements journalisés.

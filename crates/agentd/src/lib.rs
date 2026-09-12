@@ -15,5 +15,5 @@ pub mod runtime;
 pub mod task;
 
 pub use budget::{Budget, Dimension, Limits, Spent};
-pub use runtime::{Runtime, RuntimeError, TaskPlan};
+pub use runtime::{EtatPersistant, Runtime, RuntimeError, TaskPlan};
 pub use task::{State, Task, TaskError};

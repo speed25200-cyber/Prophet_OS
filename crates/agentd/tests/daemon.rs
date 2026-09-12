@@ -237,3 +237,97 @@ async fn annuler_une_tache_inconnue_ne_fabrique_rien() {
         .expect_err("une tâche inexistante ne s'annule pas");
     assert_eq!(erreur.code, prophet_ipc::ErrorCode::NotFound);
 }
+
+#[tokio::test]
+async fn un_redemarrage_ne_perd_pas_les_taches() {
+    // Sans persistance, un `systemctl restart` — une mise à jour, un plantage — effacerait tout ce
+    // qui tourne. L'écran se viderait, `prophet task ls` dirait « aucune tâche », et le travail en
+    // cours continuerait sans que rien ne le surveille.
+    let temp = tempfile::tempdir().expect("répertoire temporaire");
+    let socket_capd = temp.path().join("capd.sock");
+    let socket_agentd = temp.path().join("agentd.sock");
+    let etat_agentd = temp.path().join("etat-agentd");
+
+    let capd = Daemon::lancer(
+        binaire_voisin("prophet-capd").to_str().expect("chemin"),
+        &socket_capd,
+        &temp.path().join("etat-capd"),
+    );
+    drop(capd.joindre().await);
+
+    let socket_ledger = temp.path().join("ledger.sock");
+    let environnement = [
+        ("PROPHET_CAPD_SOCKET", socket_capd.to_str().expect("chemin")),
+        (
+            "PROPHET_LEDGER_SOCKET",
+            socket_ledger.to_str().expect("chemin"),
+        ),
+        ("PROPHET_HOME", temp.path().to_str().expect("chemin")),
+    ];
+
+    {
+        let agentd = Daemon::lancer_avec(AGENTD, &socket_agentd, &etat_agentd, &environnement);
+        let agents = agentd.joindre().await;
+        agents
+            .call("task.spawn", demande("task:persistante"))
+            .await
+            .expect("une tâche se crée");
+    }
+
+    // Le fichier d'état ne se partage pas : il contient des jetons de capacité.
+    use std::os::unix::fs::PermissionsExt as _;
+    let mode = std::fs::metadata(etat_agentd.join("taches.json"))
+        .expect("l'état est écrit")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(
+        mode, 0o600,
+        "un fichier de jetons ne se lit pas par tout le monde"
+    );
+
+    let agentd = Daemon::lancer_avec(AGENTD, &socket_agentd, &etat_agentd, &environnement);
+    let agents = agentd.joindre().await;
+    let liste = agents
+        .call("task.list", json!({}))
+        .await
+        .expect("la liste se lit");
+    let liste = liste.as_array().expect("une liste");
+    assert_eq!(
+        liste.len(),
+        1,
+        "la tâche doit avoir survécu au redémarrage : {liste:?}"
+    );
+    assert_eq!(liste[0]["id"], "task:persistante");
+    assert_eq!(
+        liste[0]["state"], "planned",
+        "et retrouver son état, pas seulement son nom"
+    );
+}
+
+#[tokio::test]
+async fn un_etat_corrompu_ne_bloque_pas_le_demarrage() {
+    // Un daemon qui refuserait de démarrer parce qu'il n'arrive pas à relire son état ferait
+    // perdre bien plus que les tâches en cours : il emporterait tout le reste avec lui.
+    let temp = tempfile::tempdir().expect("répertoire temporaire");
+    let etat = temp.path().join("etat");
+    std::fs::create_dir_all(&etat).expect("répertoire");
+    std::fs::write(etat.join("taches.json"), b"{ ceci n'est pas du JSON").expect("écriture");
+
+    let agentd = Daemon::lancer_avec(
+        AGENTD,
+        &temp.path().join("agentd.sock"),
+        &etat,
+        &[
+            ("PROPHET_CAPD_SOCKET", "/nulle/part/capd.sock"),
+            ("PROPHET_LEDGER_SOCKET", "/nulle/part/ledger.sock"),
+            ("PROPHET_HOME", temp.path().to_str().expect("chemin")),
+        ],
+    );
+    let agents = agentd.joindre().await;
+    let liste = agents
+        .call("task.list", json!({}))
+        .await
+        .expect("le daemon sert malgré un état illisible");
+    assert_eq!(liste.as_array().map(Vec::len), Some(0));
+}
