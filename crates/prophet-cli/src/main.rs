@@ -438,11 +438,20 @@ fn home() -> std::path::PathBuf {
         .unwrap_or_else(|_| std::path::PathBuf::from("/root"))
 }
 
+/// Combien de temps on laisse à un service pour répondre à une sonde.
+///
+/// `prophet status` doit rendre la main. Un service qui met plus de deux secondes à dire qu'il est
+/// là est, du point de vue de celui qui regarde son écran, un service en panne — et l'afficher
+/// ainsi est plus utile qu'une invite qui ne revient jamais.
+const DELAI_DE_SONDE: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Lesquels des services répondent, et pourquoi les autres ne répondent pas.
 ///
-/// Un `ping` sur chaque socket. C'est peu, mais c'est la seule chose qui distingue « le service
-/// est déclaré » de « le service sert » — et l'histoire de ce dépôt montre que confondre les deux
-/// coûte cher.
+/// On parle à chacun, on ne regarde pas si son fichier de socket existe — c'est la seule chose qui
+/// distingue « le service est déclaré » de « le service sert », et l'histoire de ce dépôt montre
+/// que confondre les deux coûte cher.
+///
+/// Chacun est interrogé **dans sa langue**. Six parlent JSON-RPC ; `egress` est un proxy HTTP.
 fn services() -> Vec<(String, Option<String>)> {
     [
         "capd", "ledger", "vault", "egress", "sandboxd", "memoryd", "agentd",
@@ -450,26 +459,88 @@ fn services() -> Vec<(String, Option<String>)> {
     .into_iter()
     .map(|nom| {
         let socket = prophet_ipc::socket_path(nom);
-        (nom.to_owned(), repond(&socket).err())
+        (nom.to_owned(), repond(nom, &socket).err())
     })
     .collect()
 }
 
-/// Le service répond-il ? On lui parle, on ne regarde pas si son fichier existe.
-fn repond(socket: &std::path::Path) -> Result<(), String> {
+/// Le service répond-il, dans le délai qu'on lui laisse ?
+fn repond(nom: &str, socket: &std::path::Path) -> Result<(), String> {
+    let egress = nom == "egress";
+    sous_delai(async move {
+        if egress {
+            sonde_http(socket).await
+        } else {
+            sonde_jsonrpc(socket).await
+        }
+    })
+}
+
+/// Un `ping` JSON-RPC, la langue des six daemons.
+async fn sonde_jsonrpc(socket: &std::path::Path) -> Result<(), String> {
+    let client = prophet_ipc::Client::connect(socket)
+        .await
+        .map_err(|_| "socket injoignable".to_owned())?;
+    client
+        .call("ping", serde_json::json!({}))
+        .await
+        .map(|_| ())
+        .map_err(|e| e.message.clone())
+}
+
+/// `egress` ne parle pas JSON-RPC : c'est un proxy HTTP.
+///
+/// Lui envoyer un `ping` JSON-RPC revient à lui envoyer une requête HTTP tronquée. Il attend la
+/// ligne vide qui termine les en-têtes ; elle ne vient jamais, et personne n'est en faute — le
+/// proxy fait exactement son travail. C'est `prophet status` qui ne rendait plus la main, quinze
+/// minutes durant, sans rien afficher du tout. Une commande d'état qui se tait est pire qu'une
+/// commande d'état qui annonce une panne : elle n'apprend rien et elle bloque le terminal.
+///
+/// On lui parle donc sa langue. La requête n'a pas de jeton : elle est refusée par un `407` avant
+/// que rien ne sorte de la machine. La sonde prouve ainsi davantage qu'un `pong` — que la règle
+/// « rien ne sort d'ici sans qu'on sache pour qui » est bien en place.
+async fn sonde_http(socket: &std::path::Path) -> Result<(), String> {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let mut flux = tokio::net::UnixStream::connect(socket)
+        .await
+        .map_err(|_| "socket injoignable".to_owned())?;
+    flux.write_all(
+        b"GET http://sonde.prophet.invalid/ HTTP/1.1\r\nHost: sonde.prophet.invalid\r\n\r\n",
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut tete = [0u8; 64];
+    let lus = flux.read(&mut tete).await.map_err(|e| e.to_string())?;
+    let tete = String::from_utf8_lossy(&tete[..lus]);
+    // Le code exact compte : un proxy qui laisserait passer une requête sans jeton répondrait
+    // autre chose, et ce serait une panne bien plus grave qu'un silence.
+    if tete.starts_with("HTTP/1.1 407") {
+        Ok(())
+    } else {
+        Err(format!(
+            "refus 407 attendu pour une requête sans jeton, obtenu : {}",
+            tete.lines().next().unwrap_or("(rien)")
+        ))
+    }
+}
+
+/// Exécute un échange avec un daemon, et abandonne s'il dure trop.
+///
+/// Le délai est posé ici, une fois, plutôt que dans chaque appel : un seul appel oublié suffirait
+/// à rendre `prophet status` inutilisable, et c'est exactement ce qui est arrivé.
+fn sous_delai<T>(
+    travail: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, String> {
     let execution = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
     execution.block_on(async {
-        let client = prophet_ipc::Client::connect(socket)
+        tokio::time::timeout(DELAI_DE_SONDE, travail)
             .await
-            .map_err(|_| "socket injoignable".to_owned())?;
-        client
-            .call("ping", serde_json::json!({}))
-            .await
-            .map(|_| ())
-            .map_err(|e| e.message.clone())
+            .map_err(|_| format!("pas de réponse en {} s", DELAI_DE_SONDE.as_secs()))?
     })
 }
 
@@ -489,11 +560,7 @@ fn socket_agentd() -> std::path::PathBuf {
 /// panne : sur une machine où rien ne tourne, `prophet log` et `prophet task show` restent utiles
 /// parce qu'ils lisent des fichiers.
 fn taches_en_cours(socket: &std::path::Path) -> Result<Vec<agentd::Task>, String> {
-    let execution = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| e.to_string())?;
-    execution.block_on(async {
+    sous_delai(async {
         let client = prophet_ipc::Client::connect(socket)
             .await
             .map_err(|_| format!("agentd ne répond pas sur {}", socket.display()))?;
@@ -503,6 +570,125 @@ fn taches_en_cours(socket: &std::path::Path) -> Result<Vec<agentd::Task>, String
             .map_err(|e| e.message.clone())?;
         serde_json::from_value(brut).map_err(|e| format!("réponse illisible : {e}"))
     })
+}
+
+#[cfg(test)]
+mod sondes {
+    //! Ce que `prophet status` doit à celui qui la tape : revenir.
+    //!
+    //! La commande a bloqué quinze minutes dans le test en machine virtuelle, sans rien afficher.
+    //! La cause n'était pas une panne : `egress` est un proxy HTTP, on lui parlait JSON-RPC, et il
+    //! attendait sagement la fin d'en-têtes qui ne viendraient jamais. Les deux fautes sont ici.
+
+    use std::io::{BufRead as _, Read as _, Write as _};
+    use std::os::unix::net::UnixListener;
+    use std::path::Path;
+
+    /// Lance un faux service qui accepte une connexion, lit ce qu'on lui envoie, et répond ce
+    /// qu'on lui a dit de répondre. Rend ce qu'il a reçu.
+    fn faux_service(
+        socket: &Path,
+        reponse: Option<&'static str>,
+    ) -> std::sync::mpsc::Receiver<String> {
+        let ecoute = UnixListener::bind(socket).expect("socket d'essai");
+        let (envoi, reception) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let Ok((mut flux, _)) = ecoute.accept() else {
+                return;
+            };
+            let mut lecteur = std::io::BufReader::new(flux.try_clone().expect("duplication"));
+            let mut premiere = String::new();
+            let _ = lecteur.read_line(&mut premiere);
+            let _ = envoi.send(premiere);
+            match reponse {
+                Some(texte) => {
+                    let _ = flux.write_all(texte.as_bytes());
+                }
+                // Le silence : exactement ce que faisait `egress` devant un `ping` JSON-RPC.
+                None => {
+                    let mut poubelle = Vec::new();
+                    let _ = flux.read_to_end(&mut poubelle);
+                }
+            }
+        });
+        reception
+    }
+
+    /// Appelle `repond` sans risquer de suspendre la suite de tests elle-même.
+    ///
+    /// Le défaut qu'on vérifie ici est un blocage : un test qui l'attendrait sur son propre fil
+    /// bloquerait à son tour, et un test bloqué n'est pas un test qui échoue.
+    fn repond_en_temps_borne(nom: &'static str, socket: &Path) -> Result<(), String> {
+        let socket = socket.to_path_buf();
+        let (envoi, reception) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = envoi.send(super::repond(nom, &socket));
+        });
+        reception
+            .recv_timeout(std::time::Duration::from_secs(15))
+            .expect("la sonde doit rendre la main bien avant quinze secondes")
+    }
+
+    #[test]
+    fn un_service_muet_est_declare_muet_au_lieu_de_suspendre_la_commande() {
+        let temp = tempfile::tempdir().expect("répertoire temporaire");
+        let socket = temp.path().join("muet.sock");
+        let _recu = faux_service(&socket, None);
+
+        let erreur = repond_en_temps_borne("capd", &socket)
+            .expect_err("un service qui ne répond pas n'est pas un service qui va bien");
+        assert!(
+            erreur.contains("pas de réponse"),
+            "et le motif doit être le délai, pas autre chose : {erreur}"
+        );
+    }
+
+    #[test]
+    fn egress_est_interroge_en_http_et_non_en_json_rpc() {
+        // C'est toute la correction : `egress` est un proxy. Le `407` qu'il rend à une requête
+        // sans jeton prouve davantage qu'un `pong` — que rien ne sort sans qu'on sache pour qui.
+        let temp = tempfile::tempdir().expect("répertoire temporaire");
+        let socket = temp.path().join("egress.sock");
+        let recu = faux_service(
+            &socket,
+            Some("HTTP/1.1 407 Prophet\r\nContent-Length: 0\r\n\r\n"),
+        );
+
+        repond_en_temps_borne("egress", &socket).expect("un 407 est la bonne réponse");
+
+        let demande = recu.recv().expect("la sonde a parlé");
+        assert!(
+            demande.starts_with("GET http://"),
+            "la sonde doit envoyer une requête HTTP, obtenu : {demande:?}"
+        );
+        assert!(
+            !demande.contains("jsonrpc"),
+            "et surtout pas du JSON-RPC, qui est précisément ce qui la faisait bloquer : {demande:?}"
+        );
+    }
+
+    #[test]
+    fn un_proxy_qui_laisse_passer_une_requete_sans_jeton_n_est_pas_sain() {
+        // Le piège serait de se contenter d'« une réponse est arrivée ». Un proxy qui répond `200`
+        // à une requête sans jeton a laissé sortir quelque chose, et l'annoncer comme sain serait
+        // pire que de le dire muet.
+        let temp = tempfile::tempdir().expect("répertoire temporaire");
+        let socket = temp.path().join("egress.sock");
+        let _recu = faux_service(
+            &socket,
+            Some("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"),
+        );
+
+        let erreur = repond_en_temps_borne("egress", &socket).expect_err("200 n'est pas un refus");
+        assert!(erreur.contains("407"), "{erreur}");
+    }
+
+    #[test]
+    fn un_socket_absent_se_dit_tout_de_suite() {
+        let erreur = repond_en_temps_borne("capd", Path::new("/nulle/part/capd.sock"))
+            .expect_err("rien n'écoute là");
+        assert!(erreur.contains("injoignable"), "{erreur}");
+    }
 }
 
 #[cfg(test)]

@@ -56,6 +56,21 @@ suivrait.
 
 Dans un tunnel `CONNECT`, une demande d'injection est **refusée**, pas ignorée (ADR-0007).
 
+## Comment `prophet status` le sonde
+
+Les six autres daemons répondent `pong` à un `ping` JSON-RPC. Celui-ci est un proxy : un `ping`
+JSON-RPC est, pour lui, une requête HTTP tronquée, et il attend sagement la ligne vide qui termine
+les en-têtes. Elle ne vient jamais. `prophet status` a bloqué ainsi quinze minutes dans le test en
+machine virtuelle, sans rien afficher — le proxy n'était pas en faute, la sonde l'était.
+
+La sonde lui parle donc sa langue : une requête **sans jeton**, refusée par `407` avant que rien ne
+sorte de la machine. Elle prouve davantage qu'un `pong` — que la règle « rien ne sort d'ici sans
+qu'on sache pour qui » est en place. Un `200` à cette requête serait signalé comme une panne, et
+non comme un service en bonne santé.
+
+Toutes les sondes de `prophet status` ont un délai de deux secondes. Une commande d'état qui ne
+rend pas la main n'apprend rien et bloque le terminal.
+
 ## Limites
 
 - Un corps plus grand que 8 Mio est refusé plutôt que relayé sans être regardé : un corps qu'on ne
