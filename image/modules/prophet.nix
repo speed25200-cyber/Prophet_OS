@@ -219,17 +219,29 @@ in
           # le gestionnaire ; celui de la sandbox borne la tâche. Les confondre revenait à
           # borner le gardien avec les règles du prisonnier.
           #
-          # `~@resources` reste : rien n'autorise ce service à changer les priorités ou les
-          # limites du système. `~@obsolete` et `~@reboot` ferment ce que ni lui ni personne
-          # n'a à faire ici.
+          # Ce qui est ajouté, et pourquoi chaque morceau :
+          #
+          # - `@mount` : monter la racine minimale de la sandbox, puis `pivot_root`. Absent de
+          #   `@system-service`, donc à demander explicitement.
+          # - `@privileged` : `setuid`, `setgid`, `setgroups` pour projeter les identifiants, et
+          #   `capset` pour retirer à l'enfant ce qu'il ne doit pas garder.
+          #
+          # Ce qui en est aussitôt retiré est plus long que ce qui est ajouté, et c'est voulu.
+          # `@privileged` est un fourre-tout : il contient de quoi charger un module, changer
+          # l'heure, arrêter la machine ou lire la mémoire d'un autre processus. Rien de cela
+          # n'est le travail de ce service, et un service qui peut charger un module noyau rend
+          # tout le reste décoratif.
           SystemCallFilter = lib.mkForce [
             "@system-service"
             "@mount"
             "@privileged"
-            "~@resources"
-            "~@obsolete"
+            "~@resources" # ni priorités, ni limites, ni cgroups du système
+            "~@module" # charger un module noyau rendrait tout le reste décoratif
+            "~@debug" # ptrace et lecture de la mémoire d'autrui
+            "~@clock" # `ProtectClock` le dit déjà ; le filtre le redit
             "~@reboot"
             "~@swap"
+            "~@obsolete"
           ];
           # `RestrictSUIDSGID` implique `NoNewPrivileges`, que ce service désactive juste
           # au-dessus. Les laisser tous deux revient à demander une chose et son contraire.

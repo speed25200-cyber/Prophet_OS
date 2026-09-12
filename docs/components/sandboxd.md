@@ -51,6 +51,12 @@ Elle s'est vue en toutes lettres au premier démarrage sous systemd :
 confinement impossible : écriture de uid_map : Operation not permitted
 ```
 
+Son filtre ajoute donc `@mount` — monter la racine minimale, puis `pivot_root` — et
+`@privileged` — `setuid`, `setgid`, `setgroups`, `capset`. Ce qui en est aussitôt retiré est plus
+long que ce qui est ajouté : `@privileged` est un fourre-tout qui contient de quoi charger un
+module noyau, changer l'heure, arrêter la machine ou lire la mémoire d'un autre processus. Un
+service capable de charger un module rendrait tout le reste décoratif.
+
 Ce que cela n'élargit **pas** : la sandbox. Le filtre qu'une tâche subit est posé par `sandboxd`
 dans son enfant, après le confinement, et il est bien plus étroit. Le filtre du service borne le
 gestionnaire ; celui de la sandbox borne la tâche. Les confondre revenait à borner le gardien avec
