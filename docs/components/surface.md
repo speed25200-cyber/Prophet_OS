@@ -1,15 +1,14 @@
-# `prophet-surface` — surface d'observation
+# `prophet-surface` — espace de travail natif
 
 - **Affichage** : `cage -s` sur `/dev/tty7`, sans gestionnaire de session ni de fenêtres ; `tty1` reste à la connexion
 - **Utilisateur** : `surface`, groupes `video input render prophet-system`
 - **Lit** : `agentd` (tâches), `capd` (décisions), `sandboxd` (isolation)
 - **Crate** : `crates/surface`
 
-Ce que la machine montre en s'allumant. Un champ de courants : chaque tâche est un filament qui
-traverse l'écran, à la vitesse de son débit d'étapes, et dont la clarté dit ce qui reste de budget.
-Rien n'y est décoratif — si une particule bouge, c'est qu'une étape a été franchie.
-
-Pas de barre de navigation : une barre de navigation suppose qu'on navigue.
+La surface propose un accueil, une conversation en flux, une sélection de modèle et les tâches
+des services. La saisie, le presse-papiers, le défilement et les événements d'accessibilité passent
+par egui/winit ; wgpu dessine l'interface. La sculpture dorée de l'accueil est décorative. Les
+compteurs viennent du moteur et des services, et les réponses du modèle sélectionné.
 
 ## Ce qu'elle montre, et ce qu'elle ne montre pas
 
@@ -17,15 +16,24 @@ Elle lit le système. Quand un daemon ne répond pas, **sa part du champ se vide
 d'isolation dit pourquoi. Elle ne garde pas la dernière image connue : l'écran montrerait des
 tâches en train de courir alors que plus rien ne tourne — faux, et crédible, la pire combinaison.
 
-Une scène d'exemple reste accessible par `--demonstration` ou `--capture`, pour une revue ou une
-capture. Jamais par défaut, et jamais en remplacement d'une panne.
+Une scène d'exemple reste accessible par `--demonstration`, avec ce mot inscrit dans l'image.
+`--capture` seul ne fabrique plus de tâches. `--observation` conserve l'ancien renderer pour ses
+tests visuels. Les commandes de capture et de démarrage figurent dans le README du crate.
 
 ## Interaction
 
-Deux touches, et c'est tout : <kbd>Entrée</kbd> accepte la décision montrée, <kbd>Échap</kbd> la
-refuse. La réponse part vers `capd`, sur un fil séparé pour qu'un broker lent ne gèle pas l'écran.
-Un échec de transmission est journalisé en erreur : une décision humaine perdue est exactement ce
-qu'un système d'approbation ne doit jamais faire en silence.
+Ctrl+Entrée envoie une demande au moteur choisi ; Entrée seule insère une ligne. La conversation
+se déroule sur un fil réseau séparé, reste navigable pendant la génération et dispose d'une
+interruption. Les réponses partielles restent marquées comme telles. La nouvelle conversation
+écarte les événements tardifs de la précédente. Les décisions capd ont des boutons explicites.
+Une erreur de transmission d'approbation est encore journalisée ; son acquittement visible dans
+l'interface reste à intégrer.
+
+Le modèle doit déjà être servi sur une adresse HTTP de boucle locale, configurable avec
+`--endpoint` ou `PROPHET_MODEL_ENDPOINT`. Le service systemd permet la boucle locale et refuse
+les autres adresses IP. La conversation directe n'expose pas d'outils système. Le téléchargement,
+le démarrage des modèles, la persistance des conversations et le parcours agentique complet
+restent à raccorder. Voir l'ADR 0008 et les exigences FRONTIER.
 
 Une seule décision est montrée à la fois, la plus ancienne. Faire patienter quelqu'un est déjà
 désagréable ; changer d'avis sur ce qu'on lui demande pendant qu'il patiente le serait davantage.

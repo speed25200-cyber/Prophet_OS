@@ -43,4 +43,5 @@ Les défauts de sécurité connus restent bloquants avant de confier des donnée
 
 Le 12 septembre : le client local a passé une génération avec un modèle Qwen3 réel et une écriture
 de fichier décidée par le modèle. Cela valide le pilote, pas encore la chaîne installée entière.
-Le raccordement MCP/agentd et l'interface de commande restent les prochains travaux.
+Le transport en flux et l'espace natif de conversation sont maintenant implémentés. Le raccordement
+de cette interface à l'exécution agentique complète via MCP/agentd reste à réaliser.

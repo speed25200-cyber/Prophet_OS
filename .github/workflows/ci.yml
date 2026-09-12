@@ -110,12 +110,16 @@ jobs:
       - name: Exercer la surface
         run: cargo test -p surface --release -- --ignored --test-threads=1 --nocapture
 
-      - name: Capturer les deux états
+      - name: Capturer les états et les tailles de l'espace natif
         run: |
           cargo run --release -p surface --bin prophet-surface -- \
-            --capture surface-contemplation.png
+            --capture surface-contemplation.png --demonstration
           cargo run --release -p surface --bin prophet-surface -- \
-            --capture surface-decision.png --decision
+            --capture surface-decision.png --demonstration --decision
+          cargo run --release -p surface --bin prophet-surface -- \
+            --capture surface-compacte.png --largeur 1280 --hauteur 720 --demonstration
+          cargo run --release -p surface --bin prophet-surface -- \
+            --capture surface-modele-absent.png --page modeles --endpoint http://127.0.0.1:1/v1
           ls -lh surface-*.png
 
       - name: Publier les images

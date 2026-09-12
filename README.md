@@ -24,6 +24,16 @@ Le pilote local parle maintenant à un vrai serveur d'inférence. Une boucle ave
 appel d'outil et fichier vérifié, a été exercée ; le [rapport reproductible](docs/reports/local-inference-2026-09-12.md)
 précise ce que cet essai prouve et ce qu'il ne prouve pas.
 
+L'espace natif permet de choisir ce modèle, d'écrire une demande, de recevoir sa réponse en flux,
+de copier le texte et d'interrompre la génération. Il comprend aussi les tâches et décisions des
+services. Les conversations restent en mémoire pendant la session ; le cycle de vie des moteurs
+et l'exécution agentique complète sont encore en cours d'intégration. Voir le
+[guide de l'espace natif](crates/surface/README.md).
+
+![Espace natif connecté à un modèle local réel](docs/images/espace-local.png)
+
+Captures, essais Wayland et limites : [rapport de l'espace natif](docs/reports/espace-natif-2026-09-12.md).
+
 ```
 prophet status          # ce que la machine sait faire, et ce qu'elle ne sait pas
 prophet provider ls     # pilotes disponibles et sessions d'abonnement
@@ -34,13 +44,16 @@ prophet task undo <id>  # défaire une tâche déjà validée
 prophet log verify      # vérifier l'intégrité du journal
 ```
 
-### Ce que fait le système, mesuré
+### Anciennes mesures de composants
+
+Ces microtests ne mesurent pas l'OS installé de bout en bout et ne constituent pas une comparaison
+SOTA. Ils sont conservés comme historique ; les essais réels récents sont décrits dans les rapports.
 
 | Propriété | Mesure |
 |---|---|
 | Contrôle de capacité | 11,6 µs par appel, pour 200 µs visés |
 | Démarrage d'une sandbox de niveau 0 | 2,6 ms |
-| Gel d'urgence de toutes les tâches | 124 µs |
+| Ancien microtest de gel | 124 µs ; ne valide pas l'arrêt de tous les processus installés |
 | Observation d'une page web | 1 929 octets, contre environ 900 Ko pour une capture d'écran |
 | Suite adversariale | 20 attaques sur 20 sans conséquence |
 | Démonstration multi-pilotes M8 | contrat exercé avec simulacres ; clients officiels non exécutés |

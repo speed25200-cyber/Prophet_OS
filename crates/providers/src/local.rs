@@ -168,7 +168,7 @@ impl ModelClient for LocalModel {
     }
 }
 
-fn local_endpoint(raw: &str) -> Result<Url, DriverError> {
+pub(crate) fn local_endpoint(raw: &str) -> Result<Url, DriverError> {
     let mut url = Url::parse(raw).map_err(|_| invalid("adresse de moteur local invalide"))?;
     if url.scheme() != "http"
         || !url.username().is_empty()
@@ -218,7 +218,7 @@ fn read_response(response: reqwest::blocking::Response) -> Result<Value, DriverE
     serde_json::from_slice(&bytes).map_err(|_| invalid("le moteur n'a pas rendu de JSON valide"))
 }
 
-fn messages(history: &[Value]) -> Result<Vec<Value>, DriverError> {
+pub(crate) fn messages(history: &[Value]) -> Result<Vec<Value>, DriverError> {
     let mut out = Vec::new();
     let mut pending = None;
     for (index, entry) in history.iter().enumerate() {

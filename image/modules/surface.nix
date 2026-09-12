@@ -124,7 +124,11 @@ in
         ProtectKernelTunables = true;
         ProtectKernelModules = true;
         ProtectControlGroups = true;
-        RestrictAddressFamilies = [ "AF_UNIX" ];
+        # Conversation avec le moteur de confiance de la machine uniquement. Les endpoints
+        # distants et les redirections sont aussi refusés par le client HTTP.
+        RestrictAddressFamilies = [ "AF_UNIX" "AF_INET" "AF_INET6" ];
+        IPAddressDeny = "any";
+        IPAddressAllow = "localhost";
         RestrictNamespaces = true;
         SystemCallArchitectures = "native";
         StateDirectory = "prophet-surface";

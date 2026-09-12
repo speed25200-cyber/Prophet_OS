@@ -101,6 +101,9 @@
           env = {
             PROPHET_BROWSER = "${pkgs.chromium}/bin/chromium";
             RUST_BACKTRACE = "1";
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+              pkgs.vulkan-loader pkgs.wayland pkgs.libxkbcommon pkgs.libGL
+            ];
           };
         };
 
@@ -126,15 +129,8 @@
         };
 
         packages = {
-          default = pkgs.rustPlatform.buildRustPackage {
-            pname = "prophet-os";
-            version = "0.1.0";
-            src = ./.;
-            cargoLock.lockFile = ./Cargo.lock;
-            # Les tests d'intégration exigent des espaces de noms et un navigateur ; ils tournent
-            # par `just test-privileged`, pas pendant la construction du paquet.
-            doCheck = false;
-          };
+          # Même paquet et mêmes bibliothèques graphiques dans l'atelier et dans l'image.
+          default = pkgs.callPackage ./image/packages/prophet-os.nix { };
         }
         # `nix build .#iso` produit le fichier à graver. L'attribut n'existe que sur
         # x86_64-linux : construire une image amorçable pour une architecture depuis une autre

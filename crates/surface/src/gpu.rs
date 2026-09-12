@@ -50,6 +50,8 @@ pub struct Contexte {
     pub queue: Arc<wgpu::Queue>,
     /// Nom de l'adaptateur retenu, pour le journal et le diagnostic.
     pub adaptateur: String,
+    /// Configuration choisie parmi les capacités de la fenêtre, si elle existe.
+    pub configuration_surface: Option<wgpu::SurfaceConfiguration>,
 }
 
 impl std::fmt::Debug for Contexte {
@@ -60,7 +62,7 @@ impl std::fmt::Debug for Contexte {
     }
 }
 
-/// Le format de couleur employé partout.
+/// Le format de couleur des captures hors écran.
 ///
 /// `Rgba8UnormSrgb` : les mélanges se font en linéaire et l'écriture finale reconvertit. C'est ce
 /// qui évite les bords grisâtres autour du doré sur fond noir.
@@ -118,6 +120,17 @@ impl Contexte {
 
         let info = adapter.get_info();
         let adaptateur = format!("{} ({:?})", info.name, info.backend);
+        let configuration_surface = if let Some(surface) = surface {
+            let mut configuration = surface
+                .get_default_config(&adapter, 1, 1)
+                .ok_or_else(|| ErreurGpu::Surface("aucune configuration compatible".to_owned()))?;
+            let formats = surface.get_capabilities(&adapter).formats;
+            configuration.format = choisir_format(&formats)?;
+            configuration.present_mode = wgpu::PresentMode::AutoVsync;
+            Some(configuration)
+        } else {
+            None
+        };
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -136,8 +149,18 @@ impl Contexte {
             device: Arc::new(device),
             queue: Arc::new(queue),
             adaptateur,
+            configuration_surface,
         })
     }
+}
+
+fn choisir_format(formats: &[wgpu::TextureFormat]) -> Result<wgpu::TextureFormat, ErreurGpu> {
+    formats
+        .iter()
+        .copied()
+        .find(wgpu::TextureFormat::is_srgb)
+        .or_else(|| formats.first().copied())
+        .ok_or_else(|| ErreurGpu::Surface("aucun format de pixels compatible".to_owned()))
 }
 
 /// Une cible de rendu hors écran, relisible en pixels.
@@ -265,5 +288,20 @@ impl Cible {
         drop(donnees);
         tampon.unmap();
         Ok(image)
+    }
+}
+
+#[cfg(test)]
+mod formats_tests {
+    use super::*;
+    #[test]
+    fn une_fenetre_bgra_ne_recoit_pas_le_format_rgba_des_captures() {
+        use wgpu::TextureFormat::{Bgra8Unorm, Bgra8UnormSrgb};
+        assert_eq!(
+            choisir_format(&[Bgra8Unorm, Bgra8UnormSrgb]).unwrap(),
+            Bgra8UnormSrgb
+        );
+        assert_eq!(choisir_format(&[Bgra8Unorm]).unwrap(), Bgra8Unorm);
+        assert!(choisir_format(&[]).is_err());
     }
 }

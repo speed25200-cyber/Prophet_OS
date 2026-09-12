@@ -101,3 +101,35 @@ fn un_modele_reel_choisit_un_outil_ecrit_et_termine() {
     );
     println!("moteur={model}; note vérifiée; événements={}", events.len());
 }
+
+#[tokio::test]
+#[ignore = "needs_local_model: PROPHET_TEST_MODEL et PROPHET_TEST_ENDPOINT"]
+async fn le_modele_reel_repond_en_flux() {
+    let endpoint = std::env::var("PROPHET_TEST_ENDPOINT").expect("adresse du moteur réel requise");
+    let model = std::env::var("PROPHET_TEST_MODEL").expect("modèle réel requis");
+    let client = providers::stream::ChatClient::new(&endpoint, Duration::from_secs(120)).unwrap();
+    assert!(client.models().await.unwrap().contains(&model));
+    let (_cancel, receiver) = tokio::sync::watch::channel(false);
+    let nonce = format!("prophet-{}", std::process::id());
+    let prompt = format!("Repeat exactly this identifier and nothing else: {nonce}. /no_think");
+    let mut chunks = 0;
+    let completion = client
+        .generate(
+            &model,
+            &[json!({"role":"user","content":prompt})],
+            128,
+            receiver,
+            |_| chunks += 1,
+        )
+        .await
+        .unwrap();
+    assert!(completion.text.contains(&nonce), "{}", completion.text);
+    assert!(chunks > 1);
+    assert!(completion.usage.tokens_out > 0);
+    println!(
+        "moteur={model}; fragments={chunks}; premier_texte_ms={}; total_ms={}; tokens={}",
+        completion.first_token.unwrap().as_millis(),
+        completion.elapsed.as_millis(),
+        completion.usage.tokens_out
+    );
+}

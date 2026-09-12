@@ -46,3 +46,13 @@ Validation complémentaire : `nix develop --command just check` a réussi sous W
 Le test explicite `le_gel_global_arrete_le_processus_possede_par_le_daemon` a aussi réussi :
 après un RPC au daemon, `/proc/PID/status` confirme l'état arrêté d'un vrai processus confiné.
 Cela ne prouve pas encore le gel de tous ses descendants ; le contrôleur cgroup reste à intégrer.
+
+Complément du même jour : le client asynchrone a passé le test réel
+`le_modele_reel_repond_en_flux` avec ce même serveur. Il a reçu 10 fragments, 14 tokens de sortie,
+un premier texte à 316 ms et une réponse complète à 535 ms. La découverte par la CLI retourne
+`qwen3-0.6b` ; une conversation CLI distincte a reçu une réponse et les consommations annoncées
+par le serveur (19 tokens d'entrée, 9 de sortie, 2 031 ms). Le binaire llama.cpp indique
+`0.4.0`, build 10809, commit `5266f24`.
+
+Le [rapport de l'espace natif](espace-natif-2026-09-12.md) contient une capture d'une autre
+génération réelle affichée dans l'interface, ainsi que les vérifications de rendu.

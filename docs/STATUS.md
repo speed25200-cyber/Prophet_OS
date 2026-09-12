@@ -3,8 +3,10 @@
 > Réévaluation du 12 septembre 2026 : les coches historiques ci-dessous décrivent parfois une
 > bibliothèque ou une simulation, pas le parcours installé complet. Les exigences de livraison
 > sont désormais suivies dans [FRONTIER.md](FRONTIER.md). Le moteur local possède un client HTTP
-> concret avec un essai Qwen3/CPU et fichier vérifié ; le raccordement MCP/agentd/interface reste
-> à réaliser. Voir [le rapport d'inférence](reports/local-inference-2026-09-12.md).
+> concret avec un essai Qwen3/CPU et fichier vérifié (`c3b0c08`). La conversation native en flux
+> est implémentée ; son raccordement à l'exécution agentique via MCP/agentd reste à réaliser.
+> Voir [le rapport d'inférence](reports/local-inference-2026-09-12.md) et les
+> [captures et vérifications de l'espace natif](reports/espace-natif-2026-09-12.md).
 
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 
@@ -96,7 +98,7 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 - [x] M8-T4 — Pilote `claude-code` (2026-09-12, 24b8338) — ligne de commande, environnement, détection de session
 - [x] M8-T5 — Pilote `codex` (2026-09-12, 24b8338) — pilote Codex CLI
 - [x] M8-T6 — Pilote `gemini` (2026-09-12, 24b8338) — pilote Gemini CLI
-- [ ] M8-T7 — Moteurs locaux — client HTTP local et essai Qwen3/CPU réalisés ; restent le service de modèles, le raccordement à agentd, le flux, les budgets et la matrice GPU/modèles
+- [ ] M8-T7 — Moteurs locaux — client HTTP, flux annulable, interface de conversation et essai Qwen3/CPU réalisés ; restent le service de modèles, le raccordement à agentd, les budgets de tokens/VRAM et la matrice GPU/modèles
 - [x] M8-T8 — Pilote `prophet-agent` (2026-09-12, 24b8338) — boucle native : points de reprise, fork, rejeu
 - [x] M8-T9 — Sélection de pilote (2026-09-12, 24b8338) — sélection expliquée, confidentialité locale respectée
 - [x] M8-T10 — CLI (2026-09-12, 24b8338) — `prophet provider ls|login`

@@ -1,129 +1,190 @@
-//! Rend la surface d'observation, dans une image.
-//!
-//! La fenêtre viendra ensuite ; ce binaire existe d'abord pour que la surface soit *regardable*
-//! sans écran — en intégration continue, dans une revue, dans un rapport. Une interface qu'on ne
-//! peut montrer qu'en la faisant tourner ne se discute pas et ne se vérifie pas.
+//! L'espace de travail Prophet OS, en fenêtre ou en capture reproductible.
 
+use clap::{Parser, ValueEnum};
 use std::process::ExitCode;
-
-use surface::fenetre::{Reponse, Source};
+use std::time::{Duration, Instant};
+use surface::atelier::Page;
+use surface::bureau::Bureau;
+use surface::fenetre::{Options, Reponse, Source};
 use surface::gpu::{Cible, Contexte};
 use surface::rendu::Rendu;
 use surface::scene::{Courant, Decision, Etat, Isolation, Scene};
 
-fn usage() {
-    eprintln!(
-        "Usage : prophet-surface [--capture FICHIER.png] [options]
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+enum Vue {
+    #[default]
+    Accueil,
+    Conversation,
+    Modeles,
+    Activite,
+}
 
-Sans --capture, ouvre la surface en plein écran sur l'état réel du système. C'est ainsi que
-Prophet OS l'affiche. Les tâches viennent d'agentd, les décisions de capd, l'isolation de
-sandboxd ; si l'un ne répond pas, sa part reste vide plutôt qu'inventée.
-
-  --capture FICHIER    écrire une image au lieu d'ouvrir la fenêtre
-  --largeur N          défaut 1920
-  --hauteur N          défaut 1080
-  --temps SECONDES     instant du champ ; la même valeur donne toujours la même image (défaut 8)
-  --decision           montrer l'état où une décision attend un humain
-  --demonstration      montrer une scène d'exemple au lieu du système réel
-  --aide               ce message"
-    );
+#[derive(Debug, Parser)]
+#[command(about = "Espace de travail natif pour les modèles locaux de Prophet OS")]
+struct Args {
+    /// Écrit une capture PNG au lieu d'ouvrir la fenêtre.
+    #[arg(long)]
+    capture: Option<String>,
+    /// Largeur de la capture.
+    #[arg(long, default_value_t=1920, value_parser=clap::value_parser!(u32).range(640..=7680))]
+    largeur: u32,
+    /// Hauteur de la capture.
+    #[arg(long, default_value_t=1080, value_parser=clap::value_parser!(u32).range(480..=4320))]
+    hauteur: u32,
+    /// Instant de l'animation dans la capture.
+    #[arg(long, default_value_t = 8.0)]
+    temps: f32,
+    /// Utilise des tâches d'exemple clairement identifiées.
+    #[arg(long)]
+    demonstration: bool,
+    /// Ajoute une décision à la scène d'exemple.
+    #[arg(long, requires = "demonstration")]
+    decision: bool,
+    /// Capture l'ancienne surface de courants pour ses tests visuels.
+    #[arg(long, requires = "capture")]
+    observation: bool,
+    /// Ouvre une fenêtre redimensionnable.
+    #[arg(long)]
+    fenetree: bool,
+    /// Adresse HTTP locale, sinon PROPHET_MODEL_ENDPOINT ou 127.0.0.1:8080/v1.
+    #[arg(long)]
+    endpoint: Option<String>,
+    /// Page à ouvrir ou capturer.
+    #[arg(long, value_enum, default_value_t=Vue::Accueil)]
+    page: Vue,
+    /// Modèle réel pour une capture de conversation.
+    #[arg(long, requires = "capture", conflicts_with = "demonstration")]
+    modele: Option<String>,
+    /// Demande réelle à exécuter avant de capturer la conversation.
+    #[arg(long, requires_all=["capture","modele"], conflicts_with_all=["demonstration","observation"])]
+    prompt: Option<String>,
+    /// Fige les animations décoratives.
+    #[arg(long)]
+    mouvement_reduit: bool,
 }
 
 fn main() -> ExitCode {
-    let mut fichier = None;
-    let mut largeur = 1920u32;
-    let mut hauteur = 1080u32;
-    let mut temps = 8.0f32;
-    let mut decision = false;
-    let mut demonstration_demandee = false;
-
-    let mut arguments = std::env::args().skip(1);
-    while let Some(argument) = arguments.next() {
-        match argument.as_str() {
-            "--capture" => fichier = arguments.next(),
-            "--largeur" => {
-                largeur = arguments
-                    .next()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(1920)
-            }
-            "--hauteur" => {
-                hauteur = arguments
-                    .next()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(1080)
-            }
-            "--temps" => temps = arguments.next().and_then(|v| v.parse().ok()).unwrap_or(8.0),
-            "--decision" => decision = true,
-            "--demonstration" => demonstration_demandee = true,
-            "--aide" | "-h" => {
-                usage();
-                return ExitCode::SUCCESS;
-            }
-            autre => {
-                eprintln!("argument inconnu : {autre}");
-                usage();
-                return ExitCode::FAILURE;
-            }
-        }
-    }
-
-    let Some(fichier) = fichier else {
-        // Le mode ordinaire : la surface occupe l'écran, et n'en sort pas.
-        //
-        // Elle montre le système, pas une démonstration. Si les daemons ne répondent pas, le champ
-        // reste vide et la ligne d'isolation dit pourquoi — parce qu'une interface d'observation
-        // qui invente ce qu'elle affiche est pire qu'une interface absente : elle a l'air de dire
-        // quelque chose. La démonstration reste accessible par `--demonstration`, pour une capture
-        // ou une revue.
-        let source: Box<dyn Source> = if demonstration_demandee {
-            Box::new(Demonstration {
-                avec_decision: decision,
-            })
-        } else {
-            Box::new(surface::reel::Reel::demarrer(
-                surface::reel::Sockets::default(),
-            ))
-        };
-        return match surface::fenetre::tenir(source) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(erreur) => {
-                eprintln!("surface impossible à tenir : {erreur}");
-                ExitCode::FAILURE
-            }
-        };
-    };
-
-    match capturer(&fichier, largeur, hauteur, temps, decision) {
-        Ok(adaptateur) => {
-            println!("{fichier} — {largeur}×{hauteur}, rendu par {adaptateur}");
-            ExitCode::SUCCESS
-        }
-        Err(erreur) => {
-            eprintln!("rendu impossible : {erreur}");
+    let args = Args::parse();
+    match executer(args) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("surface : {error}");
             ExitCode::FAILURE
         }
     }
 }
 
-fn capturer(
-    fichier: &str,
-    largeur: u32,
-    hauteur: u32,
-    temps: f32,
-    avec_decision: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
-    let contexte = Contexte::hors_ecran()?;
-    let mut rendu = Rendu::nouveau(&contexte)?;
-    let cible = Cible::nouvelle(&contexte, largeur, hauteur);
+fn executer(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    if !args.temps.is_finite() || args.temps < 0.0 {
+        return Err("instant de capture invalide".into());
+    }
+    let options = Options {
+        endpoint: args
+            .endpoint
+            .clone()
+            .unwrap_or_else(|| Options::default().endpoint),
+        demonstration: args.demonstration,
+        fenetree: args.fenetree,
+        mouvement_reduit: args.mouvement_reduit,
+        page: match args.page {
+            Vue::Accueil => Page::Accueil,
+            Vue::Conversation => Page::Conversation,
+            Vue::Modeles => Page::Modeles,
+            Vue::Activite => Page::Activite,
+        },
+    };
+    let mut source: Box<dyn Source> = if args.demonstration {
+        Box::new(Demonstration {
+            avec_decision: args.decision,
+        })
+    } else {
+        Box::new(surface::reel::Reel::demarrer(
+            surface::reel::Sockets::default(),
+        ))
+    };
+    let Some(path) = &args.capture else {
+        return surface::fenetre::tenir_avec(source, options).map_err(Into::into);
+    };
+    let context = Contexte::hors_ecran()?;
+    let target = Cible::nouvelle(&context, args.largeur, args.hauteur);
+    if args.observation {
+        let mut renderer = Rendu::nouveau(&context)?;
+        let mut scene = source.scene();
+        scene.ordonner();
+        renderer.dessiner(&context, &target, &scene, args.temps)?;
+    } else {
+        let mut bureau = Bureau::nouveau(&context, options.endpoint, args.demonstration);
+        bureau.figer_transitions();
+        bureau.atelier.mouvement_reduit = args.mouvement_reduit;
+        bureau.atelier.decouvrir(&bureau.ctx);
+        attendre(&mut bureau, Duration::from_secs(7), |b| {
+            b.atelier.decouverte
+        })?;
+        if let Some(model) = args.modele {
+            if !bureau.atelier.modeles.contains(&model) {
+                return Err(format!("modèle indisponible : {model}").into());
+            }
+            bureau.atelier.choisi = model;
+        }
+        if let Some(prompt) = args.prompt {
+            bureau.atelier.brouillon = prompt;
+            bureau.atelier.envoyer(&bureau.ctx);
+            attendre(&mut bureau, Duration::from_secs(185), |b| {
+                b.atelier.generation
+            })?;
+            let tour = bureau
+                .atelier
+                .tours
+                .last()
+                .ok_or("la demande n'a pas démarré")?;
+            if let Some(error) = &tour.erreur {
+                return Err(error.clone().into());
+            }
+            println!("réponse du moteur : {}", tour.reponse);
+        } else {
+            bureau.atelier.page = match args.page {
+                Vue::Accueil => Page::Accueil,
+                Vue::Conversation => Page::Conversation,
+                Vue::Modeles => Page::Modeles,
+                Vue::Activite => Page::Activite,
+            };
+        }
+        // Laisser les tailles des panneaux et l'atlas des polices se stabiliser.
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(args.largeur as f32, args.hauteur as f32),
+                )),
+                time: Some(f64::from(args.temps)),
+                ..Default::default()
+            };
+            let (mut output, _) = bureau.composer(input, &source.scene());
+            bureau.rendre(&context, &target, &mut output);
+        }
+    }
+    ecrire_png(path, args.largeur, args.hauteur, &target.pixels(&context)?)?;
+    println!(
+        "{path} — {}×{}, rendu par {}",
+        args.largeur, args.hauteur, context.adaptateur
+    );
+    Ok(())
+}
 
-    let mut scene = demonstration(avec_decision);
-    scene.ordonner();
-    rendu.dessiner(&contexte, &cible, &scene, temps)?;
-
-    let pixels = cible.pixels(&contexte)?;
-    ecrire_png(fichier, largeur, hauteur, &pixels)?;
-    Ok(contexte.adaptateur.clone())
+fn attendre(
+    bureau: &mut Bureau,
+    maximum: Duration,
+    en_cours: impl Fn(&Bureau) -> bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let started = Instant::now();
+    while en_cours(bureau) {
+        if started.elapsed() > maximum {
+            return Err("délai de capture dépassé".into());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+        bureau.atelier.actualiser();
+    }
+    Ok(())
 }
 
 fn ecrire_png(

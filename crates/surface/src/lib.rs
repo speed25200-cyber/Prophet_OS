@@ -2,6 +2,8 @@
 //!
 //! Ce que l'humain voit pendant que les agents travaillent.
 
+pub mod atelier;
+pub mod bureau;
 pub mod depuis;
 pub mod disposition;
 pub mod fenetre;
