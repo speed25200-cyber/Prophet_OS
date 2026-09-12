@@ -480,3 +480,214 @@ async fn un_cadrage_ambigu_ne_sort_pas() {
     laisser_le_temps().await;
     assert_eq!(temoin.jointes(), 0);
 }
+
+/// Monte capd et le coffre, et rend le jeton plus les chemins de leurs sockets.
+struct Chaine {
+    _capd: Daemon,
+    _coffre: Daemon,
+    socket_capd: std::path::PathBuf,
+    socket_coffre: std::path::PathBuf,
+    jeton: serde_json::Value,
+}
+
+async fn chaine(temp: &tempfile::TempDir) -> Chaine {
+    let socket_capd = temp.path().join("capd.sock");
+    let socket_coffre = temp.path().join("vault.sock");
+
+    let capd = Daemon::lancer(
+        prophet_daemon::essai::binaire_voisin("prophet-capd")
+            .to_str()
+            .expect("chemin"),
+        &socket_capd,
+        &temp.path().join("etat-capd"),
+    );
+    let coffre = Daemon::lancer(
+        prophet_daemon::essai::binaire_voisin("prophet-vault")
+            .to_str()
+            .expect("chemin"),
+        &socket_coffre,
+        &temp.path().join("etat-vault"),
+    );
+
+    let client_capd = capd.joindre().await;
+    let jeton = client_capd
+        .call(
+            "cap.mint",
+            json!({
+                "manifest": manifeste(),
+                "grants": [{ "res": "net", "act": "egress", "match": "127.0.0.1" }],
+                "task": "task:injection",
+                "user": "prophet"
+            }),
+        )
+        .await
+        .expect("jeton");
+
+    let client_coffre = coffre.joindre().await;
+    client_coffre
+        .call(
+            "vault.put",
+            json!({
+                "info": {
+                    "name": "essai",
+                    "domains": ["127.0.0.1"],
+                    "header": "Authorization",
+                    "description": "de quoi essayer"
+                },
+                "value": "valeur-que-le-modele-ne-voit-jamais"
+            }),
+        )
+        .await
+        .expect("le secret se dépose");
+
+    Chaine {
+        _capd: capd,
+        _coffre: coffre,
+        socket_capd,
+        socket_coffre,
+        jeton,
+    }
+}
+
+#[tokio::test]
+async fn sans_droit_de_reveler_la_requete_s_arrete_au_lieu_de_partir_avec_la_reference() {
+    // Le test tourne sous un utilisateur qui n'est pas `egress` : le coffre refuse donc de
+    // révéler, ce qui est exactement son travail. Ce qu'on vérifie ici est la conséquence — la
+    // requête ne part pas avec le handle littéral. La laisser partir serait inoffensif (un handle
+    // ne vaut rien sans le coffre) mais la tâche croirait son secret transmis et ne comprendrait
+    // pas l'échec d'authentification qui suivrait.
+    let temp = tempfile::tempdir().expect("répertoire temporaire");
+    let temoin = Temoin::poser().await;
+    let chaine = chaine(&temp).await;
+
+    let socket = temp.path().join("egress.sock");
+    let daemon = Daemon::lancer_avec(
+        EGRESS,
+        &socket,
+        &temp.path().join("etat"),
+        &[
+            (
+                "PROPHET_CAPD_SOCKET",
+                chaine.socket_capd.to_str().expect("chemin"),
+            ),
+            (
+                "PROPHET_VAULT_SOCKET",
+                chaine.socket_coffre.to_str().expect("chemin"),
+            ),
+        ],
+    );
+    daemon.attendre_reponse(SONDE).await;
+
+    let (reponse, corps) = demander_avec_corps(
+        &socket,
+        &format!(
+            "GET http://127.0.0.1:{}/api HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+             Authorization: Bearer prophet-secret:essai\r\n\
+             Proxy-Authorization: Prophet {}\r\n\r\n",
+            temoin.port,
+            base64_json(&chaine.jeton)
+        ),
+    )
+    .await;
+
+    assert!(
+        reponse.contains("403"),
+        "la substitution impossible arrête la requête, obtenu : {reponse} / {corps}"
+    );
+    laisser_le_temps().await;
+    assert_eq!(
+        temoin.jointes(),
+        0,
+        "et rien ne part : ni la valeur, ni la référence"
+    );
+}
+
+#[tokio::test]
+async fn un_secret_destine_a_un_autre_domaine_arrete_la_requete() {
+    let temp = tempfile::tempdir().expect("répertoire temporaire");
+    let temoin = Temoin::poser().await;
+    let chaine = chaine(&temp).await;
+
+    let socket = temp.path().join("egress.sock");
+    let daemon = Daemon::lancer_avec(
+        EGRESS,
+        &socket,
+        &temp.path().join("etat"),
+        &[
+            (
+                "PROPHET_CAPD_SOCKET",
+                chaine.socket_capd.to_str().expect("chemin"),
+            ),
+            (
+                "PROPHET_VAULT_SOCKET",
+                chaine.socket_coffre.to_str().expect("chemin"),
+            ),
+        ],
+    );
+    daemon.attendre_reponse(SONDE).await;
+
+    // Le secret « essai » n'est destiné qu'à 127.0.0.1 ; on vise ici la boucle locale par son nom,
+    // que le motif ne couvre pas.
+    let (reponse, corps) = demander_avec_corps(
+        &socket,
+        &format!(
+            "GET http://localhost:{}/api HTTP/1.1\r\nHost: localhost\r\n\
+             Authorization: Bearer prophet-secret:essai\r\n\
+             Proxy-Authorization: Prophet {}\r\n\r\n",
+            temoin.port,
+            base64_json(&chaine.jeton)
+        ),
+    )
+    .await;
+
+    assert!(reponse.contains("403"), "obtenu : {reponse} / {corps}");
+    laisser_le_temps().await;
+    assert_eq!(temoin.jointes(), 0);
+}
+
+#[tokio::test]
+async fn une_injection_dans_un_tunnel_est_refusee_plutot_que_sans_effet() {
+    // ADR-0007 : le proxy ne voit rien dans un tunnel chiffré. Laisser passer enverrait le handle
+    // littéral au serveur, et la tâche croirait son secret substitué.
+    let temp = tempfile::tempdir().expect("répertoire temporaire");
+    let temoin = Temoin::poser().await;
+    let chaine = chaine(&temp).await;
+
+    let socket = temp.path().join("egress.sock");
+    let daemon = Daemon::lancer_avec(
+        EGRESS,
+        &socket,
+        &temp.path().join("etat"),
+        &[
+            (
+                "PROPHET_CAPD_SOCKET",
+                chaine.socket_capd.to_str().expect("chemin"),
+            ),
+            (
+                "PROPHET_VAULT_SOCKET",
+                chaine.socket_coffre.to_str().expect("chemin"),
+            ),
+        ],
+    );
+    daemon.attendre_reponse(SONDE).await;
+
+    let (reponse, corps) = demander_avec_corps(
+        &socket,
+        &format!(
+            "CONNECT 127.0.0.1:{} HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+             Authorization: Bearer prophet-secret:essai\r\n\
+             Proxy-Authorization: Prophet {}\r\n\r\n",
+            temoin.port,
+            base64_json(&chaine.jeton)
+        ),
+    )
+    .await;
+
+    assert!(reponse.contains("400"), "obtenu : {reponse} / {corps}");
+    assert!(
+        corps.contains("ADR-0007"),
+        "le refus doit dire où la raison est écrite : {corps}"
+    );
+    laisser_le_temps().await;
+    assert_eq!(temoin.jointes(), 0);
+}

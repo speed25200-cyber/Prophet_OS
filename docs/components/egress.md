@@ -39,6 +39,23 @@ lecture ; une approbation qu'on donne cent fois par jour n'est plus une approbat
 on ne sort pas sur un « je ne sais pas ». Le défaut inverse — laisser passer en cas de doute —
 ouvrirait la machine entière au moment précis où elle ne doit pas l'être.
 
+## La substitution de secrets
+
+Un en-tête qui porte `prophet-secret:<nom>` est complété par le coffre **au tout dernier moment**,
+juste avant la sortie — après le contrôle, après la journalisation, après la détection. Ce qui a
+été inspecté et journalisé plus haut ne contenait que des références.
+
+Le coffre ne rend une valeur qu'à ce processus, et il le vérifie lui-même par `SO_PEERCRED`. C'est
+ce qui fait que « le Vault rend des poignées, jamais des valeurs » tient pour tout le reste du
+système, et pas seulement par convention.
+
+Une référence inconnue, interdite pour cet hôte, ou impossible à obtenir **arrête la requête**. La
+laisser partir avec le handle littéral serait inoffensif — un handle ne vaut rien sans le coffre —
+mais la tâche croirait son secret transmis et ne comprendrait pas l'échec d'authentification qui
+suivrait.
+
+Dans un tunnel `CONNECT`, une demande d'injection est **refusée**, pas ignorée (ADR-0007).
+
 ## Limites
 
 - Un corps plus grand que 8 Mio est refusé plutôt que relayé sans être regardé : un corps qu'on ne

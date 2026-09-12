@@ -67,30 +67,15 @@ impl<'a> Injector<'a> {
     }
 
     fn substitute_value(&self, host: &str, value: &str) -> Result<String, InjectionError> {
-        // La référence peut être seule ou précédée d'un schéma, par exemple
-        // `Bearer prophet-secret:github`.
-        let Some(position) = value.find("prophet-secret:") else {
+        let Some(trouvee) = reference_dans(value) else {
             return Ok(value.to_owned());
         };
-        let (prefix, rest) = value.split_at(position);
-        // Le nom s'arrête au premier caractère qui ne peut pas en faire partie. S'arrêter au
-        // premier espace avalerait la ponctuation d'un en-tête composite, par exemple le
-        // point-virgule d'un `Cookie`.
-        let reference_text: String = rest
-            .char_indices()
-            .take_while(|(index, c)| {
-                *index < "prophet-secret:".len()
-                    || c.is_ascii_alphanumeric()
-                    || *c == '-'
-                    || *c == '_'
-                    || *c == '.'
-            })
-            .map(|(_, c)| c)
-            .collect();
-        let Some(reference) = SecretRef::parse(&reference_text) else {
-            return Ok(value.to_owned());
-        };
-        let name = reference.name();
+        let Reference {
+            prefix,
+            name,
+            suffix,
+        } = trouvee;
+        let name = name.as_str();
         if self.vault.info(name).is_none() {
             return Err(InjectionError::Unknown(name.to_owned()));
         }
@@ -101,9 +86,61 @@ impl<'a> Injector<'a> {
             });
         }
         let secret = self.vault.reveal(name)?;
-        let suffix = &rest[reference_text.len()..];
         Ok(format!("{prefix}{secret}{suffix}"))
     }
+}
+
+/// Une référence de secret repérée dans la valeur d'un en-tête.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reference<'a> {
+    /// Ce qui précède, par exemple `Bearer `.
+    pub prefix: &'a str,
+    /// Le nom du secret.
+    pub name: String,
+    /// Ce qui suit, par exemple le reste d'un `Cookie`.
+    pub suffix: &'a str,
+}
+
+impl Reference<'_> {
+    /// Reconstruit la valeur en remplaçant la référence par ce qui est donné.
+    #[must_use]
+    pub fn remplacer_par(&self, valeur: &str) -> String {
+        format!("{}{valeur}{}", self.prefix, self.suffix)
+    }
+}
+
+/// Repère une référence de secret dans la valeur d'un en-tête.
+///
+/// Cette analyse a une subtilité qui mérite d'être écrite une fois et partagée : **le nom s'arrête
+/// au premier caractère qui ne peut pas en faire partie**, et non au premier espace. S'arrêter à
+/// l'espace avalerait la ponctuation d'un en-tête composite — le point-virgule d'un `Cookie`, par
+/// exemple — et le secret substitué emporterait avec lui ce qui suivait.
+///
+/// Deux appelants s'en servent : la substitution en processus, et `prophet-egress`, qui demande la
+/// valeur au coffre par son socket. Deux analyseurs auraient fini par diverger.
+#[must_use]
+pub fn reference_dans(value: &str) -> Option<Reference<'_>> {
+    // La référence peut être seule ou précédée d'un schéma, par exemple
+    // `Bearer prophet-secret:github`.
+    let position = value.find("prophet-secret:")?;
+    let (prefix, rest) = value.split_at(position);
+    let reference_text: String = rest
+        .char_indices()
+        .take_while(|(index, c)| {
+            *index < "prophet-secret:".len()
+                || c.is_ascii_alphanumeric()
+                || *c == '-'
+                || *c == '_'
+                || *c == '.'
+        })
+        .map(|(_, c)| c)
+        .collect();
+    let reference = SecretRef::parse(&reference_text)?;
+    Some(Reference {
+        prefix,
+        name: reference.name().to_owned(),
+        suffix: &rest[reference_text.len()..],
+    })
 }
 
 #[cfg(test)]

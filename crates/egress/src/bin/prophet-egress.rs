@@ -45,6 +45,8 @@ const CORPS_MAX: usize = 8 * 1024 * 1024;
 
 struct Sortie {
     capd: std::path::PathBuf,
+    /// Le coffre. Lui seul peut rendre une valeur, et seulement à ce processus.
+    coffre: std::path::PathBuf,
     detecteur: Detector,
 }
 
@@ -69,15 +71,21 @@ async fn main() -> anyhow::Result<()> {
         |_| prophet_ipc::socket_path("capd"),
         std::path::PathBuf::from,
     );
+    let coffre = std::env::var("PROPHET_VAULT_SOCKET").map_or_else(
+        |_| prophet_ipc::socket_path("vault"),
+        std::path::PathBuf::from,
+    );
 
     tracing::info!(
         socket = %socket.display(),
         capd = %capd.display(),
+        coffre = %coffre.display(),
         "egress écoute ; rien ne sort sans un jeton que capd approuve"
     );
 
     let sortie = Arc::new(Sortie {
         capd,
+        coffre,
         detecteur: Detector::new(),
     });
 
@@ -217,10 +225,104 @@ impl Sortie {
             "sortie autorisée"
         );
         if requete.method == "CONNECT" {
+            // Rien à substituer dans un tunnel : le proxy n'y voit que des octets chiffrés
+            // (ADR-0007). Une demande d'injection y serait sans effet, et une tâche qui la croit
+            // faite enverrait un handle littéral au serveur. On la refuse donc plutôt que de la
+            // laisser passer sans effet.
+            if requete
+                .headers
+                .iter()
+                .any(|(_, valeur)| egress::reference_dans(valeur).is_some())
+            {
+                tracing::warn!(hote = %requete.host, "injection demandée dans un tunnel");
+                ecriture
+                    .write_all(&reponse(
+                        400,
+                        "InjectionImpossible",
+                        "un tunnel chiffré ne reçoit pas de secret injecté (ADR-0007) ; \
+                         passez par l'outil http.fetch",
+                    ))
+                    .await?;
+                return Ok(());
+            }
             relayer_tunnel(&requete, lecteur, ecriture).await
         } else {
-            relayer_http(&requete, ecriture).await
+            // La substitution a lieu ici, au tout dernier moment, et jamais avant : ce qui a été
+            // journalisé et inspecté plus haut ne contenait que des références.
+            match self.substituer(&requete.host, &requete.headers).await {
+                Ok(entetes) => {
+                    requete.headers = entetes;
+                    relayer_http(&requete, ecriture).await
+                }
+                Err(raison) => {
+                    tracing::warn!(hote = %requete.host, %raison, "substitution refusée");
+                    ecriture
+                        .write_all(&reponse(403, "SecretRefused", &raison))
+                        .await?;
+                    Ok(())
+                }
+            }
         }
+    }
+
+    /// Remplace les références de secrets par leurs valeurs, en demandant au coffre.
+    ///
+    /// Le coffre ne rend une valeur qu'à ce processus : c'est vérifié de son côté par
+    /// `SO_PEERCRED`, et c'est ce qui fait que « le Vault rend des poignées, jamais des valeurs »
+    /// tient pour tout le reste du système.
+    ///
+    /// Une référence inconnue ou interdite pour cet hôte **arrête la requête**. La laisser partir
+    /// telle quelle enverrait le handle littéral au serveur distant : inoffensif — un handle ne
+    /// vaut rien sans le coffre — mais la tâche croirait son secret transmis et ne comprendrait pas
+    /// l'échec d'authentification qui suivrait.
+    async fn substituer(
+        &self,
+        hote: &str,
+        entetes: &[(String, String)],
+    ) -> Result<Vec<(String, String)>, String> {
+        // Le cas courant : aucune référence, aucun aller-retour vers le coffre.
+        if !entetes
+            .iter()
+            .any(|(_, valeur)| egress::reference_dans(valeur).is_some())
+        {
+            return Ok(entetes.to_vec());
+        }
+
+        let client = Client::connect(&self.coffre)
+            .await
+            .map_err(|e| format!("coffre injoignable : {e}"))?;
+
+        let mut sortants = Vec::with_capacity(entetes.len());
+        for (nom, valeur) in entetes {
+            let Some(reference) = egress::reference_dans(valeur) else {
+                sortants.push((nom.clone(), valeur.clone()));
+                continue;
+            };
+            let secret = reference.name.clone();
+
+            let permis = client
+                .call(
+                    "secrets.allowed_for",
+                    json!({ "name": secret, "host": hote }),
+                )
+                .await
+                .map_err(|e| e.message.clone())?;
+            if permis["allowed"] != true {
+                return Err(format!("le secret {secret} n'est pas destiné à {hote}"));
+            }
+
+            let rendu = client
+                .call("secrets.use", json!({ "name": secret }))
+                .await
+                .map_err(|e| format!("{secret} : {}", e.message))?;
+            let valeur_reelle = rendu["value"]
+                .as_str()
+                .ok_or_else(|| format!("{secret} : le coffre n'a pas rendu de valeur"))?;
+
+            // Le nom est journalisé plus haut ; la valeur ne l'est nulle part, et surtout pas ici.
+            sortants.push((nom.clone(), reference.remplacer_par(valeur_reelle)));
+        }
+        Ok(sortants)
     }
 
     /// Demande à `capd` si ce jeton autorise une sortie vers cet hôte.
