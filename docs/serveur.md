@@ -47,7 +47,7 @@ tort que tout va bien : c'est exactement ADR-0006.
 |---|---|---|
 | Poser le secret `VPS_PASSWORD` | vous | **fait** — la sonde s'est connectée le 12 septembre |
 | Poser la variable `VPS_HOST` | vous | **fait** |
-| Porter le workflow sur `main` | **vous** | reste à faire |
+| Poser le fichier du workflow sur `main` | **vous** | reste à faire — un fichier, pas une fusion (voir plus bas) |
 
 Les deux premiers suffisaient pour que la **sonde** tourne — elle se connecte, regarde, et repart
 sans rien toucher. Elle est partie, elle a abouti, et ce qu'elle a rapporté est dans la section
@@ -60,9 +60,9 @@ pour les autres. Ce travail-là ne part jamais sur une poussée, et la garde est
 entier plutôt que sur chaque étape — une condition oubliée sur une seule étape suffirait à faire ce
 qu'on voulait empêcher.
 
-Ce n'est pas moi qui l'amène sur `main` : la consigne de cette session est de ne pousser que sur
-`claude/ai-optimized-os-design-djq7iw`, et amener la branche sur `main` est une décision qui se
-prend, pas un effet de bord d'un commit.
+Ce n'est pas moi qui le pose sur `main` : la consigne de cette session est de ne pousser que sur
+`claude/ai-optimized-os-design-djq7iw`. Mais ce qu'il faut y poser est **un fichier**, pas la
+branche entière — la marche à suivre tient en quatre clics, plus bas.
 
 ## Les deux choses à faire, une fois
 
@@ -96,20 +96,41 @@ dépôt public, écrire la règle de dérivation d'un mot de passe revient à en
 À défaut de secret, l'entrée `root_password` du déclenchement accepte une saisie à la main. Elle
 convient pour un essai ; le secret convient pour la suite.
 
-### 2. Mettre le workflow sur la branche par défaut
+### 2. Poser **le fichier** du workflow sur la branche par défaut
 
 GitHub ne propose le bouton *Run workflow* que pour les workflows présents sur la branche par
 défaut, et son API répond `404` pour les autres. `main` n'a aujourd'hui qu'un commit initial :
 tout le travail est sur `claude/ai-optimized-os-design-djq7iw`.
 
-Il suffit donc d'y amener la branche — une fusion, ou une *pull request* fusionnée. Le workflow
-apparaît alors dans l'onglet *Actions*, et peut être déclenché sur n'importe quelle branche.
+**Il n'est pas nécessaire de fusionner la branche.** Seul le *fichier* doit exister sur `main`
+pour que le point d'entrée apparaisse ; le déclenchement, lui, se fait sur la branche de votre
+choix, et c'est la version du fichier **de cette branche-là** qui s'exécute. Fusionner tout le
+travail pour obtenir un bouton serait payer très cher une chose qui coûte un fichier.
+
+Le plus court, dans l'interface de GitHub :
+
+1. Allez sur `main`, *Add file* → *Create new file*.
+2. Nommez-le exactement `.github/workflows/verifier-sur-le-serveur.yml`.
+3. Collez le contenu du fichier tel qu'il est sur la branche de travail.
+4. *Commit directly to the `main` branch*.
+
+Les seules parties qui comptent dans la copie posée sur `main` sont le bloc `on:` et ses `inputs`,
+puisque c'est de là que l'interface tire les cases à cocher. Le reste sera lu depuis la branche
+que vous choisirez au moment de déclencher. Coller le fichier entier évite d'avoir à s'en
+souvenir.
+
+Rien de ce qui est posé sur `main` ne s'exécute tout seul : le travail qui agit est gardé par
+`workflow_dispatch`, donc par un clic, et la sonde ne touche à rien.
 
 Une variante avait été tentée pour éviter cette étape : faire de la poussée elle-même le
 déclencheur, l'intention étant écrite dans un fichier versionné. Elle a été refusée, et le refus
 est juste — cela aurait rendu un `git push` capable d'arrêter un moteur de production et de
 changer un réglage du noyau sans qu'un humain tranche au moment où cela arrive. Une décision
 pareille se prend en la prenant, pas en poussant un commit.
+
+*(Si vous préférez une seconde barrière, créez un environnement nommé `serveur` dans
+*Settings* → *Environments* avec vous-même en relecteur obligatoire, puis dites-le : le travail
+qui agit s'y rattachera et attendra votre approbation, run par run, en plus du clic.)*
 
 ## Déclencher
 
