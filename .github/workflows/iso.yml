@@ -264,3 +264,85 @@ jobs:
       - name: Ce que pèse le système
         run: |
           echo "fermeture : $(nix path-info -Sh ./systeme | awk '{print $2}')"
+
+  # --- Voir l'image démarrer ---
+  #
+  # M9-T6. Jusqu'ici l'ISO se construisait sans que personne ne l'ait jamais vue démarrer : on
+  # savait produire un fichier, pas un système qui s'allume. La différence entre les deux est
+  # exactement ce qu'un utilisateur découvre en effaçant son disque.
+  #
+  # La machine virtuelle démarre en UEFI, sans écran, et raconte son démarrage sur la console
+  # série. On attend le message d'accueil — celui qui dit quoi taper. Le voir apparaître veut dire
+  # que le micrologiciel a trouvé l'image, que le noyau a démarré, que l'espace utilisateur est
+  # monté, et que `getty` sert une invite. C'est tout ce qu'on peut vérifier sans main humaine, et
+  # c'est bien plus que rien.
+  demarrage:
+    name: Voir l'image démarrer
+    needs: iso
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Outils de machine virtuelle
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get -y -qq install qemu-system-x86 ovmf
+          # KVM accélère beaucoup, mais son absence ne doit pas faire échouer le test : QEMU sait
+          # émuler. On regarde donc si on peut *ouvrir* le périphérique, pas s'il existe.
+          if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+            echo "ACCEL=-enable-kvm -cpu host" >> "$GITHUB_ENV"
+            echo "KVM utilisable : démarrage accéléré"
+          else
+            echo "ACCEL=" >> "$GITHUB_ENV"
+            echo "::warning::/dev/kvm inutilisable — émulation logicielle, c'est plus lent"
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: prophet-os-iso
+
+      - name: Démarrer, et écouter
+        run: |
+          ISO=$(ls ./*.iso | head -1)
+          echo "image : $ISO ($(du -h "$ISO" | cut -f1))"
+
+          # Le micrologiciel est recopié : QEMU a besoin d'un OVMF_VARS inscriptible.
+          cp /usr/share/OVMF/OVMF_VARS_4M.fd ./vars.fd 2>/dev/null \
+            || cp /usr/share/OVMF/OVMF_VARS.fd ./vars.fd
+          CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
+          [ -f "$CODE" ] || CODE=/usr/share/OVMF/OVMF_CODE.fd
+
+          set +e
+          timeout 900 qemu-system-x86_64 $ACCEL -m 3072 -smp 2 \
+            -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
+            -drive if=pflash,format=raw,unit=1,file=./vars.fd \
+            -cdrom "$ISO" -boot d \
+            -display none -serial stdio -no-reboot > demarrage.log 2>&1
+          set -e
+          echo "--- 80 dernières lignes ---"
+          tail -80 demarrage.log
+
+      - name: Est-ce que ça a démarré ?
+        run: |
+          manque=0
+          # Trois preuves, du plus bas au plus haut. Ne vérifier que la dernière rendrait un échec
+          # précoce indiscernable d'un échec tardif.
+          grep -q "Linux version" demarrage.log \
+            || { echo "::error::le noyau n'a pas démarré"; manque=1; }
+          grep -qi "systemd\[1\]" demarrage.log \
+            || { echo "::error::l'espace utilisateur n'a pas été monté"; manque=1; }
+          grep -q "support d'installation" demarrage.log \
+            || { echo "::error::le message d'accueil n'est jamais apparu"; manque=1; }
+          if [ "$manque" != "0" ]; then
+            echo "::error::cette image ne démarre pas ; ne la gravez pas"
+            exit 1
+          fi
+          echo
+          echo "L'image démarre : noyau, espace utilisateur, et invite qui dit quoi taper."
+
+      - name: Conserver la trace du démarrage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demarrage-vm
+          path: demarrage.log
+          if-no-files-found: warn

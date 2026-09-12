@@ -39,6 +39,18 @@
     vim
   ];
 
+  # Une console série en plus de l'écran.
+  #
+  # Sur une vraie machine elle ne sert à rien — personne ne branche un câble série sur un portable.
+  # Elle sert à ce qu'un démarrage puisse être *observé* : sans elle, vérifier que cette image
+  # démarre exige quelqu'un devant un écran, et c'est précisément ce que personne n'a jamais fait
+  # (M9-T6). Avec elle, une machine virtuelle sans écran raconte son démarrage sur sa sortie
+  # standard, et l'intégration continue peut lire ce qu'elle raconte.
+  #
+  # `console=tty0` reste en dernier pour que ce soit l'écran qui reçoive la console principale sur
+  # le matériel réel : le noyau retient la dernière déclarée.
+  boot.kernelParams = [ "console=ttyS0,115200" "console=tty0" ];
+
   # Le Wi-Fi est souvent la seule connexion disponible sur un portable qu'on vient de vider.
   networking.wireless.enable = lib.mkForce false;
   networking.networkmanager.enable = true;

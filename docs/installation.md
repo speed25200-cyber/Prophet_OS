@@ -118,13 +118,15 @@ Dit franchement, parce que vous aurez effacé un disque pour l'essayer.
 - **Le niveau 2 d'isolation exige des images d'invité** qui ne sont pas dans l'image installée.
   `prophet status` dira ce qui manque. Les niveaux 0 et 1 fonctionnent, et ont été vérifiés sur
   du matériel réel.
-- **Aucune démonstration en machine virtuelle n'a été faite** (M9-T6). L'ISO est construite et son
-  installeur est exercé automatiquement sur un disque en boucle, mais personne n'a encore vu cette
-  image démarrer de bout en bout sur une vraie machine. Vous serez le premier.
+- **Personne n'a encore vu cette image démarrer sur du vrai matériel.** L'intégration continue la
+  démarre en machine virtuelle UEFI à chaque construction et vérifie trois choses : que le noyau
+  part, que l'espace utilisateur est monté, et que le message d'accueil apparaît. C'est ce qu'on
+  peut vérifier sans main humaine. Ce qu'elle ne dit pas : si *votre* carte graphique, *votre*
+  carte réseau et *votre* micrologiciel s'entendent avec elle.
 
 Ce dernier point mérite d'être pesé. Si vous voulez réduire le risque : essayez d'abord l'ISO dans
 une machine virtuelle (VirtualBox, VMware ou Hyper-V, avec l'UEFI activé et un disque de 80 Gio),
-puis sur le vrai PC une fois que vous l'aurez vue démarrer.
+puis sur le vrai PC une fois que vous l'aurez vue démarrer chez vous.
 
 ## Revenir à Windows
 
