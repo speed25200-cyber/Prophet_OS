@@ -253,10 +253,16 @@ plus dangereuse pour quelqu'un qui vient d'effacer son disque :
 > la machine part en mode de secours — sauf que `systemd-boot` est configuré sans éditeur, donc il
 > n'y a pas de mode de secours utilisable.
 
-Ce n'est pas vérifié, et ce n'est pas corrigé non plus : la correction n'est pas un réglage mais
-une décision de conception — `/etc` sur une superposition, ou `/etc` et `/var` portés par le
-volume d'état, plus `boot.tmp.useTmpfs`. La faire à l'aveugle sur la machine de quelqu'un qui a
-déjà formaté son disque serait pire que de l'écrire ici. **À traiter avant de déclarer l'ISO
+- [ ] `image/tests/racine-en-lecture-seule.nix` — pose la question à la machine au lieu de la
+  raisonner. Il force l'option `ro` là où le cadre de test pose la racine, démarre, et raconte ce
+  qu'il trouve : les unités en échec, l'état de `systemd-tmpfiles-setup`, les erreurs du journal.
+  Son travail d'intégration continue est en `continue-on-error` — c'est une **question**, pas une
+  garantie, et un échec n'y signale pas une régression mais donne la réponse
+
+La correction, si la réponse est « non », n'est pas un réglage mais une décision de conception. La
+piste que NixOS documente pour ce cas précis : `system.etc.overlay` — qui exige l'initrd systemd,
+déjà activé — un `/var` porté par un volume inscriptible plutôt que par la racine, et
+`boot.tmp.useTmpfs`. Elle se prendra en la prenant. **À traiter avant de déclarer l'ISO
 installable.**
 
 ## Blocages

@@ -489,3 +489,40 @@ jobs:
 
       - name: Démarrer la configuration installée
         run: nix build .#checks.x86_64-linux.installe --print-build-logs
+
+  # --- Une question ouverte, qui ne barre pas la route ---
+  #
+  # `immutable.nix` demande une racine en lecture seule. Personne n'a jamais démarré de machine où
+  # l'option soit réellement appliquée : le test `installe` ne le peut pas, le cadre de test NixOS
+  # imposant son propre montage. Ce travail force l'option et regarde ce qui arrive.
+  #
+  # `continue-on-error` parce que c'est une question. Un échec ici ne signale pas une régression :
+  # il donne la réponse. La correction, si la réponse est « non », est une décision de conception,
+  # écrite dans `docs/STATUS.md`.
+  racine-ro:
+    name: "Question ouverte : la racine en lecture seule"
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Faire de la place
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean
+          echo "$(df -h / | awk 'NR==2{print $4}') libres"
+
+      - name: Rendre /dev/kvm ouvrable
+        run: PROPHET_AUTORISER_KVM=1 sudo -E ./tools/install-isolation.sh kvm
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+            max-jobs = auto
+
+      - name: Poser la question
+        run: nix build .#checks.x86_64-linux.racine-en-lecture-seule --print-build-logs

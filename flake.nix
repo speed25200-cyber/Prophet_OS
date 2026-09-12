@@ -92,6 +92,13 @@
             inherit pkgs;
             module = nixosModules.prophet;
           };
+          # Une question, pas une garantie : `immutable.nix` demande une racine en lecture seule,
+          # et personne n'a jamais démarré de machine où l'option soit réellement appliquée. Son
+          # travail d'intégration continue ne barre pas la route (voir le fichier).
+          racine-en-lecture-seule = import ./image/tests/racine-en-lecture-seule.nix {
+            inherit pkgs;
+            module = nixosModules.prophet;
+          };
         };
 
         packages = {
