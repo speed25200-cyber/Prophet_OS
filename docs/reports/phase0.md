@@ -23,7 +23,7 @@
 | M12 | `shell` et `prophet` : interface humaine | fait | 42 tests |
 | M13 | `bench` : suite de tâches, adversariale, coût | fait ; ligne de base pixels non mesurable ici | 22 tests |
 
-**433 tests**, tous verts. **24 471 lignes** de Rust. Aucun avertissement de `clippy`, aucun `unsafe` hors d'une sonde
+**439 tests**, tous verts. **24 471 lignes** de Rust. Aucun avertissement de `clippy`, aucun `unsafe` hors d'une sonde
 d'appel système documentée.
 
 **81 des 88 tâches du plan sont faites.** Les 9 restantes, marquées ⛔ dans `docs/STATUS.md`,
@@ -92,8 +92,8 @@ Cette section importe autant que les précédentes.
 
 | Élément | Pourquoi ce n'est pas vérifié | Ce qu'il faut pour le vérifier |
 |---|---|---|
-| Sandbox de niveau 1 (gVisor) | `runsc` absent de l'environnement de construction | une machine avec gVisor installé |
-| Sandbox de niveau 2 (microVM) | `/dev/kvm` absent | une machine avec KVM ; l'objectif de 100 ms au démarrage depuis snapshot reste à mesurer |
+| Sandbox de niveau 1 (gVisor) | `runsc` absent de l'environnement de construction | une machine avec gVisor installé ; `just verify-host` lance les tests marqués `needs_gvisor` |
+| Sandbox de niveau 2 (microVM) | `/dev/kvm` et images d'invité absents | une machine avec KVM, Firecracker et les images ; `just verify-host` lance les tests marqués `needs_kvm`. L'objectif de 100 ms depuis instantané reste à mesurer |
 | Landlock | absent de ce noyau ; la restriction de chemins repose sur la racine minimale seule | un noyau avec `CONFIG_SECURITY_LANDLOCK` |
 | Image amorçable | ni Nix ni virtualisation dans l'environnement | `nixos-rebuild build-vm`, puis `just demo M8` dans la machine virtuelle |
 | Pilotes de clients officiels, de bout en bout | exigent une session d'abonnement Claude ou ChatGPT | une connexion réelle ; la construction de la ligne de commande, l'environnement transmis et la détection de session sont testés, l'exécution ne l'est pas |
@@ -105,7 +105,34 @@ Le système **annonce** ces limites plutôt que de les masquer : `prophet status
 d'isolation réellement atteignable, et `sandboxd` refuse une tâche qui exigerait davantage au lieu
 de la dégrader en silence.
 
-## 6. Écarts par rapport au plan
+## 6. Un défaut trouvé après coup, et corrigé
+
+La première version de ce rapport annonçait les niveaux 1 et 2 comme « écrits, non exerçables
+ici ». C'était trop indulgent. Une relecture a montré que le gestionnaire ignorait purement et
+simplement le niveau demandé : il vérifiait que la machine pouvait l'atteindre, puis lançait le
+confinement de niveau 0 dans tous les cas.
+
+La conséquence n'aurait pas été visible dans cet environnement, où aucun niveau supérieur n'est
+atteignable. Elle l'aurait été **sur une machine équipée** : une demande de niveau 2 aurait été
+acceptée et exécutée en niveau 0, c'est-à-dire avec une isolation bien moindre que celle annoncée.
+C'est exactement la dégradation silencieuse que le reste de la conception interdit.
+
+Trois changements :
+
+1. Chaque niveau a désormais son propre chemin de lancement : programme d'amorçage pour le
+   niveau 0, `runsc` pour le niveau 1, Firecracker pour le niveau 2.
+2. La sonde exige, pour annoncer le niveau 2, non seulement KVM et le binaire mais aussi les
+   **images d'invité** : un binaire sans les images qu'il lui faut ne démarre aucune machine
+   virtuelle, et l'annoncer reviendrait à promettre une protection inexistante.
+3. `missing_for` nomme ce qui manque, et le refus le dit à l'utilisateur.
+
+Un test, `le_niveau_deux_ne_retombe_jamais_sur_le_niveau_zero`, existe désormais pour attraper
+cette faute si elle revenait.
+
+La leçon vaut au-delà de ce défaut : un composant qu'on ne peut pas exercer doit être décrit comme
+**non vérifié**, jamais comme « prêt ». La section 5 est écrite dans cet esprit.
+
+## 7. Écarts par rapport au plan
 
 | Point du plan | Ce qui a été fait | Raison |
 |---|---|---|
@@ -114,10 +141,12 @@ de la dégrader en silence.
 | Index vectoriel `sqlite-vec` | vecteurs et similarité en Rust sur SQLite | pas d'extension à charger, entièrement testable ; l'interface d'embedding reste abstraite |
 | Interface en mode texte plein écran | vues pures rendues par la ligne de commande | les vues sont la partie qui porte la valeur et se teste ; l'habillage interactif reste à faire |
 
-## 7. Recommandations pour la phase 1
+## 8. Recommandations pour la phase 1
 
-1. **Rejouer ce rapport sur une machine complète.** Les six lignes de la section 5 sont la
-   première dette du projet. Tant qu'elles ne sont pas levées, le niveau 2 est du code non exercé.
+1. **Rejouer ce rapport sur une machine complète**, par `just verify-host`. Le script sonde la
+   machine, lance la suite complète y compris les tests marqués `needs_gvisor` et `needs_kvm`, et
+   écrit un rapport. Les lignes de la section 5 sont la première dette du projet ; le défaut de la
+   section 6 montre pourquoi elle se paie vite.
 2. **Mesurer la ligne de base par captures d'écran.** Le rapport de coût repose aujourd'hui sur un
    modèle de tour de boucle ; il faut le confronter à un agent réel.
 3. **Brancher un vrai client d'éditeur.** C'est le seul moyen de figer les noms d'options des

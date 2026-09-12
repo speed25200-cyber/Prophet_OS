@@ -32,6 +32,14 @@ secrets:
 test-privileged:
     cargo test --workspace -- --ignored
 
+# Vérifie sur une machine complète ce que l'environnement de construction ne peut pas vérifier.
+verify-host:
+    ./tools/verify-on-host.sh
+
+# Sonde seule : dit ce qui manque, sans rien exécuter.
+probe-host:
+    ./tools/verify-on-host.sh --probe
+
 # Tests NixOS en machine virtuelle.
 test-vm:
     @echo "pas encore disponible (M9)" && exit 2

@@ -14,7 +14,7 @@ Un système d'exploitation PC conçu pour que des agents IA (Claude, GPT, Gemini
 
 ## État du code
 
-Le système est construit. **433 tests** verts, aucun avertissement de `clippy`. **81 des 88 tâches du plan** sont faites ; les 9 restantes exigent du matériel absent de l'environnement de construction et sont nommées dans [`docs/STATUS.md`](docs/STATUS.md).
+Le système est construit. **439 tests** verts, aucun avertissement de `clippy`. **81 des 88 tâches du plan** sont faites ; les 9 restantes exigent du matériel absent de l'environnement de construction et sont nommées dans [`docs/STATUS.md`](docs/STATUS.md).
 
 ```
 prophet status          # ce que la machine sait faire, et ce qu'elle ne sait pas
@@ -36,6 +36,17 @@ prophet log verify      # vérifier l'intégrité du journal
 | La même tâche sur Claude, ChatGPT et un modèle local | mêmes outils, mêmes permissions, aucune clé d'API |
 
 Le détail, y compris **ce qui n'est pas vérifié et pourquoi**, est dans [`docs/reports/phase0.md`](docs/reports/phase0.md).
+
+### Vérifier sur une machine complète
+
+Cet environnement de construction n'a ni KVM, ni gVisor, ni Landlock, ni cgroups v2. Neuf tâches en dépendent. Sur une machine qui les a :
+
+```
+just probe-host    # dit ce qui manque, sans rien exécuter
+just verify-host   # suite complète, tests matériels compris, et rapport
+```
+
+Le script ne compte jamais un test ignoré comme réussi.
 
 ### Organisation
 

@@ -1,14 +1,14 @@
 //! Cycle de vie des sandboxes : lancement, gel, reprise, arrêt.
 
 use std::collections::HashMap;
-use std::process::{Child, Command, Stdio};
+use std::process::Child;
 use std::sync::{Arc, Mutex};
 
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 
 use crate::caps::Capabilities;
-use crate::spec::{SPEC_ENV, SandboxSpec};
+use crate::spec::SandboxSpec;
 
 /// Erreur du gestionnaire de sandbox.
 #[derive(Debug, thiserror::Error)]
@@ -163,32 +163,42 @@ impl Manager {
         let handshake = crate::confine::Handshake::create(&sync_dir)
             .map_err(|e| SandboxError::Confine(e.to_string()))?;
 
-        let mut child = Command::new(&self.helper)
-            .env_clear()
-            .env(SPEC_ENV, serde_json::to_string(spec)?)
-            .env(crate::confine::HANDSHAKE_ENV, &sync_dir)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
+        // Chaque niveau a son propre chemin de lancement. Le gestionnaire ne retombe jamais sur un
+        // niveau inférieur : il refuse, en nommant ce qui manque.
+        let launched =
+            crate::launch::launch(&self.caps, &self.helper, spec, &sync_dir).map_err(|error| {
+                match error {
+                    crate::launch::LaunchError::Unreachable { level, missing } => {
+                        SandboxError::LevelUnavailable {
+                            requested: level,
+                            available: self.caps.max_level(),
+                            report: format!("il manque {missing}\n{}", self.caps.report()),
+                        }
+                    }
+                    autre => SandboxError::Confine(autre.to_string()),
+                }
+            })?;
+        let mut child = launched.child;
         let pid = i32::try_from(child.id()).unwrap_or(0);
 
-        // L'amorçage a créé son espace de noms ; c'est au gestionnaire d'y projeter les
-        // identifiants, le noyau refusant que le processus le fasse pour lui-même.
-        if let Err(error) = handshake
-            .wait_for_ready()
-            .and_then(|()| crate::confine::map_child_to_root(pid))
-        {
-            // On libère l'amorçage avec un refus pour qu'il s'arrête proprement, puis on tue.
-            let _ = handshake.release(false);
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = std::fs::remove_dir_all(&sync_dir);
-            return Err(SandboxError::Confine(error.to_string()));
+        if launched.needs_handshake {
+            // L'amorçage a créé son espace de noms ; c'est au gestionnaire d'y projeter les
+            // identifiants, le noyau refusant que le processus le fasse pour lui-même.
+            if let Err(error) = handshake
+                .wait_for_ready()
+                .and_then(|()| crate::confine::map_child_to_root(pid))
+            {
+                // On libère l'amorçage avec un refus pour qu'il s'arrête proprement, puis on tue.
+                let _ = handshake.release(false);
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = std::fs::remove_dir_all(&sync_dir);
+                return Err(SandboxError::Confine(error.to_string()));
+            }
+            handshake
+                .release(true)
+                .map_err(|e| SandboxError::Confine(e.to_string()))?;
         }
-        handshake
-            .release(true)
-            .map_err(|e| SandboxError::Confine(e.to_string()))?;
         let _ = std::fs::remove_dir_all(&sync_dir);
         self.running
             .lock()

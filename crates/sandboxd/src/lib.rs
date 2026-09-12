@@ -14,10 +14,12 @@
 
 pub mod caps;
 pub mod confine;
+pub mod launch;
 pub mod spec;
 
 mod manager;
 
-pub use caps::Capabilities;
+pub use caps::{Capabilities, MicrovmImages, find_microvm_images};
+pub use launch::{LaunchError, microvm_config};
 pub use manager::{Manager, SandboxError, SandboxHandle, SandboxState};
 pub use spec::{SPEC_ENV, SandboxSpec};

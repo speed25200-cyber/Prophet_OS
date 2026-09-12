@@ -53,8 +53,8 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 ### M5 — sandboxd : Sandbox Manager
 
 - [x] M5-T1 — Niveau 0 (bwrap + Landlock + seccomp) (2026-09-12, 24b8338) — 8 tests d'évasion réels, démarrage en 2,6 ms
-- [ ] ⛔ M5-T2 — Niveau 1 (gVisor) — bloqué : gVisor absent de l'environnement
-- [ ] ⛔ M5-T3 — Niveau 2 (Firecracker) — bloqué : /dev/kvm absent
+- [ ] ⛔ M5-T2 — Niveau 1 (gVisor) — implémenté (`launch::launch_gvisor`), tests `needs_gvisor` ; bloqué : runsc absent
+- [ ] ⛔ M5-T3 — Niveau 2 (Firecracker) — implémenté (`launch::launch_microvm`), tests `needs_kvm` ; bloqué : KVM et images absents
 - [ ] ⛔ M5-T4 — Pool de snapshots — bloqué : exige KVM et Firecracker
 - [x] M5-T5 — Cycle de vie et quotas (2026-09-12, 24b8338) — gel global de 8 sandboxes en 124 µs
 - [x] M5-T6 — Sélection automatique (2026-09-12, 24b8338) — sélection de niveau, microVM imposée pour tout code

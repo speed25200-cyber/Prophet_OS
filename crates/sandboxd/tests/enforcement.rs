@@ -256,3 +256,121 @@ fn demarrage_du_niveau_zero_sous_dix_millisecondes() {
         "objectif du plan : moins de 10 ms au p50, mesuré {mediane:?}"
     );
 }
+
+// --- Tests des niveaux 1 et 2 ---
+//
+// Ils exigent gVisor, KVM et des images d'invité. Ils sont marqués `ignore` pour ne pas échouer
+// sur une machine qui n'en dispose pas, et se lancent par `cargo test -- --ignored` ou
+// `just verify-host`. Ils ne sont pas décoratifs : ce sont eux qui prouvent que les niveaux
+// supérieurs isolent vraiment, ce qu'aucun test de ce conteneur ne peut établir.
+
+#[test]
+#[ignore = "needs_gvisor"]
+fn niveau_un_execute_reellement_sous_gvisor() {
+    let caps = Capabilities::probe();
+    assert!(
+        caps.runsc.is_some(),
+        "gVisor absent : ce test doit tourner sur une machine équipée"
+    );
+    let manager = Manager::new(helper().display().to_string());
+    let spec = SandboxSpec::new(1, "/bin/sh", "/")
+        // `dmesg` de gVisor annonce son propre noyau : c'est la preuve que l'invité ne parle pas
+        // au noyau de l'hôte.
+        .args(["-c", "dmesg 2>/dev/null | head -1; echo FIN"])
+        .env("PATH", "/usr/bin:/bin");
+    let mut handle = manager.run("task:test", &spec).unwrap();
+    let mut stdout = String::new();
+    if let Some(child) = handle.child_mut()
+        && let Some(sortie) = child.stdout.as_mut()
+    {
+        let _ = sortie.read_to_string(&mut stdout);
+    }
+    let _ = handle.wait();
+    assert!(stdout.contains("FIN"), "sortie : {stdout}");
+    assert_eq!(handle.level, 1);
+}
+
+#[test]
+#[ignore = "needs_gvisor"]
+fn niveau_un_n_a_pas_de_reseau() {
+    let caps = Capabilities::probe();
+    assert!(caps.runsc.is_some(), "gVisor absent");
+    let manager = Manager::new(helper().display().to_string());
+    let spec = SandboxSpec::new(1, "/bin/sh", "/")
+        .args(["-c", "cat /proc/net/dev 2>/dev/null | tail -n +3 | wc -l"])
+        .env("PATH", "/usr/bin:/bin");
+    let mut handle = manager.run("task:test", &spec).unwrap();
+    let mut stdout = String::new();
+    if let Some(child) = handle.child_mut()
+        && let Some(sortie) = child.stdout.as_mut()
+    {
+        let _ = sortie.read_to_string(&mut stdout);
+    }
+    let _ = handle.wait();
+    let interfaces: usize = stdout.trim().parse().unwrap_or(99);
+    assert!(interfaces <= 1, "interfaces trouvées : {interfaces}");
+}
+
+#[test]
+#[ignore = "needs_kvm"]
+fn niveau_deux_demarre_une_microvm() {
+    let caps = Capabilities::probe();
+    assert!(
+        caps.supports(2),
+        "niveau 2 inatteignable : il manque {}",
+        caps.missing_for(2).join(", ")
+    );
+    let manager = Manager::new(helper().display().to_string());
+    let spec = SandboxSpec::new(2, "/bin/true", "/").env("PATH", "/bin");
+    let debut = std::time::Instant::now();
+    let mut handle = manager.run("task:test", &spec).unwrap();
+    let ecoule = debut.elapsed();
+    eprintln!("démarrage de microVM : {ecoule:?}");
+    assert_eq!(handle.level, 2);
+    // Objectif du plan : moins de 2 s à froid, moins de 100 ms depuis un instantané.
+    assert!(
+        ecoule < std::time::Duration::from_secs(5),
+        "démarrage trop lent : {ecoule:?}"
+    );
+    let _ = manager.kill(&mut handle);
+}
+
+#[test]
+#[ignore = "needs_kvm"]
+fn le_niveau_deux_ne_retombe_jamais_sur_le_niveau_zero() {
+    // Le défaut que ce test existe pour attraper : accepter une demande de niveau 2 et
+    // l'exécuter en niveau 0, donc promettre une isolation qui n'a pas lieu.
+    let caps = Capabilities::probe();
+    let manager = Manager::new(helper().display().to_string());
+    let spec = SandboxSpec::new(2, "/bin/true", "/");
+    match manager.run("task:test", &spec) {
+        Ok(handle) => assert_eq!(
+            handle.level, 2,
+            "une sandbox rendue au niveau 2 doit vraiment être au niveau 2"
+        ),
+        Err(erreur) => assert!(
+            !caps.supports(2),
+            "le niveau 2 est atteignable mais le lancement a échoué : {erreur}"
+        ),
+    }
+}
+
+#[test]
+fn un_niveau_non_atteignable_est_refuse_avec_ce_qui_manque() {
+    // Celui-ci tourne partout : c'est le comportement quand la machine n'a pas ce qu'il faut.
+    let caps = Capabilities::probe();
+    if caps.supports(2) {
+        eprintln!("machine équipée : ce test ne s'applique pas");
+        return;
+    }
+    let manager = Manager::new(helper().display().to_string());
+    let erreur = manager
+        .run("task:test", &SandboxSpec::new(2, "/bin/true", "/"))
+        .unwrap_err();
+    let message = erreur.to_string();
+    assert!(message.contains("il manque"), "{message}");
+    assert!(
+        message.contains("kvm") || message.contains("firecracker") || message.contains("images"),
+        "le message doit dire quoi installer : {message}"
+    );
+}
