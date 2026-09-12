@@ -17,6 +17,10 @@ qu'avec une commande reproductible et le résultat de l'exécution correspondant
   Aucun outil annoncé comme fonctionnel ne peut se limiter à un message d'indisponibilité.
 - [ ] Clients officiels effectivement exécutés dans le confinement requis, événements et demandes
   de permission traduits à partir de leurs protocoles documentés. Sessions réelles pour les essais.
+- [ ] ChatGPT graphique et Claude Code utilisables dans une session humaine complète : connexion,
+  projets locaux, terminal, presse-papiers, fichiers, reprise et mise à jour. Vérifier la
+  compatibilité de l'application ChatGPT Linux avec NixOS et XWayland. Mesurer les latences et
+  la consommation face aux mêmes clients sur une distribution officiellement prise en charge.
 - [ ] Isolation appliquée : espaces de noms, Landlock, seccomp, cgroups, gVisor et microVM selon
   le niveau demandé. Vérifier des commandes dans l'invité, deux VM simultanées, quotas, arrêt des
   descendants et absence de sortie réseau non autorisée. La présence d'un périphérique ne suffit pas.
@@ -48,3 +52,7 @@ de cette interface à l'exécution agentique complète via MCP/agentd reste à r
 Le registre MCP refuse maintenant les exigences impossibles à vérifier et la session applique
 le cycle d'initialisation. Son binaire reste à raccorder aux services ; les accès fichiers doivent
 être durcis contre les liens symboliques et la recherche contrôlée pour chaque descendant.
+Codex et Claude Code sont maintenant obligatoires dans la configuration de l'image ; leurs vrais
+binaires répondent aux sondes de version et d'authentification en profils vierges. Le diagnostic
+ne confond plus fichiers présents, connexion et pilote agentique disponible. Le bureau humain,
+l'application ChatGPT et les exécutions authentifiées restent à intégrer et à vérifier.

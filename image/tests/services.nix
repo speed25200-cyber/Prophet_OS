@@ -146,14 +146,24 @@ pkgs.testers.runNixOSTest {
             f"un membre déclaré du groupe système doit être servi :\n{vu}"
         )
 
+    with subtest("Codex et Claude Code sont réellement livrés et répondent"):
+        import json
+        for pilote, programme in [("codex", "codex"), ("claude-code", "claude")]:
+            version = machine.succeed(f"timeout 15 {programme} --version").strip()
+            assert version, f"{programme} doit annoncer sa version"
+            diagnostic = json.loads(machine.succeed(
+                f"su - prophet -c 'timeout 20 prophet --json provider doctor {pilote}'"
+            ))
+            assert diagnostic["executable"], diagnostic
+            assert diagnostic["version"], diagnostic
+            assert diagnostic["connection"] == "login_required", diagnostic
+            assert diagnostic["agent_execution_ready"] is False, diagnostic
+            instructions = machine.succeed(
+                f"su - prophet -c 'prophet provider login {pilote}'"
+            )
+            assert "/home/prophet/.local/state/prophet/providers/" in instructions, instructions
+
     with subtest("ce que `provider ls` annonce est ce que la machine a"):
-        # `prophet provider login claude-code` répond « lancez `claude login` ». Si `claude`
-        # n'existe pas sur la machine, cette phrase envoie quelqu'un dans le vide — et il ne s'en
-        # aperçoit qu'après avoir formaté son disque.
-        #
-        # Ce qui est vérifié ici n'est pas que les clients soient là : ils viennent de nixpkgs et
-        # peuvent en disparaître. C'est que `provider ls` **dise la vérité** sur ceux qui y sont.
-        # Annoncer un client absent est pire que de dire qu'il manque.
         annonce = machine.succeed("timeout 30 prophet provider ls")
         print(annonce)
         for pilote, programme in [

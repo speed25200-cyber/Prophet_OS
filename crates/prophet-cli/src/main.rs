@@ -132,6 +132,11 @@ enum CapAction {
 enum ProviderAction {
     /// Liste les pilotes et leur état.
     Ls,
+    /// Vérifie la version et la connexion auprès du client officiel lui-même.
+    Doctor {
+        /// Nom du pilote (codex, claude-code ou gemini).
+        driver: String,
+    },
     /// Modèles réellement chargés par un moteur local.
     Models {
         /// Base d'API du moteur local.
@@ -561,7 +566,7 @@ fn provider(action: &ProviderAction, as_json: bool) -> anyhow::Result<String> {
     use providers::local::LocalModel;
     use providers::native::{ModelClient as _, ModelTurn};
     use providers::official::{ClientProfile, OfficialDriver};
-    let racine = std::path::Path::new("/var/lib/prophet");
+    let racine = home().join(".local/state/prophet");
     let utilisateur = std::env::var("USER").unwrap_or_else(|_| "inconnu".to_owned());
     match action {
         ProviderAction::Models { endpoint } => {
@@ -602,43 +607,79 @@ fn provider(action: &ProviderAction, as_json: bool) -> anyhow::Result<String> {
             }
         }
         ProviderAction::Ls => {
+            let diagnostics: Vec<_> = ClientProfile::all()
+                .into_iter()
+                .map(|profile| OfficialDriver::new(profile, &racine, &utilisateur).diagnostic())
+                .collect();
+            if as_json {
+                return Ok(format!(
+                    "{}\n",
+                    serde_json::json!({
+                        "official_clients": diagnostics,
+                        "local_runtime": {"driver": "prophet-agent", "integrated": true}
+                    })
+                ));
+            }
             let mut out = format!(
                 "{:<16} {:<16} {:<14} {}\n",
-                "pilote", "authentification", "client", "session"
+                "pilote", "auth souhaitée", "client", "connexion"
             );
-            for profile in ClientProfile::all() {
-                let driver = OfficialDriver::new(profile.clone(), racine, &utilisateur);
+            for diagnostic in diagnostics {
                 out.push_str(&format!(
                     "{:<16} {:<16} {:<14} {}\n",
-                    profile.driver,
+                    diagnostic.driver,
                     "abonnement",
-                    if driver.client_available() {
+                    if diagnostic.executable.is_some() {
                         "présent"
                     } else {
                         "absent"
                     },
-                    if driver.logged_in() {
-                        "connectée"
-                    } else {
-                        "aucune"
-                    }
+                    diagnostic.connection.label()
                 ));
             }
             out.push_str(&format!(
                 "{:<16} {:<16} {:<14} {}\n",
                 "prophet-agent", "aucune", "intégré", "sans objet"
             ));
+            out.push_str("Exécution agentique des clients officiels : raccordement à réaliser.\n");
             Ok(out)
+        }
+        ProviderAction::Doctor { driver } => {
+            let profile = ClientProfile::all()
+                .into_iter()
+                .find(|p| &p.driver == driver)
+                .ok_or_else(|| anyhow::anyhow!("pilote inconnu : {driver}"))?;
+            let diagnostic = OfficialDriver::new(profile, &racine, &utilisateur).diagnostic();
+            if as_json {
+                Ok(format!("{}\n", serde_json::to_string(&diagnostic)?))
+            } else {
+                Ok(format!(
+                    "{} : {}\nVersion : {}\nConnexion : {}\nExécution agentique : raccordement à réaliser\n",
+                    diagnostic.driver,
+                    diagnostic
+                        .executable
+                        .as_deref()
+                        .map_or_else(|| "client absent".into(), |path| path.display().to_string()),
+                    diagnostic.version.as_deref().unwrap_or("non vérifiée"),
+                    diagnostic.connection.label()
+                ))
+            }
         }
         ProviderAction::Login { driver } => {
             let profile = ClientProfile::all()
                 .into_iter()
                 .find(|p| &p.driver == driver)
                 .ok_or_else(|| anyhow::anyhow!("pilote inconnu : {driver}"))?;
-            Ok(format!(
-                "{}\n",
-                OfficialDriver::new(profile, racine, &utilisateur).login_instructions()
-            ))
+            let instructions =
+                OfficialDriver::new(profile, &racine, &utilisateur).login_instructions();
+            if as_json {
+                Ok(format!(
+                    "{}\n",
+                    serde_json::json!({"driver": driver, "instructions": instructions})
+                ))
+            } else {
+                Ok(format!("{instructions}\n"))
+            }
         }
     }
 }

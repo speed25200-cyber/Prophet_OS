@@ -354,30 +354,11 @@ in
     # devenu le comportement par défaut ; la déclarer fait maintenant échouer l'évaluation.
 
     # --- Paquets ---
-    # `prophet`, et les clients officiels qu'il pilote.
-    #
-    # Sans eux, `prophet provider login claude-code` dit « lancez `claude login` » sur une machine
-    # où `claude` n'existe pas. C'est le genre de découverte qu'on fait après avoir formaté son
-    # disque, et le seul moment où il est trop tard.
-    #
-    # Ils sont pris **tels quels** dans nixpkgs : l'invariant est qu'un client officiel tourne sans
-    # modification, et qu'aucun de ses fichiers d'identifiants n'est lu, copié ni réutilisé par
-    # l'OS. Prophet OS se contente de monter le répertoire de session dans la sandbox du client.
-    #
-    # `lib.optional (pkgs ? …)` plutôt qu'une référence directe : le jour où l'un d'eux change de
-    # nom ou disparaît de nixpkgs, l'image se construit quand même, sans ce client. Une image qui
-    # refuse de se construire parce qu'un client a été renommé en amont serait une dépendance plus
-    # dure que ce que ce système veut assumer — et `prophet provider ls` dit, sur la machine, ce
-    # qui est réellement là.
-    # Codex CLI n'y est pas, et c'est délibéré. `pkgs.codex` est un nom générique : rien ne
-    # garantit, depuis ici, qu'il désigne le client d'OpenAI plutôt qu'un homonyme. `lib.optional
-    # (pkgs ? …)` protège d'un attribut **absent**, pas d'un attribut **qui n'est pas le bon** —
-    # et livrer un binaire étranger sous un nom auquel l'OS fait confiance serait pire que de ne
-    # rien livrer. `claude-code` et `gemini-cli` sont assez spécifiques pour qu'une collision soit
-    # invraisemblable. Le jour où quelqu'un peut vérifier le nom de l'attribut de Codex sur une
-    # machine avec Nix, il l'ajoutera ici en une ligne.
-    environment.systemPackages = [ prophet ]
-      ++ lib.optional (pkgs ? claude-code) pkgs.claude-code
+    # Clients officiels obligatoires, issus du nixpkgs épinglé dans flake.lock.
+    # `pkgs.codex.meta.homepage` a été vérifié : https://github.com/openai/codex.
+    # Une disparition de ces paquets doit bloquer la construction, pas retirer silencieusement
+    # une compatibilité requise. Aucun patch applicatif ni lecture de leurs identifiants.
+    environment.systemPackages = [ prophet pkgs.codex pkgs.claude-code ]
       ++ lib.optional (pkgs ? gemini-cli) pkgs.gemini-cli;
 
     # L'autorisation de ces paquets — nixpkgs marque Claude Code « unfree » — n'est **pas** posée
