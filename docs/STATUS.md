@@ -454,19 +454,101 @@ lever la restriction a donc été sautée, alors qu'elle était demandée. Corri
 levée **avant** la préparation, et la préparation juge sur `command -v runsc` plutôt que sur le
 code de sortie d'un outil qui répond à deux questions.
 
-### À corriger dès que le run en cours aura rendu son verdict
+### Ce que le run 48 a appris, et ce qui a été corrigé (12 septembre 2026, 16 h 30)
 
-- [ ] `image/tests/installe.nix`, sous-test « ce que ce test ne vérifie PAS » : son commentaire dit
-  encore que `immutable.nix` déclare la racine en `ro` et que « la question reste ouverte ». Les
-  deux sont faux depuis la correction de 16 h 00 — l'option est retirée, la réponse est acquise.
-  Un commentaire périmé dans un test est une consigne périmée : il enverra le prochain lecteur
-  chercher une contradiction qui n'existe plus. Non corrigé tout de suite parce que toucher à
-  `image/` annule l'exécution dont on attend le verdict
-- [ ] Le travail « Question ouverte : la racine en lecture seule » restera rouge — sa réponse est
-  acquise et `immutable.nix` ne monte plus la racine ainsi. Il est en `continue-on-error`, donc il
-  ne bloque rien, mais il occupe un coureur huit minutes à chaque poussée pour re-répondre à une
-  question tranchée. À passer en déclenchement manuel, pour qu'il redevienne le garde-fou du jour
-  où la conception permettra la racine en lecture seule
+Le run `34703888974` a rendu son verdict : quatre travaux verts, dont **« Le système installé
+démarre »** et **« Voir l'image démarrer »**. Deux rouges, tous deux réels, tous deux corrigés ici.
+
+**`prophet log` ne trouvait pas le journal.** Le test des services est allé beaucoup plus loin
+qu'avant — `sandbox démarrée tache=task:essai-sandbox niveau=0`, la correction `CAP_SETFCAP` tient
+— puis a buté sur ceci :
+
+```
+$ prophet log tail -n 20
+aucun journal sur cette machine
+```
+
+La commande lisait `~/.prophet/ledger`, et rien d'autre. Or `prophet-ledger` écrit dans
+`/var/lib/prophet/ledger` : deux journaux existent, et la commande d'audit ne connaissait que
+celui du développement. Elle répondait donc « il n'y a rien » devant un journal plein, ce qui est
+la pire des trois réponses possibles — pas « je ne sais pas », mais une négation.
+
+Corrigé : `prophet log` interroge d'abord **le service**, qui seul connaît l'état courant et qui
+seul sert les membres de `prophet-system` (l'état du daemon est en 0700, pour que personne ne
+réécrive l'histoire par le fichier) ; à défaut, il lit les fichiers, en essayant
+`/var/lib/prophet/ledger` avant `~/.prophet/ledger` ; et quand il ne trouve rien, il dit **où il a
+regardé et pourquoi chaque tentative a échoué**. Quatre tests dans `crates/prophet-cli`, dont un
+qui échoue sur l'ancien code.
+
+**Le travail « Construire le système installé » se trompait de question.** Il cherchait
+`/mnt/run/current-system` et `/mnt/etc/passwd` après un `nixos-install --no-bootloader`, et
+déclarait l'installation ratée de ne pas les trouver. Il avait tort sur les deux : `/run` est un
+tmpfs créé au démarrage, il n'existe sur aucun disque ; et `--no-bootloader` ne saute pas
+seulement `bootctl`, il saute le `switch-to-configuration boot` tout entier — donc l'activation,
+donc `/etc`. Le travail échouait sur une installation réussie, ce qui use la confiance qu'on
+accorde aux verts.
+
+Corrigé : il vérifie maintenant ce qu'un tel `nixos-install` produit réellement — le profil système
+pointant vers la fermeture exacte qu'on vient de construire, les sept unités et le binaire
+`prophet` **sur le disque cible** et non sur le coureur, le haché en 0600 — et il **dit** que les
+comptes ne sont pas de son ressort, en nommant le travail qui en répond.
+
+**Les deux dettes notées à 16 h 00 sont payées** : le commentaire périmé d'`installe.nix` (et
+celui de `racine-en-lecture-seule.nix`, qui parlait au présent d'une option retirée), et le travail
+de la racine en lecture seule, désormais à déclenchement manuel — entrée
+`reposer_la_question_de_la_racine`. Un rouge permanent dans un tableau que le guide d'installation
+demande de lire avant de graver une image n'est pas une information : c'est un entraînement à
+ignorer le rouge.
+
+### Faire tourner Prophet OS sur une machine qui n'est pas Prophet OS (12 septembre 2026)
+
+`tools/lancer-sur-l-hote.sh` installe les sept daemons en services systemd sur un hôte Ubuntu et
+les démarre. Rien ne le faisait jusqu'ici : `verify-on-host.sh` sonde sans rien installer,
+`setup-ubuntu-host.sh` pose des dépendances.
+
+Ce que cela **n'est pas**, et qui doit être dit avant qu'on le découvre : le serveur ne devient pas
+Prophet OS. Son noyau reste celui d'Ubuntu, sa racine reste inscriptible, il n'y a ni emplacements
+A/B ni chiffrement posé par nous. Ce qui tourne, ce sont les daemons, avec le durcissement de
+l'image. C'est la différence entre « Prophet OS est installé » et « Prophet OS tourne ici », et sur
+un VPS qu'on ne réinstalle pas, seule la seconde est disponible.
+
+Un piège trouvé en écrivant les unités à la main, et qui ne se voit pas dans le module NixOS :
+
+```
+SystemCallFilter=~@privileged ~@resources    # ne fait pas ce qu'on lit
+```
+
+systemd ne prend le `~` qu'en tête de valeur, puis lit chaque mot comme un nom d'appel système. Le
+second `~@resources` n'est pas un groupe nié mais un nom invalide : il est écarté avec un simple
+avertissement, et le filtre posé est plus large que voulu. `systemd-analyze verify` le dit —
+« System call ~@resources is not known, ignoring » — et le script le lui demande désormais sur les
+sept unités **avant** de démarrer quoi que ce soit. NixOS écrit une ligne par élément de liste, ce
+qui masque le piège ; à la main, il faut le connaître.
+
+### Hermes et le lancement, câblés dans le workflow du serveur (12 septembre 2026)
+
+Deux entrées neuves, toutes deux à « false » par défaut :
+
+- `supprimer_hermes` — archive `/root/hermes` dans `/root/hermes-sauvegarde-<date>.tar.gz`,
+  **relit l'archive** (`tar tzf`), et n'efface qu'ensuite ; puis retire les unités systemd et les
+  entrées cron à son nom. L'archive reste sur le serveur : la rapatrier la ferait passer par un
+  artefact d'un dépôt public, et un moteur de trading contient des clés d'API. Une archive qu'on
+  n'a pas ouverte n'est pas une sauvegarde, c'est un fichier dont on espère quelque chose ;
+- `lancer_les_services` — lance `tools/lancer-sur-l-hote.sh`, puis relève ce que la machine répond
+  (`prophet status`, `task ls`, `log tail`, l'état et le journal de chaque service) dans l'artefact
+  `prophet-sur-le-serveur`.
+
+L'en-tête du workflow disait « rien ici ne touche /root/hermes ». Ce n'est plus vrai, et il le dit
+maintenant : le laisser écrit aurait été pire que de ne rien écrire.
+
+### Une correction à ce que ce fichier affirmait encore
+
+Le paragraphe « Le serveur de l'utilisateur reste inatteint » ci-dessous portait deux erreurs, dont
+une de ma main. `workflow_dispatch` **fonctionne par l'API sur une branche de travail** : c'est le
+bouton de l'interface qui exige la branche par défaut, pas le déclenchement. J'ai affirmé le
+contraire pendant des heures, sur la foi d'un unique 404, et demandé trois fois à l'utilisateur une
+modification qui n'était pas nécessaire. L'essai a rendu `204 No Content`. Le serveur n'est plus
+inatteint : le run `34703605599` y a tourné, et le secret `VPS_PASSWORD` est posé.
 
 ## Blocages
 
@@ -499,17 +581,12 @@ du module, ses sockets en 0660 dans un répertoire en 0750, et la chaîne compl�
 tâche. Ce qui reste non vérifié est le matériel réel — la carte graphique, la carte réseau et le
 micrologiciel d'un PC donné.
 
-**Le serveur de l'utilisateur reste inatteint** (12 septembre). Le workflow qui l'atteindrait
-existe et est poussé — `.github/workflows/verifier-sur-le-serveur.yml` — mais il ne peut pas
-encore tourner. Deux obstacles, tous deux hors de portée d'un agent, décrits en détail dans
-`docs/serveur.md` :
-
-1. GitHub ne propose `workflow_dispatch` que pour les workflows présents sur la branche par
-   défaut. `main` n'a qu'un commit initial ; les 48 autres sont sur la branche de travail. Tant
-   que le fichier n'est pas sur `main`, l'API répond 404.
-2. Le mot de passe du serveur doit être posé en secret `VPS_PASSWORD` du dépôt. Aucun agent ne
-   doit l'écrire : ni dans le fichier, ni dans un commit, ni dans une entrée qu'il remplirait
-   lui-même.
+**Le serveur de l'utilisateur est atteint** (12 septembre, 15 h 52). Le workflow
+`.github/workflows/verifier-sur-le-serveur.yml` y tourne, déclenché **par l'API sur la branche de
+travail**. Ce paragraphe a longtemps dit le contraire, et c'était mon erreur : le bouton de
+l'interface GitHub exige la branche par défaut, le déclenchement par l'API non. Le secret
+`VPS_PASSWORD` est posé — et il reste la seule chose qu'aucun agent ne doit écrire : ni dans le
+fichier, ni dans un commit, ni dans une entrée qu'il remplirait lui-même.
 
 Une tentative de contourner le premier point — faire de la poussée elle-même le déclencheur, avec
 l'intention écrite dans un fichier versionné — a été refusée, à raison : cela rendait un `git push`
