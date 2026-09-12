@@ -44,6 +44,11 @@ verify-host:
 probe-host:
     ./tools/verify-on-host.sh --probe
 
+# Niveaux d'isolation seuls : ne compile que sandboxd. Pour une machine à mémoire courte, où la
+# compilation de l'atelier entier risque d'être tuée avant d'avoir répondu à la question utile.
+verify-levels:
+    ./tools/verify-on-host.sh --niveaux
+
 # Tests NixOS en machine virtuelle.
 test-vm:
     @echo "pas encore disponible (M9)" && exit 2

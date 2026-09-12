@@ -105,7 +105,9 @@ Le système **annonce** ces limites plutôt que de les masquer : `prophet status
 d'isolation réellement atteignable, et `sandboxd` refuse une tâche qui exigerait davantage au lieu
 de la dégrader en silence.
 
-## 6. Un défaut trouvé après coup, et corrigé
+## 6. Deux défauts trouvés après coup, et corrigés
+
+### 6.1 La sandbox retombait silencieusement au niveau 0
 
 La première version de ce rapport annonçait les niveaux 1 et 2 comme « écrits, non exerçables
 ici ». C'était trop indulgent. Une relecture a montré que le gestionnaire ignorait purement et
@@ -132,6 +134,45 @@ cette faute si elle revenait.
 La leçon vaut au-delà de ce défaut : un composant qu'on ne peut pas exercer doit être décrit comme
 **non vérifié**, jamais comme « prêt ». La section 5 est écrite dans cet esprit.
 
+### 6.2 L'appareil de vérification confondait « non vérifiable » et « en échec »
+
+Le premier défaut portait sur le système ; celui-ci porte sur l'instrument censé le juger, ce qui
+est plus insidieux : un instrument faux ne se signale pas, il se contente de rendre un verdict.
+
+`verify-on-host.sh` lançait `cargo test --workspace -- --ignored` en un seul bloc. Sur une machine
+qui a gVisor mais pas KVM — le cas de n'importe quel serveur d'hébergeur en nuage, puisque la
+virtualisation imbriquée n'y est pas offerte — les deux tests `needs_kvm` échouent par construction,
+l'étape entière passe au rouge, et le rapport ne permet plus de voir que le niveau 1, le seul que
+cette machine ait réellement débloqué, fonctionne. Le script promettait pourtant le contraire dans
+son propre texte : « les tests correspondants seront ignorés et signalés comme tels ».
+
+Trois changements :
+
+1. Les tests matériels sont dispatchés **marqueur par marqueur**. Les marqueurs sont lus dans les
+   sources (`#[ignore = "needs_gvisor"]`) plutôt que tenus dans une liste à part, pour qu'un test
+   ajouté demain soit pris en compte sans toucher au script. Un marqueur inconnu n'est jamais
+   supposé satisfait : il est rangé en « non vérifiable », car un vert obtenu par défaut est
+   précisément ce qu'on cherche à éviter.
+2. Trois issues distinctes remplacent deux : réussi, échoué, **non vérifiable ici**. La dernière a
+   sa propre section dans le rapport et ne compte dans aucun des deux totaux.
+3. Un mode `--niveaux` (`just verify-levels`) ne compile que `sandboxd` et s'arrête après les
+   niveaux d'isolation. Sur une machine à mémoire courte, où la compilation de l'atelier entier
+   risque d'être tuée, c'est la différence entre obtenir la réponse qui compte et ne rien obtenir.
+   En mode complet, les niveaux passent désormais **avant** la compilation longue, pour la même
+   raison.
+
+Les diagnostics des tests de niveau 1 ont été repris dans la foulée. Ils affirmaient `sortie :
+{stdout}` sur une chaîne vide, et repliaient un compte d'interfaces illisible sur la valeur `99`,
+ce qui fait lire un échec de lancement comme une mesure de réseau. Ils rapportent maintenant le
+code de sortie et l'erreur standard du moniteur, et distinguent « le compte est mauvais » de « rien
+n'a tourné ». Sur une machine distante dont on ne lit que la sortie collée, cette distinction est
+la moitié du diagnostic.
+
+Les deux moitiés du mécanisme ont été exercées : matériel absent, les quatre tests sont déclarés
+non vérifiables et aucun ne passe au vert ; un `runsc` factice placé sur le chemin, les deux tests
+`needs_gvisor` sont réellement lancés, échouent, et rapportent `runsc: unable to start container:
+permission denied`.
+
 ## 7. Écarts par rapport au plan
 
 | Point du plan | Ce qui a été fait | Raison |
@@ -143,10 +184,12 @@ La leçon vaut au-delà de ce défaut : un composant qu'on ne peut pas exercer d
 
 ## 8. Recommandations pour la phase 1
 
-1. **Rejouer ce rapport sur une machine complète**, par `just verify-host`. Le script sonde la
-   machine, lance la suite complète y compris les tests marqués `needs_gvisor` et `needs_kvm`, et
-   écrit un rapport. Les lignes de la section 5 sont la première dette du projet ; le défaut de la
-   section 6 montre pourquoi elle se paie vite.
+1. **Rejouer ce rapport sur une machine complète**, par `just verify-host` — ou `just
+   verify-levels` d'abord si la machine est petite, ce qui répond à la seule question qui compte
+   sans compiler l'atelier entier. Le script sonde la machine, lance chaque test matériel dont le
+   matériel est présent, et range les autres en « non vérifiable » sans les compter. Les lignes de
+   la section 5 sont la première dette du projet ; les deux défauts de la section 6 montrent
+   pourquoi elle se paie vite, et que l'instrument de mesure fait partie de la dette.
 2. **Mesurer la ligne de base par captures d'écran.** Le rapport de coût repose aujourd'hui sur un
    modèle de tour de boucle ; il faut le confronter à un agent réel.
 3. **Brancher un vrai client d'éditeur.** C'est le seul moyen de figer les noms d'options des

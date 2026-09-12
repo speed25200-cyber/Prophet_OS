@@ -24,14 +24,17 @@ fn namespaces_disponibles() -> bool {
     Capabilities::probe().user_namespaces && helper().exists()
 }
 
-/// Exécute `sh -c <script>` sous sandbox et renvoie (code de sortie, sortie standard, erreur).
-fn executer(rules: Ruleset, script: &str) -> (Option<i32>, String, String) {
+/// Exécute une spécification quelconque et renvoie (code de sortie, sortie standard, erreur,
+/// niveau réellement obtenu).
+///
+/// Les tests des niveaux 1 et 2 en dépendent. Quand un moniteur est installé mais refuse de
+/// démarrer, c'est son message d'erreur qui dit pourquoi ; une sortie vide, seule, n'apprend rien
+/// à qui lit le rapport depuis une autre machine. Le niveau est rendu avec le reste pour qu'un
+/// repli silencieux se voie dans le même appel.
+fn executer_spec(spec: &SandboxSpec) -> (Option<i32>, String, String, u8) {
     let manager = Manager::new(helper().display().to_string());
-    let spec = SandboxSpec::new(0, "/bin/sh", "/")
-        .args(["-c", script])
-        .rules(rules)
-        .env("PATH", "/usr/bin:/bin");
-    let mut handle = manager.run("task:test", &spec).unwrap();
+    let mut handle = manager.run("task:test", spec).unwrap();
+    let niveau = handle.level;
     let mut stdout = String::new();
     let mut stderr = String::new();
     if let Some(child) = handle_child(&mut handle) {
@@ -43,6 +46,16 @@ fn executer(rules: Ruleset, script: &str) -> (Option<i32>, String, String) {
         }
     }
     let code = handle.wait().unwrap();
+    (code, stdout, stderr, niveau)
+}
+
+/// Exécute `sh -c <script>` sous sandbox de niveau 0 et renvoie (code de sortie, sortie, erreur).
+fn executer(rules: Ruleset, script: &str) -> (Option<i32>, String, String) {
+    let spec = SandboxSpec::new(0, "/bin/sh", "/")
+        .args(["-c", script])
+        .rules(rules)
+        .env("PATH", "/usr/bin:/bin");
+    let (code, stdout, stderr, _) = executer_spec(&spec);
     (code, stdout, stderr)
 }
 
@@ -272,22 +285,21 @@ fn niveau_un_execute_reellement_sous_gvisor() {
         caps.runsc.is_some(),
         "gVisor absent : ce test doit tourner sur une machine équipée"
     );
-    let manager = Manager::new(helper().display().to_string());
     let spec = SandboxSpec::new(1, "/bin/sh", "/")
         // `dmesg` de gVisor annonce son propre noyau : c'est la preuve que l'invité ne parle pas
         // au noyau de l'hôte.
         .args(["-c", "dmesg 2>/dev/null | head -1; echo FIN"])
         .env("PATH", "/usr/bin:/bin");
-    let mut handle = manager.run("task:test", &spec).unwrap();
-    let mut stdout = String::new();
-    if let Some(child) = handle.child_mut()
-        && let Some(sortie) = child.stdout.as_mut()
-    {
-        let _ = sortie.read_to_string(&mut stdout);
-    }
-    let _ = handle.wait();
-    assert!(stdout.contains("FIN"), "sortie : {stdout}");
-    assert_eq!(handle.level, 1);
+    let (code, stdout, stderr, niveau) = executer_spec(&spec);
+    assert_eq!(
+        niveau, 1,
+        "une sandbox demandée au niveau 1 doit être rendue au niveau 1"
+    );
+    assert!(
+        stdout.contains("FIN"),
+        "gVisor est installé mais n'a rien exécuté.\n  code de sortie : {code:?}\n  \
+         sortie : {stdout:?}\n  erreur : {stderr}"
+    );
 }
 
 #[test]
@@ -295,20 +307,27 @@ fn niveau_un_execute_reellement_sous_gvisor() {
 fn niveau_un_n_a_pas_de_reseau() {
     let caps = Capabilities::probe();
     assert!(caps.runsc.is_some(), "gVisor absent");
-    let manager = Manager::new(helper().display().to_string());
     let spec = SandboxSpec::new(1, "/bin/sh", "/")
         .args(["-c", "cat /proc/net/dev 2>/dev/null | tail -n +3 | wc -l"])
         .env("PATH", "/usr/bin:/bin");
-    let mut handle = manager.run("task:test", &spec).unwrap();
-    let mut stdout = String::new();
-    if let Some(child) = handle.child_mut()
-        && let Some(sortie) = child.stdout.as_mut()
-    {
-        let _ = sortie.read_to_string(&mut stdout);
-    }
-    let _ = handle.wait();
-    let interfaces: usize = stdout.trim().parse().unwrap_or(99);
-    assert!(interfaces <= 1, "interfaces trouvées : {interfaces}");
+    let (code, stdout, stderr, niveau) = executer_spec(&spec);
+    assert_eq!(
+        niveau, 1,
+        "une sandbox demandée au niveau 1 doit être rendue au niveau 1"
+    );
+    // Un compte illisible et un mauvais compte sont deux défauts différents. Les confondre, comme
+    // le faisait la valeur de repli précédente, fait chercher une fuite de réseau là où c'est le
+    // lancement qui a échoué.
+    let interfaces: usize = stdout.trim().parse().unwrap_or_else(|_| {
+        panic!(
+            "le nombre d'interfaces n'a pas pu être lu : gVisor n'a probablement rien exécuté.\n  \
+             code de sortie : {code:?}\n  sortie : {stdout:?}\n  erreur : {stderr}"
+        )
+    });
+    assert!(
+        interfaces <= 1,
+        "l'invité de niveau 1 ne doit voir que la boucle locale, or {interfaces} interfaces sont visibles"
+    );
 }
 
 #[test]

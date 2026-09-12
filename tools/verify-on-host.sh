@@ -6,19 +6,29 @@
 # machine équipée, il répond à une seule question : **ces neuf-là tiennent-elles ?**
 #
 # Usage :
-#   ./tools/verify-on-host.sh            # sonde, tests complets, rapport
+#   ./tools/verify-on-host.sh            # sonde, niveaux d'isolation, puis suite complète
 #   ./tools/verify-on-host.sh --probe    # sonde seule, sans rien exécuter
+#   ./tools/verify-on-host.sh --niveaux  # sonde + niveaux d'isolation seulement
+#
+# Le mode `--niveaux` ne compile que `sandboxd`. Sur une petite machine, c'est la différence entre
+# obtenir la réponse qui compte et se faire tuer par le gestionnaire de mémoire avant de l'obtenir.
 #
 # Il ne modifie rien en dehors de son répertoire de rapport, et n'installe rien.
 
 set -uo pipefail
 
 RAPPORT="${RAPPORT:-verification-$(date +%Y-%m-%d-%H%M%S).md}"
-PROBE_ONLY=0
-[ "${1:-}" = "--probe" ] && PROBE_ONLY=1
+MODE=complet
+case "${1:-}" in
+  --probe)   MODE=sonde ;;
+  --niveaux) MODE=niveaux ;;
+  "")        ;;
+  *) echo "argument inconnu : $1 (attendus : --probe, --niveaux)" >&2; exit 2 ;;
+esac
 
 ok()    { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 ko()    { printf '  \033[31m✗\033[0m %s\n' "$1"; }
+hors()  { printf '  \033[33m–\033[0m %s\n' "$1"; }
 info()  { printf '  · %s\n' "$1"; }
 
 echo "Prophet OS — vérification sur machine complète"
@@ -28,9 +38,9 @@ echo
 echo "Sonde du matériel et du noyau"
 MANQUES=()
 
-if [ -e /dev/kvm ]; then ok "/dev/kvm présent"
+if [ -e /dev/kvm ]; then ok "/dev/kvm présent"; KVM=1
 else
-  ko "/dev/kvm absent"
+  ko "/dev/kvm absent"; KVM=0
   MANQUES+=("kvm")
   # Sur une machine virtuelle d'hébergeur, l'absence de KVM n'est pas une configuration
   # manquante : c'est que la virtualisation imbriquée n'est pas offerte. Le dire évite de
@@ -42,16 +52,16 @@ else
   fi
 fi
 
-if command -v runsc >/dev/null 2>&1; then ok "gVisor : $(command -v runsc)"
-else ko "gVisor absent"; MANQUES+=("gvisor"); fi
+if command -v runsc >/dev/null 2>&1; then ok "gVisor : $(command -v runsc)"; GVISOR=1
+else ko "gVisor absent"; GVISOR=0; MANQUES+=("gvisor"); fi
 
-if command -v firecracker >/dev/null 2>&1; then ok "Firecracker : $(command -v firecracker)"
-else ko "Firecracker absent"; MANQUES+=("firecracker"); fi
+if command -v firecracker >/dev/null 2>&1; then ok "Firecracker : $(command -v firecracker)"; FC=1
+else ko "Firecracker absent"; FC=0; MANQUES+=("firecracker"); fi
 
 KERNEL_IMG="${PROPHET_MICROVM_KERNEL:-/var/lib/prophet/microvm/vmlinux}"
 ROOTFS_IMG="${PROPHET_MICROVM_ROOTFS:-/var/lib/prophet/microvm/rootfs.ext4}"
-if [ -f "$KERNEL_IMG" ] && [ -f "$ROOTFS_IMG" ]; then ok "images de microVM présentes"
-else ko "images de microVM absentes ($KERNEL_IMG, $ROOTFS_IMG)"; MANQUES+=("images-microvm"); fi
+if [ -f "$KERNEL_IMG" ] && [ -f "$ROOTFS_IMG" ]; then ok "images de microVM présentes"; IMAGES=1
+else ko "images de microVM absentes ($KERNEL_IMG, $ROOTFS_IMG)"; IMAGES=0; MANQUES+=("images-microvm"); fi
 
 # Landlock : la version d'ABI se lit par l'appel système, pas par un fichier.
 if command -v python3 >/dev/null 2>&1 && python3 - <<'PY' 2>/dev/null
@@ -77,6 +87,7 @@ else ko "cargo absent : rien ne peut être compilé"; exit 2; fi
 MEM_MIB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
 SWAP_MIB=$(awk '/SwapTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
 JOBS=""
+PETITE_MACHINE=0
 if [ "$MEM_MIB" -gt 0 ]; then
   info "mémoire : ${MEM_MIB} Mio, dont ${SWAP_MIB} Mio d'échange"
   if [ "$((MEM_MIB + SWAP_MIB))" -lt 4096 ]; then
@@ -87,6 +98,7 @@ if [ "$MEM_MIB" -gt 0 ]; then
     echo "       ou laisser ce script compiler en série (il le fait automatiquement)."
     JOBS="-j 1"
     export CARGO_BUILD_JOBS=1
+    PETITE_MACHINE=1
   else
     ok "mémoire suffisante pour compiler"
   fi
@@ -97,11 +109,17 @@ if [ ${#MANQUES[@]} -eq 0 ]; then
   echo "Machine complète : les neuf tâches bloquées sont vérifiables ici."
 else
   echo "Manquent : ${MANQUES[*]}"
-  echo "Les tests correspondants seront ignorés et signalés comme tels, jamais comptés réussis."
+  echo "Les tests correspondants ne seront pas lancés, et seront signalés comme non vérifiables,"
+  echo "jamais comptés réussis ni comptés en échec."
+fi
+if [ "$PETITE_MACHINE" = "1" ] && [ "$MODE" = "complet" ]; then
+  echo
+  info "machine à mémoire courte : les niveaux d'isolation sont vérifiés en premier, avant la"
+  info "compilation longue, pour que la réponse qui compte arrive même si la suite n'aboutit pas."
 fi
 echo
 
-[ "$PROBE_ONLY" = "1" ] && exit 0
+[ "$MODE" = "sonde" ] && exit 0
 
 # --- 2. Ce que la machine peut vérifier ---
 {
@@ -109,9 +127,13 @@ echo
   echo
   echo "- Date : $(date -Is)"
   echo "- Machine : $(uname -srm)"
+  echo "- Mémoire : ${MEM_MIB} Mio + ${SWAP_MIB} Mio d'échange"
   echo "- Manques : ${MANQUES[*]:-aucun}"
   echo
 } > "$RAPPORT"
+
+ECHECS=0
+NON_VERIFIES=()
 
 lancer() {
   local titre="$1"; shift
@@ -130,12 +152,134 @@ lancer() {
   return 1
 }
 
-ECHECS=0
+# --- 3. Les niveaux d'isolation, marqueur par marqueur ---
+#
+# Chaque test qui exige du matériel porte son marqueur : `#[ignore = "needs_gvisor"]`. On lit ces
+# marqueurs dans les sources plutôt que d'en tenir une liste ici, pour qu'un test ajouté demain
+# soit pris en compte sans que ce script soit modifié.
+#
+# Le défaut que cette section corrige : lancer `cargo test -- --ignored` en bloc. Sur une machine
+# qui a gVisor mais pas KVM — le cas d'un serveur d'hébergeur, qui n'offre pas la virtualisation
+# imbriquée — les tests de niveau 2 échouent, et l'étape entière passe au rouge. On ne voit plus
+# que le niveau 1, le seul que cette machine ait débloqué, fonctionne.
+
+tests_marques() {
+  find crates -name '*.rs' \( -path '*/tests/*' -o -path '*/src/*' \) 2>/dev/null | sort | while read -r fichier; do
+    crate=$(printf '%s' "$fichier" | cut -d/ -f2)
+    awk -v crate="$crate" '
+      /#\[ignore/ {
+        if (match($0, /"[^"]+"/)) { marqueur = substr($0, RSTART + 1, RLENGTH - 2) }
+        else { marqueur = "sans-marqueur" }
+        attente = 1
+        next
+      }
+      attente && /^[[:space:]]*(pub[[:space:]]+)?(async[[:space:]]+)?fn[[:space:]]+/ {
+        nom = $0
+        sub(/^[[:space:]]*(pub[[:space:]]+)?(async[[:space:]]+)?fn[[:space:]]+/, "", nom)
+        sub(/[(<].*$/, "", nom)
+        print marqueur "\t" crate "\t" nom
+        attente = 0
+      }
+    ' "$fichier"
+  done
+}
+
+# Répond : ce marqueur a-t-il son matériel ici ? 0 = oui, 1 = non (avec la raison sur stdout).
+materiel_pour() {
+  case "$1" in
+    needs_gvisor)
+      [ "$GVISOR" = "1" ] && return 0
+      echo "gVisor absent"; return 1 ;;
+    needs_kvm)
+      # Le niveau 2 exige les trois : le module, le moniteur, et les images d'invité.
+      manquants=""
+      [ "$KVM" = "1" ]    || manquants="$manquants kvm"
+      [ "$FC" = "1" ]     || manquants="$manquants firecracker"
+      [ "$IMAGES" = "1" ] || manquants="$manquants images-microvm"
+      [ -z "$manquants" ] && return 0
+      echo "il manque${manquants}"; return 1 ;;
+    needs_gpu)
+      { [ -d /dev/dri ] || [ -e /dev/nvidiactl ]; } && return 0
+      echo "aucun GPU exposé"; return 1 ;;
+    needs_claude_login|needs_codex_login|needs_gemini_login)
+      # Une session de compte ne se sonde pas : l'affirmer serait deviner.
+      echo "exige un compte connecté, ce qu'aucune sonde ne peut établir"; return 1 ;;
+    *)
+      # Un marqueur inconnu n'est jamais supposé satisfait : le silence prudent vaut mieux
+      # qu'un vert obtenu par défaut.
+      echo "marqueur inconnu de ce script"; return 1 ;;
+  esac
+}
+
+etape_niveaux() {
+  local marques
+  marques=$(tests_marques)
+  if [ -z "$marques" ]; then
+    info "aucun test marqué trouvé"
+    return 0
+  fi
+
+  local crates_concernes
+  crates_concernes=$(printf '%s\n' "$marques" | cut -f2 | sort -u)
+  local args_paquets=()
+  local c
+  for c in $crates_concernes; do args_paquets+=(-p "$c"); done
+
+  lancer "Compilation des tests matériels" \
+    cargo build "${args_paquets[@]}" --tests $JOBS || {
+    ko "les tests matériels ne compilent pas ; rien ne peut être conclu des niveaux"
+    ECHECS=$((ECHECS + 1))
+    return 1
+  }
+
+  local marqueur crate nom raison
+  while IFS=$'\t' read -r marqueur crate nom; do
+    [ -z "$nom" ] && continue
+    if raison=$(materiel_pour "$marqueur"); then
+      lancer "$nom ($marqueur)" \
+        cargo test -p "$crate" $JOBS -- --ignored --test-threads=1 "$nom" \
+        || ECHECS=$((ECHECS + 1))
+    else
+      hors "$nom ($marqueur) — non vérifiable : $raison"
+      NON_VERIFIES+=("$nom ($marqueur) — $raison")
+    fi
+  done <<< "$marques"
+}
+
+echo "Niveaux d'isolation"
+etape_niveaux
+echo
+
+if [ "$MODE" = "niveaux" ]; then
+  {
+    echo "## Non vérifiable sur cette machine"
+    echo
+    if [ ${#NON_VERIFIES[@]} -eq 0 ]; then
+      echo "Rien : tous les tests matériels ont pu être lancés."
+    else
+      printf -- "- %s\n" "${NON_VERIFIES[@]}"
+      echo
+      echo "Ces tests n'ont pas été lancés. Ils ne comptent ni comme réussis ni comme échoués."
+    fi
+    echo
+  } >> "$RAPPORT"
+  echo "Rapport écrit dans $RAPPORT"
+  [ "$ECHECS" -eq 0 ] && { echo "Niveaux : tout ce que cette machine peut vérifier est vert."; exit 0; }
+  echo "$ECHECS étape(s) en échec : voir le rapport."
+  exit 1
+fi
+
+# --- 4. La suite complète ---
+#
 # La compilation d'abord, séparément : si elle échoue faute de mémoire, autant le savoir avant
 # d'attribuer l'échec aux tests.
-lancer "Compilation" cargo build --workspace --tests $JOBS || { ko "compilation impossible, le reste est sans objet"; exit 2; }
+echo "Suite complète"
+lancer "Compilation" cargo build --workspace --tests $JOBS || {
+  ko "compilation impossible, le reste est sans objet"
+  echo "     Les niveaux d'isolation ci-dessus restent valables : ils ont été vérifiés avant."
+  exit 2
+}
 lancer "Suite sans privilèges" cargo test --workspace $JOBS || ECHECS=$((ECHECS+1))
-lancer "Tests exigeant du matériel (--ignored)" cargo test --workspace $JOBS -- --ignored --test-threads=1 || ECHECS=$((ECHECS+1))
 lancer "Latences en binaire optimisé" cargo test --release -p capd performance $JOBS -- --nocapture || ECHECS=$((ECHECS+1))
 lancer "Suite adversariale" cargo test -p bench --test adversarial -- --nocapture || ECHECS=$((ECHECS+1))
 lancer "Démonstration M8" cargo test -p agentd --test demo_m8 -- --nocapture || ECHECS=$((ECHECS+1))
@@ -145,13 +289,29 @@ if command -v nix >/dev/null 2>&1; then
   lancer "Construction de l'image NixOS" nix build .#nixosConfigurations.prophet.config.system.build.toplevel || ECHECS=$((ECHECS+1))
 else
   echo "→ Construction de l'image : ignorée, Nix absent"
-  echo "## Construction de l'image" >> "$RAPPORT"
-  echo "Ignorée : Nix absent de la machine." >> "$RAPPORT"
-  echo >> "$RAPPORT"
+  hors "image NixOS — non vérifiable : Nix absent"
+  NON_VERIFIES+=("image NixOS — Nix absent de la machine")
 fi
+
+{
+  echo "## Non vérifiable sur cette machine"
+  echo
+  if [ ${#NON_VERIFIES[@]} -eq 0 ]; then
+    echo "Rien : tout a pu être lancé."
+  else
+    printf -- "- %s\n" "${NON_VERIFIES[@]}"
+    echo
+    echo "Ces vérifications n'ont pas été lancées. Elles ne comptent ni comme réussies ni comme"
+    echo "échouées : ce qu'elles établissent reste inconnu sur cette machine."
+  fi
+  echo
+} >> "$RAPPORT"
 
 echo
 echo "Rapport écrit dans $RAPPORT"
+if [ ${#NON_VERIFIES[@]} -gt 0 ]; then
+  echo "Non vérifié ici : ${#NON_VERIFIES[@]} élément(s), détaillés dans le rapport."
+fi
 if [ "$ECHECS" -eq 0 ]; then
   echo "Tout ce que cette machine peut vérifier est vert."
   exit 0
