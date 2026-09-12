@@ -130,14 +130,17 @@ pkgs.testers.runNixOSTest {
         # est là pour ça. Ce qui est vérifié ici est autre chose, et personne ne l'a jamais vérifié
         # — qu'elle soit **lancée**.
         #
-        # `wantedBy = [ "graphical.target" ]` suppose que cette cible est atteinte. Sur cette
-        # machine, `services.xserver.enable` vaut `false` et il n'y a pas de gestionnaire de
-        # session : la cible par défaut est `multi-user.target`. Si c'est bien le cas, la surface
-        # n'est jamais démarrée du tout, et l'écran d'un PC fraîchement installé montre une invite
-        # de connexion au lieu de ce que la machine existe pour montrer.
+        # Elle est voulue par `graphical.target`, qui n'est pas la cible par défaut de cette
+        # machine — `services.xserver.enable` vaut `false`, il n'y a pas de gestionnaire de
+        # session, et la cible par défaut est `multi-user.target`. Une ligne de `surface.nix`,
+        # quatre-vingt-dix lignes plus bas que le service, rattache `graphical.target` à
+        # `multi-user.target` et rend l'ensemble cohérent.
         #
-        # « jamais tentée » et « tentée et échouée » se ressemblent quand on regarde l'écran. Elles
-        # ne se ressemblent pas du tout quand on cherche pourquoi.
+        # Les deux ne tiennent qu'ensemble, et rien à la construction ne le dit : retirer le
+        # rattachement laisserait l'écran noir sans une ligne de journal. « Jamais lancée » et
+        # « lancée et en échec » se ressemblent quand on regarde un écran noir ; elles ne se
+        # ressemblent pas du tout quand on cherche pourquoi. C'est cette assertion qui tient la
+        # différence.
         cible = machine.succeed("systemctl get-default").strip()
         print(f"cible par défaut : {cible}")
         etat = machine.succeed("systemctl show -p ActiveState -p Result --value prophet-surface.service || true").strip()
@@ -145,8 +148,8 @@ pkgs.testers.runNixOSTest {
         journal = machine.succeed("journalctl -u prophet-surface.service --no-pager | tail -30 || true")
         print(journal)
         assert "inactive" not in etat.splitlines()[0], (
-            "la surface n'a jamais été lancée — elle est voulue par « graphical.target », "
-            f"et la cible atteinte est « {cible} »"
+            "la surface n'a jamais été lancée : elle doit être voulue par une cible que cette "
+            f"machine atteint, et la cible par défaut est « {cible} »"
         )
 
     with subtest("le propriétaire ouvre une session et voit sa machine"):

@@ -59,6 +59,19 @@ in
       # erreur répétée, ce qui la rend plus difficile à trouver, pas plus facile.
       startLimitIntervalSec = 60;
       startLimitBurst = 5;
+      # `graphical.target` — qui n'est atteinte que grâce à la ligne
+      # `systemd.targets.graphical.wantedBy` en bas de ce fichier.
+      #
+      # Sans elle, cette cible ne serait jamais atteinte : cette machine n'a ni serveur X ni
+      # gestionnaire de session, `services.xserver.enable` vaut `false`, et la cible par défaut de
+      # systemd est alors `multi-user.target`. Une unité voulue par une cible qu'on n'atteint pas
+      # n'est pas lancée — et « pas lancée » ne veut pas dire « en échec » : pas de journal, pas de
+      # service de repli, rien à chercher. L'écran d'un PC fraîchement installé montrerait une
+      # invite de connexion, et le diagnostic ne commencerait nulle part.
+      #
+      # Les deux lignes sont à quatre-vingt-dix lignes l'une de l'autre et ne tiennent que
+      # ensemble. `image/tests/installe.nix` vérifie sur une vraie machine que la surface est bien
+      # lancée : c'est ce qui empêche que l'une parte sans l'autre.
       wantedBy = [ "graphical.target" ];
       after = [ "systemd-user-sessions.service" "prophet-agentd.service" ];
       onFailure = [ "prophet-surface-repli.service" ];
@@ -140,6 +153,12 @@ MESSAGE
 
     # La cible graphique existe, mais sans gestionnaire d'affichage : personne ne se connecte,
     # il n'y a pas de session à ouvrir.
+    #
+    # **Cette ligne est ce qui fait démarrer la surface.** `graphical.target` n'est la cible par
+    # défaut que sur une machine à gestionnaire de session ; ici la cible par défaut est
+    # `multi-user.target`, et sans ce rattachement la surface — voulue par `graphical.target` —
+    # ne serait jamais lancée. La retirer ne casserait rien de visible à la construction : l'écran
+    # resterait simplement noir, sans une ligne de journal pour le dire.
     systemd.targets.graphical.wantedBy = [ "multi-user.target" ];
 
     # Le compositeur a besoin du rendu accéléré ; la surface refuse de démarrer sans adaptateur

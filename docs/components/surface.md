@@ -40,6 +40,26 @@ La règle du groupe, dans `prophet-daemon`, lit maintenant aussi `/etc/group`. C
 socket, le même accès qu'un daemon — plus qu'elle n'en utilise. Le restreindre demande une notion
 de méthode autorisée par pair que `prophet-ipc` n'a pas encore.
 
+## Ce qui la fait démarrer, et qui tient à deux lignes
+
+Le service est voulu par `graphical.target`. Cette machine n'a ni serveur X ni gestionnaire de
+session : `services.xserver.enable` vaut `false`, et la cible par défaut de systemd est donc
+`multi-user.target`. Une seconde ligne, quatre-vingt-dix lignes plus bas dans le même fichier,
+rattache `graphical.target` à `multi-user.target` — et c'est elle qui fait que la surface démarre.
+
+Les deux ne tiennent qu'ensemble, et rien à la construction ne le signalerait : retirer le
+rattachement laisserait l'écran noir sans une ligne de journal, parce qu'une unité jamais lancée
+n'échoue pas, ne journalise rien, et ne déclenche pas son service de repli.
+
+`image/tests/installe.nix` démarre une vraie machine et vérifie que la surface est bien lancée.
+C'est ce qui empêche qu'une des deux lignes parte sans l'autre.
+
+**Question restée ouverte :** la surface réclame `/dev/tty1` avec `StandardInput = "tty-force"`,
+et `getty@tty1` le réclame aussi. Sur une machine sans écran, `cage` échoue et le conflit ne dure
+que le temps des cinq tentatives ; sur une machine avec écran, personne ne l'a encore vu. Retirer
+le getty de `tty1` rendrait la machine plus cohérente et moins rattrapable — c'est le seul
+terminal où l'on puisse taper quand tout le reste manque.
+
 ## Si l'écran reste noir
 
 La surface réessaie cinq fois en une minute, puis s'arrête — marteler toutes les deux secondes
