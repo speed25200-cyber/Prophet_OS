@@ -284,17 +284,39 @@ impl Session {
     /// # Errors
     /// Si la connexion échoue ou n'aboutit pas dans le délai.
     pub async fn connect(endpoint: &str) -> Result<Self, CdpError> {
-        let connexion = tokio::time::timeout(
-            Duration::from_secs(CALL_TIMEOUT_SECONDS),
-            tokio_tungstenite::connect_async(endpoint),
-        )
-        .await
-        .map_err(|_| CdpError::Timeout {
-            method: "connect".to_owned(),
-            seconds: CALL_TIMEOUT_SECONDS,
-        })?;
-        let (socket, _) = connexion.map_err(|e| CdpError::Transport(e.to_string()))?;
-        Ok(Self { socket, next_id: 1 })
+        // Le navigateur publie l'adresse de sa page avant d'accepter les connexions dessus. Un
+        // « connexion refusée » juste après le lancement ne dit donc pas « non », il dit « pas
+        // encore » — et les deux se distinguent par le fait de réessayer. Sur une machine chargée,
+        // où plusieurs navigateurs démarrent ensemble, l'intervalle s'allonge assez pour que la
+        // première tentative tombe dedans.
+        let debut = std::time::Instant::now();
+        let limite = Duration::from_secs(CALL_TIMEOUT_SECONDS);
+        let mut attente = Duration::from_millis(25);
+        loop {
+            match tokio::time::timeout(limite, tokio_tungstenite::connect_async(endpoint)).await {
+                Err(_) => {
+                    return Err(CdpError::Timeout {
+                        method: "connect".to_owned(),
+                        seconds: CALL_TIMEOUT_SECONDS,
+                    });
+                }
+                Ok(Ok((socket, _))) => return Ok(Self { socket, next_id: 1 }),
+                Ok(Err(erreur)) => {
+                    // Tout le reste — adresse invalide, poignée de main refusée — est un vrai
+                    // refus : réessayer ne ferait que retarder le diagnostic.
+                    let refus_temporaire = matches!(
+                        &erreur,
+                        tokio_tungstenite::tungstenite::Error::Io(e)
+                            if e.kind() == std::io::ErrorKind::ConnectionRefused
+                    );
+                    if !refus_temporaire || debut.elapsed() >= limite {
+                        return Err(CdpError::Transport(erreur.to_string()));
+                    }
+                    tokio::time::sleep(attente).await;
+                    attente = (attente * 2).min(Duration::from_millis(400));
+                }
+            }
+        }
     }
 
     /// Envoie une commande et attend son résultat.
