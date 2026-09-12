@@ -337,7 +337,10 @@ jobs:
           # dans le PATH — et `sudo` remet le PATH à zéro, donc on l'appelle par son chemin.
           OUTILS=$(nix build --no-link --print-out-paths nixpkgs#nixos-install-tools)
           echo "nixos-install : $OUTILS/bin/nixos-install"
-          sudo "$OUTILS/bin/nixos-install" \
+          # `sudo env PATH=…` : `nixos-install` appelle `nix-env`, `nix-store` et consorts, que
+          # `sudo` rendrait introuvables en remettant le PATH à zéro. La première tentative s'est
+          # arrêtée sur « nixos-install: line 294: nix-env: command not found ».
+          sudo env "PATH=$PATH" "$OUTILS/bin/nixos-install" \
             --root /mnt \
             --system "$(readlink -f ./systeme)" \
             --no-bootloader \

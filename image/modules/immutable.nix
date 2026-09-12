@@ -25,10 +25,35 @@
 
   # --- Racine immuable ---
   # NixOS rend déjà /nix/store immuable ; on ferme ce qui reste.
+  # La racine n'est **pas** montée en lecture seule aujourd'hui, et c'est une correction, pas un
+  # oubli.
+  #
+  # Elle l'était — `options = [ "ro" ]` — et personne n'avait jamais démarré une machine où
+  # l'option soit réellement appliquée : le cadre de test NixOS impose son propre montage, et le
+  # test `installe.nix` ne pouvait donc pas la voir. L'expérience dédiée
+  # (`image/tests/racine-en-lecture-seule.nix`) a posé la question le 12 septembre 2026, et la
+  # réponse est nette :
+  #
+  #     RuntimeError: Shell disconnected
+  #
+  # La machine ne garde même pas un interpréteur vivant. L'activation de NixOS écrit `/etc/passwd`,
+  # `/etc/shadow` et tout l'arbre de liens de `/etc` à **chaque** démarrage, et crée des
+  # répertoires sous `/var` ; `immutable.nix` ne monte que `/home` et `/var/lib/prophet` depuis des
+  # volumes séparés. Tout le reste est sur la racine.
+  #
+  # Sur un PC dont on vient d'effacer Windows, cela donne une machine qui ne démarre pas — et
+  # `systemd-boot` est configuré sans éditeur, donc sans rattrapage. Livrer cela aurait été bien
+  # pire que de livrer une racine inscriptible.
+  #
+  # Ce que cela coûte, dit franchement : **la promesse d'immuabilité n'est pas tenue
+  # aujourd'hui.** Les mises à jour A/B, le chiffrement et le verrouillage du noyau le sont ; la
+  # racine en lecture seule ne l'est pas. La tenir demande une conception, pas un réglage :
+  # `system.etc.overlay` (qui exige l'initrd systemd, déjà activé), un `/var` porté par un volume
+  # inscriptible plutôt que par la racine, et `boot.tmp.useTmpfs`. Le jour où ce sera fait,
+  # l'expérience ci-dessus deviendra le garde-fou qui empêche de le défaire.
   fileSystems."/" = lib.mkDefault {
     device = "/dev/disk/by-label/prophet-a";
     fsType = "ext4";
-    options = [ "ro" ];
   };
 
   # Bascule automatique : si `boot-complete.target` n'est pas atteint, le prochain démarrage

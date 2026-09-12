@@ -287,7 +287,22 @@ in
         extra = {
           after = [ "prophet-capd.service" "prophet-ledger.service" "prophet-sandboxd.service" ];
           requires = [ "prophet-capd.service" "prophet-ledger.service" ];
-          serviceConfig.ReadWritePaths = [ "/home/${cfg.user}" "/var/lib/prophet" ];
+          serviceConfig = {
+            ReadWritePaths = [ "/home/${cfg.user}" "/var/lib/prophet" ];
+            # `ProtectHome = true`, hérité du modèle commun, rend `/home` inaccessible et **vide**
+            # dans l'espace de montage du service. Il l'emporte sur `ReadWritePaths` : le test des
+            # services, interrogeant depuis l'intérieur de cet espace, a rendu
+            #
+            #     agentd voit /home/prophet : refusé
+            #
+            # Une tâche qui ouvre son espace de travail aurait donc échoué sur un « Read-only file
+            # system » très loin de cette ligne, et personne ne serait remonté jusqu'ici.
+            #
+            # `ProtectSystem = "strict"` reste : tout le reste de la hiérarchie, `/home` compris,
+            # demeure en lecture seule pour ce service. Seuls les deux chemins ci-dessus sont
+            # inscriptibles, et c'est ce que la déclaration prétendait déjà.
+            ProtectHome = lib.mkForce false;
+          };
         };
       };
     };

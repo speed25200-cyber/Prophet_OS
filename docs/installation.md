@@ -112,6 +112,19 @@ Pour voir la disposition qu'il produirait sans rien installer :
 sudo prophet-installer --disque /dev/VOTRE_DISQUE --jusqu-au-montage
 ```
 
+## Ce que cette version ne tient pas encore
+
+**La racine n'est pas en lecture seule.** Elle devait l'être — c'est écrit partout dans la
+conception — et l'expérience du 12 septembre 2026 a montré qu'une machine ainsi montée ne garde
+même pas un interpréteur vivant : l'activation de NixOS écrit `/etc/passwd`, `/etc/shadow` et tout
+l'arbre de `/etc` à chaque démarrage, et seuls `/home` et `/var/lib/prophet` sont sur des volumes
+séparés.
+
+Livrer cela vous aurait donné, après avoir effacé Windows, un PC qui ne démarre pas — sans
+rattrapage, le chargeur d'amorçage étant configuré sans éditeur. La racine est donc inscriptible,
+et l'immuabilité reste une promesse à tenir. Ce qui **est** tenu : les deux emplacements A/B avec
+bascule automatique, le chiffrement LUKS2 des données et de l'état, et le verrouillage du noyau.
+
 ## 4. Premier démarrage
 
 Retirez la clé, redémarrez. La phrase de passe vous est demandée pour ouvrir les volumes chiffrés,

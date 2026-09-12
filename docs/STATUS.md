@@ -239,6 +239,16 @@ Les trois ont un test qui échoue sur le code d'avant : trois dans `crates/proph
 (`sondes::*`), deux dans `crates/prophet-daemon`, et quatre sous-tests dans
 `image/tests/services.nix`.
 
+### Ce que `agentd` promettait sans pouvoir le tenir (12 septembre 2026)
+
+- [x] `agentd` déclarait `ReadWritePaths = [ "/home/prophet" … ]` pendant que `ProtectHome = true`,
+  hérité du modèle commun, rendait `/home` inaccessible et vide dans son espace de montage. Le
+  sous-test qui interroge **depuis l'intérieur** de cet espace, par `nsenter`, a rendu
+  `agentd voit /home/prophet : refusé`. Une tâche qui ouvre son espace de travail aurait échoué
+  sur un « Read-only file system » très loin de cette ligne. `ProtectHome` est désormais désactivé
+  pour ce seul service ; `ProtectSystem = "strict"` reste, donc tout `/home` demeure en lecture
+  seule sauf les deux chemins déclarés — ce que la déclaration prétendait déjà
+
 ### Le gardien borné par les règles du prisonnier (12 septembre 2026)
 
 - [x] `sandboxd` recevait `CAP_SETUID`, `CAP_SETGID` et `CAP_SYS_ADMIN`, et de l'autre main le
@@ -369,7 +379,24 @@ plus dangereuse pour quelqu'un qui vient d'effacer son disque :
 > la machine part en mode de secours — sauf que `systemd-boot` est configuré sans éditeur, donc il
 > n'y a pas de mode de secours utilisable.
 
-- [ ] `image/tests/racine-en-lecture-seule.nix` — pose la question à la machine au lieu de la
+**RÉPONSE, le 12 septembre 2026 : non.** L'expérience a rendu
+
+```
+RuntimeError: Shell disconnected
+```
+
+La machine ne garde même pas un interpréteur vivant. `immutable.nix` **ne monte plus la racine en
+lecture seule** : livrer cela aurait donné, sur un PC dont on vient d'effacer Windows, une machine
+qui ne démarre pas — et `systemd-boot` étant configuré sans éditeur, sans aucun rattrapage.
+
+Ce que cela coûte, dit franchement : **la promesse d'immuabilité n'est pas tenue aujourd'hui.** Les
+mises à jour A/B, le chiffrement et le verrouillage du noyau le sont ; la racine en lecture seule
+ne l'est pas, et `docs/installation.md` le dit. La tenir demande une conception —
+`system.etc.overlay`, un `/var` porté par un volume inscriptible, `boot.tmp.useTmpfs` — pas un
+réglage. Le test reste, et redeviendra le garde-fou qui empêche de défaire ce travail le jour où
+il sera fait.
+
+- [x] `image/tests/racine-en-lecture-seule.nix` — pose la question à la machine au lieu de la
   raisonner. Il force l'option `ro` là où le cadre de test pose la racine, démarre, et raconte ce
   qu'il trouve : les unités en échec, l'état de `systemd-tmpfiles-setup`, les erreurs du journal.
   Son travail d'intégration continue est en `continue-on-error` — c'est une **question**, pas une

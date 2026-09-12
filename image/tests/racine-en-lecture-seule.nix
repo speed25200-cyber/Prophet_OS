@@ -76,13 +76,22 @@ pkgs.testers.runNixOSTest {
         "journalctl -b --no-pager -p err | tail -40",
         "getent passwd prophet",
     ]:
-        sortie = machine.execute(f"{commande} 2>&1 | head -40")[1]
+        # Chaque question est posée séparément et son échec est rattrapé. À la première
+        # exécution, `machine.execute` a levé « Shell disconnected » et a emporté tout le reste
+        # du diagnostic : on a appris que la machine ne tenait pas, sans rien apprendre de plus.
+        # Une sonde dont la première question fait taire les suivantes ne mesure qu'une fois.
+        try:
+            sortie = machine.execute(f"{commande} 2>&1 | head -40")[1]
+        except Exception as erreur:
+            sortie = f"(pas de réponse : {erreur})"
         print(f"$ {commande}\n{sortie}")
 
     assert atteint, (
         "la racine en lecture seule empêche le démarrage. La réponse à la question posée en "
         "tête de ce fichier est « non » : il faut un /etc et un /var inscriptibles avant que "
-        "`immutable.nix` puisse tenir sa promesse."
+        "`immutable.nix` puisse tenir sa promesse. C'est ce qu'elle a rendu le 12 septembre "
+        "2026 — « Shell disconnected » — et `immutable.nix` ne monte plus la racine en lecture "
+        "seule depuis. Ce test redeviendra un garde-fou le jour où la conception le permettra."
     )
 
     with subtest("et si elle démarre, elle est utilisable"):
