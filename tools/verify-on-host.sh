@@ -28,7 +28,19 @@ echo
 echo "Sonde du matériel et du noyau"
 MANQUES=()
 
-if [ -e /dev/kvm ]; then ok "/dev/kvm présent"; else ko "/dev/kvm absent"; MANQUES+=("kvm"); fi
+if [ -e /dev/kvm ]; then ok "/dev/kvm présent"
+else
+  ko "/dev/kvm absent"
+  MANQUES+=("kvm")
+  # Sur une machine virtuelle d'hébergeur, l'absence de KVM n'est pas une configuration
+  # manquante : c'est que la virtualisation imbriquée n'est pas offerte. Le dire évite de
+  # chercher longtemps une option qui n'existe pas.
+  if [ -d /sys/hypervisor ] || grep -qE "hypervisor" /proc/cpuinfo 2>/dev/null; then
+    info "cette machine est elle-même virtualisée : le niveau 2 exige la virtualisation imbriquée,"
+    info "que la plupart des hébergeurs de VM n'offrent pas. Un serveur dédié ou une machine"
+    info "physique est nécessaire pour vérifier le niveau 2."
+  fi
+fi
 
 if command -v runsc >/dev/null 2>&1; then ok "gVisor : $(command -v runsc)"
 else ko "gVisor absent"; MANQUES+=("gvisor"); fi
@@ -60,6 +72,25 @@ else ko "Nix absent : l'image ne peut pas être construite"; MANQUES+=("nix"); f
 
 if command -v cargo >/dev/null 2>&1; then ok "Rust : $(cargo --version)"
 else ko "cargo absent : rien ne peut être compilé"; exit 2; fi
+
+# --- Mémoire : la compilation est le poste le plus gourmand, pas les tests ---
+MEM_MIB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+SWAP_MIB=$(awk '/SwapTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+JOBS=""
+if [ "$MEM_MIB" -gt 0 ]; then
+  info "mémoire : ${MEM_MIB} Mio, dont ${SWAP_MIB} Mio d'échange"
+  if [ "$((MEM_MIB + SWAP_MIB))" -lt 4096 ]; then
+    ko "moins de 4 Gio au total : la compilation risque de se faire tuer"
+    echo "     La dépendance de politique est volumineuse. Deux remèdes, au choix :"
+    echo "       sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile \\"
+    echo "         && sudo mkswap /swapfile && sudo swapon /swapfile"
+    echo "       ou laisser ce script compiler en série (il le fait automatiquement)."
+    JOBS="-j 1"
+    export CARGO_BUILD_JOBS=1
+  else
+    ok "mémoire suffisante pour compiler"
+  fi
+fi
 
 echo
 if [ ${#MANQUES[@]} -eq 0 ]; then
@@ -100,9 +131,12 @@ lancer() {
 }
 
 ECHECS=0
-lancer "Suite sans privilèges" cargo test --workspace || ECHECS=$((ECHECS+1))
-lancer "Tests exigeant du matériel (--ignored)" cargo test --workspace -- --ignored --test-threads=1 || ECHECS=$((ECHECS+1))
-lancer "Latences en binaire optimisé" cargo test --release -p capd performance -- --nocapture || ECHECS=$((ECHECS+1))
+# La compilation d'abord, séparément : si elle échoue faute de mémoire, autant le savoir avant
+# d'attribuer l'échec aux tests.
+lancer "Compilation" cargo build --workspace --tests $JOBS || { ko "compilation impossible, le reste est sans objet"; exit 2; }
+lancer "Suite sans privilèges" cargo test --workspace $JOBS || ECHECS=$((ECHECS+1))
+lancer "Tests exigeant du matériel (--ignored)" cargo test --workspace $JOBS -- --ignored --test-threads=1 || ECHECS=$((ECHECS+1))
+lancer "Latences en binaire optimisé" cargo test --release -p capd performance $JOBS -- --nocapture || ECHECS=$((ECHECS+1))
 lancer "Suite adversariale" cargo test -p bench --test adversarial -- --nocapture || ECHECS=$((ECHECS+1))
 lancer "Démonstration M8" cargo test -p agentd --test demo_m8 -- --nocapture || ECHECS=$((ECHECS+1))
 lancer "Sonde de capacités" cargo run --quiet --release -p prophet-cli -- status || ECHECS=$((ECHECS+1))

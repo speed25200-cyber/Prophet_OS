@@ -32,6 +32,10 @@ secrets:
 test-privileged:
     cargo test --workspace -- --ignored
 
+# Prépare un hôte Ubuntu : mémoire d'échange, Rust, just, gVisor.
+setup-host:
+    sudo ./tools/setup-ubuntu-host.sh
+
 # Vérifie sur une machine complète ce que l'environnement de construction ne peut pas vérifier.
 verify-host:
     ./tools/verify-on-host.sh
