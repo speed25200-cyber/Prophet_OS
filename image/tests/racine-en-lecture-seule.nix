@@ -40,11 +40,18 @@ pkgs.testers.runNixOSTest {
     prophet.motDePasseHache = null;
     users.users.prophet.password = "essai-prophet";
 
+    # Le chargeur d'amorçage, comme pour `installe.nix` — et pour une raison qui compte ici : sans
+    # lui, le cadre de test formate le disque au démarrage (`autoFormat`), ce qu'une racine en
+    # lecture seule empêcherait. L'expérience échouerait alors sur le formatage et non sur ce
+    # qu'elle cherche, ce qui est la manière la plus sûre de n'apprendre rien.
+    virtualisation.useBootLoader = true;
+    virtualisation.useEFIBoot = true;
+    virtualisation.memorySize = 2048;
+    virtualisation.diskSize = 8192;
+
     # Le cœur de l'expérience. `virtualisation.fileSystems` est l'endroit où le cadre de test pose
     # la racine ; c'est donc là qu'il faut écrire pour que l'option survive.
     virtualisation.fileSystems."/".options = lib.mkForce [ "ro" ];
-    virtualisation.memorySize = 2048;
-    virtualisation.diskSize = 4096;
 
     boot.initrd.luks.devices = lib.mkForce { };
     networking.networkmanager.enable = lib.mkForce false;

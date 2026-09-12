@@ -234,6 +234,12 @@ lecture seule alors que l'activation de NixOS écrit `/etc/passwd` et `/etc/shad
 démarrage, `systemd-boot` sans éditeur donc sans secours, `lockdown=integrity` et
 `module.sig_enforce=1`.
 
+**Première réponse, obtenue le 12 septembre.** Le sous-test « la machine a démarré par son
+chargeur d'amorçage » est **passé** : `systemd-boot` a lancé la configuration installée, en UEFI,
+avec `lockdown=integrity` et `module.sig_enforce=1` sur la ligne de commande. Ces deux paramètres
+étaient les candidats les plus plausibles à un refus de démarrer — un noyau qui exige des modules
+signés et n'en trouve aucun ne monte pas sa racine. Ce n'est pas ce qui se produit.
+
 - [ ] `image/tests/installe.nix` — démarre la configuration installée **par son chargeur
   d'amorçage**, en UEFI, depuis un vrai disque, et vérifie dans l'ordre : le chargeur a bien
   lancé le système, les comptes ont été écrits, aucune unité n'a échoué, les sept services
