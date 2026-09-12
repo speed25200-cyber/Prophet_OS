@@ -5,14 +5,24 @@
 # pas soumis à cette politique — c'est déjà par ce chemin que le dépôt Hermes déploie sur la même
 # machine.
 #
-# Ce que ce workflow ne fait jamais. Le serveur fait tourner Hermes en production. Rien ici ne
-# touche /root/hermes, ne redémarre un service, ni ne modifie une configuration qui le concerne.
-# Prophet OS vit dans /root/prophet_os et nulle part ailleurs.
+# Ce que ce workflow fait à Hermes, depuis que le propriétaire l'a demandé. Ce commentaire disait
+# « rien ici ne touche /root/hermes ». Ce n'est plus vrai, et le laisser écrit serait pire que de
+# ne rien écrire : le propriétaire de la machine a demandé qu'Hermes cède la place, d'abord en
+# l'arrêtant, puis en le supprimant. Deux interrupteurs séparés le font, `arreter_hermes` et
+# `supprimer_hermes`, tous deux à « false » par défaut. La suppression archive d'abord dans
+# /root/hermes-sauvegarde-<date>.tar.gz, relit l'archive, et n'efface qu'ensuite.
 #
-# Ce qui modifie la machine est désactivé par défaut. Installer des paquets et lever une
-# restriction du noyau sont des décisions qui appartiennent au propriétaire de la machine, pas à un
-# workflow qui se déclenche. Chaque étape invasive a son interrupteur, et la sonde seule — qui ne
-# modifie rien — suffit à savoir où l'on en est.
+# Ce qui modifie la machine est désactivé par défaut. Installer des paquets, lever une restriction
+# du noyau, supprimer un moteur de production, poser des services : ce sont des décisions qui
+# appartiennent au propriétaire de la machine, pas à un workflow qui se déclenche. Chaque étape
+# invasive a son interrupteur, et la sonde seule — qui ne modifie rien — suffit à savoir où l'on
+# en est.
+#
+# Ce que « lancer Prophet OS » veut dire ici, et ne veut pas dire. `lancer_les_services` installe
+# les sept daemons en services systemd et les démarre. Le serveur ne devient pas Prophet OS pour
+# autant : son noyau reste celui d'Ubuntu, sa racine reste inscriptible, il n'y a ni emplacements
+# A/B ni chiffrement. Le système entier, c'est l'ISO qui l'installe — sur une machine qu'on
+# accepte d'effacer, ce que ce serveur n'est pas.
 
 name: Vérifier Prophet OS sur le serveur
 
@@ -49,6 +59,14 @@ on:
         default: "false"
       verifier_niveaux:
         description: "Compiler sandboxd et exercer les niveaux d'isolation (long sur 2 Gio)"
+        required: false
+        default: "false"
+      supprimer_hermes:
+        description: "SUPPRIMER Hermes du serveur. Une archive est faite d'abord dans /root, et vérifiée avant tout effacement."
+        required: false
+        default: "false"
+      lancer_les_services:
+        description: "Installer les sept daemons en services systemd et les démarrer (compile ; comptez trente minutes)"
         required: false
         default: "false"
 
@@ -240,7 +258,8 @@ jobs:
             echo "disque  : $(df -h / | awk 'NR==2{print $4" libres"}')"
             echo "kvm     : $([ -e /dev/kvm ] && echo present || echo absent)"
             echo "userns  : $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 'pas de restriction')"
-            echo "hermes  : laisse intact (ce workflow ne touche pas /root/hermes)"
+            echo "hermes  : $([ -d /root/hermes ] && du -sh /root/hermes 2>/dev/null | cut -f1 || echo 'supprime') ; unites : $(systemctl list-units --all --no-legend 'hermes*' 2>/dev/null | wc -l)"
+            echo "archives: $(ls /root/hermes-sauvegarde-*.tar.gz 2>/dev/null | wc -l)"
           DISTANT_SONDE
 
       # Le propriétaire de la machine a demandé que Prophet OS y prenne la place d'Hermes. Le
@@ -261,6 +280,81 @@ jobs:
           ss -ltnp 2>/dev/null | head -15
           echo "Les fichiers d'Hermes sont intacts dans /root/hermes."
           DISTANT_ARRET
+
+      # Le propriétaire a demandé qu'Hermes soit supprimé, et non plus seulement arrêté.
+      #
+      # L'effacement est irréversible ; l'archive ne l'est pas. On empaquette d'abord, on
+      # **relit** l'archive, et on n'efface que si la relecture réussit. Une archive qu'on n'a pas
+      # ouverte n'est pas une sauvegarde : c'est un fichier dont on espère quelque chose.
+      #
+      # L'archive reste sur le serveur, dans /root. La rapatrier ici la ferait passer par un
+      # artefact GitHub, donc par un dépôt public — un moteur de trading contient des clés d'API
+      # et des paramètres de position, et rien de tout cela n'a à sortir de la machine.
+      - name: Supprimer Hermes
+        if: ${{ inputs.supprimer_hermes == 'true' }}
+        timeout-minutes: 30
+        run: |
+          sshpass -e ssh $SSHOPTS "root@$VPS" 'bash -s' <<'DISTANT_SUPPRESSION'
+          set -u
+          DATE=$(date +%Y%m%d-%H%M%S)
+          ARCHIVE="/root/hermes-sauvegarde-$DATE.tar.gz"
+
+          if [ ! -d /root/hermes ]; then
+            echo "/root/hermes n'existe pas : rien à archiver ni à supprimer"
+          else
+            echo "--- ce qui va être archivé ---"
+            du -sh /root/hermes
+            echo "--- archivage vers $ARCHIVE ---"
+            # `--warning=no-file-changed` : un fichier qui bouge pendant l'archivage fait sortir
+            # tar en 1 sans que l'archive soit mauvaise. On juge sur la relecture, pas sur ce code.
+            tar czf "$ARCHIVE" --warning=no-file-changed -C /root hermes || true
+            if [ ! -s "$ARCHIVE" ]; then
+              echo "::error::l'archive est vide ou absente ; rien n'est supprimé"
+              exit 1
+            fi
+            echo "--- relecture de l'archive avant tout effacement ---"
+            if ! tar tzf "$ARCHIVE" >/tmp/contenu-archive.txt 2>/tmp/erreur-archive.txt; then
+              echo "::error::l'archive ne se relit pas ; rien n'est supprimé"
+              sed 's/^/  /' /tmp/erreur-archive.txt
+              exit 1
+            fi
+            echo "  $(wc -l < /tmp/contenu-archive.txt) entrées, $(du -h "$ARCHIVE" | cut -f1)"
+            echo "  premières entrées :"
+            head -5 /tmp/contenu-archive.txt | sed 's/^/    /'
+            chmod 600 "$ARCHIVE"
+            echo "--- effacement ---"
+            rm -rf /root/hermes
+            [ -d /root/hermes ] && { echo "::error::/root/hermes est toujours là"; exit 1; }
+            echo "  /root/hermes supprimé ; l'archive reste dans $ARCHIVE, en 0600"
+          fi
+
+          echo "--- unités systemd d'Hermes ---"
+          trouvee=0
+          for f in /etc/systemd/system/hermes*.service /etc/systemd/system/hermes*.timer; do
+            [ -e "$f" ] || continue
+            trouvee=1
+            systemctl disable --now "$(basename "$f")" 2>/dev/null || true
+            rm -f "$f"
+            echo "  $f supprimée"
+          done
+          [ "$trouvee" = "0" ] && echo "  aucune"
+          systemctl daemon-reload
+          systemctl reset-failed 2>/dev/null || true
+
+          echo "--- entrées cron ---"
+          if crontab -l 2>/dev/null | grep -qi hermes; then
+            crontab -l 2>/dev/null | grep -vi hermes | crontab -
+            echo "  entrées retirées"
+          else
+            echo "  aucune"
+          fi
+
+          echo "--- ce qui reste au nom d'Hermes ---"
+          ls -d /root/hermes* 2>/dev/null | sed 's/^/  /' || echo "  (que l'archive, si elle est ailleurs)"
+          systemctl list-units --all --no-legend 'hermes*' 2>/dev/null | sed 's/^/  /' || true
+          echo
+          echo "disque : $(df -h / | awk 'NR==2{print $4" libres"}')"
+          DISTANT_SUPPRESSION
 
       - name: Déposer Prophet OS sur le serveur
         run: |
@@ -333,6 +427,94 @@ jobs:
             . "$HOME/.cargo/env" 2>/dev/null || true
             RAPPORT=rapport-serveur.md ./tools/verify-on-host.sh --niveaux
           DISTANT_NIVEAUX
+
+      # « Lancer l'OS » sur une machine qu'on ne réinstalle pas.
+      #
+      # Ce que cela veut dire, et ce que cela ne veut pas dire. Le serveur ne devient pas Prophet
+      # OS : son noyau reste celui d'Ubuntu, sa racine reste inscriptible, il n'y a ni emplacements
+      # A/B ni chiffrement posé par nous. Ce qui tourne, ce sont les **sept daemons**, sous
+      # systemd, avec le durcissement de l'image — donc `prophet status`, `prophet task ls` et la
+      # chaîne capd → agentd → ledger. C'est la différence entre « Prophet OS est installé » et
+      # « Prophet OS tourne ici », et sur un VPS c'est la seconde qu'on peut avoir.
+      #
+      # L'ISO, elle, installe le système entier. Les deux moitiés du but avancent séparément.
+      - name: Installer et démarrer Prophet OS
+        if: ${{ inputs.lancer_les_services == 'true' }}
+        timeout-minutes: 90
+        run: |
+          sshpass -e ssh $SSHOPTS "root@$VPS" "cd $DISTANT && bash -s" <<'DISTANT_LANCEMENT'
+          . "$HOME/.cargo/env" 2>/dev/null || true
+          ./tools/lancer-sur-l-hote.sh
+          DISTANT_LANCEMENT
+
+      # Ce que la machine répond quand on l'interroge, séparé de l'installation : si le lancement
+      # échoue, c'est ici qu'on apprend pourquoi, et cette étape tourne quoi qu'il arrive.
+      - name: Ce que la machine répond
+        if: ${{ always() && inputs.lancer_les_services == 'true' }}
+        run: |
+          sshpass -e ssh $SSHOPTS "root@$VPS" "cd $DISTANT && bash -s" <<'DISTANT_ETAT' \
+            | tee rapport-lancement.md
+          echo "# Prophet OS sur ce serveur"
+          echo
+          echo "Relevé du $(date -u '+%Y-%m-%d %H:%M UTC') sur $(hostname)."
+          echo
+          echo '## Les sept services'
+          echo
+          echo '```'
+          systemctl --no-pager --no-legend list-units 'prophet-*.service' --all \
+            | awk '{printf "%-28s %-10s %-10s %s\n", $1, $3, $4, $5}'
+          echo '```'
+          echo
+          echo '## prophet status'
+          echo
+          echo '```'
+          /usr/local/bin/prophet status 2>&1
+          echo '```'
+          echo
+          echo '## prophet task ls'
+          echo
+          echo '```'
+          timeout 30 /usr/local/bin/prophet task ls 2>&1
+          echo '```'
+          echo
+          echo '## prophet log tail'
+          echo
+          echo '```'
+          timeout 60 /usr/local/bin/prophet log tail -n 20 2>&1
+          echo '```'
+          echo
+          echo "## Ce que chaque service dit de lui-même"
+          echo
+          for d in capd ledger vault egress sandboxd memoryd agentd; do
+            echo "### prophet-$d"
+            echo
+            echo '```'
+            systemctl status "prophet-$d.service" --no-pager -l 2>&1 | head -12
+            echo
+            journalctl -u "prophet-$d.service" -n 12 --no-pager 2>&1
+            echo '```'
+            echo
+          done
+          echo '## Ce que ce serveur ne peut pas faire'
+          echo
+          echo '```'
+          echo "noyau   : $(uname -r) (celui d'Ubuntu, pas celui de Prophet OS)"
+          echo "racine  : $(findmnt -no OPTIONS / | cut -d, -f1) — inscriptible, sans emplacements A/B"
+          echo "kvm     : $([ -e /dev/kvm ] && echo present || echo "absent, donc pas de niveau 2 ici")"
+          echo "gvisor  : $(command -v runsc >/dev/null && runsc --version 2>&1 | head -1 || echo absent)"
+          echo '```'
+          DISTANT_ETAT
+          echo "::group::rapport"
+          cat rapport-lancement.md
+          echo "::endgroup::"
+
+      - name: Conserver le rapport de lancement
+        if: ${{ always() && inputs.lancer_les_services == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: prophet-sur-le-serveur
+          path: rapport-lancement.md
+          if-no-files-found: ignore
 
       - name: Rapatrier le rapport
         if: ${{ always() && inputs.verifier_niveaux == 'true' }}
