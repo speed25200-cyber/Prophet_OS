@@ -25,6 +25,10 @@ const SONDE: &[u8] = b"GET http://sonde.invalide/ HTTP/1.1\r\nHost: sonde.invali
 struct Temoin {
     port: u16,
     connexions: Arc<AtomicUsize>,
+    /// La première ligne de requête reçue. Compter les connexions dit *si* quelque chose est
+    /// sorti ; la retenir dit *quoi* — et c'est la seule façon de voir qu'une requête est arrivée
+    /// amputée.
+    recue: Arc<std::sync::Mutex<String>>,
 }
 
 impl Temoin {
@@ -33,15 +37,36 @@ impl Temoin {
         let port = ecoute.local_addr().expect("adresse").port();
         let connexions = Arc::new(AtomicUsize::new(0));
         let compteur = Arc::clone(&connexions);
+        let recue = Arc::new(std::sync::Mutex::new(String::new()));
+        let carnet = Arc::clone(&recue);
         tokio::spawn(async move {
-            while let Ok((mut flux, _)) = ecoute.accept().await {
+            while let Ok((flux, _)) = ecoute.accept().await {
                 compteur.fetch_add(1, Ordering::SeqCst);
-                let _ = flux
-                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
-                    .await;
+                let carnet = Arc::clone(&carnet);
+                tokio::spawn(async move {
+                    let (lecture, mut ecriture) = flux.into_split();
+                    let mut lecteur = BufReader::new(lecture);
+                    let mut ligne = String::new();
+                    if lecteur.read_line(&mut ligne).await.is_ok()
+                        && let Ok(mut carnet) = carnet.lock()
+                    {
+                        *carnet = ligne.trim_end().to_owned();
+                    }
+                    let _ = ecriture
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                        .await;
+                });
             }
         });
-        Self { port, connexions }
+        Self {
+            port,
+            connexions,
+            recue,
+        }
+    }
+
+    fn ligne_recue(&self) -> String {
+        self.recue.lock().map(|l| l.clone()).unwrap_or_default()
     }
 
     fn jointes(&self) -> usize {
@@ -360,4 +385,98 @@ async fn une_methode_modifiante_exige_une_approbation() {
         0,
         "rien ne doit avoir atteint le serveur avant la décision"
     );
+}
+
+#[tokio::test]
+async fn une_requete_arrive_entiere_avec_sa_chaine_de_requete() {
+    // Le relais transmettait `path()`, qui retire la chaîne de requête — bon pour le journal, qui
+    // n'a pas à garder ce qu'elle peut porter, mais `/chercher?q=x` serait parti en `/chercher`.
+    // Compter les connexions ne l'aurait jamais montré : il faut regarder ce qui arrive.
+    let temp = tempfile::tempdir().expect("répertoire temporaire");
+    let temoin = Temoin::poser().await;
+
+    let socket_capd = temp.path().join("capd.sock");
+    let capd = Daemon::lancer(
+        prophet_daemon::essai::binaire_voisin("prophet-capd")
+            .to_str()
+            .expect("chemin lisible"),
+        &socket_capd,
+        &temp.path().join("etat-capd"),
+    );
+    let client_capd = capd.joindre().await;
+    let jeton = client_capd
+        .call(
+            "cap.mint",
+            json!({
+                "manifest": manifeste(),
+                "grants": [{ "res": "net", "act": "egress", "match": "127.0.0.1" }],
+                "task": "task:relais",
+                "user": "prophet"
+            }),
+        )
+        .await
+        .expect("jeton");
+
+    let socket = temp.path().join("egress.sock");
+    let daemon = Daemon::lancer_avec(
+        EGRESS,
+        &socket,
+        &temp.path().join("etat"),
+        &[(
+            "PROPHET_CAPD_SOCKET",
+            socket_capd.to_str().expect("chemin lisible"),
+        )],
+    );
+    daemon.attendre_reponse(SONDE).await;
+
+    demander(
+        &socket,
+        &format!(
+            "GET http://127.0.0.1:{}/chercher?q=important&page=2 HTTP/1.1\r\n\
+             Host: 127.0.0.1\r\nProxy-Authorization: Prophet {}\r\n\r\n",
+            temoin.port,
+            base64_json(&jeton)
+        ),
+    )
+    .await;
+    laisser_le_temps().await;
+
+    let recue = temoin.ligne_recue();
+    assert!(
+        recue.contains("/chercher?q=important&page=2"),
+        "la requête doit arriver entière, obtenu : {recue}"
+    );
+}
+
+#[tokio::test]
+async fn un_cadrage_ambigu_ne_sort_pas() {
+    // Deux `Content-Length` permettent au proxy et au serveur de lire deux corps différents dans
+    // les mêmes octets. On refuse plutôt que de faire de son mieux.
+    let temp = tempfile::tempdir().expect("répertoire temporaire");
+    let temoin = Temoin::poser().await;
+    let socket = temp.path().join("egress.sock");
+    let daemon = Daemon::lancer_avec(
+        EGRESS,
+        &socket,
+        &temp.path().join("etat"),
+        &[("PROPHET_CAPD_SOCKET", "/nulle/part/capd.sock")],
+    );
+    daemon.attendre_reponse(SONDE).await;
+
+    let reponse = demander(
+        &socket,
+        &format!(
+            "POST http://127.0.0.1:{}/x HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+             Content-Length: 0\r\nContent-Length: 9\r\n\r\n",
+            temoin.port
+        ),
+    )
+    .await;
+
+    assert!(
+        reponse.contains("400"),
+        "un cadrage ambigu se refuse, obtenu : {reponse}"
+    );
+    laisser_le_temps().await;
+    assert_eq!(temoin.jointes(), 0);
 }

@@ -112,6 +112,17 @@ impl Sortie {
 
         // Le corps, pour pouvoir le regarder. `CONNECT` n'en a pas.
         if requete.method != "CONNECT" {
+            // Un cadrage ambigu est refusé, pas interprété. Deux `Content-Length`, ou un
+            // `Transfer-Encoding` à côté, permettent au proxy et au serveur de lire deux corps
+            // différents dans les mêmes octets — c'est la faille de contrebande de requêtes, et
+            // elle vit précisément dans les cas où chacun « fait de son mieux ».
+            if let Some(raison) = cadrage_ambigu(&requete.headers) {
+                tracing::warn!(hote = %requete.host, %raison, "cadrage ambigu refusé");
+                ecriture
+                    .write_all(&reponse(400, "AmbiguousFraming", raison))
+                    .await?;
+                return Ok(());
+            }
             let attendu = longueur_du_corps(&requete.headers);
             if attendu > CORPS_MAX {
                 ecriture
@@ -256,11 +267,37 @@ async fn lire_la_tete(
         }
         let fin = ligne == "\r\n" || ligne == "\n";
         brut.push_str(&ligne);
-        if fin || brut.len() > TETE_MAX {
-            break;
+        if fin {
+            return Ok(Some(brut));
+        }
+        if brut.len() > TETE_MAX {
+            // Analyser une tête coupée en deux donnerait une requête que personne n'a écrite.
+            return Ok(None);
         }
     }
-    Ok(Some(brut))
+}
+
+/// Le cadrage du corps est-il ambigu ?
+///
+/// Rend la raison du refus, ou `None` si la requête se lit d'une seule façon.
+fn cadrage_ambigu(entetes: &[(String, String)]) -> Option<&'static str> {
+    let compte = |nom: &str| {
+        entetes
+            .iter()
+            .filter(|(n, _)| n.eq_ignore_ascii_case(nom))
+            .count()
+    };
+    if compte("content-length") > 1 {
+        return Some("deux en-têtes Content-Length : le corps se lirait de deux façons");
+    }
+    if compte("transfer-encoding") > 0 {
+        // Le proxy ne sait pas décoder le découpage en morceaux ; l'accepter reviendrait à
+        // transmettre des en-têtes qui décrivent un corps que personne n'a lu.
+        return Some(
+            "Transfer-Encoding n'est pas accepté : ce proxy lit le corps avant de le laisser sortir",
+        );
+    }
+    None
 }
 
 fn longueur_du_corps(entetes: &[(String, String)]) -> usize {
@@ -297,6 +334,21 @@ fn entetes_sortants(entetes: &[(String, String)]) -> Vec<(String, String)> {
         .collect()
 }
 
+/// La cible telle qu'un serveur l'attend : chemin **et** chaîne de requête.
+///
+/// `ParsedRequest::path()` retire la chaîne de requête, et c'est voulu — une chaîne de requête peut
+/// porter des données, et le journal n'en veut pas. Mais la transmettre amputée changerait le sens
+/// de toute requête qui en a une : `/chercher?q=x` deviendrait `/chercher`. Le journal et le relais
+/// n'ont pas besoin de la même chose.
+fn cible_relative(cible: &str) -> String {
+    let sans_schema = cible.split_once("://").map_or(cible, |(_, reste)| reste);
+    match sans_schema.find('/') {
+        Some(index) => sans_schema[index..].to_owned(),
+        // `GET http://hote HTTP/1.1` sans chemin : la racine.
+        None => "/".to_owned(),
+    }
+}
+
 /// Relaie une requête HTTP en clair.
 async fn relayer_http(
     requete: &egress::ParsedRequest,
@@ -313,7 +365,11 @@ async fn relayer_http(
         }
     };
 
-    let mut brut = format!("{} {} HTTP/1.1\r\n", requete.method, requete.path());
+    let mut brut = format!(
+        "{} {} HTTP/1.1\r\n",
+        requete.method,
+        cible_relative(&requete.target)
+    );
     for (nom, valeur) in entetes_sortants(&requete.headers) {
         brut.push_str(&format!("{nom}: {valeur}\r\n"));
     }
@@ -448,5 +504,31 @@ mod tests {
         .unwrap();
         let trace = hors_ligne(Policy::allowing(["*.exemple.fr"]), &requete);
         assert!(matches!(trace.verdict, Verdict::Deny { .. }));
+    }
+    #[test]
+    fn la_chaine_de_requete_ne_se_perd_pas_en_route() {
+        // `path()` la retire — c'est bon pour le journal, qui n'a pas à garder ce qu'elle peut
+        // porter. La transmettre amputée changerait le sens de la requête.
+        assert_eq!(
+            cible_relative("http://api.exemple.fr/chercher?q=confidentiel&p=2"),
+            "/chercher?q=confidentiel&p=2"
+        );
+        assert_eq!(cible_relative("http://api.exemple.fr"), "/");
+        assert_eq!(cible_relative("http://api.exemple.fr/"), "/");
+    }
+
+    #[test]
+    fn un_cadrage_ambigu_est_refuse_et_non_interprete() {
+        let deux = vec![
+            ("Content-Length".to_owned(), "0".to_owned()),
+            ("content-length".to_owned(), "42".to_owned()),
+        ];
+        assert!(cadrage_ambigu(&deux).is_some());
+
+        let decoupe = vec![("Transfer-Encoding".to_owned(), "chunked".to_owned())];
+        assert!(cadrage_ambigu(&decoupe).is_some());
+
+        let clair = vec![("Content-Length".to_owned(), "12".to_owned())];
+        assert!(cadrage_ambigu(&clair).is_none());
     }
 }
