@@ -124,10 +124,14 @@ installer_microvm() {
   installer_images || return 1
 }
 
+# Le résultat est retenu : sans cela, le récapitulatif qui suit deviendrait le dernier code de
+# sortie du script, et une installation ratée se déclarerait réussie — exactement le silence que
+# ce projet passe son temps à traquer ailleurs.
+RESULTAT=0
 case "$CIBLE" in
-  gvisor)  installer_gvisor ;;
-  microvm) installer_microvm ;;
-  all)     installer_gvisor; echo; installer_microvm ;;
+  gvisor)  installer_gvisor || RESULTAT=1 ;;
+  microvm) installer_microvm || RESULTAT=1 ;;
+  all)     installer_gvisor || RESULTAT=1; echo; installer_microvm || RESULTAT=1 ;;
   *) echo "cible inconnue : $CIBLE (attendues : gvisor, microvm, all)" >&2; exit 2 ;;
 esac
 
@@ -141,3 +145,5 @@ if [ -e /dev/kvm ] && command -v firecracker >/dev/null 2>&1 \
 else
   echo "  niveau 2 : non"
 fi
+
+exit "$RESULTAT"

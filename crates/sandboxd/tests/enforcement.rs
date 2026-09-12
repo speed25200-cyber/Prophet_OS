@@ -59,6 +59,15 @@ fn executer(rules: Ruleset, script: &str) -> (Option<i32>, String, String) {
     (code, stdout, stderr)
 }
 
+/// Ce que la sandbox a réellement produit, à joindre à toute assertion qui échoue.
+///
+/// Une assertion sur la seule sortie standard dit « attendu FIN, obtenu rien », ce qui ne
+/// distingue pas un confinement qui fait son travail d'un confinement qui n'a pas démarré. Sur
+/// une machine qu'on ne voit qu'à travers un journal, cette distinction est tout le diagnostic.
+fn contexte(code: Option<i32>, stdout: &str, stderr: &str) -> String {
+    format!("\n  code de sortie : {code:?}\n  sortie : {stdout:?}\n  erreur : {stderr}")
+}
+
 /// Accès au processus enfant de la poignée, via son identifiant de processus.
 fn handle_child(handle: &mut sandboxd::SandboxHandle) -> Option<&mut std::process::Child> {
     // `SandboxHandle` conserve l'enfant pour permettre la lecture des flux ; l'accès passe par
@@ -73,13 +82,14 @@ fn le_fichier_des_mots_de_passe_est_invisible() {
         return;
     }
     let rules = Ruleset::default();
-    let (code, stdout, _) = executer(rules, "cat /etc/shadow 2>/dev/null; echo FIN");
+    let (code, stdout, stderr) = executer(rules, "cat /etc/shadow 2>/dev/null; echo FIN");
     assert_eq!(
         stdout.trim(),
         "FIN",
-        "le contenu de /etc/shadow ne doit pas sortir"
+        "le contenu de /etc/shadow ne doit pas sortir{}",
+        contexte(code, &stdout, &stderr)
     );
-    assert_eq!(code, Some(0));
+    assert_eq!(code, Some(0), "{}", contexte(code, &stdout, &stderr));
 }
 
 #[test]
@@ -109,11 +119,16 @@ fn seuls_les_chemins_accordes_sont_lisibles() {
         autorise.display(),
         interdit.display()
     );
-    let (_, stdout, _) = executer(rules, &script);
-    assert!(stdout.contains("contenu visible"), "{stdout}");
+    let (code, stdout, stderr) = executer(rules, &script);
+    assert!(
+        stdout.contains("contenu visible"),
+        "le chemin accordé doit être lisible{}",
+        contexte(code, &stdout, &stderr)
+    );
     assert!(
         !stdout.contains("contenu secret"),
-        "le chemin non accordé ne doit pas être lisible : {stdout}"
+        "le chemin non accordé ne doit pas être lisible{}",
+        contexte(code, &stdout, &stderr)
     );
 }
 
@@ -140,8 +155,12 @@ fn le_chemin_accorde_en_lecture_n_est_pas_inscriptible() {
         "echo saccage > {}/a.txt 2>/dev/null; echo FIN",
         lecture.display()
     );
-    let (_, stdout, _) = executer(rules, &script);
-    assert!(stdout.contains("FIN"));
+    let (code, stdout, stderr) = executer(rules, &script);
+    assert!(
+        stdout.contains("FIN"),
+        "le script n'est pas allé à son terme{}",
+        contexte(code, &stdout, &stderr)
+    );
     assert_eq!(
         std::fs::read_to_string(lecture.join("a.txt")).unwrap(),
         "origine",
@@ -155,14 +174,22 @@ fn aucune_interface_reseau() {
         eprintln!("espaces de noms indisponibles : test ignoré");
         return;
     }
-    let (_, stdout, _) = executer(
+    let (code, stdout, stderr) = executer(
         Ruleset::default(),
         "cat /proc/net/dev 2>/dev/null | tail -n +3 | wc -l",
     );
-    let interfaces: usize = stdout.trim().parse().unwrap_or(0);
+    // Replier un compte illisible sur zéro ferait passer ce test quand rien n'a tourné : le
+    // silence deviendrait la preuve de l'isolement qu'il est censé mesurer.
+    let interfaces: usize = stdout.trim().parse().unwrap_or_else(|_| {
+        panic!(
+            "le nombre d'interfaces n'a pas pu être lu : la sandbox n'a probablement rien exécuté{}",
+            contexte(code, &stdout, &stderr)
+        )
+    });
     assert!(
         interfaces <= 1,
-        "un espace de noms réseau neuf ne contient que la boucle locale, trouvé {interfaces}"
+        "un espace de noms réseau neuf ne contient que la boucle locale, trouvé {interfaces}{}",
+        contexte(code, &stdout, &stderr)
     );
 }
 
@@ -173,11 +200,15 @@ fn le_montage_est_refuse_par_le_filtre_d_appels_systeme() {
         return;
     }
     // `mount` figure dans la liste de refus : la commande doit échouer, quel que soit son motif.
-    let (_, stdout, _) = executer(
+    let (code, stdout, stderr) = executer(
         Ruleset::default(),
         "mount -t tmpfs none /mnt 2>/dev/null && echo MONTE || echo REFUSE",
     );
-    assert!(stdout.contains("REFUSE"), "{stdout}");
+    assert!(
+        stdout.contains("REFUSE"),
+        "le montage aurait dû être refusé par le filtre{}",
+        contexte(code, &stdout, &stderr)
+    );
 }
 
 #[test]
@@ -202,10 +233,11 @@ fn l_ecriture_dans_un_chemin_accorde_fonctionne() {
         "echo resultat > {}/sortie.txt && echo ECRIT",
         travail.display()
     );
-    let (_, stdout, stderr) = executer(rules, &script);
+    let (code, stdout, stderr) = executer(rules, &script);
     assert!(
         stdout.contains("ECRIT"),
-        "sortie: {stdout} / erreur: {stderr}"
+        "l'écriture dans un chemin accordé doit aboutir{}",
+        contexte(code, &stdout, &stderr)
     );
     assert_eq!(
         std::fs::read_to_string(travail.join("sortie.txt"))
