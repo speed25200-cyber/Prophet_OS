@@ -167,6 +167,32 @@ corrigées, et la liste est dans `docs/reports/phase0.md`.
 - [x] `prophet-daemon` — la part commune : socket, état, clés, et surtout **à qui un daemon accepte
   de parler**, écrite une fois pour que les sept copies ne divergent pas
 
+### Ce que le premier démarrage sous systemd a montré (12 septembre 2026)
+
+Le test `image/tests/services.nix` a fait tourner les sept services sous systemd, avec leurs
+utilisateurs et leur durcissement. Trois défauts sont apparus, qu'aucun test de daemon pris
+isolément ne pouvait voir.
+
+- [x] `/run/prophet` en `0750` : le groupe ne pouvait pas y **écrire**. Seul le premier service
+  démarré créait son socket ; les six autres bouclaient sur un « Permission denied ». Corrigé en
+  `0770`, avec `RuntimeDirectoryPreserve` — sans quoi l'arrêt d'un seul service emportait les six
+  autres sockets
+- [x] La règle du groupe ne regardait que le `gid` attesté par `SO_PEERCRED`, c'est-à-dire le
+  groupe **principal**. Un compte déclaré dans `prophet-system` par `extraGroups` y appartient
+  réellement et se faisait pourtant refuser — **la surface était dans ce cas**, et aurait affiché
+  un champ vide sur une machine saine. L'appartenance est maintenant aussi cherchée dans
+  `/etc/group`. `root` est accepté : le refuser ne protégeait rien, puisqu'il lit les clés de
+  signature dans `/var/lib/prophet`, et rendait `prophet status` inutilisable pour le propriétaire
+- [x] `prophet status` ne rendait plus la main — quinze minutes, sans rien afficher. `egress` est
+  un proxy HTTP : un `ping` JSON-RPC est pour lui une requête tronquée, et il attendait la fin
+  d'en-têtes qui ne viendraient jamais. Il n'était pas en faute ; la sonde l'était. Elle lui parle
+  maintenant sa langue — une requête sans jeton, refusée par `407` avant toute sortie, ce qui
+  prouve davantage qu'un `pong`. Toutes les sondes ont un délai de deux secondes
+
+Les trois ont un test qui échoue sur le code d'avant : trois dans `crates/prophet-cli`
+(`sondes::*`), deux dans `crates/prophet-daemon`, et quatre sous-tests dans
+`image/tests/services.nix`.
+
 ## Blocages
 
 Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le

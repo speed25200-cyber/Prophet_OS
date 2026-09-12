@@ -129,6 +129,24 @@ pkgs.testers.runNixOSTest {
         machine.succeed("useradd -m intrus")
         machine.fail("su intrus -c 'test -r /run/prophet/capd.sock'")
 
+    with subtest("un membre déclaré du groupe système est servi"):
+        # L'autre moitié de la même règle, et celle qui manquait. `SO_PEERCRED` n'atteste que le
+        # groupe **principal** du pair ; un compte que l'administrateur met dans `prophet-system`
+        # par `extraGroups` garde le sien. Comparer ce seul `gid` refusait donc des membres
+        # véritables — à commencer par la surface, dont tout le travail est d'afficher ce que les
+        # daemons font. L'écran serait resté vide sur une machine parfaitement saine.
+        machine.succeed("useradd -m -G prophet-system operateur")
+        vu = machine.succeed("su operateur -c 'timeout 30 prophet task ls'")
+        assert "n'appartient pas" not in vu, (
+            f"un membre déclaré du groupe système doit être servi :\n{vu}"
+        )
+
+    with subtest("root administre sa machine"):
+        # Le refuser ne protégeait rien — `root` lit les clés de signature dans `/var/lib/prophet`
+        # — et rendait `prophet status` inutilisable pour le propriétaire de la machine.
+        vu = machine.succeed("timeout 30 prophet task ls")
+        assert "n'appartient pas" not in vu, f"root doit être servi :\n{vu}"
+
     with subtest("redémarrer un service n'en coupe pas six autres"):
         # Les sept partagent `/run/prophet`. Sans `RuntimeDirectoryPreserve`, systemd supprime ce
         # répertoire quand l'un s'arrête et emporte les sockets des autres : un
@@ -138,13 +156,13 @@ pkgs.testers.runNixOSTest {
         machine.wait_for_unit("prophet-memoryd.service")
         for nom in services:
             machine.succeed(f"test -S /run/prophet/{nom}.sock")
-        statut = machine.succeed("prophet status")
+        statut = machine.succeed("timeout 30 prophet status")
         assert "muet" not in statut, (
             f"un redémarrage isolé ne doit rien couper :\n{statut}"
         )
 
     with subtest("prophet status voit ses services"):
-        statut = machine.succeed("prophet status")
+        statut = machine.succeed("timeout 30 prophet status")
         print(statut)
         for nom in services:
             assert f"✓ {nom}" in statut, f"{nom} devrait répondre :\n{statut}"
@@ -158,7 +176,7 @@ pkgs.testers.runNixOSTest {
         assert "task:essai-vm" in plan, plan
         assert "local:qwen3-8b" in plan, plan
 
-        taches = machine.succeed("prophet task ls")
+        taches = machine.succeed("timeout 30 prophet task ls")
         print(taches)
         assert "task:essai-vm" in taches, taches
 
