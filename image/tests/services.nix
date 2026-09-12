@@ -213,6 +213,24 @@ pkgs.testers.runNixOSTest {
         # pas signaler, puisqu'il sonde le noyau et non ses propres entraves.
         #
         # On lui demande donc de lancer vraiment quelque chose, au niveau qu'il dit tenir.
+        #
+        # Ce que la première exécution a rendu, en toutes lettres :
+        #     confinement impossible : écriture de uid_map : Operation not permitted
+        # Les entraves sont donc imprimées d'abord. Sans elles, un échec ne dit que « refusé »,
+        # et il y a au moins quatre réglages capables de produire ce refus — chercher lequel
+        # coûterait un aller-retour par hypothèse.
+        print("--- ce que systemd impose réellement à sandboxd ---")
+        print(machine.succeed(
+            "systemctl show prophet-sandboxd.service "
+            "-p User -p CapabilityBoundingSet -p AmbientCapabilities -p NoNewPrivileges "
+            "-p SystemCallFilter -p RestrictSUIDSGID -p ProtectProc -p RestrictNamespaces"
+        ))
+        print("--- et ce que le noyau dit du processus ---")
+        print(machine.succeed(
+            "grep -E '^(Uid|Gid|CapEff|CapBnd|CapAmb|NoNewPrivs|Seccomp)' "
+            "/proc/$(systemctl show -p MainPID --value prophet-sandboxd.service)/status"
+        ))
+
         sortie = machine.succeed("prophet-essai-tache sandbox")
         print(sortie)
         assert "task:essai-sandbox" in sortie, sortie

@@ -36,6 +36,26 @@ qui ne correspond à rien.
 Le refus porte le rapport complet de ce que la machine sait faire, pour qu'on le comprenne sans se
 connecter à la machine.
 
+## Pourquoi son filtre d'appels système n'est pas celui des autres
+
+Les six autres daemons tournent avec `@system-service` moins `@privileged` et `@resources`. Ce
+filtre ne convient pas à celui-ci : `@system-service` ne contient pas `@mount`, et `~@privileged`
+retire `setuid`, `setgid`, `setgroups` et `pivot_root` — c'est-à-dire exactement le travail de ce
+service. Lui accorder `CAP_SETUID` d'une main et lui interdire `setuid` de l'autre est une
+contradiction qui ne se voit qu'à l'exécution, et que `sandbox.capabilities` ne peut pas signaler
+puisqu'il sonde le noyau et non ses propres entraves.
+
+Elle s'est vue en toutes lettres au premier démarrage sous systemd :
+
+```
+confinement impossible : écriture de uid_map : Operation not permitted
+```
+
+Ce que cela n'élargit **pas** : la sandbox. Le filtre qu'une tâche subit est posé par `sandboxd`
+dans son enfant, après le confinement, et il est bien plus étroit. Le filtre du service borne le
+gestionnaire ; celui de la sandbox borne la tâche. Les confondre revenait à borner le gardien avec
+les règles du prisonnier.
+
 ## Distinguer « absent » de « présent mais refusé »
 
 `sandbox.capabilities` rend séparément `user_namespaces`, `userns_restreint_par_politique` et

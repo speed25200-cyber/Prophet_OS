@@ -201,6 +201,45 @@ in
           AmbientCapabilities = [ "CAP_SETUID" "CAP_SETGID" "CAP_SYS_ADMIN" ];
           NoNewPrivileges = lib.mkForce false;
           RestrictNamespaces = lib.mkForce false;
+
+          # Le filtre d'appels système des six autres daemons ne convient pas à celui-ci.
+          #
+          # `@system-service` ne contient pas `@mount`, et `~@privileged` retire `setuid`,
+          # `setgid`, `setgroups` et `pivot_root`. Or c'est exactement le travail de ce
+          # service : créer des espaces de noms, y monter une racine minimale, y projeter des
+          # identifiants. Lui accorder `CAP_SETUID` d'une main et lui interdire `setuid` de
+          # l'autre est une contradiction qui ne se voit qu'à l'exécution — et c'est ce que le
+          # test des services a fini par montrer, en toutes lettres :
+          #
+          #     confinement impossible : écriture de uid_map : Operation not permitted
+          #
+          # Ce que cela n'élargit **pas** : la sandbox elle-même. Le filtre qu'une tâche subit
+          # est posé par `sandboxd` dans son enfant (`crates/sandboxd/src/confine.rs`), après
+          # le confinement, et il est bien plus étroit que celui-ci. Le filtre du service borne
+          # le gestionnaire ; celui de la sandbox borne la tâche. Les confondre revenait à
+          # borner le gardien avec les règles du prisonnier.
+          #
+          # `~@resources` reste : rien n'autorise ce service à changer les priorités ou les
+          # limites du système. `~@obsolete` et `~@reboot` ferment ce que ni lui ni personne
+          # n'a à faire ici.
+          SystemCallFilter = lib.mkForce [
+            "@system-service"
+            "@mount"
+            "@privileged"
+            "~@resources"
+            "~@obsolete"
+            "~@reboot"
+            "~@swap"
+          ];
+          # `RestrictSUIDSGID` implique `NoNewPrivileges`, que ce service désactive juste
+          # au-dessus. Les laisser tous deux revient à demander une chose et son contraire.
+          RestrictSUIDSGID = lib.mkForce false;
+          # Le gestionnaire lit et écrit `/proc/<pid>/uid_map` de ses propres enfants. Ils lui
+          # appartiennent, donc `invisible` devrait suffire ; mais ce service est le seul dont
+          # le travail passe par `/proc` d'un autre processus, et une hypothèse de moins vaut
+          # mieux ici qu'un durcissement qu'on ne sait pas expliquer.
+          ProtectProc = lib.mkForce "default";
+
           DeviceAllow = [ "/dev/kvm rw" ];
           PrivateDevices = lib.mkForce false;
         };
