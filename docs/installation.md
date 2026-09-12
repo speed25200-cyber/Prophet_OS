@@ -118,11 +118,11 @@ Dit franchement, parce que vous aurez effacé un disque pour l'essayer.
 - **Le niveau 2 d'isolation exige des images d'invité** qui ne sont pas dans l'image installée.
   `prophet status` dira ce qui manque. Les niveaux 0 et 1 fonctionnent, et ont été vérifiés sur
   du matériel réel.
-- **Personne n'a encore vu cette image démarrer sur du vrai matériel.** L'intégration continue la
-  démarre en machine virtuelle UEFI à chaque construction et vérifie trois choses : que le noyau
-  part, que l'espace utilisateur est monté, et que le message d'accueil apparaît. C'est ce qu'on
-  peut vérifier sans main humaine. Ce qu'elle ne dit pas : si *votre* carte graphique, *votre*
-  carte réseau et *votre* micrologiciel s'entendent avec elle.
+- **Cette image démarre — cela a été vu, pas supposé.** L'intégration continue la démarre en
+  machine virtuelle UEFI à chaque construction : le micrologiciel la trouve, le noyau part,
+  l'espace utilisateur monte, et l'écran d'accueil qui dit quoi taper apparaît. Ce qu'elle ne dit
+  pas : si *votre* carte graphique, *votre* carte réseau et *votre* micrologiciel s'entendent avec
+  elle. C'est la seule inconnue qui reste, et elle ne peut être levée que chez vous.
 
 Ce dernier point mérite d'être pesé. Si vous voulez réduire le risque : essayez d'abord l'ISO dans
 une machine virtuelle (VirtualBox, VMware ou Hyper-V, avec l'UEFI activé et un disque de 80 Gio),

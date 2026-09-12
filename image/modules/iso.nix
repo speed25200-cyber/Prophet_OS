@@ -51,6 +51,15 @@
   # le matériel réel : le noyau retient la dernière déclarée.
   boot.kernelParams = [ "console=ttyS0,115200" "console=tty0" ];
 
+  # Et un noyau bavard.
+  #
+  # NixOS filtre les messages du noyau au niveau 4 : « Linux version » et tout ce qui raconte le
+  # démarrage n'apparaît jamais. Sur un système installé c'est un bon défaut — personne ne veut
+  # lire cela tous les matins. Sur un *support d'installation*, c'est l'inverse : quand cette image
+  # refuse de démarrer sur une machine inconnue, ces lignes sont le seul diagnostic que son
+  # propriétaire aura sous les yeux.
+  boot.consoleLogLevel = 7;
+
   # Le Wi-Fi est souvent la seule connexion disponible sur un portable qu'on vient de vider.
   networking.wireless.enable = lib.mkForce false;
   networking.networkmanager.enable = true;

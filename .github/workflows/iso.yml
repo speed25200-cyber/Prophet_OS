@@ -337,20 +337,34 @@ jobs:
       - name: Est-ce que ça a démarré ?
         run: |
           manque=0
+
           # Trois preuves, du plus bas au plus haut. Ne vérifier que la dernière rendrait un échec
           # précoce indiscernable d'un échec tardif.
-          grep -q "Linux version" demarrage.log \
-            || { echo "::error::le noyau n'a pas démarré"; manque=1; }
-          grep -qi "systemd\[1\]" demarrage.log \
-            || { echo "::error::l'espace utilisateur n'a pas été monté"; manque=1; }
+          #
+          # Chacune est une chose que seul le franchissement de l'étape peut produire, et non un
+          # indice qui l'accompagne d'ordinaire. La première version de ce contrôle cherchait
+          # « Linux version » sur la console série et concluait, faute de l'y trouver, que le noyau
+          # n'avait pas démarré — alors que le message d'accueil, qui ne peut apparaître qu'après
+          # lui, était juste en dessous. Le noyau avait démarré ; c'est son niveau de journal qui
+          # taisait cette ligne.
+          grep -q "BdsDxe: starting Boot" demarrage.log \
+            || { echo "::error::le micrologiciel n'a pas trouvé de quoi démarrer sur l'image"; manque=1; }
+          # Cette bannière est écrite par `agetty` : elle ne peut exister que si le noyau a
+          # démarré, que si l'espace utilisateur est monté, et que si systemd a lancé un terminal.
+          grep -q "Welcome to NixOS" demarrage.log \
+            || { echo "::error::aucun terminal n'a été servi : le démarrage s'est arrêté avant"; manque=1; }
           grep -q "support d'installation" demarrage.log \
             || { echo "::error::le message d'accueil n'est jamais apparu"; manque=1; }
+
           if [ "$manque" != "0" ]; then
             echo "::error::cette image ne démarre pas ; ne la gravez pas"
             exit 1
           fi
           echo
-          echo "L'image démarre : noyau, espace utilisateur, et invite qui dit quoi taper."
+          echo "L'image démarre : le micrologiciel la trouve, et elle sert une invite qui dit quoi taper."
+          # Sans valeur de vérité, mais précieux quand le reste échoue un jour.
+          grep -q "Linux version" demarrage.log \
+            && echo "(le noyau raconte aussi son démarrage sur la console série)"
 
       - name: Conserver la trace du démarrage
         if: always()
