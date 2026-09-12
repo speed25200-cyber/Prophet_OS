@@ -188,6 +188,7 @@ même genre que le défaut 6.1 :
 | Tests de niveau 0 | sans espaces de noms, ils se taisent et passent | la CI exige `unshare --user` avant de les lancer |
 | Tests du pont CDP | sans navigateur, ils se taisent et passent | `PROPHET_EXIGER_NAVIGATEUR=1`, posé par la CI, transforme l'absence en échec |
 | Lancement de microVM | `spawn` réussi comptait pour un démarrage | Firecracker doit vivre et créer son socket d'API, sinon le lancement échoue en disant pourquoi |
+| Sonde des espaces de noms | elle lisait deux fichiers présents partout et concluait « disponibles » | elle en crée un dans un enfant jetable, et un test la confronte à `unshare` |
 
 Le dernier méritait mieux qu'une correction de confort. Créer un processus n'est pas démarrer une
 machine virtuelle : une configuration refusée tue Firecracker dans la milliseconde suivante, et
@@ -200,6 +201,19 @@ défaut ne se manifestait que dans la suite complète, où plusieurs binaires d�
 jamais quand on lançait le fichier seul — la forme même du défaut qu'on classe à tort en
 « hasard ». `Browser::launch_auto` absorbe la course en réessayant, et un test lance deux
 navigateurs simultanément pour la provoquer plutôt que de l'attendre.
+
+La sonde méritait une mention à part, car elle juge tout le reste. Elle lisait
+`max_user_namespaces` et constatait l'existence de `/proc/self/ns/user` — deux choses vraies sur
+presque tout Linux, y compris là où le noyau refuse la création. Sur une Ubuntu 24.04 récente,
+qui restreint les espaces de noms non privilégiés par défaut, elle aurait donc annoncé une
+isolation de niveau 0 que la machine ne sait pas mettre en place. Elle essaie désormais pour de
+bon, dans un enfant jetable, et un test la fait contredire par l'outil `unshare` du système :
+une sonde qui se vérifie elle-même ne vérifie rien.
+
+La cause de fond des lints qui n'apparaissaient qu'en CI était plus bête : `rust-toolchain.toml`
+dit « stable », et l'action d'intégration installait « stable » de son côté. Les deux dérivaient
+— 1.94 ici, 1.98 là-bas — et `clippy -D warnings` ne voulait pas dire la même chose des deux
+côtés. La CI lit maintenant le fichier du dépôt, comme n'importe quelle machine de développement.
 
 Enfin, le niveau 2 est vérifiable là où on ne l'attendait pas. Le journal de la CI se plaignait du
 binaire Firecracker et des images, jamais de KVM : **les coureurs GitHub offrent la virtualisation

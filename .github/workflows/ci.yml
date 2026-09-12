@@ -14,9 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      # Pas d'action de chaîne d'outils : rustup lit rust-toolchain.toml, donc la CI et une
+      # machine de développement compilent avec exactement la même version. Installer « stable »
+      # ici laissait les deux dériver, et des lints n'apparaissaient qu'en CI.
+      - name: Chaîne d'outils du dépôt
+        run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all --check
@@ -41,7 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Chaîne d'outils du dépôt
+        run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
 
       # Les tests de niveau 0 se taisent et passent quand les espaces de noms manquent : c'est le
@@ -50,7 +53,11 @@ jobs:
       # cacherait.
       - name: Exiger les espaces de noms utilisateur
         run: |
-          if ! unshare --user --map-root-user true; then
+          # On teste la création de l'espace de noms, pas la projection d'identifiants depuis
+          # l'intérieur : le noyau refuse cette dernière ici, et Prophet OS ne la fait pas non
+          # plus — il écrit la projection depuis le parent (ADR-0005). Tester --map-root-user
+          # reviendrait à exiger ce que le système ne fait volontairement pas.
+          if ! unshare --user true; then
             echo "::error::espaces de noms utilisateur indisponibles : les tests de niveau 0 se"
             echo "::error::contenteraient de se taire, et le vert de « check » ne prouverait rien."
             exit 1

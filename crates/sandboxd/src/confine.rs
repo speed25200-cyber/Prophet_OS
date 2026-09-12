@@ -201,7 +201,9 @@ pub fn map_child_to_root(pid: i32) -> Result<(), ConfineError> {
 /// # Erreurs
 /// Si Landlock est présent mais refuse la règle.
 pub fn apply_landlock(spec: &SandboxSpec) -> Result<bool, ConfineError> {
-    let Some(abi) = crate::caps::Capabilities::probe().landlock_abi else {
+    // La sonde complète essaie de créer un espace de noms ; ici, dans l'enfant déjà confiné,
+    // seule l'ABI de Landlock nous intéresse.
+    let Some(abi) = crate::caps::probe_landlock() else {
         return Ok(false);
     };
     let _ = abi;

@@ -107,10 +107,8 @@ impl Capabilities {
                     ));
                 }
             }
-            1 => {
-                if self.runsc.is_none() {
-                    manques.push("le binaire runsc (gVisor)".to_owned());
-                }
+            1 if self.runsc.is_none() => {
+                manques.push("le binaire runsc (gVisor)".to_owned());
             }
             _ => {}
         }
@@ -190,7 +188,7 @@ impl Capabilities {
 }
 
 /// Interroge la version d'ABI Landlock.
-fn probe_landlock() -> Option<i32> {
+pub(crate) fn probe_landlock() -> Option<i32> {
     // `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` renvoie la version.
     const SYS_LANDLOCK_CREATE_RULESET: libc::c_long = 444;
     const LANDLOCK_CREATE_RULESET_VERSION: libc::c_ulong = 1;
@@ -220,15 +218,58 @@ fn probe_seccomp() -> bool {
         .unwrap_or(false)
 }
 
+/// Les espaces de noms utilisateur sont-ils réellement utilisables ?
+///
+/// Lire `max_user_namespaces` et constater l'existence de `/proc/self/ns/user` ne prouve rien :
+/// les deux sont vrais sur presque tout Linux, y compris là où le noyau refuse la création.
+/// Ubuntu 24.04 la restreint par défaut, et une sonde qui se contente de lire annoncerait alors
+/// une isolation de niveau 0 que la machine ne sait pas mettre en place — la dégradation
+/// silencieuse que ce module existe pour interdire, déplacée dans la sonde.
+///
+/// On essaie donc pour de bon, dans un enfant jetable afin de ne pas déplacer ce processus-ci
+/// dans un nouvel espace de noms. Le résultat est retenu : la réponse ne change pas en cours de
+/// vie, et l'essai a un coût.
 fn probe_user_namespaces() -> bool {
-    if std::fs::read_to_string("/proc/sys/user/max_user_namespaces")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .is_some_and(|max| max == 0)
-    {
-        return false;
+    static RESULTAT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *RESULTAT.get_or_init(|| {
+        if std::fs::read_to_string("/proc/sys/user/max_user_namespaces")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .is_some_and(|max| max == 0)
+        {
+            return false;
+        }
+        if !Path::new("/proc/self/ns/user").exists() {
+            return false;
+        }
+        essayer_un_espace_de_noms_utilisateur()
+    })
+}
+
+/// Crée un espace de noms utilisateur dans un enfant jetable et dit si le noyau l'a permis.
+fn essayer_un_espace_de_noms_utilisateur() -> bool {
+    // SAFETY: `fork` n'a pas de précondition. L'enfant n'appelle ensuite que `unshare` et
+    // `_exit`, sûrs après un `fork` même dans un processus multi-thread ; il ne touche ni à
+    // l'allocateur, ni à un verrou, ni à rien que le parent pourrait détenir.
+    let pid = unsafe { libc::fork() };
+    match pid {
+        // `fork` refusé : on ne sait pas, et on ne prétend pas savoir.
+        -1 => false,
+        0 => {
+            // SAFETY: voir ci-dessus. `_exit` ne revient jamais.
+            unsafe {
+                let code = i32::from(libc::unshare(libc::CLONE_NEWUSER) != 0);
+                libc::_exit(code);
+            }
+        }
+        enfant => {
+            let mut statut: libc::c_int = 0;
+            // SAFETY: `enfant` est le processus que nous venons de créer, et `statut` est un
+            // entier valide dont nous détenons seuls l'adresse.
+            let attendu = unsafe { libc::waitpid(enfant, &raw mut statut, 0) };
+            attendu == enfant && libc::WIFEXITED(statut) && libc::WEXITSTATUS(statut) == 0
+        }
     }
-    Path::new("/proc/self/ns/user").exists()
 }
 
 /// Cherche un exécutable dans `PATH`.
@@ -314,5 +355,34 @@ mod tests {
     fn recherche_dans_le_path() {
         assert!(which("sh").is_some());
         assert!(which("binaire-qui-n-existe-pas-du-tout").is_none());
+    }
+
+    /// La sonde annonce-t-elle ce que la machine fait vraiment ?
+    ///
+    /// Comparaison par un chemin indépendant du nôtre : l'outil `unshare` du système. Une sonde
+    /// qui se vérifie elle-même ne vérifie rien ; celle-ci se fait contredire par quelqu'un
+    /// d'autre ou pas du tout.
+    #[test]
+    fn la_sonde_des_espaces_de_noms_dit_ce_que_la_machine_fait() {
+        let annonce = Capabilities::probe().user_namespaces;
+        let Ok(sortie) = std::process::Command::new("unshare")
+            .args(["--user", "true"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+        else {
+            eprintln!("outil `unshare` absent : rien à comparer");
+            return;
+        };
+        assert_eq!(
+            annonce,
+            sortie.success(),
+            "la sonde annonce {annonce} alors que `unshare --user` {}",
+            if sortie.success() {
+                "réussit"
+            } else {
+                "échoue"
+            }
+        );
     }
 }
