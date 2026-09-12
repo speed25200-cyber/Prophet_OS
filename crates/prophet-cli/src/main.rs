@@ -207,52 +207,209 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
     }
 }
 
-/// Journal d'audit. Il vit dans des fichiers : ces commandes fonctionnent sans daemon, ce qui est
-/// exactement ce qu'on attend d'un journal d'audit, y compris après un incident.
+/// Journal d'audit.
+///
+/// Deux journaux existent sur une machine Prophet OS, et les confondre est pire que de n'en avoir
+/// aucun :
+///
+/// - celui du **service**, dans `/var/lib/prophet/ledger`, écrit par `prophet-ledger`. C'est le
+///   seul où passent les tâches, les capacités et les sandboxes d'une machine en service ;
+/// - celui d'un **développement sans daemon**, dans `~/.prophet/ledger`.
+///
+/// Cette commande ne connaissait que le second. Sur la machine installée, où le service enregistre
+/// tout depuis le démarrage, elle répondait « aucun journal sur cette machine » — et le test en
+/// machine virtuelle l'a dit en ces termes, juste après avoir vu une sandbox démarrer et le
+/// service l'inscrire. C'est la pire des trois réponses possibles pour un journal d'audit : non
+/// pas « je ne sais pas », mais « il n'y a rien ».
+///
+/// L'ordre est donc : le **service** d'abord. Lui seul connaît l'état courant, et lui seul sert
+/// les membres de `prophet-system` — qui ne peuvent pas lire son état, fermé en 0700 pour que
+/// personne ne puisse réécrire l'histoire par le fichier. Les **fichiers** ensuite, parce qu'un
+/// journal d'audit doit rester lisible quand plus rien ne tourne : c'est précisément après un
+/// incident qu'on en a besoin.
 fn log(action: &LogAction) -> anyhow::Result<String> {
-    let racine = home().join(".prophet/ledger");
-    if !racine.exists() {
-        return Ok("aucun journal sur cette machine\n".to_owned());
+    match ou_est_le_journal() {
+        Journal::Service(socket) => log_par_le_service(&socket, action),
+        Journal::Fichiers(racine) => log_par_les_fichiers(&racine, action),
+        Journal::Aucun(essais) => Ok(format!(
+            "aucun journal lisible depuis ici.\n\nCe qui a été tenté :\n{essais}\n\n\
+             Si les services tournent, `prophet status` le dira. Le journal du service se lit par \
+             lui, pas par son répertoire : il est fermé en 0700 pour que personne ne puisse \
+             réécrire l'histoire en écrivant dans le fichier.\n"
+        )),
     }
-    let store = ledger::Store::open(&racine)?;
+}
+
+/// D'où cette commande lit le journal, et pourquoi.
+enum Journal {
+    /// Le service répond : on lui demande.
+    Service(std::path::PathBuf),
+    /// Pas de service, mais un répertoire lisible.
+    Fichiers(std::path::PathBuf),
+    /// Ni l'un ni l'autre, avec le détail de chaque tentative.
+    Aucun(String),
+}
+
+/// Cherche le journal, dans l'ordre où il a le plus de chances d'être à jour.
+///
+/// Chaque échec est **conservé**, pas avalé. « Aucun journal » sans dire où l'on a regardé oblige
+/// celui qui lit à deviner entre un service arrêté, un répertoire absent et une permission
+/// refusée — trois situations qui n'appellent pas du tout la même chose.
+fn ou_est_le_journal() -> Journal {
+    let socket = std::env::var("PROPHET_LEDGER_SOCKET").map_or_else(
+        |_| prophet_ipc::socket_path("ledger"),
+        std::path::PathBuf::from,
+    );
+    let mut essais = Vec::new();
+    match repond("ledger", &socket) {
+        Ok(()) => return Journal::Service(socket),
+        Err(raison) => essais.push(format!("  le service, sur {} : {raison}", socket.display())),
+    }
+
+    let force = std::env::var("PROPHET_LEDGER_DIR")
+        .ok()
+        .map(std::path::PathBuf::from);
+    for racine in candidats_de_journal(force.as_deref(), &home()) {
+        // `read_dir` plutôt que `exists` : un répertoire présent mais fermé n'est pas un journal
+        // qu'on peut lire, et le dire ici évite une erreur plus loin, sans contexte.
+        match std::fs::read_dir(&racine) {
+            Ok(_) => return Journal::Fichiers(racine),
+            Err(e) => essais.push(format!("  {} : {e}", racine.display())),
+        }
+    }
+    Journal::Aucun(essais.join("\n"))
+}
+
+/// Les répertoires où un journal peut vivre, dans l'ordre où on les essaie.
+///
+/// Séparée de la recherche elle-même pour être vérifiable : la liste est ce qui a manqué, et une
+/// liste se teste sans machine, sans daemon et sans `/var`.
+fn candidats_de_journal(
+    force: Option<&std::path::Path>,
+    home: &std::path::Path,
+) -> Vec<std::path::PathBuf> {
+    let mut candidats = Vec::new();
+    if let Some(chemin) = force {
+        candidats.push(chemin.to_path_buf());
+    }
+    // Celui du service d'abord : sur une machine en service, c'est le seul qui dise la vérité.
+    candidats.push(std::path::PathBuf::from("/var/lib/prophet/ledger"));
+    candidats.push(home.join(".prophet/ledger"));
+    candidats
+}
+
+/// Le journal tel que le service le tient.
+fn log_par_le_service(socket: &std::path::Path, action: &LogAction) -> anyhow::Result<String> {
     match action {
         LogAction::Tail { number } => {
-            let mut events = store.read_all()?;
-            let depart = events.len().saturating_sub(*number);
-            events.drain(..depart);
-            if events.is_empty() {
-                return Ok("journal vide\n".to_owned());
-            }
-            let mut out = String::new();
-            for event in events {
-                out.push_str(&format!(
-                    "{:>8}  {:<22} {}\n",
-                    event.seq,
-                    shell::kind_label(event.kind),
-                    event.task.unwrap_or_default()
-                ));
-            }
-            Ok(out)
+            let events = evenements(socket, serde_json::json!({}))?;
+            Ok(rendre_tail(&events, *number))
         }
         LogAction::Replay { task } => {
-            let events = store.read_all()?;
+            let events = evenements(socket, serde_json::json!({ "task": task }))?;
             Ok(shell::timeline(task, &events))
         }
         LogAction::Verify => {
-            let rapport = store.verify()?;
-            if rapport.ok {
-                Ok(format!(
-                    "journal intact : {} événements, {} sceaux vérifiés\n",
-                    rapport.checked, rapport.seals
-                ))
-            } else {
-                anyhow::bail!(
-                    "journal altéré à la séquence {} : {}",
-                    rapport.first_bad_seq.unwrap_or(0),
-                    rapport.reason.unwrap_or_default()
-                )
-            }
+            // La vérification est faite par celui qui détient la chaîne : il a les sceaux et la
+            // clé publique. La refaire ici sur une copie partielle dirait moins.
+            let brut = appel_au_journal(socket, "ledger.verify", serde_json::json!({}))?;
+            let rapport: ledger::VerifyReport = serde_json::from_value(brut)
+                .map_err(|e| anyhow::anyhow!("rapport de vérification illisible : {e}"))?;
+            rendre_verification(&rapport)
         }
+    }
+}
+
+/// Le journal tel qu'il est sur le disque, sans daemon.
+fn log_par_les_fichiers(racine: &std::path::Path, action: &LogAction) -> anyhow::Result<String> {
+    let store = ledger::Store::open(racine)?;
+    match action {
+        LogAction::Tail { number } => Ok(rendre_tail(&store.read_all()?, *number)),
+        LogAction::Replay { task } => Ok(shell::timeline(task, &store.read_all()?)),
+        LogAction::Verify => rendre_verification(&store.verify()?),
+    }
+}
+
+/// Les événements que le service veut bien rendre, selon un filtre.
+fn evenements(
+    socket: &std::path::Path,
+    filtre: serde_json::Value,
+) -> anyhow::Result<Vec<prophet_types::ledger::Event>> {
+    let brut = appel_au_journal(socket, "ledger.query", filtre)?;
+    serde_json::from_value(brut).map_err(|e| anyhow::anyhow!("réponse du journal illisible : {e}"))
+}
+
+/// Combien de temps on laisse au journal pour répondre.
+///
+/// Plus que pour une sonde : `ledger.query` relit des fichiers, et un journal de plusieurs mois
+/// n'est pas un « pong ». Moins que l'infini : une commande d'audit qui ne rend pas la main est
+/// une commande d'audit qu'on n'utilisera pas au moment où elle compte.
+const DELAI_DU_JOURNAL: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn appel_au_journal(
+    socket: &std::path::Path,
+    methode: &str,
+    params: serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    let execution = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    execution.block_on(async {
+        let travail = async {
+            let client = prophet_ipc::Client::connect(socket).await.map_err(|e| {
+                anyhow::anyhow!("journal injoignable sur {} : {e}", socket.display())
+            })?;
+            client
+                .call(methode, params)
+                .await
+                .map_err(|e| anyhow::anyhow!("{} : {}", methode, e.message))
+        };
+        tokio::time::timeout(DELAI_DU_JOURNAL, travail)
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "le journal n'a pas répondu en {} s",
+                    DELAI_DU_JOURNAL.as_secs()
+                )
+            })?
+    })
+}
+
+/// Les `n` derniers événements — les derniers, pas les premiers.
+///
+/// La troncature se fait ici et non dans le filtre envoyé au service : `ledger.query` coupe par le
+/// début. Lui demander « vingt » rendrait les vingt **premiers** événements de la machine, ce qui
+/// ressemble à une réponse et n'en est pas une.
+fn rendre_tail(events: &[prophet_types::ledger::Event], number: usize) -> String {
+    let depart = events.len().saturating_sub(number);
+    let derniers = &events[depart..];
+    if derniers.is_empty() {
+        return "journal vide\n".to_owned();
+    }
+    let mut out = String::new();
+    for event in derniers {
+        out.push_str(&format!(
+            "{:>8}  {:<22} {}\n",
+            event.seq,
+            shell::kind_label(event.kind),
+            event.task.clone().unwrap_or_default()
+        ));
+    }
+    out
+}
+
+fn rendre_verification(rapport: &ledger::VerifyReport) -> anyhow::Result<String> {
+    if rapport.ok {
+        Ok(format!(
+            "journal intact : {} événements, {} sceaux vérifiés\n",
+            rapport.checked, rapport.seals
+        ))
+    } else {
+        anyhow::bail!(
+            "journal altéré à la séquence {} : {}",
+            rapport.first_bad_seq.unwrap_or(0),
+            rapport.reason.clone().unwrap_or_default()
+        )
     }
 }
 
@@ -820,5 +977,84 @@ mod tests {
             erreur.contains("agentd"),
             "le motif doit nommer le daemon absent, obtenu : {erreur}"
         );
+    }
+}
+
+#[cfg(test)]
+mod journal {
+    //! Ce que `prophet log` doit à celui qui cherche ce qui s'est passé.
+    //!
+    //! La commande lisait `~/.prophet/ledger` et rien d'autre. Sur la machine installée, où
+    //! `prophet-ledger` écrit dans `/var/lib/prophet/ledger` depuis le démarrage, elle répondait
+    //! « aucun journal sur cette machine » — juste après que le test en machine virtuelle eut vu
+    //! une sandbox démarrer et le service l'inscrire. Les deux fautes sont ici : ne pas connaître
+    //! le journal du service, et rendre les premiers événements là où l'on en demandait les
+    //! derniers.
+
+    use prophet_types::ledger::{Actor, Event, EventKind};
+
+    fn evenement(seq: u64) -> Event {
+        Event {
+            v: 1,
+            seq,
+            ts: time::OffsetDateTime::UNIX_EPOCH,
+            actor: Actor("essai".to_owned()),
+            kind: EventKind::TaskCreated,
+            task: Some(format!("task:{seq}")),
+            step: None,
+            payload: serde_json::Value::Null,
+            prev: String::new(),
+            hash: None,
+        }
+    }
+
+    #[test]
+    fn le_journal_du_service_est_cherche_avant_celui_du_compte() {
+        let home = std::path::Path::new("/home/quelqu-un");
+        let candidats = super::candidats_de_journal(None, home);
+
+        let systeme = candidats
+            .iter()
+            .position(|c| c == std::path::Path::new("/var/lib/prophet/ledger"))
+            .expect(
+                "le journal du service doit être cherché : c'est le seul qui existe sur une \
+                 machine installée, et l'ignorer faisait dire « aucun journal » à une commande \
+                 d'audit devant un journal plein",
+            );
+        let compte = candidats
+            .iter()
+            .position(|c| c == &home.join(".prophet/ledger"))
+            .expect("celui du compte reste utile sans daemon");
+        assert!(
+            systeme < compte,
+            "le journal du service passe avant celui du compte : {candidats:?}"
+        );
+    }
+
+    #[test]
+    fn un_chemin_force_passe_avant_tout() {
+        let force = std::path::Path::new("/ailleurs");
+        let candidats = super::candidats_de_journal(Some(force), std::path::Path::new("/home/x"));
+        assert_eq!(
+            candidats.first().map(std::path::PathBuf::as_path),
+            Some(force)
+        );
+    }
+
+    #[test]
+    fn tail_rend_les_derniers_et_non_les_premiers() {
+        let events: Vec<Event> = (1..=50).map(evenement).collect();
+        let rendu = super::rendre_tail(&events, 3);
+        let lignes: Vec<&str> = rendu.lines().collect();
+        assert_eq!(lignes.len(), 3, "trois demandés, trois rendus : {rendu}");
+        assert!(
+            rendu.contains("task:50") && rendu.contains("task:48") && !rendu.contains("task:1 "),
+            "« tail -n 3 » doit rendre 48, 49 et 50 — pas 1, 2 et 3 :\n{rendu}"
+        );
+    }
+
+    #[test]
+    fn tail_le_dit_quand_il_n_y_a_rien() {
+        assert_eq!(super::rendre_tail(&[], 20), "journal vide\n");
     }
 }
