@@ -219,6 +219,22 @@ pub fn status(
     tasks: &[&Task],
     pending_approvals: usize,
 ) -> String {
+    status_avec_services(caps, backend, tasks, pending_approvals, &[])
+}
+
+/// Comme [`status`], en disant aussi lesquels des services répondent.
+///
+/// C'est la première chose qu'on veut savoir après une installation, et la seule que les autres
+/// lignes ne disent pas : un système dont `capd` est mort affiche une isolation parfaite et un
+/// journal intact, et ne peut rien faire.
+#[must_use]
+pub fn status_avec_services(
+    caps: &sandboxd::Capabilities,
+    backend: &sfs::Backend,
+    tasks: &[&Task],
+    pending_approvals: usize,
+    services: &[(String, Option<String>)],
+) -> String {
     let actives = tasks.iter().filter(|t| !t.state.is_terminal()).count();
     let mut out = String::from("Prophet OS\n\n");
     out.push_str(&format!(
@@ -235,6 +251,24 @@ pub fn status(
             backend.limitations()
         ));
     }
+    if !services.is_empty() {
+        out.push_str("\n  Services\n");
+        let muets = services.iter().filter(|(_, p)| p.is_some()).count();
+        for (nom, panne) in services {
+            match panne {
+                None => out.push_str(&format!("    ✓ {nom}\n")),
+                Some(raison) => out.push_str(&format!("    ✗ {nom} — {raison}\n")),
+            }
+        }
+        if muets > 0 {
+            // Dire ce que l'absence coûte, plutôt que de laisser une croix sans conséquence.
+            out.push_str(&format!(
+                "    {muets} service(s) muet(s) : voir `docs/components/` pour ce que chacun\n\
+                 \x20   emporte avec lui, et `journalctl -u prophet-<nom>` pour savoir pourquoi\n"
+            ));
+        }
+    }
+
     out.push_str("\n  Isolation\n");
     for ligne in caps.report().lines() {
         out.push_str(&format!("  {ligne}\n"));
@@ -426,5 +460,45 @@ mod tests {
         assert!(rendu.contains("2 en attente"), "{rendu}");
         assert!(rendu.contains("Isolation"), "{rendu}");
         assert!(rendu.contains("Landlock"), "{rendu}");
+    }
+    #[test]
+    fn le_statut_dit_quels_services_repondent_et_ce_que_leur_absence_coute() {
+        // Un système dont `capd` est mort affiche une isolation parfaite et un journal intact, et
+        // ne peut rien faire. C'est la seule chose que les autres lignes ne disent pas.
+        let rendu = status_avec_services(
+            &sandboxd::Capabilities::probe(),
+            &sfs::Backend {
+                kind: sfs::BackendKind::Portable,
+                reason: "essai".to_owned(),
+            },
+            &[],
+            0,
+            &[
+                ("capd".to_owned(), None),
+                ("agentd".to_owned(), Some("socket injoignable".to_owned())),
+            ],
+        );
+        assert!(rendu.contains("✓ capd"), "{rendu}");
+        assert!(rendu.contains("✗ agentd — socket injoignable"), "{rendu}");
+        assert!(
+            rendu.contains("1 service(s) muet(s)"),
+            "l'absence doit être comptée et sa conséquence dite : {rendu}"
+        );
+    }
+
+    #[test]
+    fn sans_liste_de_services_le_statut_reste_ce_qu_il_etait() {
+        // `status` est appelé ailleurs qu'en ligne de commande ; il ne doit pas se mettre à parler
+        // de services quand personne n'a demandé.
+        let rendu = status(
+            &sandboxd::Capabilities::probe(),
+            &sfs::Backend {
+                kind: sfs::BackendKind::Portable,
+                reason: "essai".to_owned(),
+            },
+            &[],
+            0,
+        );
+        assert!(!rendu.contains("Services"), "{rendu}");
     }
 }

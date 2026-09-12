@@ -81,9 +81,14 @@ sudo prophet-installer --disque /dev/VOTRE_DISQUE --jusqu-au-montage
 Retirez la clé, redémarrez. La phrase de passe vous est demandée pour ouvrir les volumes chiffrés.
 
 ```sh
-prophet status                        # ce que cette machine sait isoler
+prophet status                        # les services, l'isolation, les limites de la machine
 prophet provider login claude-code    # connecter votre abonnement
 ```
+
+`prophet status` commence par la liste des sept services et dit lesquels répondent. C'est la
+première chose à regarder : un système dont `capd` est muet affiche une isolation parfaite et un
+journal intact, et ne peut rien faire. `docs/components/` dit ce que chaque absence emporte avec
+elle.
 
 Pour ne plus taper la phrase à chaque démarrage, enrôlez-la dans le TPM :
 

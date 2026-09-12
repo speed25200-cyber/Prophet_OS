@@ -178,12 +178,17 @@ fn main() -> std::process::ExitCode {
 
 fn run(cli: &Cli) -> anyhow::Result<String> {
     match &cli.command {
-        Command::Status => Ok(shell::status(
-            &sandboxd::Capabilities::probe(),
-            &sfs::detect_backend(&home()),
-            &[],
-            0,
-        )),
+        Command::Status => {
+            let taches = taches_en_cours(&socket_agentd()).unwrap_or_default();
+            let refs: Vec<&agentd::Task> = taches.iter().collect();
+            Ok(shell::status_avec_services(
+                &sandboxd::Capabilities::probe(),
+                &sfs::detect_backend(&home()),
+                &refs,
+                0,
+                &services(),
+            ))
+        }
         Command::Freeze => {
             let manager = sandboxd::Manager::new("prophet-sandbox-helper");
             let gelees = manager.freeze_all();
@@ -431,6 +436,41 @@ fn home() -> std::path::PathBuf {
     std::env::var("HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::PathBuf::from("/root"))
+}
+
+/// Lesquels des services répondent, et pourquoi les autres ne répondent pas.
+///
+/// Un `ping` sur chaque socket. C'est peu, mais c'est la seule chose qui distingue « le service
+/// est déclaré » de « le service sert » — et l'histoire de ce dépôt montre que confondre les deux
+/// coûte cher.
+fn services() -> Vec<(String, Option<String>)> {
+    [
+        "capd", "ledger", "vault", "egress", "sandboxd", "memoryd", "agentd",
+    ]
+    .into_iter()
+    .map(|nom| {
+        let socket = prophet_ipc::socket_path(nom);
+        (nom.to_owned(), repond(&socket).err())
+    })
+    .collect()
+}
+
+/// Le service répond-il ? On lui parle, on ne regarde pas si son fichier existe.
+fn repond(socket: &std::path::Path) -> Result<(), String> {
+    let execution = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    execution.block_on(async {
+        let client = prophet_ipc::Client::connect(socket)
+            .await
+            .map_err(|_| "socket injoignable".to_owned())?;
+        client
+            .call("ping", serde_json::json!({}))
+            .await
+            .map(|_| ())
+            .map_err(|e| e.message.clone())
+    })
 }
 
 /// Où joindre `agentd`. La variable d'environnement sert aux tests et aux développements ; sur une
