@@ -277,6 +277,14 @@ jobs:
           sshpass -e ssh $SSHOPTS "root@$VPS" \
             "cd $DISTANT && ./tools/verify-on-host.sh --probe" || true
 
+      # Avant la préparation : `install-isolation.sh` rencontre cette restriction au passage,
+      # et rien — pas même le niveau 0 — ne fonctionne tant qu'elle est active.
+      - name: Lever la restriction des espaces de noms
+        if: ${{ inputs.lever_userns == 'true' }}
+        run: |
+          sshpass -e ssh $SSHOPTS "root@$VPS" \
+            "cd $DISTANT && PROPHET_AUTORISER_USERNS=1 ./tools/install-isolation.sh userns"
+
       - name: Préparer la machine
         if: ${{ inputs.preparer == 'true' }}
         timeout-minutes: 40
@@ -302,14 +310,20 @@ jobs:
             apt-get -y -qq install build-essential pkg-config libssl-dev curl git >/dev/null
             command -v cargo >/dev/null || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null
             . "$HOME/.cargo/env"
-            ./tools/install-isolation.sh gvisor
+            # `install-isolation.sh gvisor` installe gVisor **et** signale la restriction
+            # AppArmor, qu'il ne peut pas lever sans autorisation. Il sort donc en 1 quand elle
+            # est active — ce qui faisait echouer cette etape apres avoir installe ce qu'elle
+            # devait installer, et sauter l'etape suivante : celle qui leve precisement cette
+            # restriction. Le remede n'est pas d'ignorer le code de sortie, mais de juger sur ce
+            # qu'on est venu chercher.
+            ./tools/install-isolation.sh gvisor || true
+            if command -v runsc >/dev/null 2>&1; then
+              echo "gVisor installe : $(runsc --version 2>&1 | head -1)"
+            else
+              echo "::error::gVisor n'a pas ete installe ; le niveau 1 restera hors d'atteinte"
+              exit 1
+            fi
           DISTANT_PREP
-
-      - name: Lever la restriction des espaces de noms
-        if: ${{ inputs.lever_userns == 'true' }}
-        run: |
-          sshpass -e ssh $SSHOPTS "root@$VPS" \
-            "cd $DISTANT && PROPHET_AUTORISER_USERNS=1 ./tools/install-isolation.sh userns"
 
       - name: Exercer les niveaux d'isolation
         if: ${{ inputs.verifier_niveaux == 'true' }}
