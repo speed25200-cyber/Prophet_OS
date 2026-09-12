@@ -445,3 +445,41 @@ jobs:
 
       - name: Démarrer la machine et exercer les services
         run: nix build .#checks.x86_64-linux.services --print-build-logs
+
+  # --- Le système installé, démarré pour de vrai ---
+  #
+  # Le travail `systeme` ci-dessus le *construit*. Construire ne dit rien de ce qui se passe au
+  # démarrage, et c'est là que `immutable.nix` ajoute une racine en lecture seule, un chargeur sans
+  # éditeur et un noyau verrouillé. Jusqu'ici, seul le support d'amorçage avait jamais démarré.
+  installe:
+    name: Le système installé démarre
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Faire de la place
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean
+          echo "$(df -h / | awk 'NR==2{print $4}') libres"
+
+      - name: Rendre /dev/kvm ouvrable
+        run: PROPHET_AUTORISER_KVM=1 sudo -E ./tools/install-isolation.sh microvm
+
+      - name: Vérifier qu'il l'est
+        run: |
+          python3 -c "open('/dev/kvm','r+b').close()" \
+            || { echo "::error::/dev/kvm reste inouvrable : ce test a besoin de virtualisation"; exit 1; }
+          echo "/dev/kvm ouvrable"
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+            max-jobs = auto
+
+      - name: Démarrer la configuration installée
+        run: nix build .#checks.x86_64-linux.installe --print-build-logs

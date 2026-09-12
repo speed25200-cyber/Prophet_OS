@@ -70,6 +70,12 @@
             inherit pkgs;
             module = nixosModules.prophet;
           };
+          # Et une vraie machine **installée** : racine en lecture seule, chargeur d'amorçage,
+          # noyau verrouillé. Le support d'amorçage a démarré ; ce qu'il installe, jamais.
+          installe = import ./image/tests/installe.nix {
+            inherit pkgs;
+            module = nixosModules.prophet;
+          };
         };
 
         packages = {

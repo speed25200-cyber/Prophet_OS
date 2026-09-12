@@ -204,11 +204,21 @@ Les trois ont un test qui échoue sur le code d'avant : trois dans `crates/proph
   l'installeur demande son mot de passe **avant** d'écrire quoi que ce soit sur le disque, refuse
   en dessous de huit caractères, et ne pose que le haché, en `0600`
 
-Ce que cela laisse ouvert : la racine est montée en lecture seule par `immutable.nix`, et
-l'activation de NixOS écrit `/etc/passwd` et `/etc/shadow` à chaque démarrage. Le système installé
-n'a **jamais été démarré** — l'image d'amorçage l'a été, pas lui. C'est la prochaine chose à
-vérifier, et elle demande un test qui démarre la configuration installée depuis un disque, par son
-chargeur d'amorçage.
+### Le système installé, démarré pour la première fois (12 septembre 2026)
+
+M9-T6 a montré le **support d'amorçage** démarrer. Ce que ce support installe est une autre
+configuration, et elle n'avait jamais été démarrée — seulement construite. Entre les deux,
+`immutable.nix` ajoute précisément ce qui peut empêcher une machine de démarrer : racine en
+lecture seule alors que l'activation de NixOS écrit `/etc/passwd` et `/etc/shadow` à chaque
+démarrage, `systemd-boot` sans éditeur donc sans secours, `lockdown=integrity` et
+`module.sig_enforce=1`.
+
+- [ ] `image/tests/installe.nix` — démarre la configuration installée **par son chargeur
+  d'amorçage**, en UEFI, depuis un vrai disque, et vérifie dans l'ordre : le chargeur a bien
+  lancé le système, la racine est en lecture seule, les comptes ont malgré tout été écrits,
+  aucune unité n'a échoué, les sept services tournent, le propriétaire ouvre une session sur
+  `tty1` avec son mot de passe, et les paramètres du noyau sont ceux demandés. Écrit avant de
+  savoir ce qu'il dira : c'est le seul moyen d'apprendre quelque chose
 
 ## Blocages
 
