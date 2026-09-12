@@ -15,6 +15,23 @@ Le workflow `.github/workflows/verifier-sur-le-serveur.yml` est donc l'endroit o
 sur matériel réel peut avoir lieu — comme c'est déjà le cas pour gVisor et Firecracker, vérifiés
 par le job `isolation` de l'intégration continue.
 
+## Ce que la machine fait, vérifié le 12 septembre 2026 à 15 h 56
+
+Prophet OS a été déposé, préparé et **exercé** sur ce serveur. Ce qui est établi en y lançant des
+programmes, et non en lisant des réglages :
+
+```
+test niveau_un_execute_reellement_sous_gvisor ... ok
+test niveau_un_n_a_pas_de_reseau ... ok
+```
+
+Le **niveau 1 fonctionne** : une tâche s'exécute sous gVisor, et sa sandbox n'a aucune interface
+réseau. Le niveau 2 est hors d'atteinte, définitivement — pas de `/dev/kvm` sur cette machine
+virtuelle. Les tests de la surface ne s'appliquent pas : aucun périphérique Vulkan.
+
+Hermes est arrêté et désactivé ; ses fichiers sont intacts dans `/root/hermes`. Le tableau des
+changements et de leurs annulations est dans `docs/STATUS.md`.
+
 ## Ce que la sonde a trouvé (12 septembre 2026)
 
 Elle a tourné, et c'est la première fois que cette machine est décrite par une mesure plutôt que

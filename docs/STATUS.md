@@ -425,8 +425,27 @@ utilisables, et gVisor est en place. Le niveau 2 restera hors d'atteinte — pas
 VPS, c'est une machine virtuelle sans virtualisation imbriquée.
 
 « Atteignables » est ce que la configuration permet. Ce que la machine **tient réellement** est
-une autre question, et c'est celle que l'étape « Exercer les niveaux d'isolation » pose en
-compilant `sandboxd` et en lançant pour de vrai. C'est la seule réponse qui compte.
+une autre question. Elle a été posée à 15 h 56, en compilant `sandboxd` sur le serveur et en
+lançant pour de vrai :
+
+```
+test niveau_un_execute_reellement_sous_gvisor ... ok
+test niveau_un_n_a_pas_de_reseau ... ok
+```
+
+**Le niveau 1 fonctionne sur cette machine** : un programme s'exécute réellement sous gVisor, et la
+sandbox n'a aucune interface réseau. Ce ne sont pas des sondes de présence — l'une lance un
+programme et regarde ce qu'il rend, l'autre essaie de sortir et constate qu'elle ne peut pas.
+
+Non vérifiable ici, et dit comme tel plutôt que compté comme réussi ou échoué :
+
+| | |
+|---|---|
+| `niveau_deux_demarre_une_microvm` | `needs_kvm` — il manque l'accès à KVM, Firecracker et les images d'invité. Définitif sur ce VPS |
+| `le_niveau_deux_ne_retombe_jamais_sur_le_niveau_zero` | `needs_kvm`, même raison |
+| les six tests de la surface | `needs_gpu` — aucun périphérique Vulkan utilisable ; un nœud `/dev/dri` ne suffit pas |
+
+Le rapport complet est dans l'artefact `rapport-serveur` du run `34703605599`.
 
 La cause de l'étape sautée était dans le workflow, pas sur la machine :
 `install-isolation.sh gvisor` répond à deux questions — installer gVisor, et signaler la
