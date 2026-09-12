@@ -130,6 +130,12 @@ Codex CLI n'y est pas encore : son nom dans nixpkgs est un mot générique, et l
 étranger sous un nom auquel l'OS fait confiance serait pire que de ne rien livrer. Vous pouvez
 l'installer vous-même ; `prophet provider ls` le verra.
 
+Claude Code est distribué sous les conditions de son éditeur — nixpkgs le marque « unfree ».
+L'image l'autorise **nommément**, et non par un `allowUnfree` global qui laisserait entrer
+n'importe quel paquet propriétaire sans que personne ne s'en aperçoive. La liste est dans
+`image/modules/prophet.nix` et se lit en une ligne ; la retirer donne une image sans aucun paquet
+propriétaire, où `provider ls` dira simplement que le client est absent.
+
 Prophet OS ne lit jamais les fichiers d'identifiants de ces clients. Il monte leur répertoire de
 session dans leur sandbox, et c'est tout — vous vous connectez avec `claude login` comme sur
 n'importe quelle machine.

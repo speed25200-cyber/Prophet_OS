@@ -365,6 +365,23 @@ in
       ++ lib.optional (pkgs ? claude-code) pkgs.claude-code
       ++ lib.optional (pkgs ? gemini-cli) pkgs.gemini-cli;
 
+    # Claude Code est sous licence propriétaire ; nixpkgs le marque « unfree » et refuse de
+    # l'évaluer sans autorisation explicite. L'ajouter a donc fait échouer l'évaluation de toute
+    # la configuration, en trente-huit secondes — ce qui est au moins rapide à apprendre.
+    #
+    # L'autorisation est nominative, et pas `allowUnfree = true`. La différence compte : la forme
+    # globale laisserait entrer n'importe quel paquet propriétaire dans l'image, aujourd'hui ou
+    # dans six mois, sans que personne ne s'en aperçoive. Celle-ci nomme ce qu'elle laisse entrer,
+    # et la liste se lit.
+    #
+    # Ce que cela veut dire, dit franchement : cette image embarque un client distribué sous les
+    # conditions de son éditeur. C'est le client que l'OS est fait pour piloter, et l'invariant
+    # tient — il tourne sans modification, et l'OS ne lit jamais ses fichiers d'identifiants. Qui
+    # préfère une image sans aucun paquet propriétaire retire cette liste : `provider ls` dira
+    # alors que le client est absent, ce qui est la vérité.
+    nixpkgs.config.allowUnfreePredicate = paquet:
+      builtins.elem (lib.getName paquet) [ "claude-code" "gemini-cli" ];
+
     # --- Ce qui n'a rien à faire sur cette machine ---
     services.xserver.enable = lib.mkDefault false;
     documentation.nixos.enable = lib.mkDefault false;
