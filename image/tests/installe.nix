@@ -143,6 +143,27 @@ pkgs.testers.runNixOSTest {
         # différence.
         cible = machine.succeed("systemctl get-default").strip()
         print(f"cible par défaut : {cible}")
+
+        # Attendre un état **terminal**, et non « pas en train de démarrer ». Juste après
+        # l'amorçage l'unité est brièvement `inactive` ; une attente formulée à l'envers passerait
+        # donc aussitôt, avant que la surface ait seulement été lancée — et le sous-test aurait
+        # conclu « jamais tentée » sur une machine qui s'apprêtait à la tenter.
+        #
+        # `active` : elle tient l'écran. `failed` : elle a renoncé après ses cinq tentatives, et
+        # le service de repli a écrit pourquoi. Les deux sont des réponses ; `inactive` et
+        # `activating` n'en sont pas.
+        #
+        # L'attente est enveloppée : si elle expire, c'est justement le cas que ce sous-test
+        # existe pour attraper, et il vaut mieux l'annoncer avec le journal sous les yeux qu'avec
+        # « timeout » pour tout message.
+        try:
+            machine.wait_until_succeeds(
+                "case \"$(systemctl show -p ActiveState --value prophet-surface.service)\" in "
+                "active|failed) exit 0 ;; *) exit 1 ;; esac",
+                timeout=180,
+            )
+        except Exception as expiration:
+            print(f"la surface n'a atteint aucun état terminal en 180 s : {expiration}")
         etat = machine.succeed("systemctl show -p ActiveState -p Result --value prophet-surface.service || true").strip()
         print(f"prophet-surface : {etat}")
         journal = machine.succeed("journalctl -u prophet-surface.service --no-pager | tail -30 || true")
@@ -164,16 +185,6 @@ pkgs.testers.runNixOSTest {
         # Ce n'est pas qu'un artefact de test : sur une machine réelle dont le pilote graphique
         # refuse, l'invite de connexion du propriétaire serait raccrochée cinq fois en une minute.
         # C'est noté dans `docs/components/surface.md`.
-        machine.wait_until_succeeds(
-            "test \"$(systemctl show -p ActiveState --value prophet-surface.service)\" "
-            "!= activating",
-            timeout=120,
-        )
-        etat_final = machine.succeed(
-            "systemctl show -p ActiveState --value prophet-surface.service"
-        ).strip()
-        print(f"la surface s'est arrêtée sur : {etat_final}")
-
         machine.wait_for_unit("getty@tty1.service")
         machine.wait_until_tty_matches("1", "login:")
         machine.send_chars("prophet\n")
