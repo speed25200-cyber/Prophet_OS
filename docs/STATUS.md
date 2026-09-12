@@ -199,6 +199,28 @@ Les trois ont un test qui échoue sur le code d'avant : trois dans `crates/proph
 (`sondes::*`), deux dans `crates/prophet-daemon`, et quatre sous-tests dans
 `image/tests/services.nix`.
 
+### Le gardien borné par les règles du prisonnier (12 septembre 2026)
+
+- [x] `sandboxd` recevait `CAP_SETUID`, `CAP_SETGID` et `CAP_SYS_ADMIN`, et de l'autre main le
+  filtre d'appels système hérité des six autres daemons : `@system-service` moins `@privileged`.
+  Or `@system-service` ne contient pas `@mount`, et `~@privileged` retire `setuid`, `setgid`,
+  `setgroups` et `pivot_root` — le travail exact de ce service. `RestrictSUIDSGID` implique par
+  ailleurs `NoNewPrivileges`, que le même bloc désactive trois lignes plus haut. Le test des
+  services l'a montré en toutes lettres :
+
+  ```
+  confinement impossible : écriture de uid_map : Operation not permitted
+  ```
+
+  **Aucune tâche ne pouvait donc être isolée sur la machine installée**, et l'invariant « tout
+  processus non fiable tourne sous `sandboxd` au niveau requis » était inapplicable. Le filtre du
+  service borne maintenant le gestionnaire ; celui que subit une tâche reste posé par `sandboxd`
+  dans son enfant, après le confinement, et beaucoup plus étroit.
+
+  Vérifié à la main sur le conteneur de construction, hors systemd : `sandbox.start` au niveau 0
+  rend `{"task": "task:essai-local", "pid": …, "level": 0}` et le journal dit « sandbox démarrée ».
+  Le code du confinement n'était pas en cause ; seule l'entrave du service l'était.
+
 ### Le compte sans lequel personne ne se connecte (12 septembre 2026)
 
 - [x] La machine installée ne créait **aucun** compte humain. `nixos-install --no-root-password`
