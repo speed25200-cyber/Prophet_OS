@@ -15,13 +15,16 @@ fn usage() {
     eprintln!(
         "Usage : prophet-surface [--capture FICHIER.png] [options]
 
-Sans --capture, ouvre la surface en plein écran. C'est ainsi que Prophet OS l'affiche.
+Sans --capture, ouvre la surface en plein écran sur l'état réel du système. C'est ainsi que
+Prophet OS l'affiche. Les tâches viennent d'agentd, les décisions de capd, l'isolation de
+sandboxd ; si l'un ne répond pas, sa part reste vide plutôt qu'inventée.
 
   --capture FICHIER    écrire une image au lieu d'ouvrir la fenêtre
   --largeur N          défaut 1920
   --hauteur N          défaut 1080
   --temps SECONDES     instant du champ ; la même valeur donne toujours la même image (défaut 8)
   --decision           montrer l'état où une décision attend un humain
+  --demonstration      montrer une scène d'exemple au lieu du système réel
   --aide               ce message"
     );
 }
@@ -32,6 +35,7 @@ fn main() -> ExitCode {
     let mut hauteur = 1080u32;
     let mut temps = 8.0f32;
     let mut decision = false;
+    let mut demonstration_demandee = false;
 
     let mut arguments = std::env::args().skip(1);
     while let Some(argument) = arguments.next() {
@@ -51,6 +55,7 @@ fn main() -> ExitCode {
             }
             "--temps" => temps = arguments.next().and_then(|v| v.parse().ok()).unwrap_or(8.0),
             "--decision" => decision = true,
+            "--demonstration" => demonstration_demandee = true,
             "--aide" | "-h" => {
                 usage();
                 return ExitCode::SUCCESS;
@@ -65,9 +70,22 @@ fn main() -> ExitCode {
 
     let Some(fichier) = fichier else {
         // Le mode ordinaire : la surface occupe l'écran, et n'en sort pas.
-        return match surface::fenetre::tenir(Box::new(Demonstration {
-            avec_decision: decision,
-        })) {
+        //
+        // Elle montre le système, pas une démonstration. Si les daemons ne répondent pas, le champ
+        // reste vide et la ligne d'isolation dit pourquoi — parce qu'une interface d'observation
+        // qui invente ce qu'elle affiche est pire qu'une interface absente : elle a l'air de dire
+        // quelque chose. La démonstration reste accessible par `--demonstration`, pour une capture
+        // ou une revue.
+        let source: Box<dyn Source> = if demonstration_demandee {
+            Box::new(Demonstration {
+                avec_decision: decision,
+            })
+        } else {
+            Box::new(surface::reel::Reel::demarrer(
+                surface::reel::Sockets::default(),
+            ))
+        };
+        return match surface::fenetre::tenir(source) {
             Ok(()) => ExitCode::SUCCESS,
             Err(erreur) => {
                 eprintln!("surface impossible à tenir : {erreur}");
@@ -125,8 +143,9 @@ fn ecrire_png(
 
 /// La source de démonstration : elle rend toujours la même scène.
 ///
-/// C'est le seul endroit qui sait d'où vient l'état. Le branchement au ledger remplacera cette
-/// structure sans toucher ni à la fenêtre ni au rendu — c'est tout l'objet du trait `Source`.
+/// Elle ne sert plus au démarrage ordinaire — `surface::reel::Reel` a pris sa place — mais à
+/// produire des captures et à montrer la surface sans machine en marche, ce qui reste utile pour
+/// une revue. Elle n'est atteignable que par `--demonstration` ou `--capture`, jamais par défaut.
 struct Demonstration {
     avec_decision: bool,
 }

@@ -6,6 +6,7 @@ pub mod depuis;
 pub mod disposition;
 pub mod fenetre;
 pub mod gpu;
+pub mod reel;
 pub mod rendu;
 pub mod scene;
 pub mod theme;

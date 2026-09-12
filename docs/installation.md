@@ -99,8 +99,15 @@ Dit franchement, parce que vous aurez effacé un disque pour l'essayer.
 
 - **Pas de Secure Boot.** Le chargeur n'est pas signé ; il faut désactiver Secure Boot dans le
   micrologiciel. Cela réduit la garantie que ce qui démarre est bien ce qui a été installé.
-- **Pas d'environnement graphique.** Prophet OS s'utilise en ligne de commande. L'interface
-  sémantique existe sous forme de vues rendues par la CLI, pas de bureau.
+- **La surface montre le système, mais peu de choses au début.** L'environnement graphique démarre
+  seul sur le premier écran : un champ de courants où chaque tâche est un filament, sans bureau ni
+  fenêtres. Il lit les tâches réelles, les décisions en attente et ce que la machine sait isoler.
+  Tant que vous n'avez lancé aucune tâche, le champ est donc vide — c'est normal, et c'est
+  préférable à une démonstration qui ressemblerait à un système en marche.
+- **Les sept services démarrent pour la première fois sur votre machine.** Jusqu'au 12 septembre
+  au soir, ils étaient déclarés sans exister : l'image installée aurait démarré avec sept unités en
+  échec. Ils existent désormais, chacun avec un test qui lance le programme et lui parle. Ils n'ont
+  jamais tourné ensemble ailleurs que dans ces tests.
 - **La bascule A/B n'est pas exercée.** Les deux racines sont créées et le système sait démarrer
   sur la première ; le service de mise à jour qui écrit dans la seconde est une esquisse.
 - **Le niveau 2 d'isolation exige des images d'invité** qui ne sont pas dans l'image installée.
