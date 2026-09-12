@@ -337,9 +337,15 @@ in
     # refuse de se construire parce qu'un client a été renommé en amont serait une dépendance plus
     # dure que ce que ce système veut assumer — et `prophet provider ls` dit, sur la machine, ce
     # qui est réellement là.
+    # Codex CLI n'y est pas, et c'est délibéré. `pkgs.codex` est un nom générique : rien ne
+    # garantit, depuis ici, qu'il désigne le client d'OpenAI plutôt qu'un homonyme. `lib.optional
+    # (pkgs ? …)` protège d'un attribut **absent**, pas d'un attribut **qui n'est pas le bon** —
+    # et livrer un binaire étranger sous un nom auquel l'OS fait confiance serait pire que de ne
+    # rien livrer. `claude-code` et `gemini-cli` sont assez spécifiques pour qu'une collision soit
+    # invraisemblable. Le jour où quelqu'un peut vérifier le nom de l'attribut de Codex sur une
+    # machine avec Nix, il l'ajoutera ici en une ligne.
     environment.systemPackages = [ prophet ]
       ++ lib.optional (pkgs ? claude-code) pkgs.claude-code
-      ++ lib.optional (pkgs ? codex) pkgs.codex
       ++ lib.optional (pkgs ? gemini-cli) pkgs.gemini-cli;
 
     # --- Ce qui n'a rien à faire sur cette machine ---

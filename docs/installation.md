@@ -121,10 +121,14 @@ prophet provider login claude-code    # connecter votre abonnement
 ```
 
 `prophet provider ls` d'abord : il dit quels clients officiels sont **réellement présents** sur
-cette machine. L'image embarque Claude Code, Codex CLI et Gemini CLI tels quels, quand nixpkgs les
-fournit — mais un client peut y être renommé ou en disparaître, et l'image se construit alors sans
-lui plutôt que de refuser. La liste dit la vérité dans les deux cas ; `prophet provider login`
-vous enverrait sinon lancer une commande qui n'existe pas.
+cette machine. L'image embarque Claude Code et Gemini CLI tels quels, quand nixpkgs les fournit —
+un client peut y être renommé ou en disparaître, et l'image se construit alors sans lui plutôt que
+de refuser. La liste dit la vérité dans les deux cas ; `prophet provider login` vous enverrait
+sinon lancer une commande qui n'existe pas.
+
+Codex CLI n'y est pas encore : son nom dans nixpkgs est un mot générique, et livrer un binaire
+étranger sous un nom auquel l'OS fait confiance serait pire que de ne rien livrer. Vous pouvez
+l'installer vous-même ; `prophet provider ls` le verra.
 
 Prophet OS ne lit jamais les fichiers d'identifiants de ces clients. Il monte leur répertoire de
 session dans leur sandbox, et c'est tout — vous vous connectez avec `claude login` comme sur

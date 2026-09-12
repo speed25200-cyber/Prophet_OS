@@ -240,10 +240,13 @@ Les trois ont un test qui échoue sur le code d'avant : trois dans `crates/proph
 - [x] L'image n'embarquait **aucun client officiel**. `prophet provider login claude-code`
   répondait « lancez `claude login` » sur une machine où `claude` n'existe pas — découverte à
   faire après avoir formaté son disque, c'est-à-dire au seul moment où il est trop tard. Claude
-  Code, Codex CLI et Gemini CLI sont maintenant embarqués tels quels, par `lib.optional (pkgs ? …)`
+  Code et Gemini CLI sont maintenant embarqués tels quels, par `lib.optional (pkgs ? …)`
   pour qu'un renommage en amont retire le client sans casser l'image. Le test vérifie non pas leur
   présence — ils viennent de nixpkgs et peuvent en disparaître — mais que `provider ls` dise la
-  vérité sur ceux qui y sont : annoncer un client absent est pire que de dire qu'il manque
+  vérité sur ceux qui y sont : annoncer un client absent est pire que de dire qu'il manque.
+  Codex CLI est laissé de côté : `pkgs.codex` est un nom générique, `lib.optional (pkgs ? …)`
+  protège d'un attribut absent mais pas d'un attribut qui n'est pas le bon, et livrer un binaire
+  étranger sous un nom auquel l'OS fait confiance serait pire que de ne rien livrer
 
 ### Le compte sans lequel personne ne se connecte (12 septembre 2026)
 
