@@ -36,6 +36,20 @@ qui ne correspond à rien.
 Le refus porte le rapport complet de ce que la machine sait faire, pour qu'on le comprenne sans se
 connecter à la machine.
 
+## Les capacités qu'il reçoit, et celle qui ne se devine pas
+
+`CAP_SETUID`, `CAP_SETGID`, `CAP_SYS_ADMIN` — et `CAP_SETFCAP`.
+
+La dernière surprend, et c'est pour cela qu'elle est écrite ici. Depuis Linux 5.12, projeter
+l'**uid 0** dans un espace de noms utilisateur exige `CAP_SETFCAP` dans l'espace parent, et non
+`CAP_SETUID` comme le laisse croire la lecture du code de projection. Sans elle, l'écriture de
+`uid_map` rend `EPERM` — et « Operation not permitted » ne renvoie à rien qu'on puisse chercher.
+
+Le refus nomme donc maintenant sa cause : il lit l'espace de noms de l'enfant, celui du
+gestionnaire, la carte déjà écrite et ses propres capacités, et dit laquelle des quatre causes
+possibles s'applique. `tools/verifier-le-durcissement.sh` refuse par ailleurs, en une seconde, un
+service qui reçoit `CAP_SETUID` sans `CAP_SETFCAP`.
+
 ## Pourquoi son filtre d'appels système n'est pas celui des autres
 
 Les six autres daemons tournent avec `@system-service` moins `@privileged` et `@resources`. Ce

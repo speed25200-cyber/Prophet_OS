@@ -248,6 +248,18 @@ Les trois ont un test qui échoue sur le code d'avant : trois dans `crates/proph
   protège d'un attribut absent mais pas d'un attribut qui n'est pas le bon, et livrer un binaire
   étranger sous un nom auquel l'OS fait confiance serait pire que de ne rien livrer
 
+- [x] **La capacité qui ne se devine pas.** Après la correction du filtre, le refus persistait,
+  identique. Les diagnostics ajoutés au test ont écarté les capacités (`CapEff = 0x2000c0`, les
+  trois attendues), `NoNewPrivileges` (`0`) et le filtre (`setuid`, `mount`, `pivot_root` présents).
+  Le groupe principal a été écarté en reproduisant les deux cas à la main. Le refus a finalement
+  été **reproduit hors systemd** avec `capsh --drop`, en recréant le jeu de capacités exact du
+  service, puis localisé par **bissection sur les trente-huit capacités** : `CAP_SETFCAP`.
+
+  Depuis Linux 5.12, projeter l'**uid 0** dans un espace de noms exige `CAP_SETFCAP` dans l'espace
+  parent — pas `CAP_SETUID`. Vérifié dans les deux sens sur cette machine : sans elle le refus,
+  avec elle `{"task": "task:confirme", "pid": 792, "level": 0}`. Noté en ADR-0005, ajouté au
+  garde-fou, et le refus lui-même nomme désormais laquelle de ses quatre causes s'applique
+
 ### Le compte sans lequel personne ne se connecte (12 septembre 2026)
 
 - [x] La machine installée ne créait **aucun** compte humain. `nixos-install --no-root-password`

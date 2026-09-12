@@ -197,8 +197,25 @@ in
         extra.serviceConfig = {
           # Projeter les identifiants d'un enfant exige CAP_SETUID dans l'espace parent
           # (voir ADR-0005) ; créer des microVM exige l'accès à KVM.
-          CapabilityBoundingSet = lib.mkForce [ "CAP_SETUID" "CAP_SETGID" "CAP_SYS_ADMIN" ];
-          AmbientCapabilities = [ "CAP_SETUID" "CAP_SETGID" "CAP_SYS_ADMIN" ];
+          #
+          # **Et CAP_SETFCAP**, qui ne se devine pas. Depuis Linux 5.12, projeter l'**uid 0** dans
+          # un espace de noms utilisateur exige `CAP_SETFCAP` dans l'espace parent — et non
+          # `CAP_SETUID`, qu'on croit suffisant en lisant le code. La raison est que root dans un
+          # espace de noms peut poser des capacités sur des fichiers, et le noyau refuse d'ouvrir
+          # ce chemin à qui ne pourrait pas déjà le faire. `map_child_to_root` écrit exactement
+          # `0 <uid> 1` : c'est le cas visé.
+          #
+          # Sans elle, l'écriture de `uid_map` rend « Operation not permitted », et rien dans ce
+          # message ne renvoie à une capacité qui n'est mentionnée nulle part alentour. Trouvée
+          # par bissection sur les trente-huit capacités, en reproduisant le jeu exact que systemd
+          # impose ici — `CapEff = 0x2000c0` — avec `capsh --drop`.
+          CapabilityBoundingSet = lib.mkForce [
+            "CAP_SETUID"
+            "CAP_SETGID"
+            "CAP_SETFCAP"
+            "CAP_SYS_ADMIN"
+          ];
+          AmbientCapabilities = [ "CAP_SETUID" "CAP_SETGID" "CAP_SETFCAP" "CAP_SYS_ADMIN" ];
           NoNewPrivileges = lib.mkForce false;
           RestrictNamespaces = lib.mkForce false;
 

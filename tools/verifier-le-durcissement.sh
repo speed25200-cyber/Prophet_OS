@@ -19,6 +19,12 @@
 #    filtre retire `@privileged` ou n'ajoute pas `@mount`.
 # 2. `RestrictSUIDSGID = true` en même temps que `NoNewPrivileges = false`. Le premier implique le
 #    second à `true` : les déclarer ensemble, c'est demander une chose et son contraire.
+# 3. Un service qui reçoit `CAP_SETUID` pour projeter des identifiants, sans `CAP_SETFCAP`. Depuis
+#    Linux 5.12, projeter l'**uid 0** dans un espace de noms exige `CAP_SETFCAP` dans l'espace
+#    parent — pas `CAP_SETUID`, qu'on croit suffisant en lisant le code. Le noyau rend alors
+#    « Operation not permitted » sur l'écriture de `uid_map`, et rien dans ce message ne renvoie à
+#    une capacité qu'on n'a pas nommée. Il a fallu une bissection sur trente-huit capacités pour
+#    la trouver la première fois.
 #
 # Codes de sortie : 0 tout va bien, 1 contradiction trouvée, 3 fichier illisible — auquel cas on
 # ne conclut pas. Une sonde qui n'a rien pu lire n'a rien vérifié.
@@ -75,21 +81,36 @@ analyser() {
   [ -n "$nom" ] || return 0
   TROUVES=$((TROUVES + 1))
 
-  local capacites filtre restrict_suid nnp manques
+  local effectif capacites filtre restrict_suid nnp manques
+
+  # Les commentaires sont retirés d'abord. Sans cela, un bloc qui *explique* pourquoi
+  # `CAP_SETFCAP` est nécessaire passerait pour un bloc qui l'accorde — et ce contrôle dirait
+  # « tout va bien » sur la configuration même qu'il existe pour attraper. C'est ce qui s'est
+  # produit au premier essai de la règle : elle lisait sa propre justification.
+  effectif=$(printf '%s' "$bloc" | sed 's/#.*//')
+
   # Les capacités accordées, quelle que soit la ligne qui les accorde.
-  capacites=$(printf '%s' "$bloc" | grep -oE 'CAP_(SETUID|SETGID|SYS_ADMIN)' | sort -u | tr '\n' ' ')
+  capacites=$(printf '%s' "$effectif" | grep -oE 'CAP_(SETUID|SETGID|SETFCAP|SYS_ADMIN)' | sort -u | tr '\n' ' ')
   # Le filtre : celui du bloc s'il en pose un, celui du modèle commun sinon.
-  if printf '%s' "$bloc" | grep -q 'SystemCallFilter'; then
-    filtre=$(printf '%s' "$bloc" | sed -n '/SystemCallFilter/,/\]/p')
+  if printf '%s' "$effectif" | grep -q 'SystemCallFilter'; then
+    filtre=$(printf '%s' "$effectif" | sed -n '/SystemCallFilter/,/\]/p')
   else
     filtre=$(sed -n '/SystemCallFilter = \[/,/\]/p' "$MODULE" | head -20)
   fi
-  restrict_suid=$(printf '%s' "$bloc" | grep -c 'RestrictSUIDSGID = lib.mkForce false' || true)
-  nnp=$(printf '%s' "$bloc" | grep -c 'NoNewPrivileges = lib.mkForce false' || true)
+  restrict_suid=$(printf '%s' "$effectif" | grep -c 'RestrictSUIDSGID = lib.mkForce false' || true)
+  nnp=$(printf '%s' "$effectif" | grep -c 'NoNewPrivileges = lib.mkForce false' || true)
 
   if [ -z "$capacites" ]; then
     ok "$nom — aucune capacité privilégiée demandée"
   else
+    # CAP_SETUID sans CAP_SETFCAP : la projection d'identifiants échouera sur un noyau ≥ 5.12.
+    if printf '%s' "$capacites" | grep -q 'CAP_SETUID' \
+       && ! printf '%s' "$effectif" | grep -q 'CAP_SETFCAP'; then
+      ko "$nom — reçoit CAP_SETUID sans CAP_SETFCAP"
+      info "depuis Linux 5.12, projeter l'uid 0 dans un espace de noms exige CAP_SETFCAP dans"
+      info "l'espace parent ; sans elle l'écriture de uid_map rend « Operation not permitted »"
+      DEFAUTS=$((DEFAUTS + 1))
+    fi
     manques=""
     printf '%s' "$filtre" | grep -q '"~@privileged"' && manques="$manques ~@privileged"
     printf '%s' "$filtre" | grep -q '"@mount"' || manques="$manques (pas de @mount)"
