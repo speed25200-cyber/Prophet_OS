@@ -237,6 +237,14 @@ Les trois ont un test qui échoue sur le code d'avant : trois dans `crates/proph
   jour où la promesse serait fausse, une tâche échouerait sur « Read-only file system » loin de
   cette ligne, et personne ne remonterait jusqu'à elle
 
+- [x] L'image n'embarquait **aucun client officiel**. `prophet provider login claude-code`
+  répondait « lancez `claude login` » sur une machine où `claude` n'existe pas — découverte à
+  faire après avoir formaté son disque, c'est-à-dire au seul moment où il est trop tard. Claude
+  Code, Codex CLI et Gemini CLI sont maintenant embarqués tels quels, par `lib.optional (pkgs ? …)`
+  pour qu'un renommage en amont retire le client sans casser l'image. Le test vérifie non pas leur
+  présence — ils viennent de nixpkgs et peuvent en disparaître — mais que `provider ls` dise la
+  vérité sur ceux qui y sont : annoncer un client absent est pire que de dire qu'il manque
+
 ### Le compte sans lequel personne ne se connecte (12 septembre 2026)
 
 - [x] La machine installée ne créait **aucun** compte humain. `nixos-install --no-root-password`

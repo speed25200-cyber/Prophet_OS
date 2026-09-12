@@ -146,6 +146,34 @@ pkgs.testers.runNixOSTest {
             f"un membre déclaré du groupe système doit être servi :\n{vu}"
         )
 
+    with subtest("ce que `provider ls` annonce est ce que la machine a"):
+        # `prophet provider login claude-code` répond « lancez `claude login` ». Si `claude`
+        # n'existe pas sur la machine, cette phrase envoie quelqu'un dans le vide — et il ne s'en
+        # aperçoit qu'après avoir formaté son disque.
+        #
+        # Ce qui est vérifié ici n'est pas que les clients soient là : ils viennent de nixpkgs et
+        # peuvent en disparaître. C'est que `provider ls` **dise la vérité** sur ceux qui y sont.
+        # Annoncer un client absent est pire que de dire qu'il manque.
+        annonce = machine.succeed("timeout 30 prophet provider ls")
+        print(annonce)
+        for pilote, programme in [
+            ("claude-code", "claude"),
+            ("codex", "codex"),
+            ("gemini", "gemini"),
+        ]:
+            ligne = next(
+                (l for l in annonce.splitlines() if l.startswith(pilote + " ")), None
+            )
+            assert ligne is not None, f"{pilote} devrait figurer dans la liste :\n{annonce}"
+            annonce_present = "présent" in ligne
+            reellement_present = machine.execute(f"command -v {programme}")[0] == 0
+            assert annonce_present == reellement_present, (
+                f"{pilote} : la liste dit "
+                f"{'présent' if annonce_present else 'absent'}, la machine dit "
+                f"{'présent' if reellement_present else 'absent'} — "
+                f"annoncer un client qu'on n'a pas envoie l'utilisateur dans le vide"
+            )
+
     with subtest("agentd peut écrire là où sa configuration le prétend"):
         # `ReadWritePaths = [ "/home/prophet" "/var/lib/prophet" ]` est une promesse, et
         # `ProtectHome = true` — hérité du modèle commun — rend `/home` inaccessible et vide dans

@@ -116,8 +116,19 @@ daemons.
 
 ```sh
 prophet status                        # les services, l'isolation, les limites de la machine
+prophet provider ls                   # quels clients sont là, et lesquels sont connectés
 prophet provider login claude-code    # connecter votre abonnement
 ```
+
+`prophet provider ls` d'abord : il dit quels clients officiels sont **réellement présents** sur
+cette machine. L'image embarque Claude Code, Codex CLI et Gemini CLI tels quels, quand nixpkgs les
+fournit — mais un client peut y être renommé ou en disparaître, et l'image se construit alors sans
+lui plutôt que de refuser. La liste dit la vérité dans les deux cas ; `prophet provider login`
+vous enverrait sinon lancer une commande qui n'existe pas.
+
+Prophet OS ne lit jamais les fichiers d'identifiants de ces clients. Il monte leur répertoire de
+session dans leur sandbox, et c'est tout — vous vous connectez avec `claude login` comme sur
+n'importe quelle machine.
 
 `prophet status` commence par la liste des sept services et dit lesquels répondent. C'est la
 première chose à regarder : un système dont `capd` est muet affiche une isolation parfaite et un

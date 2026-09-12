@@ -322,7 +322,25 @@ in
     # devenu le comportement par défaut ; la déclarer fait maintenant échouer l'évaluation.
 
     # --- Paquets ---
-    environment.systemPackages = [ prophet ];
+    # `prophet`, et les clients officiels qu'il pilote.
+    #
+    # Sans eux, `prophet provider login claude-code` dit « lancez `claude login` » sur une machine
+    # où `claude` n'existe pas. C'est le genre de découverte qu'on fait après avoir formaté son
+    # disque, et le seul moment où il est trop tard.
+    #
+    # Ils sont pris **tels quels** dans nixpkgs : l'invariant est qu'un client officiel tourne sans
+    # modification, et qu'aucun de ses fichiers d'identifiants n'est lu, copié ni réutilisé par
+    # l'OS. Prophet OS se contente de monter le répertoire de session dans la sandbox du client.
+    #
+    # `lib.optional (pkgs ? …)` plutôt qu'une référence directe : le jour où l'un d'eux change de
+    # nom ou disparaît de nixpkgs, l'image se construit quand même, sans ce client. Une image qui
+    # refuse de se construire parce qu'un client a été renommé en amont serait une dépendance plus
+    # dure que ce que ce système veut assumer — et `prophet provider ls` dit, sur la machine, ce
+    # qui est réellement là.
+    environment.systemPackages = [ prophet ]
+      ++ lib.optional (pkgs ? claude-code) pkgs.claude-code
+      ++ lib.optional (pkgs ? codex) pkgs.codex
+      ++ lib.optional (pkgs ? gemini-cli) pkgs.gemini-cli;
 
     # --- Ce qui n'a rien à faire sur cette machine ---
     services.xserver.enable = lib.mkDefault false;
