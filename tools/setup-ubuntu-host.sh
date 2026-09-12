@@ -72,17 +72,9 @@ else
 fi
 
 # --- gVisor : c'est lui qui débloque le niveau 1 ---
-if command -v runsc >/dev/null 2>&1; then
-  echo "→ gVisor déjà présent : $(runsc --version 2>&1 | head -1)"
-else
-  echo "→ installation de gVisor (débloque le niveau 1 d'isolation)"
-  curl -fsSL https://gvisor.dev/archive.key | gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
-    > /etc/apt/sources.list.d/gvisor.list
-  apt-get update -qq
-  apt-get install -y -qq runsc >/dev/null
-  echo "  $(runsc --version 2>&1 | head -1)"
-fi
+# Délégué au script partagé, pour que cette machine et l'intégration continue débloquent le
+# niveau par exactement le même chemin. Sans cela, ce que la CI prouve ne dirait rien d'ici.
+"$(dirname "$0")/install-isolation.sh" gvisor
 
 # --- Constat sur le niveau 2 ---
 echo

@@ -147,6 +147,53 @@ impl Browser {
     }
 }
 
+/// Nombre de tentatives de lancement avant d'abandonner.
+const TENTATIVES_DE_LANCEMENT: u8 = 5;
+
+/// Demande au noyau un port libre, puis le relâche.
+///
+/// Le numéro rendu n'est garanti libre qu'à l'instant où il est lu : le navigateur le prendra
+/// quelques millisecondes plus tard, et un autre processus peut s'y glisser. C'est pourquoi
+/// [`Browser::launch_auto`] réessaie au lieu de traiter ce numéro comme acquis.
+fn port_probablement_libre() -> Option<u16> {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|l| l.local_addr())
+        .map(|a| a.port())
+        .ok()
+}
+
+impl Browser {
+    /// Lance le navigateur sur un port choisi automatiquement.
+    ///
+    /// Réserver un port puis le relâcher pour que le navigateur s'en saisisse laisse un intervalle
+    /// pendant lequel un autre processus peut le prendre. L'intervalle est court, mais il s'ouvre
+    /// précisément quand plusieurs tâches démarrent ensemble — le cas d'un agent qui ouvre
+    /// plusieurs pages, ou d'une suite de tests parallèle. Un échec de lancement y ressemblait à
+    /// de la malchance ; on réessaie donc avec un autre port, ce qui transforme une course en
+    /// simple retard.
+    ///
+    /// # Errors
+    /// Si aucune tentative n'aboutit, l'erreur de la dernière est rendue.
+    pub async fn launch_auto(
+        program: &str,
+        profile_dir: &std::path::Path,
+    ) -> Result<Self, CdpError> {
+        let mut derniere = None;
+        for _ in 0..TENTATIVES_DE_LANCEMENT {
+            let Some(port) = port_probablement_libre() else {
+                continue;
+            };
+            match Self::launch(program, profile_dir, port).await {
+                Ok(navigateur) => return Ok(navigateur),
+                // Le navigateur lancé en vain est tué par `Drop` avant la tentative suivante.
+                Err(erreur) => derniere = Some(erreur),
+            }
+        }
+        Err(derniere
+            .unwrap_or_else(|| CdpError::Launch("aucun port libre n'a pu être obtenu".to_owned())))
+    }
+}
+
 impl Drop for Browser {
     fn drop(&mut self) {
         let _ = self.child.kill();

@@ -74,6 +74,13 @@ async fn serveur(recu: Arc<Mutex<Option<String>>>) -> std::io::Result<u16> {
     Ok(port)
 }
 
+/// Chemin du navigateur, ou `None` si la machine n'en a pas.
+///
+/// Sans navigateur, ces tests passent sans rien essayer. C'est le bon comportement dans un
+/// conteneur de développement, et le mauvais en intégration continue, où le vert signifierait
+/// alors « rien n'a été tenté ». `PROPHET_EXIGER_NAVIGATEUR=1` transforme l'absence en échec ;
+/// l'exigence est portée ici, à côté de la détection, plutôt que dans un fichier de CI qui
+/// dériverait de cette liste sans qu'on s'en aperçoive.
 fn chemin_du_navigateur() -> Option<String> {
     for candidat in [
         "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
@@ -85,14 +92,45 @@ fn chemin_du_navigateur() -> Option<String> {
             return Some(candidat.to_owned());
         }
     }
-    std::env::var("PROPHET_BROWSER").ok()
+    let depuis_environnement = std::env::var("PROPHET_BROWSER").ok();
+    assert!(
+        !(depuis_environnement.is_none()
+            && std::env::var("PROPHET_EXIGER_NAVIGATEUR").as_deref() == Ok("1")),
+        "aucun navigateur trouvé alors que PROPHET_EXIGER_NAVIGATEUR=1 : ces tests se seraient \
+         tus en passant. Installez un navigateur ou indiquez-le par PROPHET_BROWSER."
+    );
+    depuis_environnement
 }
 
-fn port_libre() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .map(|a| a.port())
-        .unwrap_or(9400)
+/// Deux navigateurs lancés ensemble doivent démarrer tous les deux.
+///
+/// C'est la course que `launch_auto` existe pour absorber : réserver un port puis le relâcher
+/// pour que le navigateur s'en saisisse laisse un intervalle où un autre processus peut le
+/// prendre. Le défaut se manifestait dans la suite complète, où plusieurs binaires démarrent
+/// ensemble, et jamais quand on lançait ce fichier seul — d'où un test qui provoque la
+/// simultanéité au lieu de l'attendre.
+#[tokio::test(flavor = "multi_thread")]
+async fn deux_navigateurs_lances_ensemble_demarrent_tous_les_deux() {
+    let Some(navigateur) = chemin_du_navigateur() else {
+        eprintln!("aucun navigateur : test ignoré");
+        return;
+    };
+    let un = tempfile::tempdir().unwrap();
+    let deux = tempfile::tempdir().unwrap();
+    let (a, b) = tokio::join!(
+        Browser::launch_auto(&navigateur, un.path()),
+        Browser::launch_auto(&navigateur, deux.path()),
+    );
+    let a = a.expect("le premier navigateur doit démarrer");
+    let b = b.expect("le second navigateur doit démarrer");
+    assert_ne!(
+        a.port(),
+        b.port(),
+        "deux navigateurs simultanés ne peuvent pas partager un port"
+    );
+    // Chacun doit réellement répondre : un port ouvert par quelqu'un d'autre ne compte pas.
+    a.page_endpoint().await.expect("le premier doit répondre");
+    b.page_endpoint().await.expect("le second doit répondre");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -105,7 +143,7 @@ async fn reserver_un_billet_sans_aucune_capture_d_ecran() {
     let port = serveur(Arc::clone(&recu)).await.unwrap();
     let dir = tempfile::tempdir().unwrap();
 
-    let browser = Browser::launch(&navigateur, dir.path(), port_libre())
+    let browser = Browser::launch_auto(&navigateur, dir.path())
         .await
         .expect("le navigateur doit démarrer");
     let endpoint = browser.page_endpoint().await.unwrap();
@@ -209,9 +247,7 @@ async fn un_identifiant_inexistant_donne_une_erreur_nommee() {
     let recu = Arc::new(Mutex::new(None));
     let port = serveur(recu).await.unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let browser = Browser::launch(&navigateur, dir.path(), port_libre())
-        .await
-        .unwrap();
+    let browser = Browser::launch_auto(&navigateur, dir.path()).await.unwrap();
     let endpoint = browser.page_endpoint().await.unwrap();
     let mut page = Page::attach(Session::connect(&endpoint).await.unwrap())
         .await
@@ -242,9 +278,7 @@ async fn le_resume_reduit_l_observation() {
     let recu = Arc::new(Mutex::new(None));
     let port = serveur(recu).await.unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let browser = Browser::launch(&navigateur, dir.path(), port_libre())
-        .await
-        .unwrap();
+    let browser = Browser::launch_auto(&navigateur, dir.path()).await.unwrap();
     let endpoint = browser.page_endpoint().await.unwrap();
     let mut page = Page::attach(Session::connect(&endpoint).await.unwrap())
         .await

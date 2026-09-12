@@ -105,7 +105,7 @@ Le système **annonce** ces limites plutôt que de les masquer : `prophet status
 d'isolation réellement atteignable, et `sandboxd` refuse une tâche qui exigerait davantage au lieu
 de la dégrader en silence.
 
-## 6. Deux défauts trouvés après coup, et corrigés
+## 6. Ce qu'une relecture a trouvé après coup, et corrigé
 
 ### 6.1 La sandbox retombait silencieusement au niveau 0
 
@@ -172,6 +172,38 @@ Les deux moitiés du mécanisme ont été exercées : matériel absent, les quat
 non vérifiables et aucun ne passe au vert ; un `runsc` factice placé sur le chemin, les deux tests
 `needs_gvisor` sont réellement lancés, échouent, et rapportent `runsc: unable to start container:
 permission denied`.
+
+### 6.3 Le vert silencieux, une famille entière
+
+En cherchant où faire tourner les tests matériels, une évidence : **l'intégration continue n'avait
+jamais été regardée**. Les sept exécutions de la branche étaient rouges, dont deux pour des lints
+que le `clippy` local, plus ancien, ne signale pas. Un rapport de phase qui annonce « tout est
+vert » sans avoir ouvert la page des exécutions ne dit rien de plus que « c'était vert chez moi ».
+
+En la réparant, trois endroits sont apparus où un test pouvait passer sans rien vérifier, tous du
+même genre que le défaut 6.1 :
+
+| Où | Ce qui se taisait | Ce qui l'empêche désormais |
+|---|---|---|
+| Tests de niveau 0 | sans espaces de noms, ils se taisent et passent | la CI exige `unshare --user` avant de les lancer |
+| Tests du pont CDP | sans navigateur, ils se taisent et passent | `PROPHET_EXIGER_NAVIGATEUR=1`, posé par la CI, transforme l'absence en échec |
+| Lancement de microVM | `spawn` réussi comptait pour un démarrage | Firecracker doit vivre et créer son socket d'API, sinon le lancement échoue en disant pourquoi |
+
+Le dernier méritait mieux qu'une correction de confort. Créer un processus n'est pas démarrer une
+machine virtuelle : une configuration refusée tue Firecracker dans la milliseconde suivante, et
+rendre `Ok` à cet instant annonçait une isolation de niveau 2 inexistante — le défaut 6.1 à
+nouveau, déplacé d'un cran.
+
+Une course a été trouvée dans la même passe. Le pont CDP réservait un port libre, le relâchait,
+puis confiait le numéro au navigateur : entre les deux, un autre processus pouvait le prendre. Le
+défaut ne se manifestait que dans la suite complète, où plusieurs binaires démarrent ensemble,
+jamais quand on lançait le fichier seul — la forme même du défaut qu'on classe à tort en
+« hasard ». `Browser::launch_auto` absorbe la course en réessayant, et un test lance deux
+navigateurs simultanément pour la provoquer plutôt que de l'attendre.
+
+Enfin, le niveau 2 est vérifiable là où on ne l'attendait pas. Le journal de la CI se plaignait du
+binaire Firecracker et des images, jamais de KVM : **les coureurs GitHub offrent la virtualisation
+imbriquée**. Un serveur d'hébergeur en nuage ne le fera jamais ; l'intégration continue, si.
 
 ## 7. Écarts par rapport au plan
 

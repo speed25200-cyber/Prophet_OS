@@ -44,6 +44,15 @@ pub enum LaunchError {
     /// Niveau inconnu.
     #[error("niveau d'isolation inconnu : {0}")]
     UnknownLevel(u8),
+    /// Le moniteur a été lancé mais n'a pas tenu.
+    ///
+    /// Créer un processus n'est pas démarrer une machine virtuelle. Sans cette distinction, une
+    /// configuration refusée se lirait comme un démarrage réussi.
+    #[error("la microVM n'a pas démarré : {raison}")]
+    MicrovmMortNe {
+        /// Ce que le moniteur a dit avant de s'arrêter, ou ce qu'on a constaté.
+        raison: String,
+    },
 }
 
 /// Lance une sandbox au niveau demandé.
@@ -194,7 +203,7 @@ fn launch_microvm(
     let config = microvm_config(images, spec, &vsock_path.display().to_string());
     std::fs::write(&config_path, serde_json::to_vec_pretty(&config)?)?;
 
-    let child = Command::new(firecracker)
+    let mut child = Command::new(firecracker)
         .arg("--api-sock")
         .arg(&api_socket)
         .arg("--config-file")
@@ -204,10 +213,55 @@ fn launch_microvm(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
+
+    attendre_que_la_microvm_tienne(&mut child, &api_socket)?;
+
     Ok(Launched {
         child,
         needs_handshake: false,
     })
+}
+
+/// Attend que Firecracker soit réellement debout, ou dit pourquoi il ne l'est pas.
+///
+/// `spawn` ne rend compte que de la création du processus. Firecracker lit ensuite sa
+/// configuration, et la refuse parfois : le processus meurt alors dans la milliseconde qui suit.
+/// Rendre `Ok` à ce moment-là reviendrait à annoncer une isolation de niveau 2 qui n'existe pas,
+/// exactement la dégradation silencieuse que ce module est écrit pour interdire. Le socket d'API
+/// est le premier signe observable que le moniteur a accepté sa configuration.
+fn attendre_que_la_microvm_tienne(child: &mut Child, api_socket: &Path) -> Result<(), LaunchError> {
+    use std::io::Read as _;
+
+    let limite = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        if let Some(statut) = child.try_wait()? {
+            let mut erreur = String::new();
+            if let Some(flux) = child.stderr.as_mut() {
+                let _ = flux.read_to_string(&mut erreur);
+            }
+            let erreur = erreur.trim();
+            let detail = if erreur.is_empty() {
+                "aucun message".to_owned()
+            } else {
+                erreur.to_owned()
+            };
+            return Err(LaunchError::MicrovmMortNe {
+                raison: format!("le moniteur s'est arrêté ({statut}) : {detail}"),
+            });
+        }
+        if api_socket.exists() {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= limite {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(LaunchError::MicrovmMortNe {
+                raison: "le moniteur vit mais n'a pas créé son socket d'API en deux secondes"
+                    .to_owned(),
+            });
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
 }
 
 #[cfg(test)]

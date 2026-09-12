@@ -24,16 +24,69 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Tests
         run: cargo test --workspace
+        env:
+          # Sans navigateur, les tests du pont CDP passent sans rien essayer. Ici, le vert doit
+          # vouloir dire qu'ils ont tourné.
+          PROPHET_EXIGER_NAVIGATEUR: "1"
       - name: Secrets
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  privileged:
+  # Les tests matériels tournent ici et nulle part ailleurs : le conteneur de développement n'a ni
+  # gVisor ni KVM, et les coureurs GitHub ont les deux une fois gVisor installé. C'est donc la
+  # seule machine où les niveaux 1 et 2 sont réellement exercés.
+  isolation:
+    name: Niveaux d'isolation (matériel réel)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Tests privilégiés (namespaces, Landlock, overlay)
-        run: cargo test --workspace -- --ignored --test-threads=1
+
+      # Les tests de niveau 0 se taisent et passent quand les espaces de noms manquent : c'est le
+      # bon comportement dans un conteneur de développement, mais sur ce coureur il ferait verdir
+      # la suite de « check » sans que rien ait été confiné. On exige donc ce que le silence
+      # cacherait.
+      - name: Exiger les espaces de noms utilisateur
+        run: |
+          if ! unshare --user --map-root-user true; then
+            echo "::error::espaces de noms utilisateur indisponibles : les tests de niveau 0 se"
+            echo "::error::contenteraient de se taire, et le vert de « check » ne prouverait rien."
+            exit 1
+          fi
+          echo "espaces de noms utilisateur disponibles"
+
+      - name: Installer gVisor
+        run: sudo ./tools/install-isolation.sh gvisor
+
+      # Une installation ratée ferait glisser le niveau 1 en « non vérifiable », et le job
+      # passerait au vert sans avoir rien prouvé. Sur ce coureur, gVisor doit être là : on l'exige
+      # plutôt que de laisser le silence tenir lieu de résultat.
+      - name: Exiger gVisor
+        run: |
+          command -v runsc >/dev/null || {
+            echo "::error::gVisor devait être installé sur ce coureur et ne l'est pas ;"
+            echo "::error::sans cette exigence, le niveau 1 deviendrait « non vérifiable » en silence."
+            exit 1
+          }
+          runsc --version
+
+      # Le niveau 2 dépend d'artefacts publiés par un tiers, dont les chemins bougent. On essaie,
+      # et si les images ne viennent pas le script de vérification le rangera en « non vérifiable »
+      # — ce qui est dit dans le rapport, jamais compté réussi.
+      - name: Installer Firecracker et les images d'invité (au mieux)
+        continue-on-error: true
+        run: sudo ./tools/install-isolation.sh microvm
+
+      - name: Niveaux d'isolation
+        run: ./tools/verify-on-host.sh --niveaux
+        env:
+          RAPPORT: rapport-isolation.md
+
+      - name: Conserver le rapport
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapport-isolation
+          path: rapport-isolation.md

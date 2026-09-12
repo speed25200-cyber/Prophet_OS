@@ -317,8 +317,10 @@ impl Store {
                 // que de rendre un score qui n'a pas de sens.
                 let vectoriel = if embedder == self.embedder.name() {
                     let floats: Vec<f32> = vector
-                        .chunks_exact(4)
-                        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|c| f32::from_le_bytes(*c))
                         .collect();
                     cosine(&cible, &floats)
                 } else {
@@ -374,7 +376,7 @@ impl Store {
             min_score: -1.0,
         };
         let mut entries = self.search(&query)?;
-        entries.sort_by(|a, b| b.created.cmp(&a.created));
+        entries.sort_by_key(|a| std::cmp::Reverse(a.created));
         Ok(entries)
     }
 
