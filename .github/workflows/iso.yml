@@ -15,6 +15,12 @@ on:
       - "flake.lock"
       - "image/**"
       - ".github/workflows/iso.yml"
+      # Le système installé contient les programmes de l'atelier. Les omettre ici voulait dire
+      # qu'un crate qui cesse de compiler ne se voyait qu'au moment où quelqu'un installe.
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
   workflow_dispatch:
 
 jobs:
@@ -191,3 +197,70 @@ jobs:
             *.iso.sha256
           retention-days: 30
           compression-level: 0
+
+  # --- Le système que l'installeur posera ---
+  #
+  # L'ISO ne contient que la source : c'est `nixos-install` qui compile, sur la machine de
+  # l'utilisateur, au moment de l'installation. Rien ne vérifiait donc que cette compilation
+  # aboutisse — l'ISO se construisait, l'installeur posait les partitions, et l'échec serait
+  # survenu chez lui, à mi-chemin, sur une machine dont le disque est déjà effacé.
+  #
+  # L'évaluation, que le travail « iso » fait déjà, attrape une option mal écrite. Elle n'attrape
+  # ni un crate qui ne compile plus, ni un programme absent : pour cela il faut construire.
+  systeme:
+    name: Construire le système installé
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Faire de la place
+        run: |
+          echo "avant : $(df -h / | awk 'NR==2{print $4}') libres"
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean
+          echo "après : $(df -h / | awk 'NR==2{print $4}') libres"
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+            max-jobs = auto
+
+      - name: Construire
+        run: |
+          nix build .#nixosConfigurations.prophet.config.system.build.toplevel \
+            --print-build-logs --out-link systeme
+
+      - name: Les sept services pointent-ils vers un programme qui existe ?
+        # Le contrôle que `tools/verifier-les-services.sh` fait sur les noms, refait ici sur les
+        # chemins réels du magasin. C'est le seul endroit où l'on peut vraiment ouvrir le fichier
+        # que systemd lancera.
+        run: |
+          manque=0
+          for unite in systeme/etc/systemd/system/prophet-*.service; do
+            [ -e "$unite" ] || continue
+            nom=$(basename "$unite")
+            # `ExecStart=` peut être précédé d'un `-` ou d'un `@` ; on prend le premier mot qui
+            # ressemble à un chemin du magasin.
+            programme=$(grep -m1 '^ExecStart=' "$unite" \
+              | sed 's/^ExecStart=[-@+!]*//' | awk '{print $1}')
+            if [ -x "$programme" ]; then
+              printf '  ✓ %-34s %s\n' "$nom" "$(basename "$programme")"
+            else
+              printf '  ✗ %-34s %s introuvable ou non exécutable\n' "$nom" "$programme"
+              manque=$((manque + 1))
+            fi
+          done
+          echo
+          if [ "$manque" -gt 0 ]; then
+            echo "::error::$manque service(s) pointent vers un programme absent du système construit"
+            exit 1
+          fi
+          echo "chaque service installé pointe vers un programme présent et exécutable"
+
+      - name: Ce que pèse le système
+        run: |
+          echo "fermeture : $(nix path-info -Sh ./systeme | awk '{print $2}')"
