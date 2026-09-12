@@ -54,5 +54,7 @@ le cycle d'initialisation. Son binaire reste à raccorder aux services ; les acc
 être durcis contre les liens symboliques et la recherche contrôlée pour chaque descendant.
 Codex et Claude Code sont maintenant obligatoires dans la configuration de l'image ; leurs vrais
 binaires répondent aux sondes de version et d'authentification en profils vierges. Le diagnostic
-ne confond plus fichiers présents, connexion et pilote agentique disponible. Le bureau humain,
-l'application ChatGPT et les exécutions authentifiées restent à intégrer et à vérifier.
+ne confond plus fichiers présents, connexion et pilote agentique disponible. Le paquet expérimental
+ChatGPT affiche son écran de connexion sous NixOS/XWayland, mais une erreur de polices secondaire
+maintient son test strict en échec et le paquet reste hors de l'image installée. Le bureau humain
+et les exécutions authentifiées restent à intégrer et à vérifier.

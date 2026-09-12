@@ -32,12 +32,17 @@ Jalons d'intégration réellement exercés le 12 septembre 2026 :
   démarrage et les tests des services. Le bureau humain, l'application
   ChatGPT et les sessions authentifiées restent à intégrer. Voir le
   [guide des pilotes](components/providers.md) et l'[ADR 0009](adr/0009-clients-officiels-et-bureau.md).
-- ChatGPT Linux — paquet de compatibilité expérimental construit à partir du `.deb` officiel
-  26.908.40834 ; empreinte du binaire principal inchangée. Le test graphique NixOS/Sway/XWayland
-  et son travail CI sont ajoutés. Son exécution est en cours : aucune ouverture de fenêtre ni
-  connexion n'est encore validée. Le paquet reste hors de l'image installée. Un test de
-  régression supplémentaire protège les valeurs d'options de Claude Code. Validation locale
-  des composants : `just check` dans Nix, 576 tests réussis, aucun échec, 17 ignorés. Voir le
+- `f8e263e` et correctifs de compatibilité — paquet ChatGPT Linux expérimental construit depuis
+  le `.deb` officiel 26.908.40834 ; empreinte du binaire principal inchangée. La VM NixOS sous
+  KVM confirme une fenêtre XWayland visible et l'écran de connexion par reconnaissance de texte,
+  avec le binaire officiel sous UID 1000. La copie des plugins est corrigée, leur initialisation
+  se termine. **Le test graphique strict reste en échec** sur une erreur Fontconfig dans un
+  renderer secondaire ; le paquet reste hors de l'image installée. Aucun compte n'est connecté.
+  Un test de régression protège aussi les valeurs d'options de Claude Code. Validation locale
+  des composants : `just check` dans Nix, 576 tests réussis, aucun échec, 17 ignorés. La CI de
+  `f8e263e` réussit les composants, l'isolation, la surface, les services, l'installeur, l'ISO et
+  les deux démarrages ; son travail ChatGPT a échoué sur la classe de fenêtre, corrigée depuis.
+  Les résultats de cette révision ne valident pas les correctifs suivants. Voir le
   [rapport ChatGPT Linux](reports/chatgpt-linux-2026-09-12.md).
 
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.

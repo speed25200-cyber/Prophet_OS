@@ -8,7 +8,7 @@ des exigences de Prophet OS ; elle n'est pas encore livrée.
 | LLM local | HTTP, flux annulable et réponse Qwen3 réelle | Cycle de vie des poids, GPU et chaîne agentique installée |
 | Codex CLI 0.153.4 | Paquet Nix officiel, version et diagnostic en profil vierge | Connexion utilisateur et exécution contrôlée depuis l'interface |
 | Claude Code 2.1.266 | Paquet Nix officiel, version et diagnostic en profil vierge | Connexion utilisateur, outils, permissions et reprise de bout en bout |
-| ChatGPT graphique | Documentation officielle Linux vérifiée | Paquet compatible NixOS, session de bureau et tests fonctionnels |
+| ChatGPT graphique | Paquet officiel FHS, écran de connexion visible en VM, plugins initialisés | Erreur Fontconfig secondaire, session de bureau et parcours authentifiés |
 | Gemini CLI | Profil de commande | Version et protocole à revalider ; connexion non vérifiée |
 
 Le paquet officiel ChatGPT Linux téléchargé pour préparer la compatibilité est la version
@@ -76,7 +76,7 @@ codes de retour, l'absence de sortie privée publiée, le délai et la borne de 
 La CLI compilée a également passé `doctor`, `login` et `ls` au format JSON dans des répertoires
 utilisateur temporaires, avec les vrais clients ; un pilote inconnu est refusé.
 Le test NixOS `checks.x86_64-linux.services` exige les deux binaires et le diagnostic depuis
-le compte humain. Une exécution VM de la nouvelle révision est nécessaire pour valider l'image.
+le compte humain. Ce contrôle a réussi dans la CI des révisions `0f3f307` et `f8e263e`.
 
 Pour la suite : [décision de bureau](../adr/0009-clients-officiels-et-bureau.md) et
 [exigences de version complète](../FRONTIER.md). Aucune conversation authentifiée ni mesure

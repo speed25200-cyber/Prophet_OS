@@ -21,7 +21,9 @@ du client sont conservées. Le raccordement doit être exercé avec capd, sandbo
 d'annoncer un pilote disponible dans l'orchestrateur.
 
 L'application ChatGPT Linux est en aperçu. La liste de distributions officiellement prises en
-charge ne comprend pas NixOS ; son paquet de compatibilité reste à construire et tester.
+charge ne comprend pas NixOS ; un paquet de compatibilité est construit depuis le `.deb`
+officiel sans modification du client. Son [rapport de validation](../reports/chatgpt-linux-2026-09-12.md)
+distingue le démarrage graphique des parcours authentifiés qui restent à exercer.
 XWayland est la première cible de compatibilité, le mode Wayland natif étant expérimental.
 Source : [application ChatGPT Linux](https://learn.chatgpt.com/docs/linux/linux-app).
 

@@ -35,13 +35,22 @@ jobs:
             max-jobs = 2
             cores = 2
       - name: Ouvrir le client officiel dans une session Sway et XWayland
-        run: nix build .#checks.x86_64-linux.chatgpt-desktop --print-build-logs --out-link result-chatgpt
-      - name: Publier la capture de la VM sans compte connecté
+        run: |
+          mkdir -p chatgpt-diagnostics
+          test_output=$(nix eval --raw .#checks.x86_64-linux.chatgpt-desktop.outPath)
+          status=0
+          nix build .#checks.x86_64-linux.chatgpt-desktop --print-build-logs --keep-failed --out-link result-chatgpt || status=$?
+          if [ -d "$test_output" ]; then
+            find "$test_output" -maxdepth 1 -name '*.png' -exec cp -- {} chatgpt-diagnostics/ \;
+          fi
+          exit "$status"
+      - name: Publier les captures de la VM sans compte connecté
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: chatgpt-nixos
-          path: result-chatgpt/*.png
-          if-no-files-found: error
+          path: chatgpt-diagnostics/*.png
+          if-no-files-found: warn
           retention-days: 14
 
   check:
