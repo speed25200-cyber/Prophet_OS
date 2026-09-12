@@ -257,14 +257,49 @@ fn task(action: &TaskAction) -> anyhow::Result<String> {
     let maison = home();
     match action {
         TaskAction::Ls => {
+            // Deux questions différentes, et il vaut mieux les poser toutes les deux. `agentd` sait
+            // ce qui *tourne* ; les espaces de travail savent ce qui a *changé des fichiers*. Une
+            // tâche fraîchement planifiée n'a encore touché à rien, et n'apparaissait donc nulle
+            // part — ce qui donnait « aucune tâche » à quelqu'un qui venait d'en lancer une.
+            let mut out = String::new();
+            match taches_en_cours(&socket_agentd()) {
+                Ok(taches) if taches.is_empty() => {
+                    out.push_str("aucune tâche en cours\n\n");
+                }
+                Ok(taches) => {
+                    out.push_str(&format!(
+                        "{:<30} {:<12} {:<14} {}\n",
+                        "tâche", "état", "pilote", "intention"
+                    ));
+                    for tache in &taches {
+                        out.push_str(&format!(
+                            "{:<30} {:<12} {:<14} {}\n",
+                            tache.id,
+                            format!("{:?}", tache.state).to_lowercase(),
+                            tache.driver.as_deref().unwrap_or("—"),
+                            tache.intent,
+                        ));
+                    }
+                    out.push('\n');
+                }
+                Err(raison) => {
+                    // Le dire, plutôt que d'afficher les seuls espaces de travail comme si c'était
+                    // toute la vérité.
+                    out.push_str(&format!("tâches en cours : indisponibles ({raison})\n\n"));
+                }
+            }
+
             let espaces = sfs::Workspace::list(&maison)?;
             if espaces.is_empty() {
-                return Ok("aucune tâche sur cette machine\n".to_owned());
+                out.push_str(
+                    "aucun espace de travail : aucune tâche n'a encore modifié de fichier\n",
+                );
+                return Ok(out);
             }
-            let mut out = format!(
+            out.push_str(&format!(
                 "{:<30} {:<22} {}\n",
                 "tâche", "espace de travail", "changements"
-            );
+            ));
             for (id, state) in espaces {
                 let changements = sfs::Workspace::open(&maison, &id)
                     .and_then(|w| w.diff())
@@ -398,6 +433,38 @@ fn home() -> std::path::PathBuf {
         .unwrap_or_else(|_| std::path::PathBuf::from("/root"))
 }
 
+/// Où joindre `agentd`. La variable d'environnement sert aux tests et aux développements ; sur une
+/// machine installée, c'est le chemin conventionnel.
+fn socket_agentd() -> std::path::PathBuf {
+    std::env::var("PROPHET_AGENTD_SOCKET").map_or_else(
+        |_| prophet_ipc::socket_path("agentd"),
+        std::path::PathBuf::from,
+    )
+}
+
+/// Les tâches que `agentd` tient en ce moment.
+///
+/// La CLI parle au daemon plutôt que de deviner : lui seul sait ce qui est planifié, en cours ou
+/// en attente d'approbation. Quand il n'est pas là, on le dit — c'est une information, pas une
+/// panne : sur une machine où rien ne tourne, `prophet log` et `prophet task show` restent utiles
+/// parce qu'ils lisent des fichiers.
+fn taches_en_cours(socket: &std::path::Path) -> Result<Vec<agentd::Task>, String> {
+    let execution = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    execution.block_on(async {
+        let client = prophet_ipc::Client::connect(socket)
+            .await
+            .map_err(|_| format!("agentd ne répond pas sur {}", socket.display()))?;
+        let brut = client
+            .call("task.list", serde_json::json!({}))
+            .await
+            .map_err(|e| e.message.clone())?;
+        serde_json::from_value(brut).map_err(|e| format!("réponse illisible : {e}"))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -515,5 +582,17 @@ mod tests {
         let cli = Cli::try_parse_from(["prophet", "task", "cancel", "task:01"]).unwrap();
         let erreur = run(&cli).unwrap_err().to_string();
         assert!(erreur.contains("prophet task undo"), "{erreur}");
+    }
+    #[test]
+    fn sans_agentd_la_liste_des_taches_le_dit_au_lieu_de_mentir() {
+        // Le piege serait de n'afficher que les espaces de travail et de conclure « aucune
+        // tache ». Quelqu'un qui vient d'en planifier une verrait alors le contraire de la
+        // verite, et chercherait le defaut ailleurs.
+        let erreur = super::taches_en_cours(std::path::Path::new("/nulle/part/agentd.sock"))
+            .expect_err("aucun daemon n'écoute là");
+        assert!(
+            erreur.contains("agentd"),
+            "le motif doit nommer le daemon absent, obtenu : {erreur}"
+        );
     }
 }

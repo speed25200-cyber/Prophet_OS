@@ -2801,6 +2801,7 @@ dependencies = [
  "clap",
  "ledger",
  "memoryd",
+ "prophet-ipc",
  "prophet-types",
  "providers",
  "sandboxd",
@@ -2810,6 +2811,7 @@ dependencies = [
  "shell",
  "tempfile",
  "time",
+ "tokio",
  "vault",
 ]
 

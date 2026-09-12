@@ -11,6 +11,8 @@ name = "prophet"
 path = "src/main.rs"
 
 [dependencies]
+tokio = { workspace = true }
+prophet-ipc = { workspace = true }
 prophet-types = { workspace = true }
 capd = { workspace = true }
 sfs = { workspace = true }
