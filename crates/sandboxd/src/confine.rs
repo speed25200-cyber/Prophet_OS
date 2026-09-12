@@ -214,11 +214,69 @@ pub fn map_child_to_root(pid: i32) -> Result<(), ConfineError> {
     let gid = nix::unistd::getgid().as_raw();
     // `setgroups` doit être refusé avant d'écrire `gid_map`, sinon le noyau rejette la carte.
     let _ = std::fs::write(format!("/proc/{pid}/setgroups"), "deny");
-    std::fs::write(format!("/proc/{pid}/uid_map"), format!("0 {uid} 1\n"))
-        .map_err(|e| ConfineError::Step("écriture de uid_map", e))?;
-    std::fs::write(format!("/proc/{pid}/gid_map"), format!("0 {gid} 1\n"))
-        .map_err(|e| ConfineError::Step("écriture de gid_map", e))?;
+    std::fs::write(format!("/proc/{pid}/uid_map"), format!("0 {uid} 1\n")).map_err(|e| {
+        ConfineError::Step(
+            "écriture de uid_map",
+            std::io::Error::new(e.kind(), format!("{e}{}", etat_de_la_projection(pid))),
+        )
+    })?;
+    std::fs::write(format!("/proc/{pid}/gid_map"), format!("0 {gid} 1\n")).map_err(|e| {
+        ConfineError::Step(
+            "écriture de gid_map",
+            std::io::Error::new(e.kind(), format!("{e}{}", etat_de_la_projection(pid))),
+        )
+    })?;
     Ok(())
+}
+
+/// Ce que le noyau permet de savoir quand la projection est refusée.
+///
+/// « Operation not permitted » a au moins quatre causes ici, et rien ne les distingue : l'enfant
+/// n'est pas dans un espace de noms neuf, sa carte est déjà écrite, le gestionnaire n'a pas les
+/// capacités qu'il croit avoir, ou il n'est pas dans l'espace parent. Chercher laquelle par
+/// hypothèses coûte un aller-retour de plusieurs minutes par hypothèse — et sur la machine de
+/// quelqu'un, cela ne se cherche pas du tout.
+///
+/// Ces quatre questions se répondent en lisant quatre fichiers. On les lit donc, une seule fois,
+/// sur le chemin d'erreur.
+fn etat_de_la_projection(pid: i32) -> String {
+    let lire = |chemin: String| std::fs::read_to_string(chemin).unwrap_or_default();
+    let espace = |chemin: String| {
+        std::fs::read_link(chemin)
+            .map_or_else(|_| "illisible".to_owned(), |c| c.display().to_string())
+    };
+
+    let sien = espace(format!("/proc/{pid}/ns/user"));
+    let notre = espace("/proc/self/ns/user".to_owned());
+    let carte = lire(format!("/proc/{pid}/uid_map"));
+    let capacites = lire("/proc/self/status".to_owned())
+        .lines()
+        .find(|l| l.starts_with("CapEff:"))
+        .unwrap_or("CapEff: illisible")
+        .to_owned();
+
+    let mut diagnostic = String::from("\n  ");
+    if sien == notre {
+        diagnostic.push_str(
+            "l'enfant est dans le MÊME espace de noms utilisateur que le gestionnaire : \
+             son `unshare` n'a pas eu lieu, et la carte de l'espace initial est déjà écrite. \
+             Ce n'est pas une question de capacités.",
+        );
+    } else if !carte.trim().is_empty() {
+        diagnostic.push_str("la carte est déjà écrite — une projection ne se fait qu'une fois.");
+    } else {
+        diagnostic.push_str(
+            "l'enfant est bien dans un espace neuf et sa carte est vide : \
+             le refus vient donc des capacités du gestionnaire dans l'espace parent \
+             (CAP_SETUID et CAP_SYS_ADMIN y sont exigés tous les deux).",
+        );
+    }
+    diagnostic.push_str(&format!(
+        "\n  espace de l'enfant : {sien}\n  espace du gestionnaire : {notre}\n  {capacites}\n  \
+         carte actuelle : {:?}",
+        carte.trim()
+    ));
+    diagnostic
 }
 
 /// Applique les restrictions de chemins par Landlock, si le noyau le permet.
@@ -459,6 +517,29 @@ pub fn syscall_number(name: &str) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
+
+    /// Le diagnostic de refus nomme-t-il la bonne cause ?
+    ///
+    /// On projette un processus sur lui-même. Il est donc dans le même espace de noms utilisateur
+    /// que l'appelant — c'est le cas « l'`unshare` n'a pas eu lieu », et le noyau refuse. Un
+    /// message qui dirait « capacités insuffisantes » enverrait chercher au mauvais endroit, ce
+    /// qui est exactement ce que ce diagnostic existe pour éviter.
+    #[test]
+    fn un_refus_de_projection_nomme_sa_cause() {
+        let soi = i32::try_from(std::process::id()).expect("un pid tient dans un i32");
+        let erreur = super::map_child_to_root(soi)
+            .expect_err("on ne projette pas un processus sur son propre espace de noms");
+        let texte = erreur.to_string();
+        assert!(
+            texte.contains("MÊME espace de noms utilisateur"),
+            "le diagnostic doit nommer la cause réelle, obtenu : {texte}"
+        );
+        assert!(
+            texte.contains("espace de l'enfant"),
+            "et montrer ce qu'il a lu, obtenu : {texte}"
+        );
+    }
+
     use super::*;
 
     #[test]
