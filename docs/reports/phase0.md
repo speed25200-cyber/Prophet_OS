@@ -92,14 +92,35 @@ Cette section importe autant que les précédentes.
 
 | Élément | Pourquoi ce n'est pas vérifié | Ce qu'il faut pour le vérifier |
 |---|---|---|
-| Sandbox de niveau 1 (gVisor) | `runsc` absent de l'environnement de construction | une machine avec gVisor installé ; `just verify-host` lance les tests marqués `needs_gvisor` |
-| Sandbox de niveau 2 (microVM) | `/dev/kvm` et images d'invité absents | une machine avec KVM, Firecracker et les images ; `just verify-host` lance les tests marqués `needs_kvm`. L'objectif de 100 ms depuis instantané reste à mesurer |
-| Landlock | absent de ce noyau ; la restriction de chemins repose sur la racine minimale seule | un noyau avec `CONFIG_SECURITY_LANDLOCK` |
+| Landlock | absent du conteneur de construction ; présent et exercé sur le coureur d'intégration | un noyau avec `CONFIG_SECURITY_LANDLOCK` |
 | Image amorçable | ni Nix ni virtualisation dans l'environnement | `nixos-rebuild build-vm`, puis `just demo M8` dans la machine virtuelle |
 | Pilotes de clients officiels, de bout en bout | exigent une session d'abonnement Claude ou ChatGPT | une connexion réelle ; la construction de la ligne de commande, l'environnement transmis et la détection de session sont testés, l'exécution ne l'est pas |
 | Moteurs de modèles locaux | ni GPU ni modèle téléchargé | une machine avec GPU et un modèle du catalogue |
-| Quotas de ressources par tâche | cgroups v2 absents | un système avec la hiérarchie unifiée |
+| Quotas de ressources par tâche | cgroups v2 absents du conteneur ; montés sur le coureur, mais aucun test ne les exerce encore | des tests dédiés aux quotas, sur une machine à hiérarchie unifiée |
+| Instantanés de microVM (M5-T4) | rien n'est encore écrit ; le niveau 2 démarre désormais, ce qui lève le blocage | l'objectif de 100 ms depuis instantané reste à mesurer |
 | Comparaison avec un agent par captures d'écran | aucun agent de référence exécutable ici | la ligne de base M13-T2, à mesurer sur une machine complète |
+
+### Ce qui est passé de « non vérifié » à « vérifié »
+
+Les niveaux 1 et 2 ont quitté ce tableau le 12 septembre 2026. Le job `isolation` de
+l'intégration continue installe gVisor, Firecracker et les images d'invité sur un coureur Ubuntu
+équipé de KVM, puis lance les quatre tests matériels :
+
+```
+✓ niveau_un_execute_reellement_sous_gvisor (needs_gvisor)
+✓ niveau_un_n_a_pas_de_reseau              (needs_gvisor)
+✓ niveau_deux_demarre_une_microvm          (needs_kvm)
+✓ le_niveau_deux_ne_retombe_jamais_sur_le_niveau_zero (needs_kvm)
+```
+
+Le dernier ne veut dire quelque chose que parce que le niveau 2 est atteignable sur cette machine :
+sa règle est « soit le niveau 2, soit un refus explicite », et un refus bien formé l'aurait fait
+passer sans rien prouver. C'est le genre de nuance qu'un tableau de coches efface, et qu'il faut
+donc écrire.
+
+Le même passage a validé pour la première fois le **niveau 0 sur du matériel réel** : les six
+tests de confinement tournent sur une Ubuntu 24.04 munie de Landlock et de cgroups v2, deux
+mécanismes que le conteneur de construction n'a pas du tout.
 
 Le système **annonce** ces limites plutôt que de les masquer : `prophet status` affiche le niveau
 d'isolation réellement atteignable, et `sandboxd` refuse une tâche qui exigerait davantage au lieu

@@ -54,8 +54,8 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 
 - [x] M5-T1 — Niveau 0 (bwrap + Landlock + seccomp) (2026-09-12, 24b8338) — 8 tests d'évasion réels, démarrage en 2,6 ms
 - [x] M5-T2 — Niveau 1 (gVisor) (2026-09-12, 3c0b7cd) — vérifié sur matériel réel en intégration continue : exécution effective sous gVisor et absence d'interface réseau, tests `needs_gvisor` verts
-- [ ] ⛔ M5-T3 — Niveau 2 (Firecracker) — implémenté (`launch::launch_microvm`), tests `needs_kvm` ; KVM et Firecracker désormais disponibles en intégration continue, bloqué : images d'invité non récupérées
-- [ ] ⛔ M5-T4 — Pool de snapshots — bloqué : exige que M5-T3 soit vérifié d'abord
+- [x] M5-T3 — Niveau 2 (Firecracker) (2026-09-12, faca93c) — vérifié sur matériel réel en intégration continue : microVM démarrée avec noyau et racine d'invité, et refus explicite plutôt que repli quand le niveau est inatteignable
+- [ ] M5-T4 — Pool de snapshots — plus bloqué : le niveau 2 démarre sur le coureur d'intégration ; reste à écrire, avec l'objectif de 100 ms depuis instantané à mesurer
 - [x] M5-T5 — Cycle de vie et quotas (2026-09-12, 24b8338) — gel global de 8 sandboxes en 124 µs
 - [x] M5-T6 — Sélection automatique (2026-09-12, 24b8338) — sélection de niveau, microVM imposée pour tout code
 - [x] M5-T7 — CLI (2026-09-12, 24b8338) — sonde de capacités et rapport
@@ -138,7 +138,19 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 
 ## Blocages
 
-Environnement de construction sans KVM, sans Nix, sans Landlock et sans cgroups v2. Les tâches marquées ⛔ ci-dessus en dépendent. `docs/reports/phase0.md` section 5 dit, pour chacune, ce qu'il faut pour la vérifier.
+Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le
+dernier mot : le job `isolation` de l'intégration continue installe gVisor, Firecracker et les
+images d'invité sur un coureur Ubuntu muni de KVM, et y exerce les quatre tests matériels. C'est
+ainsi que M5-T2 et M5-T3 ont été vérifiés.
+
+Ce qu'aucune des deux machines n'offre encore, et qui bloque les tâches marquées ⛔ ci-dessus :
+Nix (M9-T5, M9-T6), un GPU avec un modèle du catalogue (M8-T7), un agent de référence exécutable
+(M13-T2). `docs/reports/phase0.md` section 5 dit, pour chacune, ce qu'il faut pour la vérifier.
+
+Un rappel qui a coûté cher le 12 septembre : une machine hôte peut refuser ce qu'elle paraît
+offrir. Ubuntu 24.04 interdit par AppArmor d'exécuter dans un espace de noms non privilégié, et
+`/dev/kvm` peut être présent sans être ouvrable. Voir ADR-0006 ; `prophet status` le signale
+désormais, et `tools/install-isolation.sh` le traite sans rien modifier sans autorisation.
 
 Les pilotes de clients officiels sont testés jusqu'à la limite de ce qui est vérifiable sans compte : construction de la ligne de commande, environnement transmis, détection de session, messages d'erreur. L'exécution de bout en bout exige une connexion réelle.
 
