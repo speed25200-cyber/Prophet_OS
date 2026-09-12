@@ -500,6 +500,73 @@ de la racine en lecture seule, désormais à déclenchement manuel — entrée
 demande de lire avant de graver une image n'est pas une information : c'est un entraînement à
 ignorer le rouge.
 
+### La surface refusait le bon mot de passe du propriétaire (12 septembre 2026, 17 h)
+
+Le run `34705399751` a rendu cinq travaux bloquants sur six. Le sixième — « Le système installé
+démarre », vert au tour précédent — a échoué, et sa cause n'est pas un aléa.
+
+`prophet-surface` tenait `/dev/tty1` avec `TTYVHangup` et `Restart = "always"`. Sur une machine
+sans pilote graphique, elle redémarre cinq fois en une minute, et **chaque tentative raccroche le
+terminal où le propriétaire tape son mot de passe**. Le journal, à vingt-deux millisecondes près :
+
+```
+16:42:00.600  machine: sending keys 'essai-prophet\n'
+16:42:00.686  prophet-surface.service: Scheduled restart job, restart counter is at 4
+16:42:00.708  unix_chkpwd: password check failed for user (prophet)
+```
+
+Le mot de passe était le bon. Sur un vrai PC, le propriétaire aurait lu « Login incorrect » sans
+écran graphique pour lui dire pourquoi, sur une machine dont il vient d'effacer le disque. Il n'y a
+pas de pire moment pour donner à un système l'air de refuser son propriétaire.
+
+`docs/components/surface.md` posait déjà la question — « le terminal disputé » — et nommait les deux
+sorties possibles. Elle est prise : **la surface vit sur `tty7`**, celui que les serveurs graphiques
+occupent depuis toujours et où NixOS ne fait naître aucun `getty` (il n'en crée que sur tty1 à
+tty6). Le service de repli reste sur `tty1`, là où un humain regarde.
+
+Le test était complice : il attendait que la surface atteigne `active` ou `failed`, or `active` est
+traversé une fraction de seconde à **chaque** relance d'une unité en `Restart = "always"`. Il
+déclarait donc la surface posée alors qu'elle en était à sa quatrième tentative, puis se connectait
+dans la course — et gagnait une fois sur deux. Un test qui dépend d'une course ne protège de rien :
+celui-ci avait déclaré la machine bonne au tour précédent. Deux corrections : l'attente exige
+maintenant un état qui **tient** (`failed` est définitif ; un `active` qui survit dix secondes est
+un vrai `active`), et un sous-test neuf lit `TTYPath` — il ne court pas, il constate.
+
+Ce qui reste inconnu et n'est pas réglé : que `cage` bascule réellement sur `tty7` et y affiche
+quelque chose. Aucun coureur n'a d'adaptateur graphique, et c'était déjà invérifiable sur `tty1`.
+Le déménagement ne dégrade rien de vérifié ; il supprime un mal, lui, mesuré.
+
+### L'adresse du serveur était publique (12 septembre 2026, 17 h)
+
+Elle était posée en **variable** de dépôt `VPS_HOST`. GitHub masque la valeur d'un secret, pas
+celle d'une variable : il l'imprime dans le bloc `env:` de chaque étape, et les journaux d'Actions
+d'un dépôt public sont publics. L'adresse d'une machine dont ce dépôt documente qu'elle accepte
+`root` par mot de passe s'est donc retrouvée en clair dans plusieurs exécutions — et une version
+antérieure de la sonde l'affichait même en toutes lettres, `VPS_HOST = …`, en croyant rendre
+service.
+
+Corrigé : le workflow cherche d'abord le **secret** `VPS_HOST`, masque l'adresse dès sa première
+étape, et ne l'imprime plus jamais — « posée » ou « absente », et rien d'autre. La variable reste
+acceptée pour que rien ne casse, mais tant qu'elle est une variable, elle fuit une fois par
+exécution dans le bloc `env:` de la première étape. **À faire par le propriétaire : déplacer
+`VPS_HOST` dans les secrets**, et considérer l'adresse comme connue.
+
+### L'archivage d'Hermes était trop lent pour finir (12 septembre 2026, 17 h)
+
+L'étape a été coupée à sa limite de trente minutes, sans avoir fini. **Rien n'a été supprimé** :
+l'effacement vient après la relecture de l'archive, jamais avant, et la relecture n'a pas eu lieu.
+`/root/hermes` est intact.
+
+La faute était `tar czf`. Compresser des données déjà compressées — historiques de marché, parquet,
+journaux gzippés — coûte tout le temps du monde pour quelques pour cent. Et rien n'était mesuré
+avant de commencer : on ne pouvait même pas dire s'il restait une minute ou une heure.
+
+Corrigé : l'archive n'est plus compressée (`tar cf` va à la vitesse du disque) ; la taille et le
+nombre de fichiers sont mesurés **avant** de commencer et affichés ; la place libre est vérifiée
+avec une marge d'un dixième, parce qu'une archive qui remplit le disque casse la machine qu'on
+essayait de préserver ; et la relecture **compte les fichiers** au lieu de se contenter que `tar`
+n'ait pas protesté — une archive tronquée au premier bloc se relit sans se plaindre.
+
 ### Faire tourner Prophet OS sur une machine qui n'est pas Prophet OS (12 septembre 2026)
 
 `tools/lancer-sur-l-hote.sh` installe les sept daemons en services systemd sur un hôte Ubuntu et
