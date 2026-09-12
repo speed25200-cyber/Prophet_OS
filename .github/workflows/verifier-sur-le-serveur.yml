@@ -143,15 +143,16 @@ jobs:
 
           # Une tentative, et sa vraie raison d'échec. Le mot de passe n'apparaît nulle part :
           # `sshpass` le lit dans l'environnement, et seule la sortie d'erreur de ssh est montrée.
+          #
+          # Une seule forme est essayée : celle du secret, telle quelle. Une version antérieure en
+          # essayait deux, et documentait en commentaire comment la seconde se dérivait de la
+          # première. Dans un dépôt public, écrire la règle de dérivation d'un mot de passe revient
+          # à en donner la moitié.
           essai() {
             SSHPASS="$1" timeout 25 sshpass -e ssh $SSHOPTS -o PreferredAuthentications=password \
               -o PubkeyAuthentication=no "root@$VPS" "echo __ok__" 2>/tmp/ssh.err | grep -q __ok__
           }
-          # Hetzner impose un changement à la première connexion. Le dépôt Hermes documente que son
-          # propre outillage a fait tourner le mot de passe vers « <original>.Hermes1 » ; les deux
-          # formes sont donc essayées, et aucune autre.
           if essai "$MDP"; then RETENU="$MDP"
-          elif essai "${MDP}.Hermes1"; then RETENU="${MDP}.Hermes1"
           else
             echo "::error::connexion refusée par $VPS."
             echo "--- ce que ssh a dit ---"
@@ -212,12 +213,14 @@ jobs:
             exit 1
           fi
           SSHOPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
-          essai() { timeout 25 sshpass -p "$1" ssh $SSHOPTS "root@$VPS" "echo __ok__" 2>/dev/null | grep -q __ok__; }
-          # Hetzner impose un changement à la première connexion. Le dépôt Hermes documente que son
-          # propre outillage a fait tourner le mot de passe vers « <original>.Hermes1 » ; les deux
-          # formes sont donc essayées, et aucune autre.
+          # `sshpass -e` lit le mot de passe dans l'environnement. `-p` le mettrait sur la ligne de
+          # commande, où n'importe quel `ps` sur le coureur le lirait — un coureur partagé n'est pas
+          # un endroit où l'on écrit un mot de passe en clair, même une seconde.
+          essai() {
+            SSHPASS="$1" timeout 25 sshpass -e ssh $SSHOPTS "root@$VPS" "echo __ok__" 2>/dev/null \
+              | grep -q __ok__
+          }
           if essai "$MDP"; then RETENU="$MDP"
-          elif essai "${MDP}.Hermes1"; then RETENU="${MDP}.Hermes1"
           else
             echo "::error::connexion refusée. Si le mot de passe a changé depuis, mettez à jour le secret VPS_PASSWORD."
             exit 1

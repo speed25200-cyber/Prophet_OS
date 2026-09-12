@@ -55,6 +55,10 @@ Aucun agent n'écrit ce mot de passe — ni dans le fichier du workflow, ni dans
 une entrée qu'il remplirait lui-même. Le workflow le masque dans son journal dès qu'il l'a retenu.
 Il n'y a pas d'autre endroit où il puisse apparaître.
 
+Le secret est lu tel quel : le workflow n'essaie **qu'une seule forme**. Une version antérieure en
+essayait deux et expliquait en commentaire comment la seconde se dérivait de la première — dans un
+dépôt public, écrire la règle de dérivation d'un mot de passe revient à en donner la moitié.
+
 À défaut de secret, l'entrée `root_password` du déclenchement accepte une saisie à la main. Elle
 convient pour un essai ; le secret convient pour la suite.
 
