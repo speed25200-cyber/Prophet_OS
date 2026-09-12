@@ -117,6 +117,27 @@ corrigées, et la liste est dans `docs/reports/phase0.md`.
   `module.sig_enforce=1` sur la ligne de commande — les deux candidats les plus plausibles à un
   refus de démarrer
 
+### Une correction à mon propre message de commit (12 septembre 2026)
+
+Le commit `63e0d99` déplace `allowUnfreePredicate` du module vers `flake.nix`, et donne comme
+raison que NixOS refuserait qu'un module touche à `nixpkgs.config` quand `pkgs` vient du cadre de
+test — « Your system configures nixpkgs with an externally created instance ». **Ce n'est pas ce
+que le journal dit.** L'erreur réelle était :
+
+```
+The option `nixpkgs.config.allowUnfreePredicate` has conflicting definition values
+Use `lib.mkForce value` ou `lib.mkDefault value` …
+```
+
+Une **définition en conflit**, pas une instance externe : le cadre de test pose déjà cette option
+pour ses nœuds, à partir du `pkgs` qu'on lui donne, et le module en posait une seconde.
+
+Le déplacement reste la bonne correction — il supprime l'une des deux définitions, et l'unique
+qui subsiste vient du `pkgs` construit dans `flake.nix`, lequel sert aussi bien aux tests qu'à
+l'image. Mais j'avais écrit le mécanisme avant de l'avoir lu, et c'est exactement ce que ce dépôt
+reproche partout ailleurs. Le commit reste tel quel — réécrire l'histoire pour se donner raison
+après coup serait pire — et la correction vit ici.
+
 ### Une leçon de la journée, écrite pour la prochaine
 
 Une exécution de « Support d'amorçage » occupe six coureurs pendant une demi-heure, et le groupe de
