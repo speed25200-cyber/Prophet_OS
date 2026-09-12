@@ -8,7 +8,7 @@
 #
 # La disposition qu'il crée découle de `image/modules/immutable.nix` :
 #
-#   partition 1  ESP            1 GiB   vfat      étiquette prophet-boot
+#   partition 1  ESP            1 GiB   vfat      étiquette PROPHET-EFI
 #   partition 2  racine A      24 GiB   ext4      étiquette prophet-a
 #   partition 3  racine B      24 GiB   ext4      étiquette prophet-b
 #   partition 4  état           32 GiB  LUKS2     étiquette prophet-state-luks → btrfs
@@ -214,7 +214,10 @@ unset PHRASE
 # --- 6. Systèmes de fichiers ---
 
 titre "Systèmes de fichiers"
-mkfs.fat -F32 -n PROPHET-BOOT "$ESP" >/dev/null
+# Onze caracteres au maximum : c'est la limite d'une etiquette FAT, et « PROPHET-BOOT » en
+# faisait douze. La valeur doit rester identique a celle qu'immutable.nix cherche au
+# demarrage, sans quoi la machine ne trouverait pas sa partition d'amorcage.
+mkfs.fat -F32 -n PROPHET-EFI "$ESP" >/dev/null
 mkfs.ext4 -q -L prophet-a "$RACINE_A"
 mkfs.ext4 -q -L prophet-b "$RACINE_B"
 # btrfs pour l'état et les données : les sous-volumes par tâche en dépendent (ADR-0004).

@@ -101,7 +101,7 @@ jobs:
           lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT "$BOUCLE"
           echo "--- étiquettes attendues par immutable.nix ---"
           manque=0
-          for etiquette in prophet-a prophet-b PROPHET-BOOT; do
+          for etiquette in prophet-a prophet-b PROPHET-EFI; do
             if lsblk -no LABEL "$BOUCLE" | grep -qx "$etiquette"; then
               echo "  ✓ $etiquette"
             else

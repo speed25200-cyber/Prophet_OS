@@ -39,7 +39,7 @@
   # La partition d'amorçage, que l'installeur étiquette. Sans elle, systemd-boot n'a nulle part
   # où écrire ses entrées.
   fileSystems."/boot" = lib.mkDefault {
-    device = "/dev/disk/by-label/PROPHET-BOOT";
+    device = "/dev/disk/by-label/PROPHET-EFI";
     fsType = "vfat";
     options = [ "fmask=0077" "dmask=0077" ];
   };
