@@ -380,16 +380,21 @@ jobs:
           sudo apt-get clean
           echo "$(df -h / | awk 'NR==2{print $4}') libres"
 
-      - name: KVM
-        # Un test NixOS sans KVM est si lent qu'il expirerait. On regarde si on peut l'ouvrir,
-        # pas s'il existe.
+      - name: Rendre /dev/kvm ouvrable
+        # Sur un coureur GitHub, `/dev/kvm` existe mais appartient au groupe `kvm`, dont
+        # l'utilisateur du coureur ne fait pas partie : il est présent et refusé. Le constater et
+        # s'arrêter là — ce que faisait la première version de cette étape — revenait à demander à
+        # la machine une permission qu'on sait comment obtenir. L'outil du dépôt la donne, et
+        # vérifie ensuite qu'elle est bien donnée.
+        run: PROPHET_AUTORISER_KVM=1 sudo -E ./tools/install-isolation.sh microvm
+
+      - name: Vérifier qu'il l'est
+        # Un test NixOS sans KVM est si lent qu'il expirerait. On essaie d'ouvrir, on ne regarde
+        # pas si le fichier est là.
         run: |
-          if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
-            echo "KVM utilisable"
-          else
-            echo "::error::/dev/kvm inutilisable : ce test a besoin de virtualisation"
-            exit 1
-          fi
+          python3 -c "open('/dev/kvm','r+b').close()" \
+            || { echo "::error::/dev/kvm reste inouvrable : ce test a besoin de virtualisation"; exit 1; }
+          echo "/dev/kvm ouvrable"
 
       - uses: cachix/install-nix-action@v27
         with:
