@@ -381,6 +381,29 @@ déjà activé — un `/var` porté par un volume inscriptible plutôt que par l
 `boot.tmp.useTmpfs`. Elle se prendra en la prenant. **À traiter avant de déclarer l'ISO
 installable.**
 
+### Le serveur, état réel au 12 septembre 2026 à 15 h 52
+
+Le travail qui agit a été déclenché **par l'API**, sur la branche de travail. Ce qui a
+effectivement changé sur la machine, et comment le défaire :
+
+| Fait | Comment revenir en arrière |
+|---|---|
+| Les unités `hermes*` sont **arrêtées et désactivées** | `systemctl enable --now hermes…` — le journal du workflow nomme les unités. Les fichiers de `/root/hermes` n'ont pas été touchés |
+| Prophet OS est déposé dans `/root/prophet_os` | `rm -rf /root/prophet_os` |
+| gVisor est installé — `runsc release-20260907.0` | le paquet reste ; `runsc` s'enlève à la main |
+| La restriction AppArmor des espaces de noms est **toujours active** | rien à défaire : l'étape a été sautée |
+
+**Aucun niveau d'isolation n'est donc utilisable pour l'instant** : la restriction les bloque tous,
+y compris le niveau 0. Le niveau 1 le deviendra dès qu'elle sera levée, gVisor étant en place. Le
+niveau 2 restera hors d'atteinte — pas de `/dev/kvm` sur ce VPS.
+
+La cause de l'étape sautée était dans le workflow, pas sur la machine :
+`install-isolation.sh gvisor` répond à deux questions — installer gVisor, et signaler la
+restriction — et sortait en 1 sur la seconde après avoir réussi la première. L'étape qui devait
+lever la restriction a donc été sautée, alors qu'elle était demandée. Corrigé : la restriction est
+levée **avant** la préparation, et la préparation juge sur `command -v runsc` plutôt que sur le
+code de sortie d'un outil qui répond à deux questions.
+
 ## Blocages
 
 Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le
