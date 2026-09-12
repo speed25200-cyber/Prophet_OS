@@ -109,6 +109,25 @@ corrigées, et la liste est dans `docs/reports/phase0.md`.
 - [x] M9-T4 — Chiffrement (2026-09-12, 24b8338) — LUKS2, TPM avec repli par phrase de passe
 - [x] M9-T5 — Installeur (2026-09-12) — `image/installateur/prophet-installer.sh` : partitionnement GPT, LUKS2 sur l'état et les données, deux racines A/B, montage. Exercé en intégration continue sur un disque en boucle, y compris ses refus — travail d'intégration vert : refus d'une mauvaise confirmation sans toucher au disque, refus d'un disque trop petit, puis préparation réelle dont chaque étiquette correspond à ce qu'`immutable.nix` attend
 - [x] M9-T6 — Démo M9 (2026-09-12) — **l'image démarre, et cela a été vu** : micrologiciel UEFI, menu d'amorçage, noyau, espace utilisateur, `serial-getty`, message d'accueil, connexion automatique. Journal complet dans l'artefact « demarrage-vm ». L'intégration continue le refait à chaque construction. Reste non vérifié : le matériel réel — carte graphique, carte réseau, micrologiciel d'un PC donné
+- [x] M9-T7 — **Le système installé démarre** (2026-09-12) — et c'est une autre question que M9-T6.
+  Le support d'amorçage est une configuration à part : racine en lecture-écriture, session ouverte
+  automatiquement. Ce qu'il installe n'avait jamais démarré, seulement été construit.
+  `image/tests/installe.nix` le démarre **par son chargeur d'amorçage**, en UEFI, depuis un vrai
+  disque : `bootctl status` confirme que `systemd-boot` l'a lancé, avec `lockdown=integrity` et
+  `module.sig_enforce=1` sur la ligne de commande — les deux candidats les plus plausibles à un
+  refus de démarrer
+
+### Une leçon de la journée, écrite pour la prochaine
+
+Une exécution de « Support d'amorçage » occupe six coureurs pendant une demi-heure, et le groupe de
+concurrence ajouté ce jour-là **annule l'exécution en cours à chaque poussée**. C'est ce qu'on veut
+quand on enchaîne des corrections ; c'est exactement ce qu'on ne veut pas quand on attend un
+verdict. Deux exécutions ont ainsi été annulées par la poussée suivante, dont l'une portait la
+correction dont on attendait la réponse.
+
+La règle qui en découle : **quand on attend la réponse d'un test de trente minutes, on ne pousse
+plus rien qui touche `flake.nix`, `image/`, `crates/` ou `iso.yml`.** `docs/` et `tools/` sont hors
+du filtre de chemins et restent libres.
 
 ### M10 — browser-bridge et SUP v0
 
