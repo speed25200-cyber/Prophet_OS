@@ -38,7 +38,13 @@ echo
 echo "Sonde du matériel et du noyau"
 MANQUES=()
 
-if [ -e /dev/kvm ]; then ok "/dev/kvm présent"; KVM=1
+# Présence et accès sont deux choses. Le nœud appartient au groupe kvm, et le constater présent
+# pendant qu'il est refusé fait lancer des tests qui échoueront pour une raison qu'on croira
+# ailleurs.
+if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then ok "/dev/kvm accessible"; KVM=1
+elif [ -e /dev/kvm ]; then
+  ko "/dev/kvm présent mais refusé à $(id -un) (groupe kvm)"; KVM=0
+  MANQUES+=("acces-kvm")
 else
   ko "/dev/kvm absent"; KVM=0
   MANQUES+=("kvm")
@@ -198,7 +204,7 @@ materiel_pour() {
     needs_kvm)
       # Le niveau 2 exige les trois : le module, le moniteur, et les images d'invité.
       manquants=""
-      [ "$KVM" = "1" ]    || manquants="$manquants kvm"
+      [ "$KVM" = "1" ]    || manquants="$manquants acces-kvm"
       [ "$FC" = "1" ]     || manquants="$manquants firecracker"
       [ "$IMAGES" = "1" ] || manquants="$manquants images-microvm"
       [ -z "$manquants" ] && return 0

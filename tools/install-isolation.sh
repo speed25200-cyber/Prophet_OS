@@ -168,8 +168,21 @@ installer_images() {
 # Le fichier appartient au groupe kvm. Un utilisateur qui n'en fait pas partie obtient EACCES au
 # moment de démarrer la machine virtuelle — trop tard, et sous la forme d'une erreur du moniteur
 # qui n'en est pas la cause.
+# L'utilisateur qui lancera réellement les sandboxes. Sous sudo, ce n'est pas celui qui exécute
+# ce script : root peut tout ouvrir, et conclure de son propre accès que tout va bien laisserait
+# l'utilisateur réel dehors — c'est exactement ce qui est arrivé.
+utilisateur_cible() {
+  echo "${SUDO_USER:-$(id -un)}"
+}
+
 kvm_accessible() {
-  [ -r /dev/kvm ] && [ -w /dev/kvm ]
+  local cible
+  cible=$(utilisateur_cible)
+  if [ "$cible" = "$(id -un)" ]; then
+    [ -r /dev/kvm ] && [ -w /dev/kvm ]
+  else
+    sudo -u "$cible" test -r /dev/kvm && sudo -u "$cible" test -w /dev/kvm
+  fi
 }
 
 traiter_l_acces_kvm() {
@@ -177,15 +190,15 @@ traiter_l_acces_kvm() {
     ok "/dev/kvm accessible"
     return 0
   fi
-  ko "/dev/kvm existe mais n'est pas ouvrable par $(id -un)"
+  ko "/dev/kvm existe mais n'est pas ouvrable par $(utilisateur_cible)"
   if [ "${PROPHET_AUTORISER_KVM:-}" != "1" ]; then
     info "rien n'est modifié : élargir l'accès à l'hyperviseur est une décision qui vous revient."
     info "Pour l'accorder, au choix :"
-    info "  sudo usermod -aG kvm $(id -un)    puis rouvrir une session (propre et durable)"
+    info "  sudo usermod -aG kvm $(utilisateur_cible)    puis rouvrir une session (propre et durable)"
     info "  PROPHET_AUTORISER_KVM=1 sudo -E ./tools/install-isolation.sh microvm   (immédiat)"
     return 1
   fi
-  sudo_si_besoin usermod -aG kvm "$(id -un)" 2>/dev/null || true
+  sudo_si_besoin usermod -aG kvm "$(utilisateur_cible)" 2>/dev/null || true
   # L'appartenance à un groupe ne prend effet qu'à la session suivante ; sur une machine jetable
   # on ouvre le nœud directement, faute de quoi l'autorisation ne servirait à rien aujourd'hui.
   sudo_si_besoin chmod 0666 /dev/kvm || { ko "l'accès a été refusé"; return 1; }
