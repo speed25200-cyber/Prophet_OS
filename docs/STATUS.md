@@ -183,6 +183,12 @@ isolément ne pouvait voir.
   un champ vide sur une machine saine. L'appartenance est maintenant aussi cherchée dans
   `/etc/group`. `root` est accepté : le refuser ne protégeait rien, puisqu'il lit les clés de
   signature dans `/var/lib/prophet`, et rendait `prophet status` inutilisable pour le propriétaire
+- [x] Ma première correction lisait `/etc/group` **au démarrage**. Le test en machine virtuelle l'a
+  refusée aussitôt : il crée son compte après le démarrage des daemons, comme le fait un
+  `nixos-rebuild switch`, qui ne les redémarre pas. Un refus qui dépend de l'heure à laquelle un
+  service a démarré ne se diagnostique jamais. Le fichier est maintenant lu au moment de la
+  question, et seulement pour un pair qui serait sinon refusé : les sept daemons se reconnaissent
+  par leur groupe principal, `root` par son `uid`, et rien n'est ouvert sur le chemin fréquent
 - [x] `prophet status` ne rendait plus la main — quinze minutes, sans rien afficher. `egress` est
   un proxy HTTP : un `ping` JSON-RPC est pour lui une requête tronquée, et il attendait la fin
   d'en-têtes qui ne viendraient jamais. Il n'était pas en faute ; la sonde l'était. Elle lui parle

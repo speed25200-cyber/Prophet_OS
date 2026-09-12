@@ -47,8 +47,17 @@ pub const GROUPE_SYSTEME: &str = "prophet-system";
 ///
 /// Ce que cela concède : un processus qui aurait *abandonné* le groupe par `setgroups` reste
 /// accepté. Il appartient toujours au groupe au sens où l'administrateur l'entend, et il pourrait
-/// de toute façon le reprendre par `newgrp`. La liste est lue au démarrage — modifier `/etc/group`
-/// demande donc de redémarrer le service, exactement comme pour `SupplementaryGroups` de systemd.
+/// de toute façon le reprendre par `newgrp`.
+///
+/// La liste n'est **pas** mise en cache, et c'est un choix. Une première version la lisait au
+/// démarrage ; le test en machine virtuelle a aussitôt montré ce que cela coûte — un compte créé
+/// après le démarrage des daemons est refusé jusqu'au prochain redémarrage de chacun d'eux, ce
+/// qu'un `nixos-rebuild switch` ne fait pas. Un refus qui dépend de l'heure à laquelle un service
+/// a démarré est exactement le genre de comportement qu'on ne diagnostique jamais.
+///
+/// Le fichier n'est lu que lorsque le pair serait sinon refusé. Les sept daemons se reconnaissent
+/// par leur groupe principal et `root` par son `uid` : sur le chemin fréquent, rien n'est ouvert.
+/// Restent la surface et l'humain, qui parlent peu et lentement.
 ///
 /// ## Pourquoi `root` passe
 ///
@@ -66,7 +75,10 @@ pub const GROUPE_SYSTEME: &str = "prophet-system";
 pub struct Pairs {
     gid_systeme: Option<u32>,
     uid_propre: u32,
-    membres: Vec<u32>,
+    /// Membres figés. `None` — le cas d'une vraie machine — veut dire « relire `/etc/group` au
+    /// moment où la question se pose ». Les tests s'en servent pour décrire une machine qu'ils
+    /// n'ont pas, sans dépendre du `/etc/group` de celle qui les exécute.
+    membres_figes: Option<Vec<u32>>,
 }
 
 /// L'identifiant de l'administrateur.
@@ -86,16 +98,10 @@ impl Pairs {
                 "groupe absent : seul l'utilisateur du service sera servi"
             );
         }
-        let membres = membres_du_groupe(GROUPE_SYSTEME);
-        tracing::debug!(
-            groupe = GROUPE_SYSTEME,
-            declares = membres.len(),
-            "membres déclarés lus"
-        );
         Ok(Self {
             gid_systeme,
             uid_propre: uid_propre()?,
-            membres,
+            membres_figes: None,
         })
     }
 
@@ -106,7 +112,7 @@ impl Pairs {
         Self {
             gid_systeme,
             uid_propre,
-            membres: Vec::new(),
+            membres_figes: Some(Vec::new()),
         }
     }
 
@@ -116,17 +122,26 @@ impl Pairs {
         Self {
             gid_systeme,
             uid_propre,
-            membres,
+            membres_figes: Some(membres),
         }
     }
 
     /// Ce pair peut-il appeler une méthode système ?
+    ///
+    /// Les trois premières réponses ne touchent à aucun fichier ; la quatrième seule ouvre
+    /// `/etc/group`, et seulement pour un pair qui serait sinon refusé.
     #[must_use]
     pub fn autorise(&self, pair: PeerIdentity) -> bool {
-        pair.uid == ROOT
-            || pair.uid == self.uid_propre
-            || self.gid_systeme.is_some_and(|gid| pair.gid == gid)
-            || self.membres.contains(&pair.uid)
+        if pair.uid == ROOT || pair.uid == self.uid_propre {
+            return true;
+        }
+        if self.gid_systeme.is_some_and(|gid| pair.gid == gid) {
+            return true;
+        }
+        match &self.membres_figes {
+            Some(membres) => membres.contains(&pair.uid),
+            None => membres_du_groupe(GROUPE_SYSTEME).contains(&pair.uid),
+        }
     }
 
     /// Le refus, formulé. Un pair refusé mérite de savoir pourquoi ; il n'apprend rien qu'il ne

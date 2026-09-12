@@ -18,7 +18,9 @@ diagnostique par ses absences.
 Tous les sockets sont en `0660`, dans `/run/prophet` qui est en `0770` pour le groupe
 `prophet-system`. Un pair est accepté dans quatre cas : il est le service lui-même ; son groupe
 principal est `prophet-system` ; l'administrateur l'a déclaré membre de ce groupe dans
-`/etc/group` ; ou il est `root`.
+`/etc/group` ; ou il est `root`. Ce dernier fichier n'est consulté que pour un pair qui serait
+sinon refusé, et il n'est jamais mis en cache : un compte créé après le démarrage d'un daemon
+est servi tout de suite, sans qu'il faille redémarrer les sept.
 
 La troisième règle n'est pas un assouplissement mais une correction. `SO_PEERCRED` n'atteste que le
 groupe **principal** du pair : un compte mis dans `prophet-system` par `extraGroups` y appartient
