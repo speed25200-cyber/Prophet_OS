@@ -236,10 +236,28 @@ démarrage, `systemd-boot` sans éditeur donc sans secours, `lockdown=integrity`
 
 - [ ] `image/tests/installe.nix` — démarre la configuration installée **par son chargeur
   d'amorçage**, en UEFI, depuis un vrai disque, et vérifie dans l'ordre : le chargeur a bien
-  lancé le système, la racine est en lecture seule, les comptes ont malgré tout été écrits,
-  aucune unité n'a échoué, les sept services tournent, le propriétaire ouvre une session sur
-  `tty1` avec son mot de passe, et les paramètres du noyau sont ceux demandés. Écrit avant de
-  savoir ce qu'il dira : c'est le seul moyen d'apprendre quelque chose
+  lancé le système, les comptes ont été écrits, aucune unité n'a échoué, les sept services
+  tournent, `prophet-surface` a au moins été lancée, le propriétaire ouvre une session sur `tty1`
+  avec son mot de passe, et les paramètres du noyau sont ceux demandés. Écrit avant de savoir ce
+  qu'il dira : c'est le seul moyen d'apprendre quelque chose
+
+**Ce que ce test ne peut pas vérifier, et qu'il ne faut pas croire vérifié.** Le cadre de test
+NixOS fournit son propre disque et redéfinit `fileSystems` à une priorité qui l'emporte sur celle
+de `immutable.nix`. La **racine en lecture seule n'est donc pas exercée**, et c'est la question la
+plus dangereuse pour quelqu'un qui vient d'effacer son disque :
+
+> L'activation de NixOS écrit `/etc/passwd`, `/etc/shadow`, `/etc/group` et tout l'arbre de liens
+> de `/etc` à **chaque** démarrage, et crée des répertoires sous `/var`. `immutable.nix` monte
+> `/home` et `/var/lib/prophet` depuis des volumes séparés, mais `/etc`, `/var/log`, `/var/lib` et
+> `/tmp` restent sur la racine. Si celle-ci est vraiment en lecture seule, l'activation échoue et
+> la machine part en mode de secours — sauf que `systemd-boot` est configuré sans éditeur, donc il
+> n'y a pas de mode de secours utilisable.
+
+Ce n'est pas vérifié, et ce n'est pas corrigé non plus : la correction n'est pas un réglage mais
+une décision de conception — `/etc` sur une superposition, ou `/etc` et `/var` portés par le
+volume d'état, plus `boot.tmp.useTmpfs`. La faire à l'aveugle sur la machine de quelqu'un qui a
+déjà formaté son disque serait pire que de l'écrire ici. **À traiter avant de déclarer l'ISO
+installable.**
 
 ## Blocages
 

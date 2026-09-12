@@ -17,9 +17,18 @@
 # construisant. Ce test démarre donc la configuration installée **par son chargeur d'amorçage**,
 # depuis un vrai disque, en UEFI.
 #
-# Ce qu'il ne reproduit pas : les volumes chiffrés et les étiquettes de partition, que le cadre de
-# test remplace par son propre disque. C'est l'installeur, exercé ailleurs sur un disque en boucle,
-# qui répond de la disposition.
+# ## Ce qu'il ne vérifie pas, et qu'il ne faut pas croire vérifié
+#
+# Le cadre de test NixOS fournit son propre disque et redéfinit `fileSystems` à une priorité qui
+# l'emporte sur celle de `immutable.nix`. Deux choses lui échappent donc :
+#
+# - **la racine en lecture seule** — elle est en lecture-écriture ici. Le sous-test le dit à voix
+#   haute plutôt que d'affirmer le contraire ;
+# - **les volumes chiffrés et les étiquettes de partition** — c'est l'installeur, exercé sur un
+#   disque en boucle, qui en répond.
+#
+# Tout le reste — chargeur d'amorçage, paramètres du noyau, comptes, services, session — est bien
+# celui de la configuration installée.
 { pkgs, module }:
 
 pkgs.testers.runNixOSTest {
@@ -70,18 +79,30 @@ pkgs.testers.runNixOSTest {
         print(info)
         assert "systemd-boot" in info, f"le chargeur attendu n'a pas démarré :\n{info}"
 
-    with subtest("la racine est bien en lecture seule"):
-        # Le cœur du sujet. Si elle ne l'est pas, ce test ne vérifie pas ce qu'il prétend, et il
-        # vaut mieux le savoir que de croire l'avoir vérifié.
+    with subtest("ce que ce test ne vérifie PAS : la racine en lecture seule"):
+        # À dire franchement, plutôt que de laisser croire le contraire.
+        #
+        # `immutable.nix` déclare `fileSystems."/"` avec l'option `ro`, en `mkDefault`. Le cadre de
+        # test NixOS fournit son propre disque et redéfinit `fileSystems` à une priorité qui gagne
+        # (`mkVMOverride`). La racine est donc **en lecture-écriture** ici, quoi qu'en dise la
+        # configuration installée.
+        #
+        # Affirmer « racine en lecture seule vérifiée » sur cette base serait la faute que ce dépôt
+        # traque partout ailleurs : une sonde qui constate autre chose que ce qu'elle annonce. La
+        # question reste donc ouverte, et elle est notée comme telle dans `docs/STATUS.md`.
         monte = machine.succeed("findmnt -no OPTIONS /").strip()
-        print(f"/ : {monte}")
-        assert monte.split(",")[0] == "ro", f"/ devrait être montée en lecture seule : {monte}"
-        machine.fail("touch /essai-ecriture-racine")
+        print(f"/ (imposée par le cadre de test) : {monte}")
+        if monte.split(",")[0] == "ro":
+            print("racine en lecture seule : le cadre de test ne l'a pas remplacée, tant mieux")
+        else:
+            print(
+                "racine en lecture-écriture : le cadre de test a remplacé le montage déclaré. "
+                "Ce que `immutable.nix` demande n'est donc pas exercé ici."
+            )
 
-    with subtest("l'activation de NixOS a pu écrire les comptes malgré cela"):
-        # NixOS écrit `/etc/passwd`, `/etc/shadow` et `/etc/group` à chaque démarrage. Sur une
-        # racine en lecture seule, cette écriture échoue — et le service qui la porte échoue avec
-        # elle. On regarde donc le résultat, pas l'intention.
+    with subtest("l'activation de NixOS a écrit les comptes"):
+        # Ce que l'activation fait à chaque démarrage : écrire `/etc/passwd`, `/etc/shadow` et
+        # `/etc/group`. On regarde le résultat, pas l'intention.
         machine.succeed("id prophet")
         machine.succeed("getent shadow prophet")
         etat = machine.succeed("passwd -S prophet").strip()
