@@ -25,6 +25,7 @@ cedar-policy = "4"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+prophet-daemon = { workspace = true, features = ["essai"] }
 
 [lints]
 workspace = true

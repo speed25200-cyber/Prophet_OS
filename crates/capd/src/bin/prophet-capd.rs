@@ -10,9 +10,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use capd::{ApprovalScope, Broker, PolicyEngine};
+use capd::{ApprovalScope, Broker, CheckRequest, PolicyEngine};
 use prophet_daemon as commun;
 use prophet_ipc::{Error, ErrorCode, Handler, PeerIdentity, Server};
+use prophet_types::cap::{Act, Res, Token};
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
@@ -43,6 +44,41 @@ impl Handler for Capd {
             "cap.public_key" => {
                 let broker = self.broker.lock().await;
                 Ok(json!({ "key": encoder(broker.verifying_key().as_bytes()) }))
+            }
+
+            // Le contrôle d'accès. C'est le seul point d'entrée légitime pour accorder un droit,
+            // et l'invariant de tout le système en dépend : rien n'est permis qui ne soit passé
+            // par ici.
+            //
+            // La décision est rendue telle quelle, refus compris, avec son motif. Un refus n'est
+            // pas une erreur de protocole : c'est une réponse, et l'appelant a besoin de savoir
+            // *pourquoi* pour décider s'il demande une approbation ou s'il abandonne.
+            "cap.check" => {
+                let jeton = jeton(&params)?;
+                let demande = demande(&params)?;
+                let broker = self.broker.lock().await;
+                let decision = broker
+                    .check(&jeton, &demande, maintenant)
+                    .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?;
+                tracing::debug!(
+                    sujet = %jeton.sub,
+                    cible = %demande.target,
+                    permis = decision.is_allow(),
+                    "contrôle rendu"
+                );
+                commun::repondre(&decision)
+            }
+
+            // Une action refusée faute de décision humaine peut être soumise à un humain. C'est
+            // ce qui alimente le panneau de décision de la surface.
+            "approval.request" => {
+                let jeton = jeton(&params)?;
+                let demande = demande(&params)?;
+                let resume = commun::texte(&params, "summary")?;
+                let mut broker = self.broker.lock().await;
+                let approbation = broker.request_approval(&jeton, &demande, resume, maintenant);
+                tracing::info!(id = %approbation.id, "approbation demandée");
+                commun::repondre(&approbation)
             }
 
             "approval.pending" => {
@@ -84,6 +120,55 @@ impl Handler for Capd {
             autre => Err(commun::methode_inconnue(autre)),
         }
     }
+}
+
+/// Le jeton présenté par l'appelant.
+///
+/// Il arrive tel quel, signature comprise. Rien n'est cru sur parole : `Broker::check` vérifie la
+/// signature, la chaîne de parents, l'expiration et la révocation avant de regarder les grants.
+fn jeton(params: &Value) -> Result<Token, Error> {
+    let brut = params
+        .get("token")
+        .ok_or_else(|| Error::new(ErrorCode::InvalidParams, "paramètre « token » attendu"))?;
+    serde_json::from_value(brut.clone())
+        .map_err(|e| Error::new(ErrorCode::InvalidParams, format!("jeton illisible : {e}")))
+}
+
+/// La demande de contrôle.
+///
+/// `irreversible` et `external` valent `false` par défaut, ce qui est le choix sûr : un appelant
+/// qui *oublie* de dire qu'une action est irréversible obtient une décision plus stricte, pas
+/// plus laxiste — la classification de `capd` reclasse ensuite selon ses propres faits.
+fn demande(params: &Value) -> Result<CheckRequest, Error> {
+    let res: Res = lire(params, "res")?;
+    let act: Act = lire(params, "act")?;
+    let mut demande = CheckRequest::new(res, act, commun::texte(params, "target")?);
+    demande.sandbox_level = params
+        .get("sandbox_level")
+        .and_then(Value::as_u64)
+        .and_then(|n| u8::try_from(n).ok())
+        .unwrap_or(0);
+    demande.irreversible = params
+        .get("irreversible")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    demande.external = params
+        .get("external")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    Ok(demande)
+}
+
+fn lire<T: serde::de::DeserializeOwned>(params: &Value, nom: &str) -> Result<T, Error> {
+    let brut = params
+        .get(nom)
+        .ok_or_else(|| Error::new(ErrorCode::InvalidParams, format!("« {nom} » attendu")))?;
+    serde_json::from_value(brut.clone()).map_err(|e| {
+        Error::new(
+            ErrorCode::InvalidParams,
+            format!("« {nom} » invalide : {e}"),
+        )
+    })
 }
 
 fn decision(texte: &str) -> Result<capd::ApprovalDecision, Error> {

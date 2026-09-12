@@ -169,3 +169,68 @@ async fn la_cle_survit_a_un_redemarrage_et_reste_illisible_par_les_autres() {
         "une clé qui change au redémarrage invaliderait tous les jetons déjà émis"
     );
 }
+
+/// Un jeton signé par une clé qui n'est **pas** celle du daemon.
+///
+/// C'est la contrefaçon la plus évidente, et donc celle qu'il faut prouver refusée : sans cela,
+/// n'importe qui pourrait s'accorder n'importe quel droit en écrivant le JSON qui l'arrange.
+fn jeton_forge() -> serde_json::Value {
+    use prophet_types::cap::{Act, Grant, Res, TokenBuilder};
+    let clef_etrangere = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+    let jeton = TokenBuilder::new("capd", "task:forge", "agent.forge", "prophet")
+        .grant(Grant::new(Res::Net, Act::Egress, "*"))
+        .build(&clef_etrangere, time::OffsetDateTime::now_utc(), [0u8; 16])
+        .expect("le faussaire sait construire un jeton bien formé");
+    serde_json::to_value(jeton).expect("sérialisable")
+}
+
+#[tokio::test]
+async fn un_jeton_signe_par_un_autre_n_accorde_rien() {
+    let temp = tempfile::tempdir().expect("répertoire temporaire");
+    let socket = temp.path().join("capd.sock");
+    let _daemon = lancer(&socket, &temp.path().join("etat"));
+    let client = joindre(&socket).await;
+
+    let decision = client
+        .call(
+            "cap.check",
+            json!({
+                "token": jeton_forge(),
+                "res": "net",
+                "act": "egress",
+                "target": "collecteur.example.com",
+                "external": true
+            }),
+        )
+        .await
+        .expect("un refus est une réponse, pas une erreur de protocole");
+
+    assert_eq!(
+        decision["decision"], "deny",
+        "un jeton signé ailleurs n'accorde rien : {decision}"
+    );
+    assert_eq!(
+        decision["reason"], "bad_signature",
+        "et le motif doit nommer la signature, pas autre chose : {decision}"
+    );
+}
+
+#[tokio::test]
+async fn un_controle_sans_jeton_ne_passe_pas_pour_un_refus_ordinaire() {
+    // La distinction compte : « refusé » est une décision du broker, « paramètre manquant » est
+    // une faute de l'appelant. Les confondre ferait passer un appel malformé pour une politique
+    // appliquée.
+    let temp = tempfile::tempdir().expect("répertoire temporaire");
+    let socket = temp.path().join("capd.sock");
+    let _daemon = lancer(&socket, &temp.path().join("etat"));
+    let client = joindre(&socket).await;
+
+    let erreur = client
+        .call(
+            "cap.check",
+            json!({ "res": "net", "act": "egress", "target": "x" }),
+        )
+        .await
+        .expect_err("sans jeton, il n'y a rien à contrôler");
+    assert_eq!(erreur.code, prophet_ipc::ErrorCode::InvalidParams);
+}
