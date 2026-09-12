@@ -11,7 +11,8 @@ effaçant son disque doit annoncer ses manques avant, pas après.
   minimum, et une connexion réseau au moment de l'installation.
 - Le fichier `prophet-os-installeur-*.iso`, produit par le travail « Support d'amorçage » de
   l'intégration continue. Il se télécharge depuis l'onglet *Actions* du dépôt, dans les artefacts
-  de la dernière exécution réussie.
+  de la dernière exécution réussie — artefact `prophet-os-iso`, environ 1,4 Gio, accompagné de son
+  empreinte. GitHub les livre dans une archive ZIP qu'il faut d'abord extraire.
 
 Vérifiez l'empreinte du fichier téléchargé — elle est publiée à côté de lui. Dans PowerShell :
 
