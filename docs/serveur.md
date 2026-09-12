@@ -47,7 +47,7 @@ tort que tout va bien : c'est exactement ADR-0006.
 |---|---|---|
 | Poser le secret `VPS_PASSWORD` | vous | **fait** — la sonde s'est connectée le 12 septembre |
 | Poser la variable `VPS_HOST` | vous | **fait** |
-| Poser le fichier du workflow sur `main` | **vous** | reste à faire — un fichier, pas une fusion (voir plus bas) |
+| Rendre le workflow visible depuis la branche par défaut | **vous** | reste à faire — un menu déroulant, ou un fichier ; pas une fusion (voir plus bas) |
 
 Les deux premiers suffisaient pour que la **sonde** tourne — elle se connecte, regarde, et repart
 sans rien toucher. Elle est partie, elle a abouti, et ce qu'elle a rapporté est dans la section
@@ -60,9 +60,10 @@ pour les autres. Ce travail-là ne part jamais sur une poussée, et la garde est
 entier plutôt que sur chaque étape — une condition oubliée sur une seule étape suffirait à faire ce
 qu'on voulait empêcher.
 
-Ce n'est pas moi qui le pose sur `main` : la consigne de cette session est de ne pousser que sur
-`claude/ai-optimized-os-design-djq7iw`. Mais ce qu'il faut y poser est **un fichier**, pas la
-branche entière — la marche à suivre tient en quatre clics, plus bas.
+Ce n'est pas moi qui le fais : la consigne de cette session est de ne pousser que sur
+`claude/ai-optimized-os-design-djq7iw`, et changer un réglage du dépôt n'est pas une poussée mais
+une décision de son propriétaire. Ce qu'il faut faire tient à un menu déroulant — la marche à
+suivre est plus bas.
 
 ## Les deux choses à faire, une fois
 
@@ -96,27 +97,39 @@ dépôt public, écrire la règle de dérivation d'un mot de passe revient à en
 À défaut de secret, l'entrée `root_password` du déclenchement accepte une saisie à la main. Elle
 convient pour un essai ; le secret convient pour la suite.
 
-### 2. Poser **le fichier** du workflow sur la branche par défaut
+### 2. Rendre le workflow visible depuis la branche par défaut
 
 GitHub ne propose le bouton *Run workflow* que pour les workflows présents sur la branche par
-défaut, et son API répond `404` pour les autres. `main` n'a aujourd'hui qu'un commit initial :
+défaut, et son API répond `404` pour les autres. `main` n'a aujourd'hui qu'un **commit initial** :
 tout le travail est sur `claude/ai-optimized-os-design-djq7iw`.
 
-**Il n'est pas nécessaire de fusionner la branche.** Seul le *fichier* doit exister sur `main`
-pour que le point d'entrée apparaisse ; le déclenchement, lui, se fait sur la branche de votre
-choix, et c'est la version du fichier **de cette branche-là** qui s'exécute. Fusionner tout le
-travail pour obtenir un bouton serait payer très cher une chose qui coûte un fichier.
+**Il n'est pas nécessaire de fusionner quoi que ce soit.** Deux chemins, du plus court au plus
+long.
 
-Le plus court, dans l'interface de GitHub :
+#### Le plus court : changer la branche par défaut
+
+*Settings* → *General* → *Default branch* → l'icône de bascule → choisir
+`claude/ai-optimized-os-design-djq7iw` → *Update*.
+
+Un menu déroulant, et c'est fait. Le workflow apparaît aussitôt dans l'onglet *Actions*.
+
+Ce n'est pas un détour : `main` ne contient qu'un commit initial, et tout ce qui existe de Prophet
+OS est sur cette branche. La branche par défaut d'un dépôt est censée être celle qu'on lit en
+arrivant ; aujourd'hui, ce n'est pas le cas. Le changement se défait par le même menu.
+
+#### Sinon : y poser le seul fichier qui manque
+
+Si vous préférez laisser `main` tranquille, seul le *fichier* doit y exister pour que le point
+d'entrée apparaisse. Le déclenchement se fait ensuite sur la branche de votre choix, et c'est la
+version du fichier **de cette branche-là** qui s'exécute.
 
 1. Allez sur `main`, *Add file* → *Create new file*.
 2. Nommez-le exactement `.github/workflows/verifier-sur-le-serveur.yml`.
 3. Collez le contenu du fichier tel qu'il est sur la branche de travail.
 4. *Commit directly to the `main` branch*.
 
-Les seules parties qui comptent dans la copie posée sur `main` sont le bloc `on:` et ses `inputs`,
-puisque c'est de là que l'interface tire les cases à cocher. Le reste sera lu depuis la branche
-que vous choisirez au moment de déclencher. Coller le fichier entier évite d'avoir à s'en
+Les seules parties qui comptent dans cette copie sont le bloc `on:` et ses `inputs`, puisque c'est
+de là que l'interface tire les cases à cocher. Coller le fichier entier évite d'avoir à s'en
 souvenir.
 
 Rien de ce qui est posé sur `main` ne s'exécute tout seul : le travail qui agit est gardé par
