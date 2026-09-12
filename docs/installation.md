@@ -24,19 +24,26 @@ Get-FileHash .\prophet-os-installeur-*.iso -Algorithm SHA256
 
 L'onglet *Actions* garde aussi les images produites par des exécutions **partiellement** vertes,
 et rien sur le fichier ne les distingue. Avant de prendre une image, ouvrez l'exécution qui l'a
-produite et vérifiez que ses cinq travaux sont verts, en particulier :
+produite et vérifiez que **tous** ses travaux sont verts, à la seule exception de celui qui porte
+« Question ouverte » dans son nom :
 
 | Travail | Ce qu'il garantit |
 |---|---|
-| Installeur sur disque en boucle | l'installeur formate, chiffre et monte pour de vrai, et refuse ce qu'il doit refuser |
-| Construire le système installé | chacun des sept services pointe vers un programme qui existe |
+| Installeur sur disque en boucle | l'installeur formate, chiffre et monte pour de vrai, et refuse ce qu'il doit refuser — mauvaise confirmation, disque trop petit, mot de passe trop court |
+| Construire l'ISO | l'image se construit, et chacun de ses fichiers est celui de la révision gravée |
+| Construire le système installé | chacun des sept services pointe vers un programme qui existe, **et** `nixos-install` pose réellement ce système sur la disposition que l'installeur crée |
 | Voir l'image démarrer | la clé USB démarre jusqu'à l'invite |
-| **Le système installé démarre** | ce que la clé installe démarre aussi : racine en lecture seule, chargeur d'amorçage, compte ouvrable |
-| Les sept services sous systemd | les daemons tournent sous leur utilisateur, avec leur durcissement |
+| Les sept services sous systemd | les daemons tournent sous leur utilisateur, avec leur durcissement, et `sandboxd` isole vraiment |
+| **Le système installé démarre** | ce que la clé installe démarre aussi : chargeur d'amorçage, noyau verrouillé, compte ouvrable, session sur `tty1` |
+| Question ouverte : la racine en lecture seule | rien — c'est une **question**, pas une garantie. Son échec ne signale pas une régression |
 
-Le quatrième est le plus récent, et le seul qui réponde à la question qui compte une fois le
-disque effacé. Une image produite par une exécution où il manque ou échoue n'a pas été vue
-démarrer autrement que depuis la clé.
+L'avant-dernier est le seul qui réponde à ce qui compte une fois le disque effacé : ce que la clé
+installe démarre-t-il ? Une image produite par une exécution où ce travail manque ou échoue n'a
+été vue démarrer que depuis la clé, ce qui est une autre configuration.
+
+`tools/verifier-la-doc-des-travaux.sh` vérifie que ce tableau ne prend pas de retard sur le
+workflow : un travail ajouté sans être décrit ici ferait croire qu'une image est bonne alors
+qu'un contrôle manque.
 
 ## 1. Écrire l'image sur la clé
 

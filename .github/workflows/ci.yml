@@ -53,6 +53,12 @@ jobs:
       # permitted ». Ce contrôle-ci le dit en une seconde.
       - name: Capacités accordées et appels système permis
         run: ./tools/verifier-le-durcissement.sh
+      # Le guide d'installation demande de vérifier les travaux d'une exécution avant de graver.
+      # Son tableau a pris du retard une fois : il annonçait cinq travaux quand il y en avait
+      # sept. Une consigne en retard est pire qu'une consigne absente — elle donne la confiance
+      # sans la vérification.
+      - name: Travaux décrits dans le guide d'installation
+        run: ./tools/verifier-la-doc-des-travaux.sh
       - name: Format
         run: cargo fmt --all --check
       - name: Lints
