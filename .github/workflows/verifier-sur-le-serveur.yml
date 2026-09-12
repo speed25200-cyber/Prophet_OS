@@ -10,7 +10,8 @@
 # ne rien écrire : le propriétaire de la machine a demandé qu'Hermes cède la place, d'abord en
 # l'arrêtant, puis en le supprimant. Deux interrupteurs séparés le font, `arreter_hermes` et
 # `supprimer_hermes`, tous deux à « false » par défaut. La suppression archive d'abord dans
-# /root/hermes-sauvegarde-<date>.tar.gz, relit l'archive, et n'efface qu'ensuite.
+# /root/hermes-sauvegarde-<date>.tar, relit l'archive, compte ses fichiers, et n'efface
+# qu'ensuite.
 #
 # Ce qui modifie la machine est désactivé par défaut. Installer des paquets, lever une restriction
 # du noyau, supprimer un moteur de production, poser des services : ce sont des décisions qui
@@ -80,8 +81,36 @@ jobs:
     name: Ce que le serveur offre
     runs-on: ubuntu-latest
     env:
-      VPS: ${{ vars.VPS_HOST }}
+      VPS_SECRET: ${{ secrets.VPS_HOST }}
+      VPS_VAR: ${{ vars.VPS_HOST }}
     steps:
+      - name: Résoudre l'adresse du serveur, sans l'écrire dans le journal
+        # L'adresse était une **variable** de dépôt. GitHub n'imprime pas la valeur d'un secret,
+        # mais il imprime celle d'une variable — dans le bloc `env:` de chaque étape, et les
+        # journaux d'Actions d'un dépôt public sont publics. L'adresse d'une machine dont on
+        # documente par ailleurs qu'elle accepte `root` par mot de passe s'est donc retrouvée en
+        # clair dans plusieurs exécutions.
+        #
+        # Elle est maintenant cherchée d'abord comme **secret** `VPS_HOST`, que GitHub masque
+        # partout et de lui-même. La variable reste acceptée pour que rien ne casse le temps de la
+        # déplacer, et elle est masquée dès cette étape — ce qui couvre toutes les suivantes, mais
+        # pas le bloc `env:` de celle-ci. Tant que l'adresse est une variable, elle fuit une fois
+        # par exécution. La déplacer dans les secrets ferme cela complètement.
+        run: |
+          set -u
+          if [ -n "${VPS_SECRET:-}" ]; then ADRESSE="$VPS_SECRET"; SOURCE="le secret VPS_HOST"
+          elif [ -n "${VPS_VAR:-}" ]; then ADRESSE="$VPS_VAR"; SOURCE="la variable VPS_HOST (à déplacer dans les secrets)"
+          else
+            echo "::error::ni le secret ni la variable VPS_HOST ne sont posés."
+            echo "Settings → Secrets and variables → Actions → onglet « Secrets » → New repository secret,"
+            echo "nom VPS_HOST, valeur l'adresse du serveur. Un secret, pas une variable : ce dépôt est"
+            echo "public, et GitHub imprime les variables dans le journal de chaque étape."
+            exit 1
+          fi
+          echo "::add-mask::$ADRESSE"
+          echo "VPS=$ADRESSE" >> "$GITHUB_ENV"
+          echo "adresse prise dans $SOURCE"
+
       - name: Outils de connexion
         run: sudo apt-get update -qq && sudo apt-get -y -qq install sshpass netcat-openbsd
 
@@ -107,7 +136,9 @@ jobs:
           dire SERVER_PASSWORD   "${N6:-}"
           echo
           echo "Variables :"
-          [ -n "${VPS:-}" ] && echo "  ✓ VPS_HOST = $VPS" || echo "  ✗ VPS_HOST (adresse du serveur)"
+          # Jamais la valeur : « posée » ou « absente », et rien d'autre. La dire ici
+          # reviendrait à publier l'adresse que l'étape précédente vient de masquer.
+          [ -n "${VPS:-}" ] && echo "  ✓ VPS_HOST (adresse posée)" || echo "  ✗ VPS_HOST (adresse du serveur)"
           echo
           echo "Ce workflow lit le secret VPS_PASSWORD. S'il est marqué absent alors que vous"
           echo "l'avez posé, vérifiez qu'il est bien un secret « Actions » du dépôt — et non un"
@@ -118,10 +149,10 @@ jobs:
         # dont on documente par ailleurs qu'elle accepte root par mot de passe serait une invitation.
         run: |
           if [ -z "${VPS:-}" ]; then
-            echo "::error::la variable de dépôt VPS_HOST n'est pas posée."
-            echo "Settings → Secrets and variables → Actions → onglet « Variables » → New repository variable,"
-            echo "nom VPS_HOST, valeur l'adresse du serveur. Une variable, pas un secret : elle n'a pas"
-            echo "besoin d'être chiffrée, mais elle n'a rien à faire dans un dépôt public."
+            echo "::error::l'adresse du serveur n'est pas connue de ce workflow."
+            echo "Settings → Secrets and variables → Actions → onglet « Secrets » → New repository secret,"
+            echo "nom VPS_HOST. Un secret, pas une variable : GitHub imprime la valeur d'une variable"
+            echo "dans le bloc env: de chaque étape, et les journaux de ce dépôt sont publics."
             exit 1
           fi
 
@@ -130,11 +161,11 @@ jobs:
         # confondre ferait chercher un mot de passe alors que c'est un pare-feu, ou l'inverse.
         run: |
           if nc -z -w 10 "$VPS" 22; then
-            echo "$VPS:22 accepte les connexions"
+            echo "le port 22 du serveur accepte les connexions"
           else
-            echo "::error::$VPS:22 ne répond pas. Machine éteinte, adresse changée, ou pare-feu."
-            echo "L'adresse utilisée est « $VPS ». Pour en changer sans toucher au code, posez la"
-            echo "variable de dépôt VPS_HOST (Settings → Secrets and variables → Actions → Variables)."
+            echo "::error::le port 22 du serveur ne répond pas. Machine éteinte, adresse changée, ou pare-feu."
+            echo "Pour en changer sans toucher au code, posez le secret de dépôt VPS_HOST"
+            echo "(Settings → Secrets and variables → Actions → Secrets)."
             exit 1
           fi
 
@@ -172,14 +203,14 @@ jobs:
           }
           if essai "$MDP"; then RETENU="$MDP"
           else
-            echo "::error::connexion refusée par $VPS."
+            echo "::error::connexion refusée par le serveur."
             echo "--- ce que ssh a dit ---"
             sed 's/^/  /' /tmp/ssh.err || true
             echo
             echo "Trois causes possibles, dans l'ordre de probabilité :"
             echo "  1. le mot de passe du secret VPS_PASSWORD n'est plus le bon ;"
             echo "  2. le serveur refuse l'authentification par mot de passe (voir la liste ci-dessus) ;"
-            echo "  3. ce n'est pas la bonne machine — l'adresse utilisée est « $VPS »."
+            echo "  3. ce n'est pas la bonne machine — vérifiez le secret VPS_HOST."
             exit 1
           fi
           echo "::add-mask::$RETENU"
@@ -210,10 +241,38 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
-      VPS: ${{ vars.VPS_HOST }}
+      VPS_SECRET: ${{ secrets.VPS_HOST }}
+      VPS_VAR: ${{ vars.VPS_HOST }}
       DISTANT: /root/prophet_os
     steps:
       - uses: actions/checkout@v4
+
+      - name: Résoudre l'adresse du serveur, sans l'écrire dans le journal
+        # L'adresse était une **variable** de dépôt. GitHub n'imprime pas la valeur d'un secret,
+        # mais il imprime celle d'une variable — dans le bloc `env:` de chaque étape, et les
+        # journaux d'Actions d'un dépôt public sont publics. L'adresse d'une machine dont on
+        # documente par ailleurs qu'elle accepte `root` par mot de passe s'est donc retrouvée en
+        # clair dans plusieurs exécutions.
+        #
+        # Elle est maintenant cherchée d'abord comme **secret** `VPS_HOST`, que GitHub masque
+        # partout et de lui-même. La variable reste acceptée pour que rien ne casse le temps de la
+        # déplacer, et elle est masquée dès cette étape — ce qui couvre toutes les suivantes, mais
+        # pas le bloc `env:` de celle-ci. Tant que l'adresse est une variable, elle fuit une fois
+        # par exécution. La déplacer dans les secrets ferme cela complètement.
+        run: |
+          set -u
+          if [ -n "${VPS_SECRET:-}" ]; then ADRESSE="$VPS_SECRET"; SOURCE="le secret VPS_HOST"
+          elif [ -n "${VPS_VAR:-}" ]; then ADRESSE="$VPS_VAR"; SOURCE="la variable VPS_HOST (à déplacer dans les secrets)"
+          else
+            echo "::error::ni le secret ni la variable VPS_HOST ne sont posés."
+            echo "Settings → Secrets and variables → Actions → onglet « Secrets » → New repository secret,"
+            echo "nom VPS_HOST, valeur l'adresse du serveur. Un secret, pas une variable : ce dépôt est"
+            echo "public, et GitHub imprime les variables dans le journal de chaque étape."
+            exit 1
+          fi
+          echo "::add-mask::$ADRESSE"
+          echo "VPS=$ADRESSE" >> "$GITHUB_ENV"
+          echo "adresse prise dans $SOURCE"
 
       - name: Outils de connexion
         run: sudo apt-get update -qq && sudo apt-get -y -qq install sshpass rsync
@@ -292,39 +351,68 @@ jobs:
       # et des paramètres de position, et rien de tout cela n'a à sortir de la machine.
       - name: Supprimer Hermes
         if: ${{ inputs.supprimer_hermes == 'true' }}
-        timeout-minutes: 30
+        timeout-minutes: 45
         run: |
           sshpass -e ssh $SSHOPTS "root@$VPS" 'bash -s' <<'DISTANT_SUPPRESSION'
           set -u
           DATE=$(date +%Y%m%d-%H%M%S)
-          ARCHIVE="/root/hermes-sauvegarde-$DATE.tar.gz"
+          ARCHIVE="/root/hermes-sauvegarde-$DATE.tar"
 
           if [ ! -d /root/hermes ]; then
             echo "/root/hermes n'existe pas : rien à archiver ni à supprimer"
           else
+            # Mesurer avant d'agir. Le premier essai a compressé avec gzip et s'est fait couper à
+            # trente minutes sans avoir fini — sans qu'on sache jamais s'il restait une minute ou
+            # une heure, puisque rien n'avait été mesuré. Une étape qui peut durer doit d'abord
+            # dire combien il y en a.
+            OCTETS=$(du -sb /root/hermes | cut -f1)
+            LIBRE=$(df -B1 --output=avail /root | tail -1)
             echo "--- ce qui va être archivé ---"
-            du -sh /root/hermes
-            echo "--- archivage vers $ARCHIVE ---"
-            # `--warning=no-file-changed` : un fichier qui bouge pendant l'archivage fait sortir
-            # tar en 1 sans que l'archive soit mauvaise. On juge sur la relecture, pas sur ce code.
-            tar czf "$ARCHIVE" --warning=no-file-changed -C /root hermes || true
+            printf '  %s dans %s fichiers\n' "$(du -sh /root/hermes | cut -f1)" "$(find /root/hermes -type f | wc -l)"
+            printf '  place libre : %s\n' "$(df -h --output=avail /root | tail -1 | tr -d ' ')"
+
+            # Une marge d'un dixième : une archive qui remplit le disque en le remplissant casse
+            # la machine qu'on essayait de préserver.
+            if [ "$LIBRE" -lt "$((OCTETS + OCTETS / 10))" ]; then
+              echo "::error::pas assez de place pour l'archive ($OCTETS octets à copier, $LIBRE libres)"
+              echo "Rien n'est supprimé. Videz d'abord, ou copiez ailleurs à la main."
+              exit 1
+            fi
+
+            # **Sans compression.** Le premier essai utilisait `czf`, et gzip sur des données déjà
+            # compressées — historiques de marché, parquet, journaux gzippés — coûte tout le temps
+            # du monde pour quelques pour cent. Cette archive est une sécurité de quelques heures
+            # avant un effacement, pas un envoi. Un `tar` nu va à la vitesse du disque.
+            echo "--- archivage vers $ARCHIVE (sans compression) ---"
+            debut=$(date +%s)
+            tar cf "$ARCHIVE" --warning=no-file-changed -C /root hermes || true
+            echo "  $(( ($(date +%s) - debut) / 60 )) min, $(du -h "$ARCHIVE" 2>/dev/null | cut -f1)"
+
             if [ ! -s "$ARCHIVE" ]; then
               echo "::error::l'archive est vide ou absente ; rien n'est supprimé"
               exit 1
             fi
+
             echo "--- relecture de l'archive avant tout effacement ---"
-            if ! tar tzf "$ARCHIVE" >/tmp/contenu-archive.txt 2>/tmp/erreur-archive.txt; then
+            if ! tar tf "$ARCHIVE" >/tmp/contenu-archive.txt 2>/tmp/erreur-archive.txt; then
               echo "::error::l'archive ne se relit pas ; rien n'est supprimé"
               sed 's/^/  /' /tmp/erreur-archive.txt
               exit 1
             fi
-            echo "  $(wc -l < /tmp/contenu-archive.txt) entrées, $(du -h "$ARCHIVE" | cut -f1)"
-            echo "  premières entrées :"
-            head -5 /tmp/contenu-archive.txt | sed 's/^/    /'
+            # Le compte des fichiers, pas seulement « tar a bien voulu la lire ». Une archive
+            # tronquée au premier bloc se relit sans se plaindre.
+            DEDANS=$(grep -vc '/$' /tmp/contenu-archive.txt || echo 0)
+            DEHORS=$(find /root/hermes -type f | wc -l)
+            printf '  %s fichiers dans l archive, %s sur le disque\n' "$DEDANS" "$DEHORS"
+            if [ "$DEDANS" -lt "$DEHORS" ]; then
+              echo "::error::l'archive contient moins de fichiers que le répertoire ; rien n'est supprimé"
+              exit 1
+            fi
             chmod 600 "$ARCHIVE"
+
             echo "--- effacement ---"
             rm -rf /root/hermes
-            [ -d /root/hermes ] && { echo "::error::/root/hermes est toujours là"; exit 1; }
+            if [ -d /root/hermes ]; then echo "::error::/root/hermes est toujours là"; exit 1; fi
             echo "  /root/hermes supprimé ; l'archive reste dans $ARCHIVE, en 0600"
           fi
 
@@ -350,7 +438,7 @@ jobs:
           fi
 
           echo "--- ce qui reste au nom d'Hermes ---"
-          ls -d /root/hermes* 2>/dev/null | sed 's/^/  /' || echo "  (que l'archive, si elle est ailleurs)"
+          ls -ld /root/hermes* 2>/dev/null | sed 's/^/  /' || echo "  rien"
           systemctl list-units --all --no-legend 'hermes*' 2>/dev/null | sed 's/^/  /' || true
           echo
           echo "disque : $(df -h / | awk 'NR==2{print $4" libres"}')"
