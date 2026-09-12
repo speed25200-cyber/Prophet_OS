@@ -185,6 +185,17 @@ désormais, et `tools/install-isolation.sh` le traite sans rien modifier sans au
 
 Les pilotes de clients officiels sont testés jusqu'à la limite de ce qui est vérifiable sans compte : construction de la ligne de commande, environnement transmis, détection de session, messages d'erreur. L'exécution de bout en bout exige une connexion réelle.
 
+**L'autorisation au niveau du socket est grossière.** Un pair est accepté s'il appartient au
+groupe `prophet-system`, et il a alors accès à *toutes* les méthodes système du daemon. C'est
+suffisant entre daemons, qui se font mutuellement confiance par construction, mais la surface doit
+elle aussi en faire partie pour lire les tâches — et elle obtient du même coup un accès qu'elle
+n'utilise pas. Restreindre demanderait une notion de méthode autorisée par pair que `prophet-ipc`
+n'a pas. À faire avant qu'un programme moins fiable qu'un afficheur ne parle à un daemon.
+
+**Rien de tout cela n'a démarré sous systemd.** Les sept daemons sont exercés par des tests qui
+lancent le binaire et lui parlent ; aucun n'a encore tourné dans une unité, avec le durcissement
+du module et les permissions réelles des sockets. C'est M9-T6 qui le dira.
+
 **Le serveur de l'utilisateur reste inatteint** (12 septembre). Le workflow qui l'atteindrait
 existe et est poussé — `.github/workflows/verifier-sur-le-serveur.yml` — mais il ne peut pas
 encore tourner. Deux obstacles, tous deux hors de portée d'un agent, décrits en détail dans

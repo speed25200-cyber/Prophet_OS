@@ -32,13 +32,22 @@ in
       };
     };
 
-    # Le compte qui tient l'écran. Il n'a aucun privilège : il affiche, il ne décide de rien. Ce
-    # qu'il transmet quand un humain tranche une approbation passe par `capd`, qui vérifie.
+    # Le compte qui tient l'écran. Il affiche, il ne décide de rien : ce qu'il transmet quand un
+    # humain tranche une approbation passe par `capd`, qui vérifie.
+    #
+    # `prophet-system` lui est nécessaire pour atteindre les sockets : `/run/prophet` est en 0750
+    # pour ce groupe, et les sockets en 0660. Sans lui, la surface ne joindrait aucun daemon et
+    # afficherait un champ vide en permanence — ce qui ressemblerait à une machine au repos.
+    #
+    # Ce que cela donne, dit franchement : au niveau du socket, la surface a le même accès qu'un
+    # daemon. Le restreindre demanderait une notion de méthode autorisée par pair que `prophet-ipc`
+    # n'a pas encore ; c'est noté dans `docs/STATUS.md`. Le durcissement ci-dessous limite le reste
+    # — pas de réseau, pas d'écriture ailleurs, pas d'acquisition de privilège.
     users.users.surface = {
       isSystemUser = true;
       group = "surface";
       description = "Surface d'observation Prophet OS";
-      extraGroups = [ "video" "input" "render" ];
+      extraGroups = [ "video" "input" "render" "prophet-system" ];
     };
     users.groups.surface = { };
 
@@ -74,6 +83,11 @@ in
         RestrictNamespaces = true;
         SystemCallArchitectures = "native";
         StateDirectory = "prophet-surface";
+        # `ProtectSystem = "strict"` rend toute la hiérarchie en lecture seule. Se connecter à un
+        # socket n'est pas une écriture de système de fichiers, mais plutôt que de parier sur ce
+        # détail — et de découvrir au premier démarrage sur une vraie machine que l'écran reste
+        # vide — on le déclare.
+        ReadWritePaths = [ "/run/prophet" ];
       };
     };
 
