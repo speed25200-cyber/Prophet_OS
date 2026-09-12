@@ -78,9 +78,34 @@ in
       serviceConfig = {
         User = "surface";
         Group = "surface";
-        # Le premier terminal virtuel : la surface est ce que la machine montre en s'allumant,
-        # pas une application qu'on va chercher.
-        TTYPath = "/dev/tty1";
+
+        # Le **septième** terminal virtuel, et non le premier.
+        #
+        # Elle était sur `/dev/tty1`, avec `TTYVHangup` et `Restart = "always"`. Sur une machine
+        # dont le pilote graphique refuse, cela fait cinq tentatives en une minute, et **chaque
+        # tentative raccroche le terminal où le propriétaire tape son mot de passe**. Le test du
+        # système installé l'a montré en toutes lettres, à vingt-deux millisecondes près :
+        #
+        #     16:42:00.600  machine: sending keys 'essai-prophet\n'
+        #     16:42:00.686  systemd: prophet-surface.service: Scheduled restart job, counter 4
+        #     16:42:00.708  unix_chkpwd: password check failed for user (prophet)
+        #
+        # puis `getty@tty1` redémarré trois fois de suite. Sur un vrai PC, le propriétaire aurait
+        # tapé le bon mot de passe et lu « Login incorrect », sans écran graphique pour lui dire
+        # pourquoi, sur une machine dont il vient d'effacer le disque. Le pire moment possible.
+        #
+        # Le septième terminal est celui que les serveurs graphiques occupent depuis toujours, et
+        # pour cette raison exacte : NixOS ne fait naître de `getty` que sur tty1 à tty6, donc
+        # personne ne se connecte sur tty7. Une surface qui s'y débat ne prend plus en otage la
+        # seule porte d'entrée de la machine.
+        #
+        # Ce que cela change à l'écran : quand la surface démarre, le compositeur bascule sur son
+        # terminal et l'occupe — c'est ce que fait un serveur graphique. Quand elle échoue, le
+        # propriétaire garde sous les yeux une invite de connexion utilisable, avec au-dessus le
+        # message du service de repli qui dit pourquoi l'écran n'est pas ce qu'il devrait être.
+        # Une invite de connexion et une explication valent mieux qu'un écran noir, et infiniment
+        # mieux qu'une invite qui refuse le bon mot de passe.
+        TTYPath = "/dev/tty7";
         TTYReset = true;
         TTYVHangup = true;
         StandardInput = "tty-force";
@@ -121,6 +146,9 @@ in
     systemd.services.prophet-surface-repli = {
       description = "Prophet OS — dire pourquoi l'écran est resté noir";
       after = [ "prophet-surface.service" ];
+      # Sur `tty1`, et non sur le terminal de la surface. La surface a déménagé sur tty7 ; ce
+      # message-ci doit rester là où un humain regarde, c'est-à-dire devant l'invite de connexion.
+      # L'écrire sur tty7 reviendrait à expliquer un écran noir sur cet écran noir.
       unitConfig.ConditionPathExists = "/dev/tty1";
       serviceConfig = {
         Type = "oneshot";

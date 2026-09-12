@@ -156,13 +156,23 @@ pkgs.testers.runNixOSTest {
         # le service de repli a écrit pourquoi. Les deux sont des réponses ; `inactive` et
         # `activating` n'en sont pas.
         #
+        # Mais `active` seul n'est pas un état **terminal** pour une unité en `Restart = "always"`.
+        # Entre deux tentatives, elle passe par `active` une fraction de seconde avant de mourir
+        # à nouveau — la première version de cette attente s'arrêtait là et déclarait la surface
+        # « posée » alors qu'elle en était à sa quatrième relance. On regarde donc si l'état
+        # **tient** : `failed` est définitif par construction (la limite de démarrages est
+        # atteinte), tandis qu'un `active` qui survit à dix secondes est un vrai `active`.
+        #
         # L'attente est enveloppée : si elle expire, c'est justement le cas que ce sous-test
         # existe pour attraper, et il vaut mieux l'annoncer avec le journal sous les yeux qu'avec
         # « timeout » pour tout message.
         try:
             machine.wait_until_succeeds(
-                "case \"$(systemctl show -p ActiveState --value prophet-surface.service)\" in "
-                "active|failed) exit 0 ;; *) exit 1 ;; esac",
+                "etat() { systemctl show -p ActiveState --value prophet-surface.service; }; "
+                "case \"$(etat)\" in "
+                "failed) exit 0 ;; "
+                "active) sleep 10; [ \"$(etat)\" = active ] && exit 0 || exit 1 ;; "
+                "*) exit 1 ;; esac",
                 timeout=180,
             )
         except Exception as expiration:
@@ -176,18 +186,45 @@ pkgs.testers.runNixOSTest {
             f"machine atteint, et la cible par défaut est « {cible} »"
         )
 
+    with subtest("la surface ne prend pas en otage le terminal de connexion"):
+        # Le défaut que ce sous-test existe pour empêcher, et qui a coûté une exécution entière.
+        #
+        # La surface tenait `/dev/tty1` avec `TTYVHangup` et `Restart = "always"`. Sur une machine
+        # sans pilote graphique, elle redémarre cinq fois en une minute, et chaque tentative
+        # raccroche le terminal. Le journal du 12 septembre 2026, à vingt-deux millisecondes près :
+        #
+        #     16:42:00.600  machine: sending keys 'essai-prophet\n'
+        #     16:42:00.686  prophet-surface.service: Scheduled restart job, counter is at 4
+        #     16:42:00.708  unix_chkpwd: password check failed for user (prophet)
+        #
+        # Le mot de passe était le bon. Sur un vrai PC, le propriétaire aurait lu « Login
+        # incorrect » sans écran graphique pour lui dire pourquoi, sur une machine dont il vient
+        # d'effacer le disque.
+        #
+        # Le sous-test de connexion, lui, passait une fois sur deux selon l'instant où la surface
+        # en était de ses cinq tentatives. Un test qui dépend d'une course ne protège de rien : il
+        # a déclaré la machine bonne au tour précédent. Celui-ci ne court pas — il lit une
+        # déclaration, et elle ne dépend d'aucun instant.
+        terminal = machine.succeed(
+            "systemctl show -p TTYPath --value prophet-surface.service"
+        ).strip()
+        print(f"la surface tient {terminal}")
+        assert terminal != "/dev/tty1", (
+            "la surface est revenue sur /dev/tty1. Avec TTYVHangup et Restart=always, chacune de "
+            "ses tentatives raccroche l'invite où le propriétaire tape son mot de passe, et le "
+            "bon mot de passe est refusé. Le septième terminal est libre — NixOS ne fait naître "
+            "de getty que sur tty1 à tty6 — et c'est là que les serveurs graphiques vivent, pour "
+            "cette raison exacte."
+        )
+
     with subtest("le propriétaire ouvre une session et voit sa machine"):
         # Le test qui compte pour celui qui installera ce système sur son PC : il tape son
         # identifiant, son mot de passe, et il est devant quelque chose d'utilisable.
         #
-        # On attend d'abord que la surface ait fini de se débattre. Elle réclame `/dev/tty1` avec
-        # `TTYVHangup`, donc chacune de ses tentatives raccroche le terminal — et il n'y a pas
-        # d'adaptateur graphique ici, donc elle en fait cinq avant de renoncer. Se connecter
-        # pendant ce temps échouerait pour une raison qui n'a rien à voir avec la connexion.
-        #
-        # Ce n'est pas qu'un artefact de test : sur une machine réelle dont le pilote graphique
-        # refuse, l'invite de connexion du propriétaire serait raccrochée cinq fois en une minute.
-        # C'est noté dans `docs/components/surface.md`.
+        # Il n'y a plus rien à attendre avant. La surface vit sur `tty7` depuis la correction du
+        # 12 septembre 2026 : quoi qu'elle fasse — démarrer, échouer, se relancer cinq fois — elle
+        # ne touche pas ce terminal-ci. C'était la condition pour que ce sous-test cesse d'être
+        # une course dont l'issue dépendait de l'instant.
         machine.wait_for_unit("getty@tty1.service")
         machine.wait_until_tty_matches("1", "login:")
         machine.send_chars("prophet\n")

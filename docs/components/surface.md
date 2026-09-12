@@ -1,6 +1,6 @@
 # `prophet-surface` — surface d'observation
 
-- **Affichage** : `cage -s` sur `/dev/tty1`, sans gestionnaire de session ni de fenêtres
+- **Affichage** : `cage -s` sur `/dev/tty7`, sans gestionnaire de session ni de fenêtres ; `tty1` reste à la connexion
 - **Utilisateur** : `surface`, groupes `video input render prophet-system`
 - **Lit** : `agentd` (tâches), `capd` (décisions), `sandboxd` (isolation)
 - **Crate** : `crates/surface`
@@ -54,21 +54,43 @@ n'échoue pas, ne journalise rien, et ne déclenche pas son service de repli.
 `image/tests/installe.nix` démarre une vraie machine et vérifie que la surface est bien lancée.
 C'est ce qui empêche qu'une des deux lignes parte sans l'autre.
 
-**Question restée ouverte : le terminal disputé.** La surface réclame `/dev/tty1` avec
-`StandardInput = "tty-force"` et `TTYVHangup = true`, et `getty@tty1` le réclame aussi. Chaque
-tentative de la surface raccroche donc le terminal.
+**Le terminal disputé, et ce qu'il a coûté.** Cette section posait une question ouverte : la
+surface réclamait `/dev/tty1` avec `TTYVHangup = true`, et `getty@tty1` le réclamait aussi.
+Chaque tentative de la surface raccrochait le terminal, et on estimait que le propriétaire
+attendrait une minute avant de pouvoir taper.
 
-Sur une machine dont le pilote graphique refuse, cela veut dire une chose précise et désagréable :
-l'invite de connexion du propriétaire est raccrochée **cinq fois en une minute** avant que la
-surface renonce. Ensuite seulement il peut taper. Ce n'est pas un blocage — le service de repli
-écrit alors son diagnostic au même endroit — mais c'est une minute pendant laquelle la machine a
-l'air cassée à quelqu'un qui vient d'installer son système.
+C'était optimiste. Le test du système installé a montré pire, le 12 septembre 2026, à vingt-deux
+millisecondes près :
 
-Deux sorties, aucune prise pour l'instant : retirer le getty de `tty1` (plus cohérent, moins
-rattrapable — c'est le seul terminal où l'on puisse taper quand tout le reste manque), ou donner à
-la surface son propre terminal virtuel et laisser `tty1` à la connexion. La seconde demande de
-savoir comment `cage` bascule de terminal, ce qu'aucun test de ce dépôt ne peut vérifier sans
-adaptateur graphique.
+```
+16:42:00.600  machine: sending keys 'essai-prophet\n'
+16:42:00.686  prophet-surface.service: Scheduled restart job, restart counter is at 4
+16:42:00.708  unix_chkpwd: password check failed for user (prophet)
+```
+
+Le mot de passe était le bon. Raccrocher le terminal pendant que quelqu'un tape ne lui fait pas
+perdre une minute : cela lui fait lire **« Login incorrect »** alors qu'il n'a pas fait d'erreur,
+sur une machine dont il vient d'effacer le disque, sans écran graphique pour lui dire pourquoi. Il
+n'y a pas de pire moment pour donner à un système l'air de refuser son propriétaire.
+
+**La seconde sortie a été prise** : la surface vit sur `/dev/tty7`, et `tty1` reste à la connexion.
+Le septième terminal est celui que les serveurs graphiques occupent depuis toujours, et pour cette
+raison exacte — NixOS ne fait naître de `getty` que sur `tty1` à `tty6`, donc personne ne se
+connecte sur `tty7`. Une surface qui s'y débat ne prend plus en otage la seule porte d'entrée de la
+machine. `image/tests/installe.nix` le garde, par un sous-test qui lit `TTYPath` plutôt que de
+courir contre une relance : « la surface ne prend pas en otage le terminal de connexion ».
+
+Le service de repli, lui, **reste sur `tty1`** : c'est là que le propriétaire regarde. Expliquer un
+écran noir sur cet écran noir n'aurait servi à personne.
+
+**Ce qui reste inconnu, et qu'il ne faut pas croire réglé.** Que `cage` bascule effectivement sur
+`tty7` et y affiche quelque chose n'est vérifié nulle part : aucun coureur d'intégration continue
+n'a d'adaptateur graphique utilisable, et les six tests de la surface sont marqués `needs_gpu`.
+C'était déjà vrai quand elle était sur `tty1` — on n'a jamais vu cette surface à l'écran. Le
+déménagement ne dégrade donc rien de vérifié ; il supprime un mal, lui, mesuré. Si la bascule ne se
+fait pas sur une machine réelle, le propriétaire aura sous les yeux une invite de connexion
+utilisable et le message du service de repli, ce qui est très exactement le comportement voulu
+quand l'écran ne peut pas s'allumer.
 
 ## Si l'écran reste noir
 
