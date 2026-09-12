@@ -65,7 +65,20 @@ jobs:
       VPS: ${{ vars.VPS_HOST || '178.104.191.79' }}
     steps:
       - name: Outils de connexion
-        run: sudo apt-get update -qq && sudo apt-get -y -qq install sshpass
+        run: sudo apt-get update -qq && sudo apt-get -y -qq install sshpass netcat-openbsd
+
+      - name: La machine est-elle joignable ?
+        # Distinguer « injoignable » de « refusée » avant même de présenter un identifiant. Les
+        # confondre ferait chercher un mot de passe alors que c'est un pare-feu, ou l'inverse.
+        run: |
+          if nc -z -w 10 "$VPS" 22; then
+            echo "$VPS:22 accepte les connexions"
+          else
+            echo "::error::$VPS:22 ne répond pas. Machine éteinte, adresse changée, ou pare-feu."
+            echo "L'adresse utilisée est « $VPS ». Pour en changer sans toucher au code, posez la"
+            echo "variable de dépôt VPS_HOST (Settings → Secrets and variables → Actions → Variables)."
+            exit 1
+          fi
 
       - name: Se connecter et regarder
         env:
@@ -81,14 +94,33 @@ jobs:
             exit 0
           fi
           SSHOPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
-          essai() { timeout 25 sshpass -p "$1" ssh $SSHOPTS "root@$VPS" "echo __ok__" 2>/dev/null | grep -q __ok__; }
+
+          # Ce que le serveur accepte comme méthode. Si le mot de passe n'est pas dans la liste,
+          # aucun mot de passe ne marchera jamais, et le dire évite d'en essayer trois.
+          echo "--- méthodes d'authentification offertes ---"
+          ssh -o PreferredAuthentications=none -o StrictHostKeyChecking=accept-new \
+              -o ConnectTimeout=10 "root@$VPS" 2>&1 | head -5 | sed 's/^/  /' || true
+
+          # Une tentative, et sa vraie raison d'échec. Le mot de passe n'apparaît nulle part :
+          # `sshpass` le lit dans l'environnement, et seule la sortie d'erreur de ssh est montrée.
+          essai() {
+            SSHPASS="$1" timeout 25 sshpass -e ssh $SSHOPTS -o PreferredAuthentications=password \
+              -o PubkeyAuthentication=no "root@$VPS" "echo __ok__" 2>/tmp/ssh.err | grep -q __ok__
+          }
           # Hetzner impose un changement à la première connexion. Le dépôt Hermes documente que son
           # propre outillage a fait tourner le mot de passe vers « <original>.Hermes1 » ; les deux
           # formes sont donc essayées, et aucune autre.
           if essai "$MDP"; then RETENU="$MDP"
           elif essai "${MDP}.Hermes1"; then RETENU="${MDP}.Hermes1"
           else
-            echo "::error::connexion refusée. Si le mot de passe a changé depuis, mettez à jour le secret VPS_PASSWORD."
+            echo "::error::connexion refusée par $VPS."
+            echo "--- ce que ssh a dit ---"
+            sed 's/^/  /' /tmp/ssh.err || true
+            echo
+            echo "Trois causes possibles, dans l'ordre de probabilité :"
+            echo "  1. le mot de passe du secret VPS_PASSWORD n'est plus le bon ;"
+            echo "  2. le serveur refuse l'authentification par mot de passe (voir la liste ci-dessus) ;"
+            echo "  3. ce n'est pas la bonne machine — l'adresse utilisée est « $VPS »."
             exit 1
           fi
           echo "::add-mask::$RETENU"
