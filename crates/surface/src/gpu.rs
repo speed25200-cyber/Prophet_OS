@@ -168,11 +168,12 @@ impl Cible {
             mapped_at_creation: false,
         });
 
-        let mut encodeur = contexte
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("relecture"),
-            });
+        let mut encodeur =
+            contexte
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("relecture"),
+                });
         encodeur.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.texture,

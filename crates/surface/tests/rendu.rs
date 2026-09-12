@@ -63,7 +63,9 @@ fn rendre(avec_decision: bool, temps: f32) -> Vec<u8> {
     rendu
         .dessiner(&contexte, &cible, &scene(avec_decision), temps)
         .expect("le rendu doit aboutir");
-    cible.pixels(&contexte).expect("l'image doit être relisible")
+    cible
+        .pixels(&contexte)
+        .expect("l'image doit être relisible")
 }
 
 /// Fraction de pixels dont la luminosité dépasse un seuil.
@@ -131,7 +133,9 @@ fn une_decision_change_l_ecran() {
         .0
         .iter()
         .zip(avec.as_chunks::<4>().0.iter())
-        .filter(|(a, b)| a[0].abs_diff(b[0]) > 8 || a[1].abs_diff(b[1]) > 8 || a[2].abs_diff(b[2]) > 8)
+        .filter(|(a, b)| {
+            a[0].abs_diff(b[0]) > 8 || a[1].abs_diff(b[1]) > 8 || a[2].abs_diff(b[2]) > 8
+        })
         .count();
     let part = differents as f32 / (sans.len() / 4) as f32;
     assert!(

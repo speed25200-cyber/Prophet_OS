@@ -34,8 +34,18 @@ fn main() -> ExitCode {
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--capture" => fichier = arguments.next(),
-            "--largeur" => largeur = arguments.next().and_then(|v| v.parse().ok()).unwrap_or(1920),
-            "--hauteur" => hauteur = arguments.next().and_then(|v| v.parse().ok()).unwrap_or(1080),
+            "--largeur" => {
+                largeur = arguments
+                    .next()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(1920)
+            }
+            "--hauteur" => {
+                hauteur = arguments
+                    .next()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(1080)
+            }
             "--temps" => temps = arguments.next().and_then(|v| v.parse().ok()).unwrap_or(8.0),
             "--decision" => decision = true,
             "--aide" | "-h" => {
