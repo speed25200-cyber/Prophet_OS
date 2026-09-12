@@ -13,7 +13,14 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # Historique complet, pour gitleaks. Il scanne la plage `<premier poussé>^..<dernier>` ;
+      # avec le clone superficiel par défaut, le parent du premier commit n'existe pas, git
+      # refuse la plage, et l'action sort en échec après avoir scanné zéro octet. L'échec
+      # ressemble alors à une fuite détectée alors que rien n'a été regardé — le pire des
+      # messages, puisqu'il fait chercher un secret qui n'existe pas.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       # Pas d'action de chaîne d'outils : rustup lit rust-toolchain.toml, donc la CI et une
       # machine de développement compilent avec exactement la même version. Installer « stable »
       # ici laissait les deux dériver, et des lints n'apparaissaient qu'en CI.
