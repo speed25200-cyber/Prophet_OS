@@ -7,6 +7,9 @@ repository.workspace = true
 description = "Mémoire de Prophet OS : de travail, épisodique et sémantique, cloisonnée et éditable par l'humain."
 
 [dependencies]
+prophet-ipc = { workspace = true }
+prophet-daemon = { workspace = true }
+anyhow = { workspace = true }
 prophet-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -15,8 +18,10 @@ time = { workspace = true }
 blake3 = { workspace = true }
 rusqlite = { workspace = true }
 tracing = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
+prophet-daemon = { workspace = true, features = ["essai"] }
 tempfile = { workspace = true }
 
 [lints]

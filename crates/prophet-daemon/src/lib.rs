@@ -107,6 +107,19 @@ pub fn gid_du_groupe(nom: &str) -> Option<u32> {
     })
 }
 
+/// Identifiant numérique d'un utilisateur, lu dans `/etc/passwd`.
+///
+/// Sert aux daemons qui ne servent pas seulement un groupe mais une personne précise : le Vault
+/// ne révèle une valeur qu'au proxy de sortie, et à personne d'autre.
+#[must_use]
+pub fn uid_de_l_utilisateur(nom: &str) -> Option<u32> {
+    let contenu = std::fs::read_to_string("/etc/passwd").ok()?;
+    contenu.lines().find_map(|ligne| {
+        let mut champs = ligne.split(':');
+        (champs.next()? == nom).then(|| champs.nth(1)?.parse().ok())?
+    })
+}
+
 /// Charge une clé de signature, ou en crée une au premier démarrage.
 ///
 /// Le mode `0600` est vérifié **après** écriture, et non supposé : un `umask` hostile ferait mentir
