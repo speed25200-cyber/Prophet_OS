@@ -8,7 +8,13 @@ use prophet_types::manifest::{Manifest, Privacy};
 use serde::{Deserialize, Serialize};
 
 /// Ce qui est disponible au moment du choix.
+///
+/// `#[serde(default)]` porte un sens, pas une commodité : ne pas mentionner une catégorie veut
+/// dire qu'elle est vide. Un appelant qui ne connaît que les modèles locaux n'a pas à énumérer
+/// trois listes vides pour le dire, et exiger qu'il le fasse ferait échouer sa description sur une
+/// question de forme plutôt que de fond.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Availability {
     /// Pilotes de clients officiels connectés.
     pub logged_in_drivers: Vec<String>,

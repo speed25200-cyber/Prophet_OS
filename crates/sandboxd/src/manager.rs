@@ -41,7 +41,11 @@ pub enum SandboxError {
 }
 
 /// État d'une sandbox.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Sérialisable : c'est ce que `prophet-sandboxd` rend à qui demande, et ce que la surface montre.
+/// Un état qu'on ne peut pas transmettre ne sert qu'au processus qui le détient.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SandboxState {
     /// En cours d'exécution.
     Running,

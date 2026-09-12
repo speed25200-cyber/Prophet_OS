@@ -143,7 +143,12 @@ pub struct Report {
 
 /// Le runtime.
 pub struct Runtime {
-    broker: Broker,
+    /// Le broker, quand le runtime émet lui-même les jetons.
+    ///
+    /// Il est absent dans le daemon : là, c'est `prophet-capd` qui émet, parce qu'une seule clé
+    /// doit signer les jetons de tout le système. Deux brokers avec deux clés produiraient des
+    /// jetons que le reste des services jugerait contrefaits — et ils auraient raison.
+    broker: Option<Broker>,
     home: PathBuf,
     tasks: BTreeMap<String, Task>,
     tokens: BTreeMap<String, Token>,
@@ -165,7 +170,24 @@ impl Runtime {
     #[must_use]
     pub fn new(broker: Broker, home: impl Into<PathBuf>) -> Self {
         Self {
-            broker,
+            broker: Some(broker),
+            home: home.into(),
+            tasks: BTreeMap::new(),
+            tokens: BTreeMap::new(),
+            journal: Vec::new(),
+            quota_policy: QuotaPolicy::default(),
+        }
+    }
+
+    /// Runtime sans broker, dont les jetons viennent d'ailleurs.
+    ///
+    /// C'est la forme qu'utilise `prophet-agentd` : il demande le jeton à `capd`, puis appelle
+    /// [`Runtime::plan_with_token`]. Appeler [`Runtime::plan`] sur un tel runtime échoue au lieu
+    /// d'émettre un jeton que personne d'autre ne reconnaîtrait.
+    #[must_use]
+    pub fn sans_broker(home: impl Into<PathBuf>) -> Self {
+        Self {
+            broker: None,
             home: home.into(),
             tasks: BTreeMap::new(),
             tokens: BTreeMap::new(),
@@ -185,6 +207,15 @@ impl Runtime {
     #[must_use]
     pub fn journal(&self) -> &[Draft] {
         &self.journal
+    }
+
+    /// Retire les événements accumulés et les rend.
+    ///
+    /// `prophet-agentd` les pousse vers `prophet-ledger` puis n'a plus à s'en soucier. Sans ce
+    /// retrait, chaque envoi rejouerait tout l'historique : le journal se remplirait de doublons,
+    /// et un journal qui raconte deux fois la même chose ne raconte plus rien de fiable.
+    pub fn retirer_le_journal(&mut self) -> Vec<Draft> {
+        std::mem::take(&mut self.journal)
     }
 
     /// Tâches connues.
@@ -218,6 +249,32 @@ impl Runtime {
     pub fn plan(
         &mut self,
         request: &PlanRequest<'_>,
+        now: OffsetDateTime,
+    ) -> Result<TaskPlan, RuntimeError> {
+        self.planifier(request, None, now)
+    }
+
+    /// Crée et planifie une tâche dont le jeton a été émis ailleurs.
+    ///
+    /// C'est la voie du daemon : `capd` a déjà fait l'intersection entre ce que la tâche demande
+    /// et ce que son manifeste plafonne, et le jeton qui en résulte est signé par la seule clé que
+    /// le reste du système reconnaît.
+    ///
+    /// # Errors
+    /// Aucun pilote disponible, ou capacités refusées.
+    pub fn plan_with_token(
+        &mut self,
+        request: &PlanRequest<'_>,
+        token: Token,
+        now: OffsetDateTime,
+    ) -> Result<TaskPlan, RuntimeError> {
+        self.planifier(request, Some(token), now)
+    }
+
+    fn planifier(
+        &mut self,
+        request: &PlanRequest<'_>,
+        jeton_fourni: Option<Token>,
         now: OffsetDateTime,
     ) -> Result<TaskPlan, RuntimeError> {
         let PlanRequest {
@@ -274,17 +331,27 @@ impl Runtime {
             executes_code,
         );
 
-        let token = self
-            .broker
-            .mint(
-                manifest,
-                id,
-                user,
-                requested,
-                i64::try_from(limits.wall_time_s).unwrap_or(1800),
-                now,
-            )
-            .map_err(|e| RuntimeError::Capability(e.to_string()))?;
+        let token = match &mut self.broker {
+            Some(broker) => broker
+                .mint(
+                    manifest,
+                    id,
+                    user,
+                    requested,
+                    i64::try_from(limits.wall_time_s).unwrap_or(1800),
+                    now,
+                )
+                .map_err(|e| RuntimeError::Capability(e.to_string()))?,
+            None => match jeton_fourni {
+                Some(jeton) => jeton,
+                None => {
+                    return Err(RuntimeError::Capability(
+                        "ce runtime n'émet pas de jetons : fournissez-en un (plan_with_token)"
+                            .to_owned(),
+                    ));
+                }
+            },
+        };
 
         let grants: Vec<String> = token
             .grants

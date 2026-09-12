@@ -7,6 +7,9 @@ repository.workspace = true
 description = "Agent Runtime de Prophet OS : cycle de vie des tâches, budgets, hiérarchie."
 
 [dependencies]
+anyhow = { workspace = true }
+prophet-daemon = { workspace = true }
+prophet-ipc = { workspace = true }
 prophet-types = { workspace = true }
 capd = { workspace = true }
 sfs = { workspace = true }
@@ -23,6 +26,7 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+prophet-daemon = { workspace = true, features = ["essai"] }
 tempfile = { workspace = true }
 ed25519-dalek = { workspace = true }
 rand = { workspace = true }

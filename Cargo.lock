@@ -22,11 +22,14 @@ dependencies = [
 name = "agentd"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "blake3",
  "capd",
  "ed25519-dalek",
  "ledger",
  "mcp-system",
+ "prophet-daemon",
+ "prophet-ipc",
  "prophet-types",
  "providers",
  "rand 0.8.8",
@@ -3198,15 +3201,19 @@ dependencies = [
 name = "sandboxd"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "capd",
  "libc",
  "nix",
+ "prophet-daemon",
+ "prophet-ipc",
  "prophet-types",
  "seccompiler",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.20",
+ "tokio",
  "tracing",
 ]
 

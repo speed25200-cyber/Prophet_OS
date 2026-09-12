@@ -103,7 +103,7 @@ continue exerce l'installeur sur un disque en boucle, puis produit `prophet-os-i
 Six options du Nix n'avaient jamais été évaluées avant ce jour et l'empêchaient — elles sont
 corrigées, et la liste est dans `docs/reports/phase0.md`.
 
-- [x] M9-T1 — Modules NixOS (2026-09-12, 24b8338) — modules NixOS, un service durci par daemon
+- [x] M9-T1 — Modules NixOS (2026-09-12) — modules NixOS, un service durci par daemon. **Cochée à tort jusqu'au 12 septembre au soir** : les sept services déclaraient un `ExecStart` vers un programme que l'atelier ne produisait pas. Une machine installée aurait démarré avec sept unités en échec. Les sept programmes existent désormais, et `tools/verifier-les-services.sh` refuse l'écart — il tourne dans `just check`
 - [x] M9-T2 — Noyau (2026-09-12, 24b8338) — exigences noyau documentées et conséquences d'une absence
 - [x] M9-T3 — Immuabilité et A/B (2026-09-12, 24b8338) — racine A/B, bascule automatique
 - [x] M9-T4 — Chiffrement (2026-09-12, 24b8338) — LUKS2, TPM avec repli par phrase de passe
@@ -140,6 +140,29 @@ corrigées, et la liste est dans `docs/reports/phase0.md`.
 - [ ] ⛔ M13-T2 — Ligne de base « pixels » — bloqué : exige un agent de référence exécutable
 - [x] M13-T3 — Suite adversariale (2026-09-12, 24b8338) — 20 scénarios, 20 sans conséquence
 - [x] M13-T4 — Rapport de phase 0 (2026-09-12, 24b8338) — docs/reports/phase0.md
+
+
+### Daemons — les programmes que les services déclaraient
+
+Écrits le 12 septembre 2026, après qu'un garde-fou a montré que les sept `ExecStart` de
+`image/modules/prophet.nix` ne nommaient aucun programme existant. Chacun a un test qui lance le
+**binaire** et lui parle par son socket, parce que c'est le binaire que systemd lancera.
+
+- [x] `prophet-capd` — `cap.check`, `cap.mint`, `cap.revoke`, `approval.*`. Un jeton signé par une
+  autre clé est refusé, et le motif nomme la signature
+- [x] `prophet-ledger` — seul écrivain du journal, scellement tous les 256 événements. Un appelant
+  ne peut pas choisir sa place dans la chaîne
+- [x] `prophet-vault` — `secrets.use` n'est servi qu'au compte du proxy de sortie ; sans ce compte,
+  personne n'obtient de valeur
+- [x] `prophet-memoryd` — espaces cloisonnés ; une recherche sans espace échoue au lieu de chercher
+  partout
+- [x] `prophet-egress` — le relais, écrit ici : jeton, `cap.check`, détection d'exfiltration, puis
+  seulement la sortie. Un `capd` injoignable ferme la sortie
+- [x] `prophet-sandboxd` — un niveau que la machine ne tient pas est refusé, jamais abaissé
+- [x] `prophet-agentd` — demande ses jetons à `capd` et pousse son journal vers `ledger` ; il
+  n'émet ni n'écrit lui-même
+- [x] `prophet-daemon` — la part commune : socket, état, clés, et surtout **à qui un daemon accepte
+  de parler**, écrite une fois pour que les sept copies ne divergent pas
 
 ## Blocages
 

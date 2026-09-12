@@ -26,6 +26,12 @@ jobs:
       # unique des échecs des niveaux 0 et 1 sur ce coureur.
       - name: Lever la restriction des espaces de noms
         run: PROPHET_AUTORISER_USERNS=1 sudo -E ./tools/install-isolation.sh userns
+      # Les sept services de l'image ont chacun leur programme. Ce contrôle est en tête parce
+      # qu'il coûte une seconde et qu'il attrape un défaut que rien d'autre ne voit : un
+      # `ExecStart` peut nommer un binaire inexistant sans que Nix, cargo ou systemd ne s'en
+      # aperçoivent avant le démarrage de la machine installée.
+      - name: Services déclarés et programmes produits
+        run: ./tools/verifier-les-services.sh
       - name: Format
         run: cargo fmt --all --check
       - name: Lints
