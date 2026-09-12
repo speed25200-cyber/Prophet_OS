@@ -196,6 +196,63 @@ fn identifiant(_montree: &Decision, approbations: &[Approval]) -> String {
         .unwrap_or_default()
 }
 
+/// Ce qui manque pour atteindre le niveau d'isolation suivant, en une phrase.
+///
+/// Le rapport complet de `sandboxd` fait plusieurs lignes ; la surface a une ligne. Y verser le
+/// rapport donnerait « il manque niveau maximal atteignable : 0 (0 confiné… » — illisible, et faux
+/// grammaticalement. On nomme donc ce qui manque, et seulement cela.
+///
+/// Rendre `None` veut dire « rien ne manque », ce que la surface affiche comme tel. Ne jamais le
+/// rendre par commodité : une machine incapable qui afficherait « tout est disponible » serait
+/// pire que muette.
+fn manque_pour_monter(capacites: &serde_json::Value) -> Option<String> {
+    let niveau = capacites["max_level"].as_u64().unwrap_or(0);
+    let present = |cle: &str| capacites[cle].as_bool().unwrap_or(false);
+    let outil = |cle: &str| capacites[cle].as_str().is_some();
+
+    let mut manques: Vec<&str> = Vec::new();
+    match niveau {
+        0 => {
+            // Pour le niveau 0 lui-même, d'abord : sans cela rien n'est isolé du tout.
+            if !present("user_namespaces") {
+                manques.push(if present("userns_restreint_par_politique") {
+                    "des espaces de noms que la politique de la machine n'interdit pas"
+                } else {
+                    "des espaces de noms utilisateur"
+                });
+            }
+            if capacites["landlock_abi"].is_null() {
+                manques.push("Landlock");
+            }
+            if !present("cgroups_v2") {
+                manques.push("cgroups v2");
+            }
+            if !outil("runsc") {
+                manques.push("gVisor");
+            }
+        }
+        1 => {
+            if !present("kvm") {
+                manques.push("l'accès à /dev/kvm");
+            }
+            if !outil("firecracker") {
+                manques.push("Firecracker");
+            }
+            if !present("microvm_images") {
+                manques.push("les images d'invité");
+            }
+        }
+        // Niveau 2 atteint : il n'y a pas de niveau au-dessus.
+        _ => return None,
+    }
+
+    let dernier = manques.pop()?;
+    if manques.is_empty() {
+        return Some(dernier.to_owned());
+    }
+    Some(format!("{} et {dernier}", manques.join(", ")))
+}
+
 /// La boucle qui interroge, pour toujours.
 fn interroger(sockets: &Sockets, partage: &Arc<Mutex<Partage>>) {
     let Ok(execution) = tokio::runtime::Builder::new_current_thread()
@@ -232,7 +289,7 @@ fn interroger(sockets: &Sockets, partage: &Arc<Mutex<Partage>>) {
                 etat.isolation = capacites.ok().map(|valeur| Isolation {
                     niveau_max: u8::try_from(valeur["max_level"].as_u64().unwrap_or(0))
                         .unwrap_or(0),
-                    manque: valeur["report"].as_str().map(str::to_owned),
+                    manque: manque_pour_monter(&valeur),
                 });
                 etat.panne = panne;
             }
@@ -358,5 +415,44 @@ mod tests {
         });
         // Ne doit ni paniquer, ni envoyer quoi que ce soit.
         source.repond(Reponse::Accepte);
+    }
+    #[test]
+    fn ce_qui_manque_se_dit_en_une_phrase() {
+        let sans_rien = serde_json::json!({
+            "max_level": 0, "user_namespaces": false, "landlock_abi": null,
+            "cgroups_v2": false, "runsc": null, "userns_restreint_par_politique": false
+        });
+        let dit = manque_pour_monter(&sans_rien).expect("il manque des choses");
+        assert!(dit.contains("espaces de noms"), "{dit}");
+        assert!(dit.contains(" et "), "la liste doit se lire : {dit}");
+        assert!(!dit.contains('\n'), "une ligne, pas un rapport : {dit}");
+    }
+
+    #[test]
+    fn une_restriction_de_politique_se_distingue_d_une_absence() {
+        // ADR-0006 : les confondre fait chercher le défaut dans le mauvais composant.
+        let restreint = serde_json::json!({
+            "max_level": 0, "user_namespaces": false, "landlock_abi": 4,
+            "cgroups_v2": true, "runsc": "/usr/bin/runsc",
+            "userns_restreint_par_politique": true
+        });
+        let dit = manque_pour_monter(&restreint).expect("il manque quelque chose");
+        assert!(dit.contains("politique"), "{dit}");
+    }
+
+    #[test]
+    fn au_niveau_deux_il_n_y_a_plus_rien_a_manquer() {
+        let complet = serde_json::json!({ "max_level": 2 });
+        assert!(manque_pour_monter(&complet).is_none());
+    }
+
+    #[test]
+    fn au_niveau_un_ce_sont_les_microvm_qui_manquent() {
+        let gvisor = serde_json::json!({
+            "max_level": 1, "kvm": false, "firecracker": null, "microvm_images": false
+        });
+        let dit = manque_pour_monter(&gvisor).expect("il manque des choses");
+        assert!(dit.contains("kvm"), "{dit}");
+        assert!(dit.contains("images d'invité"), "{dit}");
     }
 }

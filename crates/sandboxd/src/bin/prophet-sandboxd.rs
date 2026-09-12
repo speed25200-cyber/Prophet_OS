@@ -59,6 +59,7 @@ impl Handler for Isolation {
                     "kvm": caps.kvm,
                     "runsc": caps.runsc,
                     "firecracker": caps.firecracker,
+                    "microvm_images": caps.microvm_images.is_some(),
                     "report": caps.report(),
                 }))
             }
