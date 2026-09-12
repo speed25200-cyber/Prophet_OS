@@ -46,7 +46,11 @@
   # pire que de livrer une racine inscriptible.
   #
   # Ce que cela coûte, dit franchement : **la promesse d'immuabilité n'est pas tenue
-  # aujourd'hui.** Les mises à jour A/B, le chiffrement et le verrouillage du noyau le sont ; la
+  # aujourd'hui.** Les mises à jour A/B et le chiffrement le sont ; le verrouillage du noyau, non —
+  # `lockdown=integrity` est bien sur la ligne de commande, mais le noyau démarre avec
+  # `lsm=landlock,yama,bpf`, où `lockdown` ne figure pas, et `/sys/kernel/security/lockdown`
+  # n'existe pas. Le paramètre est donc inerte, et le croire posé est pire que de savoir qu'il ne
+  # l'est pas (constaté par `image/tests/installe.nix` le 12 septembre 2026). La
   # racine en lecture seule ne l'est pas. La tenir demande une conception, pas un réglage :
   # `system.etc.overlay` (qui exige l'initrd systemd, déjà activé), un `/var` porté par un volume
   # inscriptible plutôt que par la racine, et `boot.tmp.useTmpfs`. Le jour où ce sera fait,

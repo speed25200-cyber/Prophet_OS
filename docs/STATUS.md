@@ -536,6 +536,45 @@ Ce qui reste inconnu et n'est pas réglé : que `cage` bascule réellement sur `
 quelque chose. Aucun coureur n'a d'adaptateur graphique, et c'était déjà invérifiable sur `tty1`.
 Le déménagement ne dégrade rien de vérifié ; il supprime un mal, lui, mesuré.
 
+### La première ISO installable, et ce qu'elle ne tient pas (12 septembre 2026, 17 h 16)
+
+Run `34707081688` : **les six travaux bloquants sont verts**, le septième ignoré comme voulu. La
+correction de la surface tient — le sous-test de connexion, qui mettait 900 s à expirer, a rendu
+la main en 1,04 s, et le propriétaire voit ses sept services depuis sa session :
+
+```
+machine: (finished: waiting for \$|prophet@ to appear on tty 1, in 1.04 seconds)
+  Services
+    ✓ capd  ✓ ledger  ✓ vault  ✓ egress  ✓ sandboxd  ✓ memoryd  ✓ agentd
+```
+
+Et `egress` a refusé la sonde de `prophet status`, sur la machine installée comme sur le serveur :
+`WARN requête sans jeton hote=sonde.prophet.invalid`.
+
+**Ce que le même test a montré, et qu'il ne faut pas laisser passer : le verrouillage du noyau
+n'a pas lieu.**
+
+```
+initrd=… lockdown=integrity module.sig_enforce=1 … lsm=landlock,yama,bpf
+lockdown : absent
+```
+
+Les deux paramètres sont bien sur la ligne de commande — c'est ce que le sous-test affirme, et il a
+raison. Mais le noyau démarre avec `lsm=landlock,yama,bpf`, où `lockdown` ne figure pas, et
+`/sys/kernel/security/lockdown` n'existe pas : le LSM n'est pas actif, donc `lockdown=integrity`
+ne fait rien. `module.sig_enforce=1` est vraisemblablement inerte de même, puisque la machine
+charge ses modules sans se plaindre.
+
+Le sous-test **affichait** déjà `lockdown : absent` sans en conclure quoi que ce soit, et c'était
+la bonne façon de ne pas mentir. Mais `docs/installation.md` annonçait « le verrouillage du noyau »
+parmi ce qui est tenu, et `immutable.nix` le répète. Corrigé dans le guide : un durcissement
+annoncé qui n'a pas lieu est pire qu'un durcissement absent, parce qu'on compte dessus.
+
+Ce n'est pas un défaut de démarrage et cela ne retarde pas l'image. C'est une dette, nommée.
+La payer demande d'ajouter `lockdown` à la liste `lsm=` — et de vérifier ce que cela casse, car
+`module.sig_enforce=1` devenu effectif sur des modules NixOS non signés empêcherait une machine
+réelle de charger ses pilotes.
+
 ### Prophet OS tourne sur le serveur (12 septembre 2026, 17 h 09)
 
 Run `34707355297`, vert. Les sept daemons sont `active (running)` et `enabled` sur

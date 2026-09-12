@@ -34,7 +34,7 @@ produite et vérifiez que **tous** ses travaux sont verts, à la seule exception
 | Construire le système installé | chacun des sept services pointe vers un programme qui existe, **et** `nixos-install` pose réellement ce système sur la disposition que l'installeur crée |
 | Voir l'image démarrer | la clé USB démarre jusqu'à l'invite |
 | Les sept services sous systemd | les daemons tournent sous leur utilisateur, avec leur durcissement, et `sandboxd` isole vraiment |
-| **Le système installé démarre** | ce que la clé installe démarre aussi : chargeur d'amorçage, noyau verrouillé, compte ouvrable, session sur `tty1` |
+| **Le système installé démarre** | ce que la clé installe démarre aussi : chargeur d'amorçage, paramètres du noyau, compte ouvrable, session sur `tty1`, et les sept services vus par le propriétaire depuis sa session |
 | Question ouverte : la racine en lecture seule | rien — c'est une **question**, pas une garantie, et elle ne part plus qu'à la demande. Sa réponse est « non » depuis le 12 septembre 2026 : voir `image/tests/racine-en-lecture-seule.nix`. Pour la reposer, déclenchez le workflow à la main en cochant « Rejouer l'expérience de la racine en lecture seule » |
 
 Les six premiers partent à chaque poussée et doivent être verts. Le septième ne part qu'à la
@@ -126,8 +126,18 @@ séparés.
 
 Livrer cela vous aurait donné, après avoir effacé Windows, un PC qui ne démarre pas — sans
 rattrapage, le chargeur d'amorçage étant configuré sans éditeur. La racine est donc inscriptible,
-et l'immuabilité reste une promesse à tenir. Ce qui **est** tenu : les deux emplacements A/B avec
-bascule automatique, le chiffrement LUKS2 des données et de l'état, et le verrouillage du noyau.
+et l'immuabilité reste une promesse à tenir.
+
+**Le verrouillage du noyau n'est pas actif non plus.** `lockdown=integrity` et
+`module.sig_enforce=1` sont bien passés au noyau — le test le lit sur `/proc/cmdline` — mais le
+noyau démarre avec `lsm=landlock,yama,bpf`, où `lockdown` ne figure pas, et
+`/sys/kernel/security/lockdown` n'existe pas. Un paramètre que le noyau ignore ne protège rien, et
+le croire posé est pire que de savoir qu'il ne l'est pas. C'est écrit dans `docs/STATUS.md` ; ce
+n'est pas un défaut de démarrage, c'est un durcissement annoncé qui n'a pas lieu.
+
+Ce qui **est** tenu : les deux emplacements A/B avec bascule automatique, le chiffrement LUKS2 des
+données et de l'état, Landlock et seccomp, les sept services durcis sous leur propre compte, et
+`egress` qui refuse toute requête sans jeton.
 
 ## 4. Premier démarrage
 
