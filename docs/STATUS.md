@@ -221,6 +221,15 @@ Les trois ont un test qui échoue sur le code d'avant : trois dans `crates/proph
   rend `{"task": "task:essai-local", "pid": …, "level": 0}` et le journal dit « sandbox démarrée ».
   Le code du confinement n'était pas en cause ; seule l'entrave du service l'était.
 
+- [x] `tools/verifier-le-durcissement.sh` — le garde-fou qui dit en une seconde ce que le test en
+  machine virtuelle a mis sept minutes à apprendre. Il cherche deux contradictions et rien
+  d'autre : un service à qui l'on accorde `CAP_SETUID`, `CAP_SETGID` ou `CAP_SYS_ADMIN` et dont le
+  filtre retire `@privileged` ou n'ajoute pas `@mount` ; et `RestrictSUIDSGID` gardé en même temps
+  que `NoNewPrivileges = false`, que le premier implique. Vérifié en remettant la configuration
+  d'avant la correction : il rend les deux défauts et sort en 1. Il ne remplace pas le test — lui
+  seul exerce le durcissement réel — mais il évite d'y aller pour une faute qui se lit dans le
+  fichier. Ajouté à `just check` et au travail `check` de l'intégration continue
+
 ### Le compte sans lequel personne ne se connecte (12 septembre 2026)
 
 - [x] La machine installée ne créait **aucun** compte humain. `nixos-install --no-root-password`

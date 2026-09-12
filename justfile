@@ -12,6 +12,7 @@ check:
     cargo clippy --all-targets --all-features -- -D warnings
     cargo test --workspace
     ./tools/verifier-les-services.sh
+    ./tools/verifier-le-durcissement.sh
     @just secrets
 
 # Recherche de secrets commités (gitleaks si présent, motifs de base sinon).

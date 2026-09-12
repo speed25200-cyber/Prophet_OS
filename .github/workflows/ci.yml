@@ -39,6 +39,13 @@ jobs:
       # aperçoivent avant le démarrage de la machine installée.
       - name: Services déclarés et programmes produits
         run: ./tools/verifier-les-services.sh
+      # Même raison, autre défaut : un service peut recevoir une capacité que son filtre d'appels
+      # système lui refuse ensuite. Ni Nix, ni systemd, ni le démarrage du service ne le signalent
+      # — seul le premier essai réel le dit, et il a fallu sept minutes de machine virtuelle pour
+      # l'apprendre la première fois, sous la forme « écriture de uid_map : Operation not
+      # permitted ». Ce contrôle-ci le dit en une seconde.
+      - name: Capacités accordées et appels système permis
+        run: ./tools/verifier-le-durcissement.sh
       - name: Format
         run: cargo fmt --all --check
       - name: Lints
