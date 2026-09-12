@@ -536,6 +536,44 @@ Ce qui reste inconnu et n'est pas réglé : que `cage` bascule réellement sur `
 quelque chose. Aucun coureur n'a d'adaptateur graphique, et c'était déjà invérifiable sur `tty1`.
 Le déménagement ne dégrade rien de vérifié ; il supprime un mal, lui, mesuré.
 
+### Prophet OS tourne sur le serveur (12 septembre 2026, 17 h 09)
+
+Run `34707355297`, vert. Les sept daemons sont `active (running)` et `enabled` sur
+`ubuntu-2gb-fsn1-2`, chacun sous son compte, avec le durcissement de l'image. Ce ne sont pas des
+sondes de présence — chacun a écrit dans le journal ce qu'il fait :
+
+```
+prophet-capd    : clé créée /var/lib/prophet/capd/signing.key
+                  politiques locales chargées nombre=1
+                  capd écoute socket=/run/prophet/capd.sock
+prophet-ledger  : clé créée /var/lib/prophet/ledger/seal.key
+                  ledger écoute cle=ed25519:R633QnvkrUans5I6Kxqf/e0tOB/Ra2qxd/UPEeWARJ0=
+prophet-egress  : egress écoute ; rien ne sort sans un jeton que capd approuve
+                  WARN requête sans jeton hote=sonde.prophet.invalid   (×2)
+prophet-sandboxd: niveau maximal atteignable : 1, Landlock ABI 8, gVisor /usr/bin/runsc
+prophet-agentd  : les jetons viennent de capd, le journal part vers ledger
+```
+
+Les deux lignes d'`egress` valent d'être lues : c'est `prophet status` qui l'interroge, et le proxy
+**refuse sa requête faute de jeton**. L'invariant « toute sortie réseau passe par egress » n'est pas
+seulement déclaré sur cette machine, il est exercé — et la sonde d'état prouve davantage qu'un
+`pong` en se faisant refuser.
+
+Ce que cela n'est pas, et qui doit rester écrit : le serveur n'est pas devenu Prophet OS. Noyau
+d'Ubuntu (`7.0.0-22-generic`), racine inscriptible, pas d'emplacements A/B, pas de chiffrement posé
+par nous. Ce sont les daemons qui tournent, pas le système. Le niveau 2 y restera hors d'atteinte :
+pas de `/dev/kvm`.
+
+Ce qui a changé sur la machine, et comment le défaire :
+
+| Fait | Comment revenir en arrière |
+|---|---|
+| `/root/hermes` **supprimé** | `tar xf /root/hermes-sauvegarde-<date>.tar -C /root` |
+| Sept services dans `/etc/systemd/system/prophet-*.service`, démarrés et activés | `sudo /root/prophet_os/tools/lancer-sur-l-hote.sh --retirer` |
+| Programmes dans `/usr/local/lib/prophet`, `prophet` dans `/usr/local/bin` | idem |
+| Comptes `capd`, `ledger`, `vault`, `egress`, `memoryd`, `agentd` et groupe `prophet-system` | conservés par `--retirer` ; `userdel` à la main |
+| État dans `/var/lib/prophet/<daemon>`, en 0700 | conservé par `--retirer` |
+
 ### Hermes est supprimé ; mon propre garde a empêché le lancement (12 septembre 2026, 17 h 06)
 
 Le run `34707083853` a fait ce qu'on lui demandait d'abord : **`/root/hermes` est supprimé**, après
