@@ -19,6 +19,8 @@ rand = { workspace = true }
 base64 = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
 cedar-policy = "4"
 
 [dev-dependencies]

@@ -159,6 +159,23 @@ désormais, et `tools/install-isolation.sh` le traite sans rien modifier sans au
 
 Les pilotes de clients officiels sont testés jusqu'à la limite de ce qui est vérifiable sans compte : construction de la ligne de commande, environnement transmis, détection de session, messages d'erreur. L'exécution de bout en bout exige une connexion réelle.
 
+**Le serveur de l'utilisateur reste inatteint** (12 septembre). Le workflow qui l'atteindrait
+existe et est poussé — `.github/workflows/verifier-sur-le-serveur.yml` — mais il ne peut pas
+encore tourner. Deux obstacles, tous deux hors de portée d'un agent, décrits en détail dans
+`docs/serveur.md` :
+
+1. GitHub ne propose `workflow_dispatch` que pour les workflows présents sur la branche par
+   défaut. `main` n'a qu'un commit initial ; les 48 autres sont sur la branche de travail. Tant
+   que le fichier n'est pas sur `main`, l'API répond 404.
+2. Le mot de passe du serveur doit être posé en secret `VPS_PASSWORD` du dépôt. Aucun agent ne
+   doit l'écrire : ni dans le fichier, ni dans un commit, ni dans une entrée qu'il remplirait
+   lui-même.
+
+Une tentative de contourner le premier point — faire de la poussée elle-même le déclencheur, avec
+l'intention écrite dans un fichier versionné — a été refusée, à raison : cela rendait un `git push`
+capable d'arrêter un moteur de production et de changer un réglage du noyau sans qu'un humain
+tranche au moment où cela arrive. Le workflow reste donc à déclenchement manuel.
+
 ## Backlog (hors tâche courante, à ne pas faire maintenant)
 
 _Vide._
