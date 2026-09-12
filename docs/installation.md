@@ -20,6 +20,24 @@ Vérifiez l'empreinte du fichier téléchargé — elle est publiée à côté d
 Get-FileHash .\prophet-os-installeur-*.iso -Algorithm SHA256
 ```
 
+### Savoir qu'une ISO est bonne avant de formater son disque
+
+L'onglet *Actions* garde aussi les images produites par des exécutions **partiellement** vertes,
+et rien sur le fichier ne les distingue. Avant de prendre une image, ouvrez l'exécution qui l'a
+produite et vérifiez que ses cinq travaux sont verts, en particulier :
+
+| Travail | Ce qu'il garantit |
+|---|---|
+| Installeur sur disque en boucle | l'installeur formate, chiffre et monte pour de vrai, et refuse ce qu'il doit refuser |
+| Construire le système installé | chacun des sept services pointe vers un programme qui existe |
+| Voir l'image démarrer | la clé USB démarre jusqu'à l'invite |
+| **Le système installé démarre** | ce que la clé installe démarre aussi : racine en lecture seule, chargeur d'amorçage, compte ouvrable |
+| Les sept services sous systemd | les daemons tournent sous leur utilisateur, avec leur durcissement |
+
+Le quatrième est le plus récent, et le seul qui réponde à la question qui compte une fois le
+disque effacé. Une image produite par une exécution où il manque ou échoue n'a pas été vue
+démarrer autrement que depuis la clé.
+
 ## 1. Écrire l'image sur la clé
 
 Depuis Windows, avec [Rufus](https://rufus.ie) ou
@@ -37,7 +55,7 @@ Trois réglages :
 
 | Réglage | Valeur | Pourquoi |
 |---|---|---|
-| Secure Boot | **désactivé** | Prophet OS ne signe pas encore son chargeur d'amorçage. C'est une dette connue, notée en ADR-0006 ; tant qu'elle n'est pas payée, le micrologiciel refuserait de démarrer. |
+| Secure Boot | **désactivé** | Prophet OS ne signe pas encore son chargeur d'amorçage. C'est une dette connue, écrite dans `image/modules/immutable.nix` : elle demande d'ajouter `lanzaboote` aux entrées du flake et d'enrôler les clés depuis l'installeur. Tant qu'elle n'est pas payée, le micrologiciel refuserait de démarrer. |
 | CSM / Legacy BIOS | **désactivé** | L'installeur exige un démarrage UEFI et refusera de continuer sinon. |
 | Ordre de démarrage | la clé USB en premier | — |
 
