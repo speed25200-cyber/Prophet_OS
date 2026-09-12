@@ -9,3 +9,48 @@ Un système d'exploitation PC conçu pour que des agents IA (Claude, GPT, Gemini
 📄 **[Plan complet](docs/PLAN.md)** : diagnostic, principes, architecture, spécification des composants, sécurité, feuille de route, équipe, métriques, risques, MVP.
 
 🛠️ **[Plan d'exécution pour l'agent constructeur](docs/BUILD_PLAN.md)** : 14 jalons, 79 tâches avec critères d'acceptation vérifiables, à suivre dans l'ordre de [`docs/STATUS.md`](docs/STATUS.md). Instructions de travail dans [`CLAUDE.md`](CLAUDE.md), décisions dans [`docs/adr/`](docs/adr/), spécifications gelées dans [`docs/specs/`](docs/specs/).
+
+---
+
+## État du code
+
+Le système est construit. **374 tests** verts, **21 773 lignes** de Rust, aucun avertissement de `clippy`.
+
+```
+prophet status          # ce que la machine sait faire, et ce qu'elle ne sait pas
+prophet provider ls     # pilotes disponibles et sessions d'abonnement
+prophet task ls         # tâches, même sans daemon en service
+prophet task undo <id>  # défaire une tâche déjà validée
+prophet log verify      # vérifier l'intégrité du journal
+```
+
+### Ce que fait le système, mesuré
+
+| Propriété | Mesure |
+|---|---|
+| Contrôle de capacité | 11,6 µs par appel, pour 200 µs visés |
+| Démarrage d'une sandbox de niveau 0 | 2,6 ms |
+| Gel d'urgence de toutes les tâches | 124 µs |
+| Observation d'une page web | 1 929 octets, contre environ 900 Ko pour une capture d'écran |
+| Suite adversariale | 20 attaques sur 20 sans conséquence |
+| La même tâche sur Claude, ChatGPT et un modèle local | mêmes outils, mêmes permissions, aucune clé d'API |
+
+Le détail, y compris **ce qui n'est pas vérifié et pourquoi**, est dans [`docs/reports/phase0.md`](docs/reports/phase0.md).
+
+### Organisation
+
+| Crate | Rôle |
+|---|---|
+| `prophet-types` | jetons de capacité, manifestes, événements, sérialisation canonique |
+| `prophet-ipc` | JSON-RPC sur socket Unix, identité du pair attestée par le noyau |
+| `capd` | broker de capacités, politiques Cedar, approbations |
+| `ledger` | journal en ajout seul, chaîné et scellé |
+| `sfs` | espace de travail par tâche, diff, annulation |
+| `sandboxd` | isolation graduée, du confinement à la microVM |
+| `vault`, `egress` | secrets jamais vus par un modèle, unique voie réseau |
+| `mcp-system` | outils système, contrôlés au même endroit pour tous |
+| `agentd`, `providers` | cycle de vie des tâches, pilotes d'abonnement et boucle native |
+| `sup`, `browser-bridge` | interface sémantique, navigation sans pixels |
+| `memoryd` | mémoire cloisonnée par espace |
+| `shell`, `prophet-cli` | vues et binaire destinés à l'humain |
+| `bench` | suite adversariale et mesure de coût |
