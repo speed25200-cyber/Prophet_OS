@@ -24,11 +24,23 @@ let
         StateDirectory = "prophet/${name}";
         StateDirectoryMode = "0700";
         RuntimeDirectory = "prophet";
-        RuntimeDirectoryMode = "0750";
-        # Les sept services partagent ce répertoire. Sans cette ligne, systemd le supprime quand
-        # l'un d'eux s'arrête — et emporte les six autres sockets avec lui. Un `systemctl restart
-        # prophet-memoryd` couperait tout le reste, ce qui est une façon remarquable de rendre un
-        # système fragile sans qu'aucun test de daemon ne s'en aperçoive.
+        # `0770`, et non `0750`.
+        #
+        # Les sept services partagent ce répertoire, et systemd le crée au nom du premier qui
+        # démarre. En `0750`, le groupe n'a que lecture et traversée : seul ce premier service peut
+        # y créer son socket, et les six autres échouent sur un `Permission denied` en s'ouvrant.
+        # C'est ce qui s'est produit au premier démarrage sous systemd — `agentd` a gagné la
+        # course, `capd` et `ledger` ont bouclé jusqu'à la limite de redémarrages.
+        #
+        # Le droit d'écriture est donné au groupe, pas au monde. Cela n'élargit rien : appartenir à
+        # `prophet-system` donne déjà accès à toutes les méthodes système de tous les daemons, donc
+        # pouvoir poser un fichier à côté de leurs sockets n'ajoute aucun pouvoir. Ce qui compte
+        # est que les autres n'entrent pas, et `0770` le tient aussi bien que `0750`.
+        RuntimeDirectoryMode = "0770";
+        # Sans cette ligne, systemd supprime le répertoire quand l'un d'eux s'arrête — et emporte
+        # les six autres sockets avec lui. Un `systemctl restart prophet-memoryd` couperait tout
+        # le reste, ce qui est une façon remarquable de rendre un système fragile sans qu'aucun
+        # test de daemon ne s'en aperçoive.
         RuntimeDirectoryPreserve = true;
 
         # Durcissement : ce qu'un daemon n'a pas besoin de faire, il ne peut pas le faire.

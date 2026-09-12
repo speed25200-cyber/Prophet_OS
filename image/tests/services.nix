@@ -92,7 +92,12 @@ pkgs.testers.runNixOSTest {
             mode = machine.succeed(f"stat -c %a {chemin}").strip()
             assert mode == "660", f"{chemin} est en {mode}, attendu 660"
         repertoire = machine.succeed("stat -c %a /run/prophet").strip()
-        assert repertoire == "750", f"/run/prophet est en {repertoire}, attendu 750"
+        # 0770 : le groupe doit pouvoir *écrire*, sinon seul le premier service démarré arrive à
+        # créer son socket et les six autres échouent sur un « Permission denied ». C'est
+        # exactement ce que ce test a trouvé à sa première exécution.
+        assert repertoire == "770", f"/run/prophet est en {repertoire}, attendu 770"
+        groupe = machine.succeed("stat -c %G /run/prophet").strip()
+        assert groupe == "prophet-system", f"/run/prophet appartient à {groupe}"
 
     with subtest("un utilisateur ordinaire n'atteint pas les sockets"):
         # La règle que `prophet-daemon` porte, vérifiée avec de vrais utilisateurs plutôt qu'avec
