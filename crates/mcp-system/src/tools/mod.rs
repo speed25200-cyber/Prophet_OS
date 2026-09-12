@@ -7,11 +7,16 @@
 mod clock;
 mod fs;
 mod http;
+mod system;
 mod task;
 
 pub use clock::Now;
 pub use fs::{List, Read, Search, Stat, Write};
 pub use http::Fetch;
+pub use system::{
+    Exec, Kill, LedgerQuery, ListModels, ListSecrets, Notify, Recall, Remember, RequestApproval,
+    UseSecret, WaitApproval, is_safe_binary, required_level_for,
+};
 pub use task::{Diff as TaskDiff, Status as TaskStatus};
 
 use std::sync::Arc;
@@ -30,6 +35,17 @@ pub fn register_all(registry: &mut Registry) {
         Arc::new(TaskStatus),
         Arc::new(TaskDiff),
         Arc::new(Now),
+        Arc::new(Exec),
+        Arc::new(Kill),
+        Arc::new(RequestApproval),
+        Arc::new(WaitApproval),
+        Arc::new(LedgerQuery),
+        Arc::new(Remember),
+        Arc::new(Recall),
+        Arc::new(ListSecrets),
+        Arc::new(UseSecret),
+        Arc::new(Notify),
+        Arc::new(ListModels),
     ];
     for tool in tools {
         registry.register(tool);

@@ -15,11 +15,13 @@
 #![warn(missing_docs)]
 
 pub mod detect;
+pub mod identity;
 pub mod inject;
 pub mod policy;
 mod proxy;
 
 pub use detect::{Detector, Outbound, Signal, Thresholds};
+pub use identity::{AgentIdentity, HEADER as AGENT_HEADER};
 pub use inject::{InjectionError, Injector};
 pub use policy::{DenyReason, Policy, Verdict};
 pub use proxy::{Proxy, ProxyError, RequestLog};

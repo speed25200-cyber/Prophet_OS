@@ -353,3 +353,122 @@ fn la_sortie_reseau_sans_grant_est_refusee() {
     assert!(result.is_error);
     assert_eq!(result.structured.unwrap()["code"], json!("PolicyDenied"));
 }
+
+#[test]
+fn la_liste_des_outils_couvre_la_specification() {
+    // La spécification `docs/specs/mcp-system-tools.md` est normative : un outil qui y figure et
+    // qui manque ici est une divergence, pas un détail.
+    let m = monde();
+    let noms: std::collections::BTreeSet<String> =
+        m.registry.all().into_iter().map(|s| s.name).collect();
+    for attendu in [
+        "fs.read",
+        "fs.write",
+        "fs.list",
+        "fs.stat",
+        "fs.search",
+        "proc.exec",
+        "proc.kill",
+        "http.fetch",
+        "task.status",
+        "task.diff",
+        "approval.request",
+        "approval.wait",
+        "ledger.query",
+        "memory.remember",
+        "memory.search",
+        "secrets.list_refs",
+        "secrets.use",
+        "clock.now",
+        "notify.human",
+        "model.list",
+    ] {
+        assert!(noms.contains(attendu), "outil manquant : {attendu}");
+    }
+}
+
+#[test]
+fn chaque_outil_declare_la_capacite_qu_il_exige() {
+    let m = monde();
+    for spec in m.registry.all() {
+        let meta = spec
+            .meta
+            .unwrap_or_else(|| panic!("{} ne déclare pas ses exigences", spec.name));
+        assert!(
+            !meta.requires.is_empty(),
+            "{} déclare une exigence vide",
+            spec.name
+        );
+        assert!(
+            prophet_types::manifest::parse_capability_key(&meta.requires).is_ok(),
+            "{} exige une capacité inconnue : {}",
+            spec.name,
+            meta.requires
+        );
+    }
+}
+
+#[test]
+fn l_execution_de_code_est_annoncee_comme_exigeant_la_microvm() {
+    let m = monde();
+    let exec = m
+        .registry
+        .all()
+        .into_iter()
+        .find(|s| s.name == "proc.exec")
+        .unwrap();
+    let meta = exec.meta.unwrap();
+    assert_eq!(meta.sandbox_level_min, Some(2));
+    assert!(meta.irreversible);
+}
+
+#[test]
+fn un_secret_ne_sort_jamais_du_coffre_par_un_outil() {
+    // Le coffre de ce monde de test contient une valeur ; aucun outil ne doit pouvoir la rendre.
+    let m = monde();
+    let racine = m.home.join(".prophet");
+    let mut coffre =
+        vault::Vault::open(racine.join("vault.json"), racine.join("vault.key")).unwrap();
+    coffre
+        .put(
+            vault::SecretInfo {
+                name: "github".to_owned(),
+                domains: vec!["api.github.com".to_owned()],
+                header: "Authorization".to_owned(),
+                description: String::new(),
+            },
+            "ghp_valeur_qui_ne_doit_jamais_sortir",
+        )
+        .unwrap();
+
+    for (outil, arguments) in [
+        ("secrets.list_refs", json!({})),
+        ("secrets.use", json!({"name": "github"})),
+    ] {
+        let result = m.registry.call(outil, &arguments, &m.context, now());
+        let rendu = serde_json::to_string(&result).unwrap();
+        assert!(
+            !rendu.contains("ghp_valeur_qui_ne_doit_jamais_sortir"),
+            "{outil} a laissé fuir la valeur : {rendu}"
+        );
+    }
+}
+
+#[test]
+fn la_memoire_est_accessible_par_les_outils() {
+    let m = monde();
+    let ecriture = m.registry.call(
+        "memory.remember",
+        &json!({"text": "les rapports de ventes se font au format PDF A4"}),
+        &m.context,
+        now(),
+    );
+    // Le jeton du monde de test ne couvre pas `memory.write` : l'outil doit être refusé, et le
+    // refus doit être net.
+    assert!(ecriture.is_error);
+    assert_eq!(
+        ecriture.structured.unwrap()["code"],
+        json!("PolicyDenied"),
+        "un outil non couvert par le jeton ne doit pas s'exécuter"
+    );
+}

@@ -239,15 +239,10 @@ impl Store {
             source_task,
             confidence,
         } = *entry;
-        let id = format!(
-            "mem:{}",
-            blake3::hash(format!("{space}{text}{}", now.unix_timestamp_nanos()).as_bytes())
-                .to_hex()
-                .to_string()
-                .chars()
-                .take(16)
-                .collect::<String>()
-        );
+        // L'identifiant ne dérive pas du contenu : deux faits identiques enregistrés au même
+        // instant sont deux entrées distinctes, et une horloge grossière ne doit pas les faire
+        // entrer en collision.
+        let id = prophet_types::ids::Id::new(prophet_types::ids::Kind::Memory).to_string();
         let vector = self.embedder.embed(text);
         let bytes: Vec<u8> = vector.iter().flat_map(|v| v.to_le_bytes()).collect();
         self.connection.execute(

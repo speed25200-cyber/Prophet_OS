@@ -13,7 +13,9 @@
 #![warn(missing_docs)]
 
 mod embed;
+pub mod episodic;
 mod store;
 
 pub use embed::{Embedder, HashEmbedder, cosine};
+pub use episodic::{Episode, record as record_episode, summarize};
 pub use store::{Entry, Kind, MemoryError, NewEntry, Query, Space, Store};

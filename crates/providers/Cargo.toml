@@ -9,7 +9,6 @@ description = "Pilotes d'agents : clients officiels par abonnement, moteurs loca
 [dependencies]
 prophet-types = { workspace = true }
 capd = { workspace = true }
-mcp-system = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

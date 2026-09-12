@@ -728,7 +728,11 @@ dependencies = [
 name = "egress"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "blake3",
+ "ed25519-dalek",
  "prophet-types",
+ "rand 0.8.8",
  "serde",
  "serde_json",
  "tempfile",
@@ -1301,7 +1305,9 @@ dependencies = [
  "ed25519-dalek",
  "egress",
  "ledger",
+ "memoryd",
  "prophet-types",
+ "providers",
  "rand 0.8.8",
  "serde",
  "serde_json",
@@ -1634,7 +1640,6 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "capd",
- "mcp-system",
  "prophet-types",
  "serde",
  "serde_json",
