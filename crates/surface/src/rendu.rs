@@ -18,7 +18,11 @@ use crate::theme;
 
 /// Particules par courant. Assez pour un ruban continu, assez peu pour qu'une machine modeste
 /// tienne les soixante images par seconde.
-const PARTICULES: u32 = 700;
+///
+/// Cette valeur doit rester identique à `par_courant` dans `flux.wgsl` : le shader en déduit à
+/// quel courant appartient chaque instance, et une divergence mélangerait silencieusement les
+/// filaments.
+const PARTICULES: u32 = 5000;
 
 /// Ce qui peut empêcher un rendu.
 #[derive(Debug, thiserror::Error)]

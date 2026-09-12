@@ -57,17 +57,19 @@ fn vs(
     @builtin(vertex_index) sommet: u32,
     @builtin(instance_index) instance: u32,
 ) -> Sortie {
-    let par_courant = 700u;
+    // Sept cents particules donnaient des pointillés. Un ruban de lumière demande une densité
+    // qu'on ne peut pas simuler : il faut réellement assez de points pour qu'ils se touchent.
+    let par_courant = 5000u;
     let index_courant = instance / par_courant;
     let index_particule = instance % par_courant;
     let c = courants[index_courant];
 
     let graine = f32(instance) + 1.0;
     let phase_particule = aleatoire(graine);
-    // Les particules se répartissent autour du filament, plus denses au centre : c'est ce qui
-    // donne un ruban plutôt qu'un trait.
-    let ecart = (aleatoire(graine * 1.7) - 0.5);
-    let lateral = ecart * ecart * ecart * 0.09;
+    // Les particules se répartissent autour du filament, bien plus denses au centre : c'est ce qui
+    // donne un ruban plutôt qu'un trait. Le cube concentre, la largeur donne l'épaisseur.
+    let ecart = (aleatoire(graine * 1.7) - 0.5) * 2.0;
+    let lateral = ecart * ecart * ecart * 0.030;
 
     // L'avance. `fract` rebouclerait brutalement ; on atténue plutôt aux deux bords.
     let t = fract(phase_particule + cadre.temps * c.vitesse);
@@ -81,7 +83,15 @@ fn vs(
         vec2<f32>(-1.0, 1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
     );
     let coin = coins[sommet];
-    let rayon_px = 1.0 + aleatoire(graine * 3.3) * 2.2;
+    // Deux populations. Un cœur fin et vif porte le dessin ; un halo large et faible lui donne
+    // sa profondeur. Une taille unique produit soit une ligne dure, soit une brume — jamais une
+    // lumière.
+    let tirage = aleatoire(graine * 3.3);
+    let est_halo = tirage > 0.78;
+    var rayon_px = 0.8 + tirage * 1.4;
+    if (est_halo) {
+        rayon_px = 4.0 + tirage * 9.0;
+    }
 
     let centre_px = vec2<f32>(x * cadre.resolution.x, y * cadre.resolution.y);
     let position_px = centre_px + coin * rayon_px;
@@ -101,7 +111,12 @@ fn vs(
     let alerte = vec3<f32>(0.85, 0.38, 0.24);
     let teinte = mix(or, alerte, c.teinte);
 
-    let intensite = c.clarte * bord * scintille * cadre.attenuation;
+    // Le halo est beaucoup plus faible que le cœur : il ajoute de la lueur, pas de la matière.
+    var force = 1.0;
+    if (est_halo) {
+        force = 0.10;
+    }
+    let intensite = c.clarte * bord * scintille * cadre.attenuation * force;
 
     var sortie: Sortie;
     sortie.position = vec4<f32>(ndc, 0.0, 1.0);
