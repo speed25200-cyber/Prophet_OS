@@ -35,13 +35,19 @@ part jamais sur une poussée, et la garde est posée sur le travail entier plut�
 Elles demandent toutes deux la main d'un humain. La première pour une raison de plateforme, la
 seconde pour une raison de principe.
 
-### 1. Poser le secret `VPS_PASSWORD`
+### 1. Poser le secret **et** l'adresse
 
-Dépôt → *Settings* → *Secrets and variables* → *Actions* → *New repository secret*.
+Dépôt → *Settings* → *Secrets and variables* → *Actions*. Deux onglets, deux choses.
 
-| Nom | Valeur |
-|---|---|
-| `VPS_PASSWORD` | le mot de passe root du serveur |
+| Onglet | Nom | Valeur | Pourquoi là |
+|---|---|---|---|
+| **Secrets** | `VPS_PASSWORD` | le mot de passe root | chiffré, jamais affiché |
+| **Variables** | `VPS_HOST` | l'adresse du serveur | pas un secret, mais ce dépôt est public |
+
+Le nom du secret compte exactement. Un secret **Codespaces**, **Dependabot** ou **d'environnement**
+n'est pas visible par un workflow d'Actions : il existe, et la variable reste vide — les deux cas
+se ressemblent parfaitement vus du workflow. La sonde affiche donc lesquels de six noms plausibles
+elle voit, sans jamais montrer de valeur.
 
 Les secrets ne traversent pas les dépôts : celui d'Hermes ne vaut pas ici, il faut le reposer.
 
@@ -90,7 +96,23 @@ Le rapport est rapatrié en artefact `rapport-serveur`.
 - Il n'écrit aucun identifiant nulle part.
 - Prophet OS vit dans `/root/prophet_os` et nulle part ailleurs.
 
-## Une remarque sur le mot de passe
+## Deux remarques sur ce mot de passe
 
-Il a été collé en clair dans une conversation. Quel que soit le reste, il vaut mieux le changer,
-puis mettre à jour le secret. Tant qu'il ne l'est pas, il faut le considérer comme connu.
+**Il a été collé en clair dans une conversation.** Quel que soit le reste, il vaut mieux le
+changer, puis mettre à jour le secret. Tant qu'il ne l'est pas, il faut le considérer comme connu.
+
+**Ce dépôt est public.** L'adresse du serveur n'y figure donc plus : elle vit dans la variable
+`VPS_HOST`. Mais ce document dit, et continuera de dire, que cette machine accepte `root` par mot
+de passe — c'est une information utile à qui l'administre, et une invitation pour qui la trouve.
+Les deux mesures qui ferment vraiment la porte :
+
+```sh
+# Sur le serveur, une fois une clé publique installée :
+sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+systemctl reload sshd
+```
+
+Cela demanderait de changer ce workflow pour une clé plutôt qu'un mot de passe — un secret
+`VPS_SSH_KEY` à la place de `VPS_PASSWORD`. C'est la bonne direction, et elle n'est pas prise
+aujourd'hui.

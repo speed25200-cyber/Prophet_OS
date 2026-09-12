@@ -62,10 +62,50 @@ jobs:
     name: Ce que le serveur offre
     runs-on: ubuntu-latest
     env:
-      VPS: ${{ vars.VPS_HOST || '178.104.191.79' }}
+      VPS: ${{ vars.VPS_HOST }}
     steps:
       - name: Outils de connexion
         run: sudo apt-get update -qq && sudo apt-get -y -qq install sshpass netcat-openbsd
+
+      - name: Ce qui est configuré, et sous quel nom
+        # Un secret absent et un secret mal nommé se ressemblent parfaitement vus d'ici : dans les
+        # deux cas la variable est vide. Les distinguer demande de regarder plusieurs noms — et de
+        # ne rien dire d'autre que « présent » ou « absent », jamais une valeur, fût-elle tronquée.
+        env:
+          N1: ${{ secrets.VPS_PASSWORD }}
+          N2: ${{ secrets.VPS_ROOT_PASSWORD }}
+          N3: ${{ secrets.SSH_PASSWORD }}
+          N4: ${{ secrets.HETZNER_PASSWORD }}
+          N5: ${{ secrets.VPS_PASS }}
+          N6: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          echo "Secrets d'Actions visibles par ce dépôt :"
+          dire() { [ -n "${2:-}" ] && echo "  ✓ $1" || echo "  ✗ $1"; }
+          dire VPS_PASSWORD      "${N1:-}"
+          dire VPS_ROOT_PASSWORD "${N2:-}"
+          dire SSH_PASSWORD      "${N3:-}"
+          dire HETZNER_PASSWORD  "${N4:-}"
+          dire VPS_PASS          "${N5:-}"
+          dire SERVER_PASSWORD   "${N6:-}"
+          echo
+          echo "Variables :"
+          [ -n "${VPS:-}" ] && echo "  ✓ VPS_HOST = $VPS" || echo "  ✗ VPS_HOST (adresse du serveur)"
+          echo
+          echo "Ce workflow lit le secret VPS_PASSWORD. S'il est marqué absent alors que vous"
+          echo "l'avez posé, vérifiez qu'il est bien un secret « Actions » du dépôt — et non un"
+          echo "secret Codespaces, Dependabot, ou d'environnement, qui ne sont pas visibles ici."
+
+      - name: L'adresse du serveur est-elle connue ?
+        # Elle n'est plus écrite dans le dépôt : il est public, et publier l'adresse d'une machine
+        # dont on documente par ailleurs qu'elle accepte root par mot de passe serait une invitation.
+        run: |
+          if [ -z "${VPS:-}" ]; then
+            echo "::error::la variable de dépôt VPS_HOST n'est pas posée."
+            echo "Settings → Secrets and variables → Actions → onglet « Variables » → New repository variable,"
+            echo "nom VPS_HOST, valeur l'adresse du serveur. Une variable, pas un secret : elle n'a pas"
+            echo "besoin d'être chiffrée, mais elle n'a rien à faire dans un dépôt public."
+            exit 1
+          fi
 
       - name: La machine est-elle joignable ?
         # Distinguer « injoignable » de « refusée » avant même de présenter un identifiant. Les
@@ -151,7 +191,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
-      VPS: ${{ vars.VPS_HOST || '178.104.191.79' }}
+      VPS: ${{ vars.VPS_HOST }}
       DISTANT: /root/prophet_os
     steps:
       - uses: actions/checkout@v4
