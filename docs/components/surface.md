@@ -32,8 +32,11 @@ désagréable ; changer d'avis sur ce qu'on lui demande pendant qu'il patiente l
 
 ## Pourquoi elle appartient à `prophet-system`
 
-`/run/prophet` est en 0750 pour ce groupe et les sockets en 0660 : sans lui, la surface ne
-joindrait aucun daemon et afficherait un champ vide en permanence. Cela lui donne, au niveau du
+`/run/prophet` est en 0770 pour ce groupe et les sockets en 0660 : sans lui, la surface ne
+joindrait aucun daemon et afficherait un champ vide en permanence. Elle y est par `extraGroups`,
+c'est-à-dire comme membre déclaré et non comme groupe principal — ce que `SO_PEERCRED` n'atteste
+pas. Chaque daemon la refusait donc, et l'écran serait resté vide sans qu'aucune panne n'existe.
+La règle du groupe, dans `prophet-daemon`, lit maintenant aussi `/etc/group`. Cela lui donne, au niveau du
 socket, le même accès qu'un daemon — plus qu'elle n'en utilise. Le restreindre demande une notion
 de méthode autorisée par pair que `prophet-ipc` n'a pas encore.
 

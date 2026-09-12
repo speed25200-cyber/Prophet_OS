@@ -28,7 +28,8 @@ un appel malformé pour une politique appliquée.
 
 ## Ce qu'il refuse
 
-- Un pair hors du groupe `prophet-system`, y compris `root`.
+- Un pair hors du groupe `prophet-system` — membre déclaré dans `/etc/group` compris. `root`, lui,
+  est accepté : le refuser ne protégeait rien, puisqu'il lit déjà la clé de signature.
 - Un jeton signé par une autre clé — motif `bad_signature`.
 - Une portée d'approbation inconnue ; le défaut est la plus étroite, jamais la plus large.
 

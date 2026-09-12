@@ -25,15 +25,52 @@ pub const GROUPE_SYSTEME: &str = "prophet-system";
 
 /// Qui a le droit de parler à ce daemon.
 ///
-/// Deux réponses acceptables, et une seule règle : soit le pair appartient au groupe système, soit
-/// il *est* le service lui-même. Rien d'autre — et surtout pas « root passe partout » : `root` qui
-/// parle à `capd` reste un pair comme un autre, parce que le jour où un programme tourne en root
-/// sans qu'on l'ait voulu, on préfère qu'il soit refusé.
-#[derive(Debug, Clone, Copy)]
+/// Quatre réponses acceptables :
+///
+/// - le pair **est** le service lui-même ;
+/// - son groupe principal *est* le groupe système — c'est le cas des sept daemons ;
+/// - l'administrateur l'a **déclaré** membre du groupe système dans `/etc/group` ;
+/// - il est `root`.
+///
+/// ## Pourquoi la troisième règle existe
+///
+/// `SO_PEERCRED` ne rend que le groupe **principal** du pair. Un processus que l'administrateur a
+/// mis dans `prophet-system` par `extraGroups` y appartient réellement — le noyau le sait, et les
+/// droits du socket le respectent — mais son `gid` attesté reste celui de son groupe principal.
+/// Comparer ce seul `gid` revient donc à refuser des membres véritables du groupe.
+///
+/// Ce n'était pas théorique : la surface, dont tout le travail est d'afficher ce que font les
+/// daemons, est déclarée ainsi. Chacun d'eux la refusait, et l'écran serait resté vide sur une
+/// machine parfaitement saine. Le kernel rend la liste complète par `SO_PEERGROUPS` ; l'obtenir
+/// changerait le type porté par `prophet-ipc` jusque dans les sept daemons. On lit donc la
+/// déclaration de l'administrateur, dans le fichier même que `initgroups` consulte.
+///
+/// Ce que cela concède : un processus qui aurait *abandonné* le groupe par `setgroups` reste
+/// accepté. Il appartient toujours au groupe au sens où l'administrateur l'entend, et il pourrait
+/// de toute façon le reprendre par `newgrp`. La liste est lue au démarrage — modifier `/etc/group`
+/// demande donc de redémarrer le service, exactement comme pour `SupplementaryGroups` de systemd.
+///
+/// ## Pourquoi `root` passe
+///
+/// La règle disait l'inverse, et le disait bien : « le jour où un programme tourne en root sans
+/// qu'on l'ait voulu, on préfère qu'il soit refusé ». Elle ne protégeait rien. `root` lit déjà les
+/// clés de signature dans `/var/lib/prophet`, et peut donc émettre les jetons qu'il veut sans
+/// jamais toucher à ce socket ; il peut aussi arrêter les services et prendre leur place. La seule
+/// chose que ce refus produisait était un `prophet status` inutilisable pour le propriétaire de la
+/// machine — ce que le test en machine virtuelle a fini par montrer.
+///
+/// Une tâche isolée ne peut pas s'en servir : `SO_PEERCRED` traduit les identifiants dans l'espace
+/// de noms du destinataire, et un `uid 0` qui n'y est pas projeté arrive en `overflowuid`, pas en
+/// zéro.
+#[derive(Debug, Clone)]
 pub struct Pairs {
     gid_systeme: Option<u32>,
     uid_propre: u32,
+    membres: Vec<u32>,
 }
+
+/// L'identifiant de l'administrateur.
+const ROOT: u32 = 0;
 
 impl Pairs {
     /// Lit l'identité du service et celle du groupe système.
@@ -49,9 +86,16 @@ impl Pairs {
                 "groupe absent : seul l'utilisateur du service sera servi"
             );
         }
+        let membres = membres_du_groupe(GROUPE_SYSTEME);
+        tracing::debug!(
+            groupe = GROUPE_SYSTEME,
+            declares = membres.len(),
+            "membres déclarés lus"
+        );
         Ok(Self {
             gid_systeme,
             uid_propre: uid_propre()?,
+            membres,
         })
     }
 
@@ -62,16 +106,27 @@ impl Pairs {
         Self {
             gid_systeme,
             uid_propre,
+            membres: Vec::new(),
+        }
+    }
+
+    /// La même, en nommant les membres déclarés du groupe système.
+    #[must_use]
+    pub fn avec_membres(gid_systeme: Option<u32>, uid_propre: u32, membres: Vec<u32>) -> Self {
+        Self {
+            gid_systeme,
+            uid_propre,
+            membres,
         }
     }
 
     /// Ce pair peut-il appeler une méthode système ?
     #[must_use]
     pub fn autorise(&self, pair: PeerIdentity) -> bool {
-        match self.gid_systeme {
-            Some(gid) => pair.gid == gid || pair.uid == self.uid_propre,
-            None => pair.uid == self.uid_propre,
-        }
+        pair.uid == ROOT
+            || pair.uid == self.uid_propre
+            || self.gid_systeme.is_some_and(|gid| pair.gid == gid)
+            || self.membres.contains(&pair.uid)
     }
 
     /// Le refus, formulé. Un pair refusé mérite de savoir pourquoi ; il n'apprend rien qu'il ne
@@ -80,7 +135,10 @@ impl Pairs {
     pub fn refus(&self) -> Error {
         Error::new(
             ErrorCode::Unauthorized,
-            format!("ce pair n'appartient pas au groupe {GROUPE_SYSTEME}"),
+            format!(
+                "ce pair n'appartient pas au groupe {GROUPE_SYSTEME} : \
+                 ni comme groupe principal, ni comme membre déclaré dans /etc/group"
+            ),
         )
     }
 }
@@ -105,6 +163,45 @@ pub fn gid_du_groupe(nom: &str) -> Option<u32> {
         let mut champs = ligne.split(':');
         (champs.next()? == nom).then(|| champs.nth(1)?.parse().ok())?
     })
+}
+
+/// Les `uid` des membres **déclarés** d'un groupe, d'après `/etc/group` et `/etc/passwd`.
+///
+/// Ceux dont c'est le groupe principal n'y figurent pas : `/etc/group` ne liste que les
+/// appartenances supplémentaires. Ce n'est pas un manque — le groupe principal, lui, est attesté
+/// par le noyau à chaque connexion, et `Pairs::autorise` le regarde séparément.
+#[must_use]
+pub fn membres_du_groupe(nom: &str) -> Vec<u32> {
+    let groupes = std::fs::read_to_string("/etc/group").unwrap_or_default();
+    let comptes = std::fs::read_to_string("/etc/passwd").unwrap_or_default();
+    membres_declares(nom, &groupes, &comptes)
+}
+
+/// La même règle, sur des fichiers donnés.
+///
+/// Séparée pour être vérifiable : un test qui dépendrait du `/etc/group` de la machine qui
+/// l'exécute ne prouverait rien de stable.
+#[must_use]
+pub fn membres_declares(nom: &str, groupes: &str, comptes: &str) -> Vec<u32> {
+    let Some(liste) = groupes.lines().find_map(|ligne| {
+        let champs: Vec<&str> = ligne.split(':').collect();
+        (champs.first() == Some(&nom)).then(|| champs.get(3).copied().unwrap_or_default())
+    }) else {
+        return Vec::new();
+    };
+    liste
+        .split(',')
+        .map(str::trim)
+        .filter(|membre| !membre.is_empty())
+        .filter_map(|membre| {
+            comptes.lines().find_map(|ligne| {
+                let champs: Vec<&str> = ligne.split(':').collect();
+                (champs.first() == Some(&membre))
+                    .then(|| champs.get(2)?.parse::<u32>().ok())
+                    .flatten()
+            })
+        })
+        .collect()
 }
 
 /// Identifiant numérique d'un utilisateur, lu dans `/etc/passwd`.
@@ -242,20 +339,56 @@ mod tests {
     }
 
     #[test]
-    fn root_ne_passe_pas_par_faveur() {
-        // Le jour où un programme tourne en root sans qu'on l'ait voulu, on préfère qu'il soit
-        // refusé comme n'importe qui d'autre.
+    fn root_administre_sa_machine() {
+        // Le refus précédent ne protégeait rien : `root` lit les clés de signature dans
+        // `/var/lib/prophet` et peut émettre ses jetons sans passer par ce socket. Il ne coûtait
+        // qu'une chose, et une seule : `prophet status` inutilisable pour le propriétaire.
         let regle = Pairs::explicite(Some(900), 42);
-        assert!(!regle.autorise(pair(0, 0)));
+        assert!(regle.autorise(pair(0, 0)));
     }
 
     #[test]
-    fn sans_groupe_seul_le_service_est_servi() {
+    fn un_membre_declare_passe_sans_avoir_le_groupe_en_principal() {
+        // Le cas de la surface : `extraGroups = [ "prophet-system" ]`. Elle appartient au groupe,
+        // mais `SO_PEERCRED` n'atteste que son groupe principal. Sans cette règle, chacun des sept
+        // daemons la refuse et l'écran reste vide sur une machine saine.
+        let regle = Pairs::avec_membres(Some(900), 42, vec![1001]);
+        assert!(regle.autorise(pair(1001, 555)), "membre déclaré, autre gid");
+        assert!(!regle.autorise(pair(1002, 555)), "et lui n'est pas déclaré");
+    }
+
+    #[test]
+    fn sans_groupe_seul_le_service_et_root_sont_servis() {
         // Sur une machine de développement, le groupe n'existe pas. Servir tout le monde « parce
         // qu'on ne sait pas » serait exactement la faute que ce module existe pour éviter.
         let regle = Pairs::explicite(None, 42);
         assert!(regle.autorise(pair(42, 7)));
         assert!(!regle.autorise(pair(43, 900)));
+    }
+
+    #[test]
+    fn les_membres_se_lisent_dans_le_fichier_de_groupes() {
+        let groupes = "root:x:0:\nprophet-system:x:900:surface,prophet\nvideo:x:26:surface\n";
+        let comptes = "root:x:0:0::/root:/bin/sh\n\
+                       surface:x:998:998::/var/empty:/bin/false\n\
+                       prophet:x:1000:100::/home/prophet:/bin/sh\n";
+        let mut membres = membres_declares("prophet-system", groupes, comptes);
+        membres.sort_unstable();
+        assert_eq!(membres, vec![998, 1000]);
+    }
+
+    #[test]
+    fn un_groupe_absent_ne_donne_aucun_membre() {
+        // Le piège serait de rendre « tout le monde » quand on ne trouve rien, ou de se tromper de
+        // colonne : `/etc/group` met le mot de passe en deuxième champ et les membres en
+        // quatrième, et lire le mauvais accepterait des inconnus.
+        assert!(
+            membres_declares("absent", "autre:x:5:un,deux\n", "un:x:1:1::/:/bin/sh\n").is_empty()
+        );
+        assert!(
+            membres_declares("vide", "vide:x:5:\n", "un:x:1:1::/:/bin/sh\n").is_empty(),
+            "un groupe sans membre déclaré n'en a aucun, et surtout pas le mot de passe pour nom"
+        );
     }
 
     #[test]
