@@ -8,6 +8,19 @@
 > Voir [le rapport d'inférence](reports/local-inference-2026-09-12.md) et les
 > [captures et vérifications de l'espace natif](reports/espace-natif-2026-09-12.md).
 
+Jalons d'intégration réellement exercés le 12 septembre 2026 :
+
+- `c3b0c08` — moteur local réel, CLI et gel d'un processus possédé par sandboxd.
+- `766ce9e` — espace natif Wayland, conversation locale en flux, neuf tests de rendu réussis,
+  première image en fenêtre WSLg et capture d'une vraie réponse Qwen3.
+- Préparation MCP : le registre refuse désormais les exigences inconnues, les cibles absentes,
+  les niveaux d'isolation insuffisants et les contextes de tâche incohérents. La session exige
+  son initialisation et borne ses entrées. Quatre tests de régression ont d'abord échoué sur
+  l'ancien comportement. Le [guide du composant](../crates/mcp-system/README.md) précise les
+  accès fichiers et les raccordements aux daemons qui restent à corriger avant activation.
+  Validation locale après correction : `nix develop --command just check`, 569 tests réussis,
+  aucun échec, 16 ignorés ; format, clippy et contrôles du dépôt réussis.
+
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 
 Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'environnement de construction** ; le détail est dans `docs/reports/phase0.md` section 5.

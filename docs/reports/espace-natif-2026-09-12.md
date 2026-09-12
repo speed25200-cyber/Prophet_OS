@@ -60,6 +60,13 @@ ces essais ne prouvent aucune accélération d'inférence par un GPU physique.
   accès HTTP limité à la boucle locale. L'image installée et l'application effective de cette
   règle systemd n'ont pas été réexercées après ce changement.
 
+Après publication du commit `766ce9e`, les trois travaux du [workflow CI de la PR](https://github.com/speed25200-cyber/Prophet_OS/actions/runs/34713406456)
+ont réussi : contrôles généraux, rendu de la surface et suite d'isolation. La construction de
+l'ISO a également réussi dans le [workflow du support d'amorçage](https://github.com/speed25200-cyber/Prophet_OS/actions/runs/34713384618).
+Le travail « Voir l'image démarrer » a réussi lui aussi. Au moment de cette note, les essais du
+système installé de ce workflow sont encore en cours. La réussite d'un travail ne transforme pas ses cas ignorés en validations
+matérielles ; il faut conserver le détail du rapport d'isolation.
+
 ## Limites de ce jalon
 
 Les conversations restent en mémoire. L'interface ne gère pas encore le téléchargement,

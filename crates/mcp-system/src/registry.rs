@@ -40,8 +40,8 @@ pub trait Tool: Send + Sync {
 
     /// Cible concrète de l'appel, déduite des arguments, sur laquelle porte le contrôle d'accès.
     ///
-    /// Retourner `None` signifie « aucune cible spécifique » : le contrôle porte alors sur le nom
-    /// de l'outil.
+    /// `None` n'est accepté que pour une exigence `tool.call`. Une capacité de ressource exige
+    /// une cible concrète non vide ; son absence provoque un refus avant l'exécution.
     fn target(&self, args: &Value, context: &ToolContext) -> Option<String>;
 
     /// Exécute l'appel. N'est appelé qu'après autorisation.
@@ -240,6 +240,20 @@ impl Registry {
         context: &ToolContext,
         now: OffsetDateTime,
     ) -> Decision {
+        // Une description incomplète ou un contexte incohérent ne doivent jamais transformer
+        // une autorisation impossible à vérifier en permission implicite.
+        let Some((res, act)) = parse_requires(&meta.requires) else {
+            return Decision::deny(DenyReason::PolicyDenied);
+        };
+        if context.task != context.token.sub
+            || context.sandbox_level > 2
+            || meta
+                .sandbox_level_min
+                .is_some_and(|minimum| context.sandbox_level < minimum)
+            || (res == Res::Tool && act != Act::Call)
+        {
+            return Decision::deny(DenyReason::PolicyDenied);
+        }
         let Ok(broker) = self.broker.lock() else {
             return Decision::deny(DenyReason::PolicyDenied);
         };
@@ -263,9 +277,6 @@ impl Registry {
 
         // Second contrôle : la ressource que l'outil va toucher. Le droit d'appeler `fs.read` ne
         // dit rien sur le fichier visé ; c'est ici que le périmètre est vérifié.
-        let Some((res, act)) = parse_requires(&meta.requires) else {
-            return decision;
-        };
         if res == Res::Tool {
             return decision;
         }
@@ -273,8 +284,11 @@ impl Registry {
             return Decision::deny(DenyReason::PolicyDenied);
         };
         let Some(target) = tool.target(args, context) else {
-            return decision;
+            return Decision::deny(DenyReason::PolicyDenied);
         };
+        if target.trim().is_empty() {
+            return Decision::deny(DenyReason::PolicyDenied);
+        }
         let mut request = CheckRequest::new(res, act, target).sandbox_level(context.sandbox_level);
         if meta.irreversible {
             request = request.irreversible();
@@ -531,5 +545,82 @@ preferred = ["local:test"]
     fn doublon_refuse() {
         let (mut registry, _, _) = registre();
         registry.register(Arc::new(Faux));
+    }
+
+    struct Exigences {
+        requires: &'static str,
+        level: Option<u8>,
+        target: Option<&'static str>,
+    }
+
+    impl Tool for Exigences {
+        fn spec(&self) -> ToolSpec {
+            let mut spec = Faux.spec();
+            spec.name = "test.exigences".into();
+            let meta = spec.meta.as_mut().unwrap();
+            meta.requires = self.requires.into();
+            meta.sandbox_level_min = self.level;
+            spec
+        }
+
+        fn target(&self, _: &Value, _: &ToolContext) -> Option<String> {
+            self.target.map(str::to_owned)
+        }
+
+        fn call(&self, _: &Value, _: &ToolContext) -> CallResult {
+            panic!("le registre doit refuser avant de passer la main à l'outil")
+        }
+    }
+
+    #[test]
+    fn les_exigences_invalides_ou_inapplicables_ne_sont_pas_ignorees() {
+        for tool in [
+            Exigences {
+                requires: "inconnue.action",
+                level: None,
+                target: None,
+            },
+            Exigences {
+                requires: "tool.read",
+                level: None,
+                target: None,
+            },
+            Exigences {
+                requires: "fs.read",
+                level: None,
+                target: None,
+            },
+            Exigences {
+                requires: "fs.read",
+                level: None,
+                target: Some(""),
+            },
+            Exigences {
+                requires: "tool.call",
+                level: Some(2),
+                target: None,
+            },
+        ] {
+            let (mut registry, _, broker) = registre();
+            let context = contexte(&mut broker.lock().unwrap(), &["test.*"]);
+            registry.register(Arc::new(tool));
+            let result = registry.call("test.exigences", &json!({}), &context, now());
+            assert!(result.is_error);
+        }
+    }
+
+    #[test]
+    fn un_jeton_ne_peut_pas_agir_pour_une_autre_tache() {
+        let (mut registry, _, broker) = registre();
+        let mut context = contexte(&mut broker.lock().unwrap(), &["test.*"]);
+        context.task = "task:autre".into();
+        registry.register(Arc::new(Exigences {
+            requires: "tool.call",
+            level: None,
+            target: None,
+        }));
+        let result = registry.call("test.exigences", &json!({}), &context, now());
+        assert!(result.is_error);
+        assert_eq!(result.structured.unwrap()["code"], "PolicyDenied");
     }
 }
