@@ -107,40 +107,60 @@ installer_images() {
   sudo_si_besoin mkdir -p "$MICROVM_DIR"
 
   # Les artefacts publiés par le projet Firecracker pour ses propres essais. Le chemin porte une
-  # version qui bouge : on liste plutôt que de coder une URL en dur, et on dit clairement quand la
-  # liste ne donne rien, au lieu de laisser croire que le niveau 2 est prêt.
-  local base="https://s3.amazonaws.com/spec.ccfc.min" prefixe trouve
+  # version qui bouge : on liste plutôt que de coder une URL en dur.
+  local base="https://s3.amazonaws.com/spec.ccfc.min"
+
+  # Les clés sont extraites du XML, pas grattées dans le texte. Un motif approximatif attrapait
+  # « vmlinux-6.1.128. » — le début de « vmlinux-6.1.128.config » — et élisait une clé qui
+  # n'existe pas, d'où un téléchargement en 404 et un niveau 2 déclaré indisponible pour une
+  # raison fausse.
+  lister_cles() {
+    curl -fsSL "${base}/?list-type=2&prefix=$1&max-keys=1000" 2>/dev/null \
+      | tr '<' '\n' | sed -n 's|^Key>||p'
+  }
+
+  # Une archive de 404 pèse quelques centaines d'octets. Un noyau, plusieurs mégaoctets.
+  telecharger() {
+    local url="$1" dest="$2" minimum="$3" nom="$4"
+    curl -fsSL "$url" -o "$dest" || { ko "téléchargement de $nom impossible"; return 1; }
+    local taille
+    taille=$(stat -c %s "$dest" 2>/dev/null || echo 0)
+    if [ "$taille" -lt "$minimum" ]; then
+      ko "$nom fait $taille octets : ce n'est pas l'image attendue"
+      rm -f "$dest"
+      return 1
+    fi
+    return 0
+  }
+
+  local serie cle_noyau cle_racine
   for serie in v1.12 v1.11 v1.10; do
-    prefixe="firecracker-ci/${serie}/${ARCH}"
-    trouve=$(curl -fsSL "${base}/?list-type=2&prefix=${prefixe}/vmlinux-" 2>/dev/null \
-             | grep -o "${prefixe}/vmlinux-[0-9.]*" | sort -V | tail -1)
-    [ -n "$trouve" ] && break
+    local prefixe="firecracker-ci/${serie}/${ARCH}"
+    cle_noyau=$(lister_cles "${prefixe}/vmlinux-" \
+      | grep -E "/vmlinux-[0-9]+\.[0-9]+\.[0-9]+$" | sort -V | tail -1)
+    cle_racine=$(lister_cles "${prefixe}/ubuntu-" \
+      | grep -E "/ubuntu-[0-9]+\.[0-9]+\.(squashfs|ext4)$" | sort -V | tail -1)
+    if [ -n "$cle_noyau" ] && [ -n "$cle_racine" ]; then
+      break
+    fi
   done
-  if [ -z "$trouve" ]; then
-    ko "aucune image de noyau publiée n'a pu être listée"
+
+  if [ -z "$cle_noyau" ] || [ -z "$cle_racine" ]; then
+    ko "aucune paire noyau + racine publiée n'a pu être listée"
     info "le niveau 2 restera non vérifiable : ce n'est pas un échec silencieux, c'est dit ici"
     return 1
   fi
-  curl -fsSL "${base}/${trouve}" -o /tmp/vmlinux.prophet \
-    || { ko "téléchargement du noyau invité impossible"; return 1; }
-  sudo_si_besoin install -m 0644 /tmp/vmlinux.prophet "$noyau"
-  rm -f /tmp/vmlinux.prophet
-  ok "noyau invité : $(basename "$trouve")"
 
-  local racine_distante
-  racine_distante=$(curl -fsSL "${base}/?list-type=2&prefix=${prefixe}/ubuntu-" 2>/dev/null \
-                    | grep -o "${prefixe}/ubuntu-[0-9.]*\.\(squashfs\|ext4\)" | sort -V | tail -1)
-  if [ -z "$racine_distante" ]; then
-    ko "aucune image de racine publiée n'a pu être listée"
-    sudo_si_besoin rm -f "$noyau"
-    info "le noyau seul ne démarre rien : il est retiré plutôt que de laisser un jeu incomplet"
+  telecharger "${base}/${cle_noyau}" /tmp/vmlinux.prophet 1048576 "le noyau invité" || return 1
+  telecharger "${base}/${cle_racine}" /tmp/rootfs.prophet 1048576 "la racine invitée" || {
+    rm -f /tmp/vmlinux.prophet
     return 1
-  fi
-  curl -fsSL "${base}/${racine_distante}" -o /tmp/rootfs.prophet \
-    || { ko "téléchargement de la racine invitée impossible"; sudo_si_besoin rm -f "$noyau"; return 1; }
+  }
+  sudo_si_besoin install -m 0644 /tmp/vmlinux.prophet "$noyau"
   sudo_si_besoin install -m 0644 /tmp/rootfs.prophet "$racine"
-  rm -f /tmp/rootfs.prophet
-  ok "racine invitée : $(basename "$racine_distante")"
+  rm -f /tmp/vmlinux.prophet /tmp/rootfs.prophet
+  ok "noyau invité : $(basename "$cle_noyau")"
+  ok "racine invitée : $(basename "$cle_racine")"
 }
 
 installer_microvm() {
