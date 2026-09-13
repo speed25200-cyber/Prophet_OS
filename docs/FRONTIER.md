@@ -203,6 +203,7 @@ Le même jour, l'image sert deux modèles en mode routeur (Qwen3-1.7B en réflex
 en exécution, ADR 0034), et la [parole](adr/0036-la-parole-de-l-humain.md) entre dans le
 système : `prophet voice` enregistre le micro ou lit un fichier, transcrit en local par
 whisper.cpp, et fait de la phrase dite une mission à examiner. Preuve : une phrase française de
-synthèse transcrite avec ses mots-clés par le vrai modèle. Le critère d'interface (espace de
-commande, conversations) progresse sans être coché : l'atelier n'a pas encore de bouton de
-dictée, la voix humaine n'est pas mesurée, et l'OS ne parle pas.
+synthèse transcrite avec ses mots-clés par le vrai modèle, et un bouton « Dicter » dans
+l'atelier dont le contrôleur est testé avec des dictées simulées. Le critère d'interface (espace
+de commande, conversations) progresse sans être coché : la voix humaine n'est pas mesurée sur
+un vrai micro, et l'OS ne parle pas.

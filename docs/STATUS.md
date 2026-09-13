@@ -299,8 +299,11 @@ fait de la phrase dite une mission à examiner par le chemin de `prophet task pr
 télécharge le modèle `ggml-base` (148 Mo, empreinte vérifiée) à l'installation. Preuve : une
 phrase française synthétisée par espeak-ng, transcrite par le vrai whisper.cpp et le vrai modèle,
 rend ses mots-clés (« note », « documents ») et la langue `fr`, détectée aussi sans indication ;
-tests unitaires de la lecture de whisper et des refus. Ni voix humaine, ni bouton de dictée dans
-l'atelier, ni réponse parlée : voir l'[ADR 0036](adr/0036-la-parole-de-l-humain.md).
+tests unitaires de la lecture de whisper et des refus. L'atelier gagne un bouton « Dicter (6 s) »
+sous l'objectif, présent seulement avec un modèle de parole, qui écoute et transcrit hors du fil
+graphique et ajoute le texte à l'objectif que l'humain relit ; son contrôleur est testé avec des
+dictées simulées. Ni voix humaine mesurée, ni réponse parlée : voir
+l'[ADR 0036](adr/0036-la-parole-de-l-humain.md) et le [rapport](reports/parole-2026-09-13.md).
 
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 

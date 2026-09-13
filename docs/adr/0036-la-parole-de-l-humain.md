@@ -33,8 +33,12 @@ distant ; et la parole ne donne aucun droit, elle produit un texte que l'humain 
   française synthétisée par espeak-ng est transcrite par le vrai whisper.cpp et le vrai modèle
   avec ses mots-clés, langue détectée `fr` ; les tests unitaires couvrent la lecture de la
   sortie de whisper et les refus (durée, fichier, enregistreur absent).
+- L'atelier a un bouton « Dicter (6 s) » sous le champ d'objectif, présent seulement si la
+  machine a un modèle de parole : le micro est écouté puis transcrit hors du fil graphique, et
+  le texte rejoint l'objectif que l'humain relit avant tout envoi ; un brouillon déjà envoyé
+  ne reçoit pas de dictée. Le contrôleur est testé avec des réponses de dictée simulées
+  (ajout, texte vide, échec nommé).
 - Ce qui n'est pas livré : la voix humaine (le test parle avec une voix de synthèse ; la
-  qualité sur un vrai micro reste à mesurer), le bouton de dictée dans l'atelier (la surface
-  n'appelle pas encore `voice`), la réponse parlée de l'OS (aucune synthèse), et le mot
-  d'activation. Le modèle `base` est un compromis vitesse/qualité sur processeur ; un modèle
-  plus grand s'installe par `prophet.voice.model`.
+  qualité sur un vrai micro reste à mesurer), la réponse parlée de l'OS (aucune synthèse), et
+  le mot d'activation. Le modèle `base` est un compromis vitesse/qualité sur processeur ; un
+  modèle plus grand s'installe par `prophet.voice.model`.

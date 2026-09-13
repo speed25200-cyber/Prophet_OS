@@ -9,6 +9,8 @@ use serde_json::json;
 enum Reply {
     Options(Result<Options, String>),
     Plan(Result<Box<TaskPlan>, String>),
+    /// Une dictée : le texte transcrit en local, ou ce qui a manqué (ADR 0036).
+    Dictation(Result<String, String>),
 }
 
 /// Préparation séparée du dialogue : aucun modèle ne décide du profil ou des droits.
@@ -26,6 +28,8 @@ pub struct Preparation {
     attempt: Option<Request>,
     prepared: Option<TaskPlan>,
     error: Option<String>,
+    /// Une dictée est en cours : le micro écoute puis whisper transcrit, hors du fil graphique.
+    dictating: bool,
     tx: Sender<Reply>,
     rx: Receiver<Reply>,
 }
@@ -44,10 +48,17 @@ impl Default for Preparation {
             attempt: None,
             prepared: None,
             error: None,
+            dictating: false,
             tx,
             rx,
         }
     }
+}
+
+/// La parole est configurée sur cette machine (modèle et whisper.cpp présents).
+#[must_use]
+pub fn voice_ready() -> bool {
+    voice::Tools::from_env().is_ok()
 }
 
 impl Preparation {
@@ -125,8 +136,57 @@ impl Preparation {
                         }
                     }
                 }
+                Reply::Dictation(result) => {
+                    self.dictating = false;
+                    match result {
+                        Ok(text) if text.trim().is_empty() => {
+                            self.error = Some("Rien n'a été compris ; réessayez.".into());
+                        }
+                        Ok(text) => {
+                            if !self.intent.is_empty()
+                                && !self.intent.ends_with(char::is_whitespace)
+                            {
+                                self.intent.push(' ');
+                            }
+                            self.intent.push_str(text.trim());
+                            self.error = None;
+                        }
+                        Err(error) => self.error = Some(format!("Dictée impossible : {error}")),
+                    }
+                }
             }
         }
+    }
+
+    /// Écoute le micro `seconds` secondes puis transcrit en local ; le texte rejoint l'objectif
+    /// à la réception, l'humain le relit avant tout envoi (ADR 0036).
+    pub fn dictate(&mut self, ctx: &egui::Context, seconds: u32) {
+        if self.dictating || self.pending || self.attempt.is_some() {
+            return;
+        }
+        self.dictating = true;
+        self.error = None;
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let result = (|| {
+                let tools = voice::Tools::from_env().map_err(|e| e.to_string())?;
+                let wav =
+                    std::env::temp_dir().join(format!("prophet-dictee-{}.wav", std::process::id()));
+                tools.record(seconds, &wav).map_err(|e| e.to_string())?;
+                let transcript = tools.transcribe(&wav, None).map_err(|e| e.to_string());
+                let _ = std::fs::remove_file(&wav);
+                transcript.map(|t| t.text)
+            })();
+            let _ = tx.send(Reply::Dictation(result));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Dictée en cours.
+    #[must_use]
+    pub const fn dictating(&self) -> bool {
+        self.dictating
     }
 
     /// Conserve un choix présent ; ne reprend pas un modèle d'un autre profil par accident.
@@ -360,5 +420,49 @@ mod tests {
         assert_eq!(preparation.model, "envoye");
         assert!(!preparation.loading());
         assert!(preparation.error().is_none());
+    }
+
+    #[test]
+    fn une_dictee_rejoint_l_objectif_et_un_echec_est_dit() {
+        let mut preparation = Preparation {
+            intent: "Écris une note".into(),
+            dictating: true,
+            ..Default::default()
+        };
+        preparation
+            .tx
+            .send(Reply::Dictation(Ok("  dans mes documents.  ".into())))
+            .unwrap();
+        preparation.update();
+        assert_eq!(preparation.intent, "Écris une note dans mes documents.");
+        assert!(!preparation.dictating());
+        assert!(preparation.error().is_none());
+
+        preparation.dictating = true;
+        preparation
+            .tx
+            .send(Reply::Dictation(Ok("   ".into())))
+            .unwrap();
+        preparation.update();
+        assert_eq!(preparation.intent, "Écris une note dans mes documents.");
+        assert!(
+            preparation
+                .error()
+                .unwrap()
+                .contains("Rien n'a été compris")
+        );
+
+        preparation.dictating = true;
+        preparation
+            .tx
+            .send(Reply::Dictation(Err("aucun modèle de parole".into())))
+            .unwrap();
+        preparation.update();
+        assert!(!preparation.dictating());
+        assert!(preparation.error().unwrap().contains("Dictée impossible"));
+        // Un brouillon déjà envoyé ne reçoit pas de dictée.
+        preparation.pending = true;
+        preparation.dictate(&egui::Context::default(), 3);
+        assert!(!preparation.dictating());
     }
 }

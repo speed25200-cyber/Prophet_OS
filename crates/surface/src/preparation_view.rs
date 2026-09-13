@@ -131,6 +131,20 @@ fn form(ui: &mut egui::Ui, preparation: &mut Preparation, compact: bool) {
         ui.add_enabled_ui(!locked,|ui| {
             ui.add(egui::TextEdit::multiline(&mut preparation.intent).id(egui::Id::new("mission-intent")).hint_text("Décrivez le résultat attendu, les documents utiles et vos contraintes…").font(egui::FontId::proportional(if compact{18.0}else{21.0})).desired_width(f32::INFINITY).desired_rows(if compact{3}else{4}).char_limit(16_384).frame(Frame::NONE));
         });
+        // La parole (ADR 0036) : six secondes de micro, transcrites en local, ajoutées à
+        // l'objectif que l'humain relit avant tout envoi. Le bouton n'existe que si la
+        // machine a un modèle de parole ; le son ne quitte pas la machine.
+        if crate::preparation::voice_ready() {
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(!locked && !preparation.dictating(),|ui| {
+                    if bouton(ui,"mission-dictate",if preparation.dictating(){"Écoute…"}else{"Dicter (6 s)"},false).clicked(){preparation.dictate(&ctx,6);}
+                });
+                if preparation.dictating() {
+                    ui.label(RichText::new("Parlez ; le texte s'ajoutera à votre objectif.").color(MUTED));
+                }
+            });
+        }
         ui.add_space(8.0);ui.separator();ui.add_space(10.0);
         ui.horizontal(|ui| {
             caption(ui,"02 / CONTEXTE ET MODÈLE");
