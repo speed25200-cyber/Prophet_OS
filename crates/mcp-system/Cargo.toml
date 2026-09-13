@@ -20,6 +20,7 @@ vault = { workspace = true }
 ledger = { workspace = true }
 memoryd = { workspace = true }
 providers = { workspace = true }
+sandboxd = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

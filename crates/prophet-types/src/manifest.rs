@@ -353,12 +353,14 @@ impl Manifest {
         if self.sandbox.min_level > 2 {
             return Err(ManifestError::BadSandboxLevel(self.sandbox.min_level));
         }
-        let exec_allowed = self
+        // Exécuter du code arbitraire exige la microVM ; les utilitaires confinés de la liste
+        // (`crate::exec`), désignés par leur nom, n'en sont pas (ADR 0031).
+        let arbitrary_exec = self
             .capabilities
             .max
             .get("proc.exec")
-            .is_some_and(|v| !v.is_empty());
-        if exec_allowed && self.sandbox.code_execution != CodeExecution::Microvm {
+            .is_some_and(|v| v.iter().any(|p| !crate::exec::is_safe_utility(p)));
+        if arbitrary_exec && self.sandbox.code_execution != CodeExecution::Microvm {
             return Err(ManifestError::ExecWithoutMicrovm);
         }
 

@@ -5,9 +5,13 @@
 forbid(principal, action, resource)
 when { resource has sensitive && resource.sensitive == true };
 
-// L'exécution de code arbitraire n'est permise qu'en microVM (niveau 2).
+// L'exécution de code arbitraire n'est permise qu'en microVM (niveau 2). Les utilitaires
+// confinés de la liste (cat, wc, grep… : ADR 0031) ne modifient rien et tournent sur place.
 forbid(principal, action == Prophet::Action::"proc.exec", resource)
-unless { context has sandbox_level && context.sandbox_level >= 2 };
+unless {
+    (context has sandbox_level && context.sandbox_level >= 2)
+    || (resource has confined_utility && resource.confined_utility == true)
+};
 
 // --- Classes d'actions automatiques. ---
 

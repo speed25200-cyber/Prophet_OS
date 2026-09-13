@@ -22,9 +22,13 @@ pub const DEFAULT_POLICIES: &str = r#"
 forbid(principal, action, resource)
 when { resource has sensitive && resource.sensitive == true };
 
-// L'exécution de code arbitraire n'est permise qu'en microVM (niveau 2).
+// L'exécution de code arbitraire n'est permise qu'en microVM (niveau 2). Les utilitaires
+// confinés de la liste (cat, wc, grep… : ADR 0031) ne modifient rien et tournent sur place.
 forbid(principal, action == Prophet::Action::"proc.exec", resource)
-unless { context has sandbox_level && context.sandbox_level >= 2 };
+unless {
+    (context has sandbox_level && context.sandbox_level >= 2)
+    || (resource has confined_utility && resource.confined_utility == true)
+};
 
 // --- Classes d'actions automatiques. ---
 
@@ -120,6 +124,9 @@ pub struct ResourceFacts {
     pub irreversible: bool,
     /// Vrai si l'action a un effet hors de la machine.
     pub external: bool,
+    /// Vrai si la cible est un utilitaire confiné de la liste (`prophet_types::exec`) : il
+    /// tourne sans microVM, sur place, parce qu'il ne modifie rien (ADR 0031).
+    pub confined_utility: bool,
 }
 
 /// Chemins sensibles par défaut, relatifs au home de l'utilisateur ou absolus.
@@ -208,6 +215,10 @@ impl PolicyEngine {
                 (
                     "external".to_owned(),
                     RestrictedExpression::new_bool(facts.external),
+                ),
+                (
+                    "confined_utility".to_owned(),
+                    RestrictedExpression::new_bool(facts.confined_utility),
                 ),
             ]
             .into_iter()
@@ -345,6 +356,23 @@ mod tests {
         assert!(!e.allows("task:01", Res::Proc, Act::Exec, &f, 0).unwrap());
         assert!(!e.allows("task:01", Res::Proc, Act::Exec, &f, 1).unwrap());
         assert!(e.allows("task:01", Res::Proc, Act::Exec, &f, 2).unwrap());
+    }
+
+    #[test]
+    fn un_utilitaire_confine_tourne_sur_place_mais_pas_un_interprete() {
+        // Le fait vient du broker, jamais de l'appelant : ici on le pose comme il le poserait.
+        let e = engine();
+        let wc = ResourceFacts {
+            confined_utility: true,
+            ..facts("wc")
+        };
+        assert!(e.allows("task:01", Res::Proc, Act::Exec, &wc, 0).unwrap());
+        let sh = ResourceFacts {
+            confined_utility: false,
+            ..facts("sh")
+        };
+        assert!(!e.allows("task:01", Res::Proc, Act::Exec, &sh, 0).unwrap());
+        assert!(e.allows("task:01", Res::Proc, Act::Exec, &sh, 2).unwrap());
     }
 
     #[test]

@@ -44,7 +44,7 @@ pub fn register_all(registry: &mut Registry) {
         Arc::new(TaskStatus),
         Arc::new(TaskDiff),
         Arc::new(Now),
-        Arc::new(Exec),
+        Arc::new(Exec::default()),
         Arc::new(Kill),
         Arc::new(RequestApproval),
         Arc::new(WaitApproval),

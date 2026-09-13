@@ -52,6 +52,8 @@ struct Agents {
     browser_root: std::path::PathBuf,
     /// Socket de l'adaptateur d'accessibilité de la session humaine, s'il est configuré.
     sup_socket: Option<std::path::PathBuf>,
+    /// Socket de sandboxd, pour les commandes confinées de `proc.exec`.
+    sandboxd: std::path::PathBuf,
     /// Séances d'outils ouvertes pour des clients MCP, une par mission attachée.
     seances: Seances,
     /// Où l'état est écrit entre deux démarrages.
@@ -644,6 +646,7 @@ impl Agents {
             browser_root: self.browser_root.clone(),
             sup_socket: self.sup_socket.clone(),
             delegate: Some(self.delegator()),
+            sandboxd: self.sandboxd.clone(),
             stop,
         };
         let opened =
@@ -906,6 +909,7 @@ impl Agents {
             browser_root: self.browser_root.clone(),
             sup_socket: self.sup_socket.clone(),
             delegate: Some(self.delegator()),
+            sandboxd: self.sandboxd.clone(),
             stop,
         };
         if let Err(error) = std::thread::Builder::new()
@@ -1071,6 +1075,7 @@ impl Agents {
             browser: self.browser.clone(),
             browser_root: self.browser_root.clone(),
             sup_socket: self.sup_socket.clone(),
+            sandboxd: self.sandboxd.clone(),
             jobs: self.jobs.clone(),
         }))
     }
@@ -1088,6 +1093,7 @@ struct DelegationContext {
     browser: Option<std::path::PathBuf>,
     browser_root: std::path::PathBuf,
     sup_socket: Option<std::path::PathBuf>,
+    sandboxd: std::path::PathBuf,
     jobs: Arc<std::sync::Mutex<BTreeMap<String, Arc<AtomicBool>>>>,
 }
 
@@ -1252,6 +1258,7 @@ fn deleguer(
         browser_root: ctx.browser_root.clone(),
         sup_socket: ctx.sup_socket.clone(),
         delegate: Some(delegation_fn(ctx.clone())),
+        sandboxd: ctx.sandboxd.clone(),
         stop,
     };
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1410,6 +1417,7 @@ async fn main() -> anyhow::Result<()> {
     let capd = chemin("PROPHET_CAPD_SOCKET", "capd");
     let ledger = chemin("PROPHET_LEDGER_SOCKET", "ledger");
     let egress = chemin("PROPHET_EGRESS_SOCKET", "egress");
+    let sandboxd = chemin("PROPHET_SANDBOXD_SOCKET", "sandboxd");
     // Un navigateur n'est piloté que s'il est nommé explicitement : ce choix appartient à
     // l'administrateur. Sa sortie réseau est relayée vers egress ; il n'est pas encore confiné
     // au niveau 2 (ADR 0024).
@@ -1503,6 +1511,7 @@ async fn main() -> anyhow::Result<()> {
             browser_state,
             browser_root,
             sup_socket,
+            sandboxd,
             seances: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
             etat: fichier_etat,
             pairs: commun::Pairs::detecter()?,

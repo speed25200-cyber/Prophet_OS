@@ -515,7 +515,10 @@ fn chaque_outil_declare_la_capacite_qu_il_exige() {
 }
 
 #[test]
-fn l_execution_de_code_est_annoncee_comme_exigeant_la_microvm() {
+fn l_execution_de_code_est_irreversible_hors_liste_blanche() {
+    // Le niveau minimal de l'outil est 0 : c'est la politique de capd qui n'accorde, sous 2,
+    // que les utilitaires confinés ; l'outil lui-même met tout autre programme en microVM
+    // (ADR 0031). L'annonce reste « irréversible » pour qu'un client ne s'y trompe pas.
     let m = monde();
     let exec = m
         .registry
@@ -524,8 +527,18 @@ fn l_execution_de_code_est_annoncee_comme_exigeant_la_microvm() {
         .find(|s| s.name == "proc.exec")
         .unwrap();
     let meta = exec.meta.unwrap();
-    assert_eq!(meta.sandbox_level_min, Some(2));
+    assert_eq!(meta.sandbox_level_min, Some(0));
     assert!(meta.irreversible);
+    assert_eq!(
+        mcp_system::tools::required_level_for("cat", None),
+        0,
+        "un utilitaire de la liste tourne sur place"
+    );
+    assert_eq!(
+        mcp_system::tools::required_level_for("sh", None),
+        2,
+        "tout autre programme exige la microVM"
+    );
 }
 
 #[test]

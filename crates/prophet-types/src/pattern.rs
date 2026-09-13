@@ -44,6 +44,8 @@ pub enum Family {
     Domain,
     /// Nom d'outil, d'application ou d'espace.
     Name,
+    /// Programme : un nom (`wc`) ou un chemin absolu de binaire (`/usr/bin/**`).
+    Program,
 }
 
 impl Family {
@@ -51,7 +53,8 @@ impl Family {
     #[must_use]
     pub fn of(res: Res) -> Self {
         match res {
-            Res::Fs | Res::Proc => Self::Path,
+            Res::Fs => Self::Path,
+            Res::Proc => Self::Program,
             Res::Net => Self::Domain,
             Res::Tool | Res::Ui | Res::Ledger | Res::Memory | Res::Model | Res::Task | Res::Cap => {
                 Self::Name
@@ -72,7 +75,24 @@ pub fn validate(family: Family, pattern: &str) -> Result<(), PatternError> {
         Family::Path => validate_path(pattern),
         Family::Domain => validate_domain(pattern),
         Family::Name => validate_name(pattern),
+        Family::Program => validate_program(pattern),
     }
+}
+
+/// Un programme : un chemin absolu (règles des chemins) ou un nom simple, jamais un chemin
+/// relatif ni un joker.
+fn validate_program(pattern: &str) -> Result<(), PatternError> {
+    if pattern.starts_with('/') || pattern.starts_with("~/") || pattern == "*" || pattern == "**" {
+        return validate_path(pattern);
+    }
+    if pattern.contains('/')
+        || !pattern
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+'))
+    {
+        return Err(PatternError::NotAbsolute(pattern.to_owned()));
+    }
+    Ok(())
 }
 
 fn validate_path(pattern: &str) -> Result<(), PatternError> {
@@ -169,6 +189,13 @@ pub fn covers(family: Family, parent: &str, child: &str) -> bool {
         Family::Path => path_covers(parent, child),
         Family::Domain => domain_covers(parent, child),
         Family::Name => name_covers(parent, child),
+        Family::Program => {
+            if parent.starts_with('/') || parent == "*" || parent == "**" {
+                path_covers(parent, child)
+            } else {
+                false
+            }
+        }
     }
 }
 
@@ -232,7 +259,18 @@ pub fn matches(family: Family, pattern: &str, target: &str, home: &str) -> bool 
         Family::Path => path_matches(pattern, target, home),
         Family::Domain => domain_matches(pattern, target),
         Family::Name => name_covers(pattern, target) || pattern == target,
+        Family::Program => program_matches(pattern, target, home),
     }
+}
+
+/// Un motif de programme : un chemin (règles des chemins) ou un nom simple, qui n'accepte que
+/// ce nom exact. Un nom ne couvre jamais un chemin dont le nom de base coïncide : le chemin est
+/// choisi par l'appelant, le nom est résolu par le PATH du service.
+fn program_matches(pattern: &str, target: &str, home: &str) -> bool {
+    if pattern.starts_with('/') || pattern.starts_with("~/") || pattern == "*" || pattern == "**" {
+        return path_matches(pattern, target, home);
+    }
+    pattern == target
 }
 
 fn path_matches(pattern: &str, target: &str, home: &str) -> bool {
@@ -281,6 +319,34 @@ fn domain_matches(pattern: &str, target: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn un_programme_est_un_nom_nu_ou_un_chemin() {
+        assert!(validate(Family::Program, "wc").is_ok());
+        assert!(validate(Family::Program, "/usr/bin/**").is_ok());
+        assert!(validate(Family::Program, "*").is_ok());
+        assert!(validate(Family::Program, "bin/wc").is_err());
+        assert!(validate(Family::Program, "w c").is_err());
+        assert!(matches(Family::Program, "wc", "wc", "/home/u"));
+        assert!(!matches(Family::Program, "wc", "/tmp/x/wc", "/home/u"));
+        assert!(!matches(Family::Program, "wc", "cat", "/home/u"));
+        assert!(matches(
+            Family::Program,
+            "/usr/bin/**",
+            "/usr/bin/python3",
+            "/home/u"
+        ));
+        assert!(!matches(
+            Family::Program,
+            "/usr/bin/**",
+            "python3",
+            "/home/u"
+        ));
+        assert!(matches(Family::Program, "*", "/tmp/x/wc", "/home/u"));
+        assert!(covers(Family::Program, "/usr/bin/**", "/usr/bin/python3"));
+        assert!(covers(Family::Program, "*", "wc"));
+        assert!(!covers(Family::Program, "wc", "/usr/bin/wc"));
+    }
 
     #[test]
     fn validation_des_chemins() {

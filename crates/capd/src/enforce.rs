@@ -112,6 +112,10 @@ pub fn concrete_root(pattern: &str, home: &str) -> String {
 }
 
 /// Appels système refusés au niveau 0, quel que soit le jeton.
+///
+/// `setsid` et `setpgid` en font partie : une sandbox de niveau 0 est un groupe de processus,
+/// que sandboxd gèle, dégèle et tue d'un seul signal ; un programme qui changerait de groupe
+/// échapperait à ce geste (ADR 0031).
 pub const SECCOMP_DENY_LEVEL0: &[&str] = &[
     "mount",
     "umount2",
@@ -131,6 +135,8 @@ pub const SECCOMP_DENY_LEVEL0: &[&str] = &[
     "process_vm_writev",
     "keyctl",
     "add_key",
+    "setsid",
+    "setpgid",
 ];
 
 /// Profil seccomp d'un niveau de sandbox.

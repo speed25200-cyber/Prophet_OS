@@ -223,7 +223,7 @@ impl Manager {
     /// # Erreurs
     /// Si le signal échoue.
     pub fn freeze(&self, handle: &mut SandboxHandle) -> Result<(), SandboxError> {
-        kill(Pid::from_raw(handle.pid), Signal::SIGSTOP)?;
+        signaler(handle.pid, Signal::SIGSTOP)?;
         handle.state = SandboxState::Frozen;
         Ok(())
     }
@@ -233,7 +233,7 @@ impl Manager {
     /// # Erreurs
     /// Si le signal échoue.
     pub fn thaw(&self, handle: &mut SandboxHandle) -> Result<(), SandboxError> {
-        kill(Pid::from_raw(handle.pid), Signal::SIGCONT)?;
+        signaler(handle.pid, Signal::SIGCONT)?;
         handle.state = SandboxState::Running;
         Ok(())
     }
@@ -243,7 +243,7 @@ impl Manager {
     /// # Erreurs
     /// Si le signal échoue.
     pub fn kill(&self, handle: &mut SandboxHandle) -> Result<(), SandboxError> {
-        let _ = kill(Pid::from_raw(handle.pid), Signal::SIGKILL);
+        let _ = signaler(handle.pid, Signal::SIGKILL);
         self.running
             .lock()
             .map(|mut map| map.remove(&handle.id))
@@ -264,7 +264,7 @@ impl Manager {
         };
         let mut frozen = 0;
         for pid in map.values() {
-            if kill(Pid::from_raw(*pid), Signal::SIGSTOP).is_ok() {
+            if signaler(*pid, Signal::SIGSTOP).is_ok() {
                 frozen += 1;
             }
         }
@@ -277,7 +277,7 @@ impl Manager {
             return 0;
         };
         map.values()
-            .filter(|pid| kill(Pid::from_raw(**pid), Signal::SIGCONT).is_ok())
+            .filter(|pid| signaler(**pid, Signal::SIGCONT).is_ok())
             .count()
     }
 
@@ -286,6 +286,13 @@ impl Manager {
     pub fn count(&self) -> usize {
         self.running.lock().map(|m| m.len()).unwrap_or(0)
     }
+}
+
+/// Signale la sandbox entière : le groupe de processus dont l'amorçage est le chef, ce qui
+/// atteint aussi tout ce qu'elle a lancé. Si le groupe n'existe plus (l'amorçage a été
+/// récolté), on retombe sur le processus seul, pour rendre l'erreur qu'il donnerait.
+fn signaler(pid: i32, signal: Signal) -> nix::Result<()> {
+    kill(Pid::from_raw(-pid), signal).or_else(|_| kill(Pid::from_raw(pid), signal))
 }
 
 #[cfg(test)]

@@ -2909,6 +2909,7 @@ dependencies = [
  "providers",
  "rand 0.8.8",
  "rustix 1.1.4",
+ "sandboxd",
  "serde",
  "serde_json",
  "sfs",

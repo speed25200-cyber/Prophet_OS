@@ -487,6 +487,8 @@ pub fn syscall_number(name: &str) -> Option<i64> {
         ("process_vm_writev", 311),
         ("keyctl", 250),
         ("add_key", 248),
+        ("setsid", 112),
+        ("setpgid", 109),
     ];
     #[cfg(target_arch = "aarch64")]
     let table: &[(&str, i64)] = &[
@@ -508,6 +510,8 @@ pub fn syscall_number(name: &str) -> Option<i64> {
         ("process_vm_writev", 271),
         ("keyctl", 219),
         ("add_key", 217),
+        ("setsid", 157),
+        ("setpgid", 154),
     ];
     table
         .iter()

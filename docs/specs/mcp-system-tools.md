@@ -102,6 +102,18 @@ styles ; archives zip et tar listées ; texte brut sinon, avec `json`, `csv`, `m
 attendu indéfiniment ; les octets passent par un fichier temporaire privé, effacé après. Aucun
 réseau, aucun programme choisi par l'agent. Voir l'[ADR 0028](../adr/0028-lecture-des-formats-par-un-outil-natif.md).
 
+## Commandes actuellement implémentées
+
+`proc.exec {program, args?, level?, timeout_s?}` exige `proc.exec` sur le programme tel que
+demandé : le nom nu, résolu par le chemin du service, ou un chemin absolu (jamais relatif ni
+remontant). Il tourne par `sandbox.run` de sandboxd dans l'espace de travail de la tâche, le
+home lisible selon le jeton et jamais inscriptible. La liste blanche (`cat`, `ls`, `wc`, `head`,
+`tail`, `sort`, `uniq`, `grep`, `rg`, `cut`, `tr`, `diff`, `file`), par le nom nu seulement,
+tourne au niveau 0 sans décision humaine ; tout autre programme, et tout chemin même nommé
+`cat`, exige le niveau 2 et est irréversible. Rend `exit_code`, `stdout` (256 Kio au plus,
+`truncated` sinon), `stderr`, `timed_out`. Sans sandboxd, l'outil le dit et ne lance rien. Voir
+l'[ADR 0031](../adr/0031-execution-de-programmes-sous-sandboxd.md).
+
 ## Sortie réseau et navigation actuellement implémentées
 
 `http.fetch` ne joint jamais le réseau lui-même : il écrit la requête sur le socket du proxy

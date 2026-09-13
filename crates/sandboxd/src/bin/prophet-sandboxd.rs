@@ -104,6 +104,57 @@ impl Handler for Isolation {
                 Ok(json!({ "task": tache, "pid": pid, "level": niveau }))
             }
 
+            // Exécuter et attendre : une commande d'agent (`proc.exec`) vit le temps de la
+            // réponse, sa sortie est rendue bornée, et le délai la tue plutôt que de laisser
+            // l'appelant attendre. La sandbox est la même que pour `sandbox.start`.
+            "sandbox.run" => {
+                let tache = commun::texte(&params, "task")?;
+                let spec: SandboxSpec = params
+                    .get("spec")
+                    .ok_or_else(|| Error::new(ErrorCode::InvalidParams, "« spec » attendu"))
+                    .and_then(|v| {
+                        serde_json::from_value(v.clone()).map_err(|e| {
+                            Error::new(ErrorCode::InvalidParams, format!("« spec » invalide : {e}"))
+                        })
+                    })?;
+                let delai = params
+                    .get("timeout_s")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(60)
+                    .clamp(1, 600);
+                let borne = usize::try_from(
+                    params
+                        .get("max_bytes")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(256 * 1024)
+                        .clamp(1024, 4 * 1024 * 1024),
+                )
+                .unwrap_or(256 * 1024);
+                let niveau = spec.level;
+                let rendu = tokio::task::block_in_place(|| {
+                    let mut poignee = self.manager.run(&tache, &spec).map_err(sandbox)?;
+                    let pid = poignee.pid;
+                    let sortie = executer_bornee(
+                        &self.manager,
+                        &mut poignee,
+                        std::time::Duration::from_secs(delai),
+                        borne,
+                    );
+                    Ok::<_, Error>(json!({
+                        "task": tache,
+                        "pid": pid,
+                        "level": niveau,
+                        "exit_code": sortie.code,
+                        "timed_out": sortie.timed_out,
+                        "stdout": String::from_utf8_lossy(&sortie.stdout),
+                        "stderr": String::from_utf8_lossy(&sortie.stderr),
+                        "truncated": sortie.truncated,
+                    }))
+                })?;
+                tracing::info!(niveau, "commande exécutée sous sandbox");
+                Ok(rendu)
+            }
+
             // Geler plutôt que tuer : une tâche gelée peut être reprise après une décision
             // humaine, une tâche tuée a perdu son état.
             "sandbox.freeze_all" => {
@@ -167,6 +218,78 @@ impl Handler for Isolation {
 
             autre => Err(commun::methode_inconnue(autre)),
         }
+    }
+}
+
+struct Sortie {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    code: Option<i32>,
+    timed_out: bool,
+    truncated: bool,
+}
+
+/// Lit la sortie d'une commande jusqu'à une borne, l'attend jusqu'à un délai, et la tue au-delà.
+fn executer_bornee(
+    manager: &Manager,
+    poignee: &mut SandboxHandle,
+    delai: std::time::Duration,
+    borne: usize,
+) -> Sortie {
+    use std::io::Read as _;
+    let (stdout, stderr) = match poignee.child_mut() {
+        Some(child) => (child.stdout.take(), child.stderr.take()),
+        None => (None, None),
+    };
+    let lire = |flux: Option<std::process::ChildStdout>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut f) = flux {
+                let _ = f.by_ref().take(borne as u64 + 1).read_to_end(&mut buf);
+                // Vider le reste pour ne pas bloquer la commande sur un tube plein.
+                let _ = std::io::copy(&mut f, &mut std::io::sink());
+            }
+            buf
+        })
+    };
+    let lecteur_out = lire(stdout);
+    let lecteur_err = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut f) = stderr {
+            let _ = f.by_ref().take(64 * 1024).read_to_end(&mut buf);
+            let _ = std::io::copy(&mut f, &mut std::io::sink());
+        }
+        buf
+    });
+    let debut = std::time::Instant::now();
+    let mut timed_out = false;
+    let code = loop {
+        let statut = poignee.child_mut().and_then(|c| c.try_wait().ok());
+        match statut {
+            Some(Some(status)) => break status.code(),
+            Some(None) if debut.elapsed() < delai => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Some(None) => {
+                timed_out = true;
+                let _ = manager.kill(poignee);
+                let _ = poignee.wait();
+                break None;
+            }
+            None => break None,
+        }
+    };
+    let _ = poignee.wait();
+    let mut stdout = lecteur_out.join().unwrap_or_default();
+    let stderr = lecteur_err.join().unwrap_or_default();
+    let truncated = stdout.len() > borne;
+    stdout.truncate(borne);
+    Sortie {
+        stdout,
+        stderr,
+        code,
+        timed_out,
+        truncated,
     }
 }
 

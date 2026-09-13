@@ -279,6 +279,10 @@ impl Profile {
         let apps = grants
             .iter()
             .any(|g| g.res == Res::Ui && g.pattern != "browser" && is_app_name(&g.pattern));
+        // Une commande suppose un programme nommé ; la liste blanche ou la microVM tranchent.
+        let execs = grants
+            .iter()
+            .any(|g| g.res == Res::Proc && g.act == Act::Exec);
         // Déléguer suppose un contexte à confier ; le catalogue vérifie ensuite qu'il existe.
         let spawns = grants
             .iter()
@@ -309,10 +313,13 @@ impl Profile {
                 (Res::Tool, Act::Call) if apps && UI_TOOLS.contains(&grant.pattern.as_str()) => {}
                 // Une sous-mission se confie à un contexte nommé du catalogue, jamais à « tout ».
                 (Res::Task, Act::Spawn) if is_app_name(&grant.pattern) => {}
+                // Un programme par son nom, jamais « tout » ni un chemin relatif.
+                (Res::Proc, Act::Exec) if is_app_name(&grant.pattern) => {}
+                (Res::Tool, Act::Call) if execs && grant.pattern == "proc.exec" => {}
                 (Res::Tool, Act::Call) if spawns && grant.pattern == "task.delegate" => {}
                 _ => {
                     return Err(
-                        "Le profil dépasse les outils fichiers natifs, le web relayé par egress, les applications nommées, la délégation à un contexte nommé et ses périmètres."
+                        "Le profil dépasse les outils fichiers natifs, le web relayé par egress, les applications nommées, les programmes nommés, la délégation à un contexte nommé et ses périmètres."
                             .into(),
                     );
                 }

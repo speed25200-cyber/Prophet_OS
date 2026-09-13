@@ -17,6 +17,7 @@
 pub mod canon;
 pub mod cap;
 pub mod driver;
+pub mod exec;
 pub mod ids;
 pub mod ledger;
 pub mod manifest;

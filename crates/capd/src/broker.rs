@@ -415,6 +415,9 @@ impl Broker {
             sensitive,
             irreversible: request.irreversible,
             external: request.external,
+            confined_utility: request.res == Res::Proc
+                && request.act == Act::Exec
+                && prophet_types::exec::is_safe_utility(&request.target),
         }
     }
 

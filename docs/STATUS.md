@@ -136,6 +136,17 @@ Code, lanceur, navigateur, X, verrouillage, déconnexion puis reconnexion) réus
 l'ISO, son démarrage et l'installeur ; seul ChatGPT reste en échec sur Fontconfig.
 Aucune case complète de FRONTIER n'est cochée.
 
+Commandes du 13 septembre 2026, dans le commit portant ce rapport : `proc.exec` n'est plus un
+talon. sandboxd gagne `sandbox.run` (lance, attend, tue au délai, rend code et sorties bornées) ;
+l'outil résout le programme par le chemin du service, l'exécute dans l'espace de travail avec le
+home en lecture seule selon le jeton, la liste blanche au niveau 0 sans décision, tout autre
+programme en microVM et tenu pour irréversible ; le profil accorde `proc.exec` par nom de
+programme, et un chemin (même `/tmp/x/cat`) n'est jamais l'utilitaire du PATH. Chaque sandbox
+est un groupe de processus, gelé et tué en entier (`setsid`/`setpgid` refusés au niveau 0) : le
+test du daemon a montré qu'un `sleep` survivait au délai avant cela. Tests du plan (niveaux,
+règles, refus) sans sandboxd ; exécution réelle prouvée par `sandbox.run` sur cette machine.
+Voir l'[ADR 0031](adr/0031-execution-de-programmes-sous-sandboxd.md).
+
 Suite d'applications du 13 septembre 2026, dans le commit portant ce rapport : le bureau
 installe LibreOffice, GIMP, Inkscape, Blender, FreeCAD, Evince et mpv (`prophet.desktop.suite`,
 activée par défaut), avec leurs entrées dans le lanceur ; le contexte « bureau » nomme celles

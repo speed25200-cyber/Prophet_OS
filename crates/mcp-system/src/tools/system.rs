@@ -9,34 +9,20 @@ use serde_json::{Value, json};
 use crate::protocol::{CallResult, ErrorCode, ToolMeta, ToolSpec};
 use crate::registry::{Tool, ToolContext};
 
-/// Binaires dont l'exécution ne force pas la microVM : lecture seule, effets nuls, très employés.
-///
-/// Toute commande hors de cette liste est traitée comme du code arbitraire, donc exécutée au
-/// niveau 2. La liste est courte à dessein : l'élargir est un choix explicite, à justifier.
-pub const SAFE_BINARIES: &[&str] = &[
-    "/bin/cat",
-    "/usr/bin/cat",
-    "/bin/ls",
-    "/usr/bin/ls",
-    "/usr/bin/wc",
-    "/usr/bin/head",
-    "/usr/bin/tail",
-    "/usr/bin/sort",
-    "/usr/bin/uniq",
-    "/usr/bin/rg",
-    "/usr/bin/grep",
-];
-
-/// Vrai si le binaire peut s'exécuter sans microVM.
+/// Vrai si le programme, désigné par son nom nu, est un utilitaire confiné ; un chemin ne l'est
+/// jamais. La liste vit dans `prophet_types::exec` pour que le manifeste, la politique de capd
+/// et cet outil disent la même chose (ADR 0031).
 #[must_use]
 pub fn is_safe_binary(program: &str) -> bool {
-    SAFE_BINARIES.contains(&program)
+    prophet_types::exec::is_safe_utility(program)
 }
 
-/// Niveau de sandbox exigé par une commande.
+/// Niveau de sandbox exigé par une commande : la liste blanche tourne confinée sur place
+/// (niveau 0 : espaces de noms, Landlock, seccomp), tout autre programme en microVM. Un niveau
+/// demandé ne s'abaisse jamais.
 #[must_use]
 pub fn required_level_for(program: &str, requested: Option<u8>) -> u8 {
-    let base = if is_safe_binary(program) { 1 } else { 2 };
+    let base = if is_safe_binary(program) { 0 } else { 2 };
     requested.map_or(base, |asked| asked.max(base))
 }
 
@@ -44,21 +30,130 @@ fn string_arg(args: &Value, key: &str) -> Option<String> {
     args.get(key)?.as_str().map(ToOwned::to_owned)
 }
 
-/// Exécution d'une commande.
-#[derive(Debug)]
-pub struct Exec;
+/// Exécution d'une commande sous sandboxd.
+///
+/// Le programme tourne dans l'espace de travail de la tâche, confiné sur place (niveau 0) pour
+/// la liste blanche, en microVM (niveau 2) pour tout le reste ; le home n'est lisible que selon
+/// les droits du jeton, et jamais inscriptible : ce qu'une commande écrit va dans l'espace de
+/// travail, à examiner comme toute écriture (ADR 0031).
+#[derive(Debug, Default)]
+pub struct Exec {
+    sandboxd: Option<std::path::PathBuf>,
+}
+
+impl Exec {
+    /// Un outil qui exécute par ce socket de sandboxd.
+    #[must_use]
+    pub fn via(sandboxd: std::path::PathBuf) -> Self {
+        Self {
+            sandboxd: Some(sandboxd),
+        }
+    }
+
+    /// Ce que la commande deviendrait sous sandbox : programme résolu, niveau, règles, sans
+    /// rien lancer, et la cible telle que capd la juge (le nom nu, ou le chemin demandé). Rendu
+    /// séparément pour être vérifiable sans sandboxd.
+    ///
+    /// # Errors
+    /// Programme absent ou chemin refusé, arguments invalides.
+    pub fn plan(
+        args: &Value,
+        context: &ToolContext,
+    ) -> Result<(sandboxd::SandboxSpec, String), CallResult> {
+        let Some(program) = string_arg(args, "program") else {
+            return Err(CallResult::error(
+                ErrorCode::Invalid,
+                "argument `program` manquant",
+            ));
+        };
+        let arguments: Vec<String> = match args.get("args") {
+            None => Vec::new(),
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|v| {
+                    v.as_str().map(ToOwned::to_owned).ok_or_else(|| {
+                        CallResult::error(ErrorCode::Invalid, "args : chaînes attendues")
+                    })
+                })
+                .collect::<Result<_, _>>()?,
+            Some(_) => {
+                return Err(CallResult::error(
+                    ErrorCode::Invalid,
+                    "args : liste attendue",
+                ));
+            }
+        };
+        let resolved = resolve_program(&program).ok_or_else(|| {
+            CallResult::error(
+                ErrorCode::NotFound,
+                format!("programme introuvable : {program}"),
+            )
+        })?;
+        // La cible jugée par capd est le programme tel que demandé : un nom nu que le PATH du
+        // service a résolu, ou un chemin choisi par l'appelant (jamais confiné sur place).
+        let target = program.clone();
+        let level = required_level_for(
+            &target,
+            args.get("level").and_then(Value::as_u64).map(|v| v as u8),
+        );
+        // Les règles viennent du jeton, en lecture seule : une commande ne modifie jamais le
+        // home, elle écrit dans l'espace de travail de la tâche, et seulement là.
+        let mut rules = capd::enforce::ruleset_for(&context.token, &context.home);
+        for rule in &mut rules.paths {
+            rule.write = false;
+        }
+        rules.paths.push(capd::enforce::PathRule {
+            path: context.workdir.clone(),
+            read: true,
+            write: true,
+        });
+        rules.paths.sort_by(|a, b| a.path.cmp(&b.path));
+        let mut spec = sandboxd::SandboxSpec::new(level, resolved, context.workdir.clone())
+            .args(arguments)
+            .rules(rules);
+        spec.env = vec![
+            ("HOME".to_owned(), context.workdir.clone()),
+            (
+                "PATH".to_owned(),
+                std::env::var("PATH")
+                    .unwrap_or_else(|_| "/run/current-system/sw/bin:/usr/bin:/bin".to_owned()),
+            ),
+            ("LANG".to_owned(), "C.UTF-8".to_owned()),
+        ];
+        Ok((spec, target))
+    }
+}
+
+/// Résout un nom de programme par le PATH du service, ou vérifie un chemin absolu ; jamais un
+/// chemin relatif ni un `..`.
+fn resolve_program(program: &str) -> Option<String> {
+    if program.is_empty() || program.contains("..") {
+        return None;
+    }
+    if program.contains('/') {
+        let path = std::path::Path::new(program);
+        return (path.is_absolute() && path.is_file()).then(|| program.to_owned());
+    }
+    std::env::var_os("PATH").and_then(|path| {
+        std::env::split_paths(&path)
+            .map(|dir| dir.join(program))
+            .find(|candidate| candidate.is_file())
+            .and_then(|c| c.to_str().map(ToOwned::to_owned))
+    })
+}
 
 impl Tool for Exec {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "proc.exec".into(),
-            description: "Exécute une commande dans une sandbox. Toute commande hors d'une courte liste de binaires inoffensifs s'exécute en microVM, quel que soit le niveau demandé.".into(),
+            description: "Exécute un programme dans une sandbox, avec ses arguments, dans l'espace de travail de la tâche, et rend sa sortie (bornée) et son code de retour. Les utilitaires qui ne modifient rien (cat, ls, wc, head, tail, sort, uniq, grep, rg, cut, tr, diff, file) tournent confinés sur place ; tout autre programme exige une microVM et une décision humaine. Le home n'est lisible que selon vos droits et n'est jamais modifié : écrivez dans l'espace de travail.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "program": {"type": "string", "description": "Chemin absolu du binaire."},
+                    "program": {"type": "string", "description": "Nom sur le PATH ou chemin absolu."},
                     "args": {"type": "array", "items": {"type": "string"}},
-                    "level": {"type": "integer", "description": "Niveau minimal souhaité ; jamais abaissé."}
+                    "level": {"type": "integer", "description": "Niveau minimal souhaité ; jamais abaissé."},
+                    "timeout_s": {"type": "integer", "minimum": 1, "maximum": 300, "default": 60}
                 },
                 "required": ["program"],
                 "additionalProperties": false
@@ -67,29 +162,83 @@ impl Tool for Exec {
                 requires: "proc.exec".into(),
                 irreversible: true,
                 external: false,
-                sandbox_level_min: Some(2),
+                sandbox_level_min: Some(0),
             }),
         }
     }
 
+    /// La cible est le programme tel que demandé : le nom nu, ou le chemin. Réduire un chemin à
+    /// son nom de base ferait passer `/tmp/x/cat` pour l'utilitaire `cat`.
     fn target(&self, args: &Value, _context: &ToolContext) -> Option<String> {
         string_arg(args, "program")
     }
 
-    fn call(&self, args: &Value, _context: &ToolContext) -> CallResult {
-        let Some(program) = string_arg(args, "program") else {
-            return CallResult::error(ErrorCode::Invalid, "argument `program` manquant");
+    /// Les utilitaires de la liste ne modifient rien : ils s'exécutent sans décision humaine.
+    /// Tout autre programme est tenu pour irréversible.
+    fn effects(&self, args: &Value, _meta: &ToolMeta) -> (bool, bool) {
+        let safe = string_arg(args, "program").is_some_and(|p| is_safe_binary(&p));
+        (!safe, false)
+    }
+
+    fn call(&self, args: &Value, context: &ToolContext) -> CallResult {
+        let Some(socket) = &self.sandboxd else {
+            return CallResult::error(
+                ErrorCode::SandboxError,
+                "sandboxd n'est pas configuré pour ce service ; aucune commande n'a été lancée",
+            );
         };
-        let niveau = required_level_for(
-            &program,
-            args.get("level").and_then(Value::as_u64).map(|v| v as u8),
-        );
-        CallResult::error(
-            ErrorCode::SandboxError,
-            format!(
-                "l'exécution de {program} exige sandboxd en service au niveau {niveau} ; aucune commande n'a été lancée"
-            ),
-        )
+        let (spec, target) = match Self::plan(args, context) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        let timeout = args
+            .get("timeout_s")
+            .and_then(Value::as_u64)
+            .unwrap_or(60)
+            .clamp(1, 300);
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(r) => r,
+            Err(e) => return CallResult::error(ErrorCode::SandboxError, e.to_string()),
+        };
+        let level = spec.level;
+        let program = spec.program.clone();
+        let params = json!({
+            "task": context.task,
+            "spec": spec,
+            "timeout_s": timeout,
+            "max_bytes": 256 * 1024,
+        });
+        let result = runtime.block_on(async {
+            let client = prophet_ipc::Client::connect(socket)
+                .await
+                .map_err(|e| format!("sandboxd injoignable ({}) : {e}", socket.display()))?;
+            client
+                .call("sandbox.run", params)
+                .await
+                .map_err(|e| e.message)
+        });
+        match result {
+            Ok(value) => {
+                let mut rendu = json!({
+                    "program": program,
+                    "name": target,
+                    "level": level,
+                    "exit_code": value["exit_code"],
+                    "stdout": value["stdout"],
+                    "stderr": value["stderr"],
+                    "timed_out": value["timed_out"],
+                    "truncated": value["truncated"],
+                });
+                if value["timed_out"].as_bool().unwrap_or(false) {
+                    rendu["note"] = json!(format!("commande interrompue après {timeout} s"));
+                }
+                CallResult::structured(rendu)
+            }
+            Err(e) => CallResult::error(ErrorCode::SandboxError, e),
+        }
     }
 }
 
@@ -579,15 +728,18 @@ mod tests {
     }
 
     #[test]
-    fn un_binaire_inoffensif_reste_au_niveau_un() {
-        assert_eq!(required_level_for("/bin/cat", None), 1);
-        assert!(is_safe_binary("/usr/bin/grep"));
-        assert!(!is_safe_binary("/usr/bin/curl"));
+    fn un_utilitaire_nomme_reste_sur_place_mais_pas_un_chemin() {
+        assert_eq!(required_level_for("cat", None), 0);
+        assert_eq!(required_level_for("/bin/cat", None), 2);
+        assert!(is_safe_binary("grep"));
+        assert!(!is_safe_binary("/usr/bin/grep"));
+        assert!(!is_safe_binary("curl"));
     }
 
     #[test]
     fn un_niveau_demande_plus_eleve_est_respecte() {
-        assert_eq!(required_level_for("/bin/cat", Some(2)), 2);
+        assert_eq!(required_level_for("cat", Some(2)), 2);
+        assert_eq!(required_level_for("cat", Some(1)), 1);
     }
 
     #[test]

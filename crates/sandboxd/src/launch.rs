@@ -5,6 +5,7 @@
 //! une isolation qui n'aurait pas lieu, ce qui est pire que de refuser. Le module refuse donc
 //! plutôt que de dégrader, et nomme ce qui manque.
 
+use std::os::unix::process::CommandExt as _;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
@@ -98,10 +99,13 @@ fn launch_confined(
     spec: &SandboxSpec,
     sync_dir: &Path,
 ) -> Result<Launched, LaunchError> {
+    // La sandbox est un groupe de processus : geler, dégeler ou tuer touche l'arbre entier, pas
+    // seulement l'amorçage, sans quoi une commande interrompue laisserait ses enfants vivre.
     let child = Command::new(helper)
         .env_clear()
         .env(SPEC_ENV, serde_json::to_string(spec)?)
         .env(HANDSHAKE_ENV, sync_dir)
+        .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -130,6 +134,7 @@ fn launch_gvisor(runsc: &str, spec: &SandboxSpec) -> Result<Launched, LaunchErro
     let child = command
         .env_clear()
         .envs(spec.env.iter().map(|(k, v)| (k.clone(), v.clone())))
+        .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -209,6 +214,7 @@ fn launch_microvm(
         .arg("--config-file")
         .arg(&config_path)
         .env_clear()
+        .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

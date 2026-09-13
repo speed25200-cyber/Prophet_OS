@@ -70,6 +70,8 @@ pub struct Mission {
     pub sup_socket: Option<PathBuf>,
     /// Comment déléguer une sous-mission ; sans lui, aucun outil `task.delegate`.
     pub delegate: Option<Delegate>,
+    /// Socket de sandboxd, par lequel `proc.exec` exécute une commande confinée.
+    pub sandboxd: PathBuf,
     /// Signal d'annulation. Le résultat final confirme l'arrêt.
     pub stop: Arc<AtomicBool>,
 }
@@ -363,6 +365,11 @@ impl Mission {
         registry.register(Arc::new(mcp_system::tools::Search));
         // Tout format se lit sous le droit `fs.read` : PDF, bureautique, images, médias.
         registry.register(Arc::new(mcp_system::tools::DocRead));
+        // Une commande tourne sous sandboxd, dans l'espace de travail, le home en lecture seule
+        // selon le jeton (ADR 0031) ; le profil doit accorder `proc.exec` sur son nom.
+        registry.register(Arc::new(mcp_system::tools::Exec::via(
+            self.sandboxd.clone(),
+        )));
         // La seule sortie réseau : l'outil ne joint que le proxy, qui fait trancher capd sur
         // l'hôte réellement visé et retire le jeton avant que quoi que ce soit ne sorte.
         registry.register(Arc::new(mcp_system::tools::Fetch::via(self.egress.clone())));
