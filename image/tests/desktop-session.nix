@@ -19,7 +19,7 @@ pkgs.testers.runNixOSTest {
       SWAYSOCK = "/run/user/1000/prophet-sway.sock";
       WLR_RENDERER = "pixman";
     };
-    environment.systemPackages = [ pkgs.jq pkgs.iptables ];
+    environment.systemPackages = [ pkgs.jq pkgs.iptables pkgs.acl ];
     virtualisation.memorySize = 4096;
     virtualisation.cores = 2;
     virtualisation.diskSize = 8192;
@@ -285,7 +285,15 @@ pkgs.testers.runNixOSTest {
             # Documents/Prophet pour agentd : un `install -m 0600` explicite réduirait le masque de
             # l'ACL et rendrait le document illisible au service, qui refuserait alors la capture
             # (« erreur d'entrée-sortie : Permission denied », vu en CI le 13 septembre).
+            # Ce que le service voit de l'espace de l'humain, avant d'y compter : les ACL de chaque
+            # niveau, le masque de l'utilisateur, le journal de tmpfiles. Si le service ne lit pas,
+            # ces lignes disent pourquoi, sans attendre une autre exécution.
+            print(machine.succeed("getfacl -p /home/pilot /home/pilot/Documents /home/pilot/Documents/Prophet; "
+                                  "ls -lad /home/pilot /home/pilot/Documents /home/pilot/Documents/Prophet; "
+                                  "su - pilot -c umask; journalctl -u systemd-tmpfiles-setup --no-pager | tail -n 20"))
+            machine.succeed("runuser -u agentd -- ls /home/pilot/Documents/Prophet")
             machine.succeed("su - pilot -c 'mkdir -p /home/pilot/Documents/Prophet && touch /home/pilot/Documents/Prophet/bonjour.txt'")
+            print(machine.succeed("getfacl -p /home/pilot/Documents/Prophet/bonjour.txt"))
             machine.succeed("runuser -u agentd -- cat /home/pilot/Documents/Prophet/bonjour.txt")
             machine.succeed("su - pilot -c " + q("swaymsg exec " + q("prophet-ouvrir editeur /home/pilot/Documents/Prophet/bonjour.txt")))
             window("org.xfce.mousepad")

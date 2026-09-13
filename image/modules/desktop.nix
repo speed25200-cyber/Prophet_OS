@@ -113,7 +113,11 @@ ${lib.optionalString cfg.suite.enable ''
           # piloter par son arbre d'accessibilité (contexte « bureau », ADR 0027). Un chemin
           # en second argument ouvre ce fichier ; sinon un document vide dans l'espace Prophet.
           swaymsg 'workspace "2: Atelier"' >/dev/null
-          install -d -m 0700 -- "$HOME/Documents/Prophet"
+          # Jamais `install -d -m 0700` ici : sur un répertoire qui existe déjà, c'est un chmod,
+          # et un chmod réduit le masque de l'ACL que tmpfiles a posée pour agentd — le service
+          # ne pourrait plus lire ce que l'humain lui confie (vu en CI le 13 septembre 2026).
+          # tmpfiles crée l'espace Prophet à chaque démarrage ; ceci n'est qu'un secours.
+          mkdir -p -- "$HOME/Documents/Prophet"
           launch ${pkgs.mousepad}/bin/mousepad "''${2:-}"
           ;;
         claude-code)
