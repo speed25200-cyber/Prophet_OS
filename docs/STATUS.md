@@ -133,7 +133,8 @@ et rendent la configuration à donner au client. Trois tests avec les vrais capd
 pont prouvent la séance de bout en bout : outils limités au jeton, écriture dans le travail et
 non dans le home, refus hors périmètre sans fuite du contenu, retrait qui scelle les versions,
 examen puis publication par le créateur ; annulation pendant la séance ; mission inconnue
-refusée. Voir l'[ADR 0026](adr/0026-seance-d-outils-mcp-pour-les-clients-de-l-humain.md).
+refusée. Voir l'[ADR 0026](adr/0026-seance-d-outils-mcp-pour-les-clients-de-l-humain.md)
+et le [rapport de la séance](reports/seance-mcp-2026-09-13.md).
 Le lanceur du bureau offre « Claude Code · mission » (mission préparée sans moteur local,
 configuration MCP écrite dans la session, client lancé avec) ; cette entrée attend la CI.
 Le client n'est pas confiné par la séance.
