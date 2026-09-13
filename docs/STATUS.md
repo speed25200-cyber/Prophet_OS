@@ -280,6 +280,17 @@ appartient à l'humain : leur exécution réelle reste un essai `needs_claude_lo
 `needs_chatgpt_login`. Voir l'[ADR 0035](adr/0035-clients-officiels-comme-roles-par-le-lanceur-de-session.md)
 et le [composant](components/pilotd.md). Aucune case complète de FRONTIER n'est cochée.
 
+Deux modèles dans l'image, 13 septembre 2026, dans le commit portant ce rapport :
+`prophet.localEngine.executeWeights` ajoute le modèle d'exécution du relais (Qwen3-0.6B Q8_0,
+640 Mo, empreinte vérifiée sur Hugging Face, téléchargé à l'installation comme le 1.7B) ; le
+moteur passe alors en mode routeur de llama-server (fichier de préréglages, un modèle par section,
+chargés à la demande sur le même port) et les profils de l'image (documents, web, bureau, atelier)
+gagnent les rôles `reflect` (1.7B) et `execute` (0.6B puis 1.7B). Preuves locales : le fichier de
+préréglages exact, servi par le llama-server du flake, expose les deux identifiants et répond à
+une complétion sur chacun ; la configuration de référence s'évalue avec les deux poids dans
+`ConditionPathExists` et le routeur dans `ExecStart`. La variante `prophet-ci` et le test de VM du
+moteur restent à un seul modèle ; le démarrage installé avec les deux poids attend la CI.
+
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 
 - `c3b0c08` — moteur local réel, CLI et gel d'un processus possédé par sandboxd.
@@ -611,7 +622,7 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 - [x] M8-T4 — Pilote `claude-code` (2026-09-12, 24b8338) — ligne de commande, environnement, détection de session
 - [x] M8-T5 — Pilote `codex` (2026-09-12, 24b8338) — pilote Codex CLI
 - [x] M8-T6 — Pilote `gemini` (2026-09-12, 24b8338) — pilote Gemini CLI
-- [ ] M8-T7 — Moteurs locaux — client HTTP, flux annulable, interface de conversation et essai Qwen3/CPU réalisés ; le 13 septembre, budgets de tokens par modèle, condensation du contexte et deux modèles servis par un llama-server en mode routeur, prouvés en relais réel (ADR 0034) ; restent le service de modèles dans l'image (routeur, second poids), les budgets VRAM et la matrice GPU/modèles
+- [ ] M8-T7 — Moteurs locaux — client HTTP, flux annulable, interface de conversation et essai Qwen3/CPU réalisés ; le 13 septembre, budgets de tokens par modèle, condensation du contexte et deux modèles servis par un llama-server en mode routeur, prouvés en relais réel (ADR 0034) ; le même jour, l'image sert deux modèles en mode routeur (Qwen3-1.7B en réflexion, Qwen3-0.6B en exécution, téléchargés à l'installation), préréglages vérifiés sur le vrai moteur et configuration évaluée ; restent le cycle de vie des poids, les budgets VRAM et la matrice GPU/modèles
 - [x] M8-T8 — Pilote `prophet-agent` (2026-09-12, 24b8338) — boucle native : points de reprise, fork, rejeu
 - [x] M8-T9 — Sélection de pilote (2026-09-12, 24b8338) — sélection expliquée, confidentialité locale respectée
 - [x] M8-T10 — CLI (2026-09-12, 24b8338) — `prophet provider ls|login`

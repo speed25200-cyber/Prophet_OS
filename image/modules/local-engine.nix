@@ -7,6 +7,16 @@ let
   engine = pkgs.callPackage ../packages/llama-cpp.nix { };
   endpoint = "http://127.0.0.1:${toString cfg.port}/v1";
   navigateur = config.prophet.navigateur != null;
+  # Le relais local (ADR 0034) : avec un second poids, le moteur sert deux modèles en mode
+  # routeur, le grand réfléchit, le petit exécute ; sans lui, un seul modèle fait tout.
+  relais = cfg.executeWeights != null;
+  modelesLocaux = [ "local:${cfg.model}" ] ++ lib.optional relais "local:${cfg.executeModel}";
+  modele = { preferred = modelesLocaux; } // lib.optionalAttrs relais {
+    roles = {
+      reflect = [ "local:${cfg.model}" ];
+      execute = [ "local:${cfg.executeModel}" "local:${cfg.model}" ];
+    };
+  };
   profiles = pkgs.writeText "prophet-mission-profiles.json" (builtins.toJSON [
     {
       id = "documents";
@@ -20,7 +30,7 @@ let
           name = "Documents Prophet";
           publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
         };
-        model.preferred = [ "local:${cfg.model}" ];
+        model = modele;
         sandbox.min_level = 0;
         capabilities.max = {
           "fs.read" = [ "~/Documents/Prophet/**" ];
@@ -46,7 +56,7 @@ let
           name = "Recherche web Prophet";
           publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
         };
-        model.preferred = [ "local:${cfg.model}" ];
+        model = modele;
         sandbox.min_level = 0;
         capabilities.max = {
           "fs.read" = [ "~/Documents/Prophet/**" ];
@@ -78,7 +88,7 @@ let
           name = "Éditeur du bureau";
           publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
         };
-        model.preferred = [ "local:${cfg.model}" ];
+        model = modele;
         sandbox.min_level = 0;
         capabilities.max = {
           "fs.read" = [ "~/Documents/Prophet/**" ];
@@ -110,12 +120,12 @@ let
           publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
         };
         model = {
-          preferred = [ "driver:claude-code" "driver:codex" "local:${cfg.model}" ];
+          preferred = [ "driver:claude-code" "driver:codex" ] ++ modelesLocaux;
           privacy = "local-preferred";
           roles = {
             reflect = [ "driver:claude-code" "local:${cfg.model}" ];
             code = [ "driver:codex" "driver:claude-code" "local:${cfg.model}" ];
-            execute = [ "local:${cfg.model}" ];
+            execute = lib.optional relais "local:${cfg.executeModel}" ++ [ "local:${cfg.model}" ];
           };
         };
         sandbox.min_level = 0;
@@ -142,17 +152,35 @@ in {
       default = "qwen3-1.7b";
       description = "Identifiant exposé par le moteur et admis par le profil de mission.";
     };
+    executeWeights = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = "Second fichier GGUF, le modèle d'exécution du relais (ADR 0034) : le moteur passe alors en mode routeur et sert les deux modèles, chargés à la demande ; les profils gagnent les rôles reflect (modèle principal) et execute (celui-ci). null : un seul modèle.";
+    };
+    executeModel = lib.mkOption {
+      type = lib.types.strMatching "[A-Za-z0-9][A-Za-z0-9._-]{0,127}";
+      default = "qwen3-0.6b";
+      description = "Identifiant du modèle d'exécution exposé par le moteur.";
+    };
     port = lib.mkOption { type = lib.types.port; default = 8080; description = "Port sur la boucle locale uniquement."; };
     threads = lib.mkOption { type = lib.types.ints.between 1 128; default = 4; description = "Nombre maximal de threads CPU d'inférence."; };
     contextSize = lib.mkOption { type = lib.types.ints.between 4096 131072; default = 4096; description = "Contexte par requête ; sa compatibilité et sa mémoire dépendent du modèle."; };
   };
 
   config = lib.mkIf (config.prophet.enable && cfg.enable) {
-    assertions = [{
-      assertion = cfg.weights == null || lib.hasPrefix "/var/lib/prophet/models/" (toString cfg.weights)
-        || lib.hasPrefix "/nix/store/" (toString cfg.weights);
-      message = "Les poids Prophet doivent être placés dans /var/lib/prophet/models ou /nix/store, hors des dossiers privés du propriétaire.";
-    }];
+    assertions = [
+      {
+        assertion = cfg.weights == null || lib.hasPrefix "/var/lib/prophet/models/" (toString cfg.weights)
+          || lib.hasPrefix "/nix/store/" (toString cfg.weights);
+        message = "Les poids Prophet doivent être placés dans /var/lib/prophet/models ou /nix/store, hors des dossiers privés du propriétaire.";
+      }
+      {
+        assertion = cfg.executeWeights == null || (cfg.weights != null && cfg.model != cfg.executeModel
+          && (lib.hasPrefix "/var/lib/prophet/models/" (toString cfg.executeWeights)
+            || lib.hasPrefix "/nix/store/" (toString cfg.executeWeights)));
+        message = "Le modèle d'exécution exige le modèle principal, un identifiant distinct, et des poids sous /var/lib/prophet/models ou /nix/store.";
+      }
+    ];
     environment.systemPackages = [ engine ];
     environment.etc."prophet/mission-profiles.json".source = profiles;
     # Le dialogue et les missions doivent interroger le même serveur, même avec un port modifié.
@@ -183,22 +211,48 @@ in {
       "d ${home}/.prophet/tasks 0700 agentd prophet-system -"
     ];
 
-    systemd.services.prophet-local-engine = lib.mkIf (cfg.weights != null) {
+    systemd.services.prophet-local-engine = let
+      # Les réglages d'un modèle, identiques en mode simple et en mode routeur.
+      reglages = [
+        "--jinja" "--reasoning" "off" "--ctx-size" (toString cfg.contextSize)
+        "--threads" (toString cfg.threads) "--parallel" "1" "--gpu-layers" "0"
+        "--temp" "0.7" "--top-p" "0.8" "--top-k" "20" "--min-p" "0"
+        "--presence-penalty" "1.5"
+      ];
+      # En mode routeur, chaque modèle est une section du fichier de préréglages, nommée par
+      # l'identifiant qu'il expose ; le routeur charge les modèles à la demande sur le même port.
+      section = nom: poids: ''
+        [${nom}]
+        model = ${toString poids}
+        jinja = 1
+        reasoning = off
+        ctx-size = ${toString cfg.contextSize}
+        threads = ${toString cfg.threads}
+        parallel = 1
+        n-gpu-layers = 0
+        temp = 0.7
+        top-p = 0.8
+        top-k = 20
+        min-p = 0
+        presence-penalty = 1.5
+      '';
+      prereglages = pkgs.writeText "prophet-modeles.ini"
+        (section cfg.model cfg.weights + "\n" + section cfg.executeModel cfg.executeWeights);
+    in lib.mkIf (cfg.weights != null) {
       description = "Prophet OS — moteur local CPU";
       wantedBy = [ "multi-user.target" ];
       after = [ "systemd-tmpfiles-setup.service" ];
-      unitConfig.ConditionPathExists = toString cfg.weights;
+      unitConfig.ConditionPathExists = [ (toString cfg.weights) ]
+        ++ lib.optional relais (toString cfg.executeWeights);
       startLimitIntervalSec = 60;
       startLimitBurst = 3;
       serviceConfig = {
-        ExecStart = utils.escapeSystemdExecArgs [
-          "${engine}/bin/llama-server" "--model" (toString cfg.weights)
-          "--host" "127.0.0.1" "--port" (toString cfg.port) "--alias" cfg.model
-          "--jinja" "--reasoning" "off" "--ctx-size" (toString cfg.contextSize)
-          "--threads" (toString cfg.threads) "--parallel" "1" "--gpu-layers" "0"
-          "--temp" "0.7" "--top-p" "0.8" "--top-k" "20" "--min-p" "0"
-          "--presence-penalty" "1.5"
-        ];
+        ExecStart = utils.escapeSystemdExecArgs (
+          [ "${engine}/bin/llama-server" "--host" "127.0.0.1" "--port" (toString cfg.port) ]
+          ++ (if relais
+            then [ "--models-preset" (toString prereglages) "--models-max" "2" ]
+            else [ "--model" (toString cfg.weights) "--alias" cfg.model ] ++ reglages)
+        );
         User = "prophet-model";
         Group = "prophet-model";
         Restart = "on-failure";

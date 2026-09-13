@@ -48,6 +48,13 @@
         url = "https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/90862c4b9d2787eaed51d12237eafdfe7c5f6077/Qwen3-1.7B-Q8_0.gguf";
         sha256 = "061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a";
       };
+      # Le modèle d'exécution du relais : Qwen3-0.6B en Q8_0, 640 Mo, le moins coûteux qui
+      # applique une étape décidée par le 1.7B (ADR 0034). Le moteur sert les deux en mode
+      # routeur, chargés à la demande ; l'empreinte est celle publiée par Hugging Face.
+      modeleExecution = {
+        url = "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/23749fefcc72300e3a2ad315e1317431b06b590a/Qwen3-0.6B-Q8_0.gguf";
+        sha256 = "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031";
+      };
     in
     {
       inherit nixosModules;
@@ -69,6 +76,7 @@
           ({ pkgs, ... }: {
             prophet.enable = true;
             prophet.localEngine.weights = pkgs.fetchurl modeleParDefaut;
+            prophet.localEngine.executeWeights = pkgs.fetchurl modeleExecution;
             nixpkgs.config.allowUnfreePredicate = autoriserLesClients;
           })
         ];

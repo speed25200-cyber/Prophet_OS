@@ -51,9 +51,12 @@ compte par modèle, et une réduction de ce qui est renvoyé au modèle à chaqu
 ## Conséquences
 
 - Un profil peut dire « qwen3-1.7b réfléchit, qwen3-0.6b exécute » ; le catalogue d'exemple le
-  fait, et `task.options` rend pour chaque rôle les modèles réellement servis. Le moteur de
-  l'image reste à un seul modèle : y servir deux modèles relève du service de modèles (M8-T7)
-  et d'un second poids à l'installation, non livrés ici.
+  fait, et `task.options` rend pour chaque rôle les modèles réellement servis. Le même jour,
+  l'image sert les deux : `prophet.localEngine.executeWeights` (Qwen3-0.6B Q8_0, 640 Mo,
+  téléchargé à l'installation comme le modèle principal) fait passer le moteur en mode routeur
+  de llama-server (un fichier de préréglages, un modèle par section, chargés à la demande sur le
+  même port), et les profils de l'image gagnent les rôles `reflect` et `execute` ; sans second
+  poids, un seul modèle fait tout et rien ne change.
 - Les clients officiels ne sont pas encore des cibles de rôle exécutables par le service : un
   rôle `driver:claude-code` ou `driver:codex` est un manifeste valide, mais le catalogue de
   missions locales n'admet que `local:` et le lanceur ne lance aucun client (ADR 0026 : la
