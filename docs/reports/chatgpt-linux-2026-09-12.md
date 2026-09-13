@@ -97,3 +97,12 @@ ne figure pas parmi les distributions officiellement prises en charge ; XWayland
 ici conformément au mode de compatibilité documenté. Voir la
 [documentation officielle](https://learn.chatgpt.com/docs/linux/linux-app) et l'
 [ADR 0009](../adr/0009-clients-officiels-et-bureau.md).
+
+Le 13 septembre, le [run de `2eb86f8`](https://github.com/speed25200-cyber/Prophet_OS/actions/runs/34731398933)
+reproduit le même échec dans le travail `103654731863` : le renderer signale
+`Fontconfig error: Cannot load default config file: File not found: /etc/fonts/fonts.conf`.
+Ce relevé confirme le défaut ; il ne démontre pas une nouvelle cause. Les essais de copie
+physique, de chemins canoniques et de version Fontconfig différente décrits ci-dessus ne doivent
+pas être présentés comme des correctifs réussis. La documentation officielle relue le même jour
+maintient la préversion Linux, les distributions annoncées et le caractère expérimental du
+Wayland natif. Aucun changement du paquet ni aucune session authentifiée n'est ajouté par ce relevé.

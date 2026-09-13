@@ -1,0 +1,32 @@
+[
+  {
+    "id": "documents",
+    "name": "Documents de travail",
+    "description": "Rédiger et préparer des documents dans votre espace Prophet.",
+    "scopes": ["~/Documents/Prophet"],
+    "manifest": {
+      "agent": {
+        "id": "org.prophet.documents-locaux",
+        "version": "1.0.0",
+        "name": "Documents locaux",
+        "publisher_key": "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      },
+      "model": {
+        "preferred": ["local:qwen3-0.6b"],
+        "privacy": "local-only"
+      },
+      "sandbox": { "min_level": 0 },
+      "capabilities": {
+        "max": {
+          "fs.read": ["~/Documents/Prophet/**"],
+          "fs.list": ["~/Documents/Prophet/**"],
+          "fs.write": ["~/Documents/Prophet/**"],
+          "tool.call": ["fs.read", "fs.list", "fs.stat", "fs.search", "fs.write"]
+        }
+      },
+      "budget": {
+        "default": { "tokens": 20000, "wall_time": "120s", "approvals": 3 }
+      }
+    }
+  }
+]

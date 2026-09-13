@@ -73,6 +73,11 @@ ne sont pas encore livrés à ce jalon. Le raccordement suivant ajoute un
 cohérente du plan et du résultat, lancement et arrêt, réponses tardives écartées et missions
 terminées conservées. La liste des fichiers provient des métadonnées du diff ; leur contenu,
 validation et annulation restent à intégrer, ainsi que la création d'un plan depuis le dialogue.
+Le jalon suivant ajoute la préparation depuis une intention humaine et depuis une demande du
+dialogue : profils configurés côté service, découverte réelle du modèle, plan persistant et
+lancement distinct. La récupération d'une réponse perdue utilise une lecture de la référence
+conservée. Ce raccordement nécessite encore l'installation des profils et du moteur ; il ne
+valide pas la planification par un modèle réel ni la chaîne installée entière. Voir l'[ADR 0015](adr/0015-intention-et-profils-de-mission.md).
 Aucune exigence complète ci-dessus n'est cochée pour ces jalons.
 Codex et Claude Code sont maintenant obligatoires dans la configuration de l'image ; leurs vrais
 binaires répondent aux sondes de version et d'authentification en profils vierges. Le diagnostic

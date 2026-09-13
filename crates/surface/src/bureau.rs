@@ -65,13 +65,19 @@ impl Bureau {
     /// Les scènes de démonstration ne peuvent pas activer ce transport.
     pub fn brancher_missions(&mut self, socket: std::path::PathBuf) {
         if !self.atelier.demonstration {
-            self.supervision.missions = crate::missions::Missions::connect(socket);
+            self.supervision.missions = crate::missions::Missions::connect(socket.clone());
+            self.supervision.preparation = crate::preparation::Preparation::connect(socket);
         }
     }
 
     /// Contrôleur de la mission sélectionnée, pour l'intégration native et ses essais.
     pub fn missions(&mut self) -> &mut crate::missions::Missions {
         &mut self.supervision.missions
+    }
+
+    /// Brouillon et catalogue de préparation de mission.
+    pub fn preparation(&mut self) -> &mut crate::preparation::Preparation {
+        &mut self.supervision.preparation
     }
 
     /// Prépare les widgets et retourne une éventuelle décision humaine.

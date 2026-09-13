@@ -5,7 +5,8 @@ conversation locale en flux, copie du texte, interruption et activité des servi
 et décisions viennent d'agentd/capd ; les conversations directes n'utilisent pas d'outils système.
 
 L'accueil est l'espace de supervision : missions sélectionnables, filtres, contexte et examen
-des décisions humaines. Préparer un objectif ouvre le dialogue local, sans lancer d'agent.
+des décisions humaines. Préparer un objectif ouvre un brouillon de mission : intention, contexte
+et modèle effectivement disponible auprès du service. Le plan est préparé sans lancer d'agent.
 Une mission déjà planifiée par agentd peut être examinée puis lancée depuis son plan. Son
 inspecteur affiche les accès, l'état exact, le résultat textuel et les métadonnées des fichiers
 préparés. L'arrêt est explicite et sa confirmation vient du service. Les missions terminées
@@ -39,5 +40,11 @@ Le raccordement de l'inspecteur utilise `PROPHET_AGENTD_SOCKET` (sinon `/run/pro
 Le moteur des missions est configuré dans **agentd** par `PROPHET_LOCAL_ENDPOINT` ; `--endpoint`
 configure uniquement la conversation directe. Le lanceur actuel accepte les outils natifs de
 confiance au niveau 0. Un plan exigeant un pilote isolé reste non lançable depuis cette vue.
-Le contenu ligne par ligne des diffs, la validation des fichiers, le journal détaillé et la
-création de plans depuis la conversation restent à intégrer. Voir l'[ADR 0014](../../docs/adr/0014-inspection-et-commandes-de-mission.md).
+Le catalogue de contextes est configuré dans agentd par `PROPHET_MISSION_PROFILES` ; voir
+le [guide de configuration](../agentd/README.md). Une demande humaine du dialogue peut devenir
+un brouillon ; les réponses du modèle ne choisissent ni profil ni droits. Une préparation
+incertaine conserve sa référence et peut être retrouvée par lecture, sans nouvelle création.
+Les brouillons restent en mémoire ; les plans confirmés sont persistants dans le service.
+Le contenu ligne par ligne des diffs, la validation des fichiers et le journal détaillé restent
+à intégrer. Voir les ADR [0014](../../docs/adr/0014-inspection-et-commandes-de-mission.md) et
+[0015](../../docs/adr/0015-intention-et-profils-de-mission.md).

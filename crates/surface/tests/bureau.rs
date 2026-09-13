@@ -116,10 +116,34 @@ fn la_navigation_et_la_saisie_unicode_fonctionnent_dans_les_widgets_rendus() {
     assert_eq!(bureau.atelier.page, Page::Accueil);
     let events = click_widget(&bureau, "preparer-mission");
     frame(&mut bureau, &context, &target, events);
-    assert_eq!(bureau.atelier.page, Page::Conversation);
+    assert_eq!(bureau.atelier.page, Page::Accueil);
     frame(&mut bureau, &context, &target, vec![]);
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("mission-intent"))
+            .is_some()
+    );
+    let events = click_widget(&bureau, "mission-prepare-back");
+    frame(&mut bureau, &context, &target, events);
+    let events = click_widget(&bureau, "nav-conversation");
+    frame(&mut bureau, &context, &target, events);
+    assert_eq!(bureau.atelier.page, Page::Conversation);
+    for _ in 0..3 {
+        frame(&mut bureau, &context, &target, vec![]);
+    }
     let events = click_widget(&bureau, "intention");
     frame(&mut bureau, &context, &target, events);
+    let input = bureau
+        .ctx
+        .read_response(egui::Id::new("intention"))
+        .unwrap();
+    assert!(
+        input.has_focus(),
+        "saisie sans focus : {:?}, visible={:?}",
+        input.rect,
+        input.interact_rect
+    );
     frame(
         &mut bureau,
         &context,

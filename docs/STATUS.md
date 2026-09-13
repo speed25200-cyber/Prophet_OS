@@ -110,7 +110,7 @@ processus sous sandboxd et l'intégration à l'image restent ouverts. Aucun crit
 de FRONTIER.md n'est coché pour ce jalon. La CI de `d7b5c90` a réussi composants, isolation
 et surface ; le test ChatGPT reste en échec (run `34726143307`).
 
-Jalon de supervision du 13 septembre 2026, après `a91ed22`, dans le commit portant ce rapport :
+Jalon de supervision du 13 septembre 2026, commit `2eb86f8` :
 `task.inspect` expose le plan et le résultat sans jeton. L'interface native permet de lancer
 un plan existant, de demander l'arrêt et de lire ou copier le résultat ; les missions terminées
 restent consultables. Les commandes attendent les réponses du service et les lectures anciennes
@@ -132,6 +132,30 @@ ChatGPT échoue toujours sur Fontconfig (run `34728460203`). La nouvelle révisi
 vérifier en CI. La création de plans depuis le dialogue, le contenu des diffs et leur validation,
 les processus isolés, les sessions authentifiées et l'intégration complète à l'image restent
 à réaliser. Aucun critère complet de FRONTIER.md n'est coché pour ce jalon.
+
+Jalon de préparation du 13 septembre 2026, après `2eb86f8`, dans le commit portant ce rapport :
+une intention saisie dans la surface peut devenir un plan avec `task.prepare`. Le contexte
+et les modèles admis viennent de profils configurés dans agentd ; le moteur est interrogé
+réellement avant de proposer puis de préparer le modèle choisi. L'identité vient du pair Unix.
+L'humain examine le plan puis le lance séparément. Une demande du dialogue peut devenir un
+nouveau brouillon ; les réponses du modèle ne fournissent ni droits ni profil.
+
+Le contrôleur garde la référence envoyée après une erreur et propose une relecture du plan
+sans nouvelle création. Il conserve aussi le modèle de la tentative incertaine. Le formulaire
+adapte son organisation aux fenêtres étroites et moins hautes. Un essai graphique a rencontré
+un délai de confirmation, puis le même binaire a réussi en exécution isolée ; sa cause reste
+inconnue. **`just check` réussi : 622 tests, aucun échec, 25 ignorés**, avec format, clippy,
+reconstruction des programmes et contrôles du dépôt. **Les 15 tests graphiques explicites
+réussissent**, dont le parcours de préparation avec modèle HTTP contrôlé et trois vrais
+services, puis le transfert d'une nouvelle demande du dialogue vers un nouveau brouillon.
+Voir le [rapport et les captures](reports/preparation-missions-2026-09-13.md)
+et l'[ADR 0015](adr/0015-intention-et-profils-de-mission.md).
+
+La CI de `2eb86f8` a réussi composants, isolation et surface ; le travail ChatGPT a échoué
+(run `34731398933`). Les trois échecs Qwen3-0.6B restent ouverts. Les profils, moteurs et la
+session humaine installée restent à intégrer ; aucune session authentifiée ChatGPT/Claude Code
+n'est validée. L'examen et la validation du contenu, les checkpoints, l'undo robuste et les
+processus isolés restent à réaliser. Aucun critère complet de FRONTIER.md n'est coché.
 
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 

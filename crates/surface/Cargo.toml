@@ -21,6 +21,7 @@ shell = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
+ulid = { workspace = true }
 
 wgpu = "30"
 egui = "0.36.2"

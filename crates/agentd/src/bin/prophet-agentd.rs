@@ -31,6 +31,8 @@ struct Agents {
     runtime: Arc<Mutex<Runtime>>,
     jobs: Arc<std::sync::Mutex<BTreeMap<String, Arc<AtomicBool>>>>,
     local_endpoint: Option<String>,
+    profiles: Vec<agentd::preparation::Profile>,
+    preparing: Mutex<()>,
     capd: std::path::PathBuf,
     ledger: std::path::PathBuf,
     /// Où l'état est écrit entre deux démarrages.
@@ -53,6 +55,103 @@ impl Handler for Agents {
 
         match methode.as_str() {
             "ping" => Ok(json!("pong")),
+
+            "task.options" => {
+                let (models, model_error) = match self.local_models().await {
+                    Ok(models) => (models, None),
+                    Err(error) => (Vec::new(), Some(error.message)),
+                };
+                commun::repondre(&agentd::preparation::Options {
+                    profiles: self.profiles.iter().map(|p| p.view(&models)).collect(),
+                    model_error,
+                })
+            }
+
+            "task.prepare" => {
+                let request: agentd::preparation::Request = serde_json::from_value(params)
+                    .map_err(|e| Error::new(ErrorCode::InvalidParams, e.to_string()))?;
+                request
+                    .validate()
+                    .map_err(|e| Error::new(ErrorCode::InvalidParams, e))?;
+                let profile = self
+                    .profiles
+                    .iter()
+                    .find(|p| p.id == request.profile)
+                    .ok_or_else(|| {
+                        Error::new(ErrorCode::InvalidParams, "Profil de mission inconnu.")
+                    })?;
+                let reference = format!("local:{}", request.model);
+                if !profile.manifest.model.preferred.contains(&reference) {
+                    return Err(Error::new(
+                        ErrorCode::PolicyDenied,
+                        "Modèle non admis par ce profil.",
+                    ));
+                }
+                // Sérialise les préparations pour refuser une seconde émission pour le même id.
+                let _preparing = self.preparing.lock().await;
+                if self.runtime.lock().await.task(&request.id).is_some() {
+                    return Err(Error::new(
+                        ErrorCode::Conflict,
+                        "Cette référence existe déjà. Relisez son plan.",
+                    ));
+                }
+                let models = self.local_models().await?;
+                if !models.contains(&request.model) {
+                    return Err(Error::new(
+                        ErrorCode::Conflict,
+                        "Le modèle choisi n'est plus disponible.",
+                    ));
+                }
+                let mut manifest = profile.manifest.clone();
+                manifest.model.preferred = vec![reference];
+                let grants = profile
+                    .grants()
+                    .map_err(|e| Error::new(ErrorCode::InternalError, e))?;
+                let user = format!("uid:{}", pair.uid);
+                let token = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    self.demander_un_jeton(&manifest, &request.id, &user, &grants),
+                )
+                .await
+                .map_err(|_| {
+                    Error::new(
+                        ErrorCode::InternalError,
+                        "capd ne répond pas dans le délai.",
+                    )
+                })??;
+                let availability = Availability {
+                    local_models: models,
+                    ..Default::default()
+                };
+                let scopes: Vec<&str> = profile.scopes.iter().map(String::as_str).collect();
+                let plan = {
+                    let mut runtime = self.runtime.lock().await;
+                    let plan = runtime
+                        .plan_with_token(
+                            &PlanRequest {
+                                id: &request.id,
+                                intent: &request.intent,
+                                manifest: &manifest,
+                                user: &user,
+                                requested: &grants,
+                                scopes: &scopes,
+                                availability: &availability,
+                            },
+                            token,
+                            OffsetDateTime::now_utc(),
+                        )
+                        .map_err(runtime_erreur)?;
+                    ecrire(&self.etat, &runtime.etat()).map_err(|e| {
+                        Error::new(
+                            ErrorCode::InternalError,
+                            format!("Plan non confirmé sur disque : {e}"),
+                        )
+                    })?;
+                    plan
+                };
+                self.vider_le_journal().await;
+                commun::repondre(&plan)
+            }
 
             // Planifier, c'est décider *avant* : quel pilote, quel niveau d'isolation, quelles
             // capacités, quel budget. Le plan est rendu tel quel pour que l'humain puisse dire non
@@ -178,6 +277,20 @@ impl Handler for Agents {
 }
 
 impl Agents {
+    async fn local_models(&self) -> Result<Vec<String>, Error> {
+        let endpoint = self.local_endpoint.as_deref().ok_or_else(|| {
+            Error::new(
+                ErrorCode::Conflict,
+                "Le moteur de mission local n'est pas configuré.",
+            )
+        })?;
+        providers::stream::ChatClient::new(endpoint, std::time::Duration::from_secs(3))
+            .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?
+            .models()
+            .await
+            .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))
+    }
+
     async fn start_local(&self, id: String) -> Result<Value, Error> {
         let endpoint = self.local_endpoint.clone().ok_or_else(|| {
             Error::new(ErrorCode::Conflict, "moteur local du service non configuré")
@@ -456,6 +569,11 @@ async fn main() -> anyhow::Result<()> {
     let maison = std::env::var("PROPHET_HOME").unwrap_or_else(|_| "/home/prophet".to_owned());
     let capd = chemin("PROPHET_CAPD_SOCKET", "capd");
     let ledger = chemin("PROPHET_LEDGER_SOCKET", "ledger");
+    let profiles = std::env::var_os("PROPHET_MISSION_PROFILES")
+        .map(|path| agentd::preparation::load(std::path::Path::new(&path)))
+        .transpose()
+        .map_err(anyhow::Error::msg)?
+        .unwrap_or_default();
 
     let fichier_etat = commun::etat("agentd").join("taches.json");
     let mut repris = relire(&fichier_etat)?;
@@ -495,6 +613,8 @@ async fn main() -> anyhow::Result<()> {
             runtime: Arc::new(Mutex::new(runtime)),
             jobs: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
             local_endpoint: std::env::var("PROPHET_LOCAL_ENDPOINT").ok(),
+            profiles,
+            preparing: Mutex::new(()),
             capd,
             ledger,
             etat: fichier_etat,

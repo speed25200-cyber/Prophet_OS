@@ -33,7 +33,8 @@ impl Model {
         let (release, gate) = mpsc::channel();
         let worker = std::thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(40);
-            for turn in 0..2 {
+            let mut turn = 0;
+            while turn < 2 {
                 let stream = loop {
                     if let Ok((stream, _)) = listener.accept() {
                         break stream;
@@ -47,6 +48,10 @@ impl Model {
                     .set_read_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
                 let mut stream = std::io::BufReader::new(stream);
+                let mut first = String::new();
+                if stream.read_line(&mut first).unwrap() == 0 {
+                    return;
+                }
                 let mut size = 0;
                 loop {
                     let mut line = String::new();
@@ -59,6 +64,11 @@ impl Model {
                     if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
                         size = value.trim().parse::<usize>().unwrap();
                     }
+                }
+                if first.starts_with("GET /v1/models ") {
+                    let body = json!({"data":[{"id":"modele-controle"}]}).to_string();
+                    write!(stream.get_mut(), "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+                    continue;
                 }
                 assert!(size < 128 * 1024);
                 let mut request = vec![0; size];
@@ -82,6 +92,7 @@ impl Model {
                 if stream.get_mut().write_all(response.as_bytes()).is_err() {
                     return;
                 }
+                turn += 1;
             }
         });
         Self {
@@ -112,6 +123,14 @@ impl Chain {
             sandboxd: dir.path().join("sandbox-absent.sock"),
         };
         let journal = dir.path().join("ledger.sock");
+        let profile = dir.path().join("profiles.json");
+        let mut example: Value =
+            serde_json::from_str(include_str!("../../../examples/missions/note-locale.json"))
+                .unwrap();
+        example["manifest"]["model"]["preferred"] = json!(["local:modele-controle"]);
+        example["manifest"]["capabilities"]["max"]["fs.read"] = json!(["~/docs/**"]);
+        example["manifest"]["capabilities"]["max"]["fs.write"] = json!(["~/docs/**"]);
+        std::fs::write(&profile,json!([{"id":"documents","name":"Documents de travail","description":"Rédiger et préparer des fichiers dans votre espace documentaire.","manifest":example["manifest"],"scopes":["~/docs"]}]).to_string()).unwrap();
         let capd = Daemon::lancer_avec(
             binaire_voisin("prophet-capd").to_str().unwrap(),
             &sockets.capd,
@@ -132,6 +151,7 @@ impl Chain {
                 ("PROPHET_CAPD_SOCKET", sockets.capd.to_str().unwrap()),
                 ("PROPHET_LEDGER_SOCKET", journal.to_str().unwrap()),
                 ("PROPHET_LOCAL_ENDPOINT", endpoint),
+                ("PROPHET_MISSION_PROFILES", profile.to_str().unwrap()),
             ],
         );
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -441,4 +461,131 @@ fn les_widgets_permettent_l_arret_et_montrent_un_echec_de_moteur() {
     }
     drop(model.release);
     model.worker.unwrap().join().unwrap();
+}
+
+#[test]
+#[ignore = "needs_gpu: intention saisie, préparation, lancement et résultat avec services réels"]
+fn une_intention_saisie_dans_la_surface_devient_une_mission_et_un_fichier_prepare() {
+    let mut model = Model::new();
+    let chain = Chain::new(&model.endpoint);
+    let context = Contexte::hors_ecran().unwrap();
+    let mut source = Reel::demarrer(chain.sockets.clone());
+    // Le catalogue doit provenir du moteur agentd malgré le dialogue non connecté.
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.brancher_missions(chain.sockets.agentd.clone());
+    bureau.figer_transitions();
+    let target = Cible::nouvelle(&context, 1440, 1000);
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    let events = click(&bureau, &target, "preparer-mission");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while bureau.preparation().options().is_none() {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        assert!(
+            Instant::now() < deadline,
+            "catalogue absent : {:?}",
+            bureau.preparation().error()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let events = click(&bureau, &target, "mission-intent");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    let intent = "Prépare une note sur la supervision humaine dans ~/docs/note.txt, puis résume le travail réalisé.";
+    frame(
+        &mut bureau,
+        &mut source,
+        &context,
+        &target,
+        vec![Event::Paste(intent.into())],
+    );
+    assert_eq!(bureau.preparation().intent, intent);
+    for (width, height) in [(1440, 1000), (1280, 800), (640, 900)] {
+        let size = Cible::nouvelle(&context, width, height);
+        for _ in 0..3 {
+            frame(&mut bureau, &mut source, &context, &size, vec![]);
+        }
+        let _ = click(&bureau, &size, "mission-prepare-submit"); // Le bouton entier reste accessible.
+        capture(&context, &size, "objectif");
+    }
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    let events = click(&bureau, &target, "mission-prepare-submit");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    let id = bureau.preparation().attempted_id().unwrap().to_owned();
+    assert!(
+        model.received.try_recv().is_err(),
+        "aucune inférence avant lancement"
+    );
+    let deadline = Instant::now() + Duration::from_secs(12);
+    loop {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        if bureau
+            .missions()
+            .snapshot()
+            .is_some_and(|s| s.task.id == id && s.task.state == State::Planned)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "plan absent : {:?}",
+            bureau.preparation().error()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(bureau.missions().snapshot().unwrap().task.intent, intent);
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    capture(&context, &target, "objectif-plan");
+    let events = click(&bureau, &target, "mission-start");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    model
+        .received
+        .recv_timeout(Duration::from_secs(10))
+        .unwrap();
+    model.release.send(()).unwrap();
+    chain.wait(bureau.missions(), State::Done);
+    model.worker.take().unwrap().join().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(
+            chain
+                .dir
+                .path()
+                .join(format!("home/.prophet/tasks/{id}/work/docs/note.txt"))
+        )
+        .unwrap(),
+        "L'humain définit, supervise et examine le travail des agents."
+    );
+    assert!(!chain.dir.path().join("home/docs/note.txt").exists());
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    capture(&context, &target, "objectif-resultat");
+    let events = click(&bureau, &target, "nav-conversation");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    let events = click(&bureau, &target, "intention");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    let next = "Relis maintenant cette note et propose une version plus courte.";
+    frame(
+        &mut bureau,
+        &mut source,
+        &context,
+        &target,
+        vec![Event::Paste(next.into())],
+    );
+    frame(&mut bureau, &mut source, &context, &target, vec![]);
+    let events = click(&bureau, &target, "conversation-vers-mission");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    assert_eq!(bureau.preparation().intent, next);
+    assert!(
+        bureau.preparation().attempted_id().is_none(),
+        "la nouvelle demande ne reprend pas la mission précédente"
+    );
 }

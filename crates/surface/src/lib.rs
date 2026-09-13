@@ -11,6 +11,8 @@ mod glyphes;
 pub mod gpu;
 mod mission_details;
 pub mod missions;
+pub mod preparation;
+mod preparation_view;
 pub mod reel;
 pub mod rendu;
 pub mod scene;

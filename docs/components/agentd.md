@@ -10,6 +10,8 @@
 | Méthode | Comportement |
 |---|---|
 | `task.spawn` | Planifie, demande le jeton à capd, persiste et rend le plan |
+| `task.options` | Rend les profils configurés et leurs modèles réellement disponibles |
+| `task.prepare` | Prépare une intention avec un profil du service, sans génération ni exécution |
 | `task.start` | Lance en arrière-plan une mission locale native de niveau 0 |
 | `task.list` | Rend les tâches et leurs budgets observés |
 | `task.status` | Rend une tâche par identifiant |
@@ -22,6 +24,13 @@ Le format de planification complet est illustré dans
 [`examples/missions/note-locale.json`](../../examples/missions/note-locale.json).
 Les méthodes sont réservées aux pairs de confiance. Le contrôle existant est global au
 socket ; les droits propres à chaque méthode ne sont pas encore appliqués.
+
+`task.prepare` prend uniquement `{id, intent, profile, model}`. Son utilisateur provient du pair
+Unix. `PROPHET_MISSION_PROFILES` fixe les manifestes et périmètres au démarrage ; les modèles sont
+redécouverts au moment de préparer. Le modèle du dialogue ne fournit aucune autorité à ce chemin.
+Une référence déjà connue est refusée et se relit par `task.inspect`. Le plan devient exécutable
+par une commande distincte après examen. Le catalogue est une configuration locale de confiance,
+pas une validation des signatures d'éditeurs. Voir l'[ADR 0015](../adr/0015-intention-et-profils-de-mission.md).
 
 ## Exécution
 

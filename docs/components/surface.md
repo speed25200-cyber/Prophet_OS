@@ -20,6 +20,13 @@ terminées restent accessibles. Les contrôles de lancement et d'arrêt envoient
 explicite hors de la boucle de rendu, affichent son acquittement ou son erreur et relisent l'état.
 Le contenu des diffs, leur validation et le journal détaillé des actions restent à intégrer.
 
+La préparation d'une mission possède maintenant son propre écran : objectif humain, contexte
+configuré dans le service, modèle disponible et limites. `task.prepare` conserve le plan, qui
+est sélectionné dans la supervision dès réception ; il n'est jamais lancé automatiquement.
+Le dialogue peut transmettre sa demande humaine au brouillon. Après une réponse perdue,
+la référence conservée permet de relire le plan sans renvoyer la création. La fermeture de
+l'interface ne conserve pas encore ces brouillons. Les profils du service doivent être configurés.
+
 ## Ce qu'elle montre, et ce qu'elle ne montre pas
 
 Elle lit le système. Quand un daemon ne répond pas, **sa part du champ se vide** et la ligne

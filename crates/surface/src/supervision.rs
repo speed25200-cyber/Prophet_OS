@@ -19,6 +19,9 @@ const AMBRE: Color32 = Color32::from_rgb(160, 102, 35);
 #[derive(Default)]
 pub(crate) struct Supervision {
     pub(crate) missions: crate::missions::Missions,
+    pub(crate) preparation: crate::preparation::Preparation,
+    composing: bool,
+    prepared_selection: Option<String>,
     detail_tab: crate::mission_details::Tab,
     detail_id: Option<String>,
     selection: Option<String>,
@@ -199,6 +202,14 @@ impl Supervision {
         reponse: &mut Option<Reponse>,
     ) {
         let ctx = root.ctx().clone();
+        self.preparation.update();
+        if let Some(plan) = self.preparation.take_prepared() {
+            self.prepared_selection = Some(plan.task);
+            self.composing = false;
+            self.filtre = Filtre::Toutes;
+            self.focus_compact = true;
+            atelier.page = Page::Accueil;
+        }
         let compact = root.available_width() < 900.0;
         if atelier.mouvement_reduit {
             ctx.all_styles_mut(|s| s.animation_time = 0.0);
@@ -312,8 +323,46 @@ impl Supervision {
                     .inner_margin(if compact { 14 } else { 28 }),
             )
             .show(root, |ui| match atelier.page {
-                Page::Accueil => largeur(ui, 1400.0, |ui| self.accueil(ui, atelier, scene)),
-                Page::Conversation => largeur(ui, 880.0, |ui| conversation(ui, atelier)),
+                Page::Accueil if self.composing => largeur(ui, 1240.0, |ui| {
+                    if crate::preparation_view::draw(ui, &mut self.preparation) {
+                        self.composing = false;
+                    }
+                }),
+                Page::Accueil => largeur(ui, 1400.0, |ui| self.accueil(ui, scene)),
+                Page::Conversation => largeur(ui, 880.0, |ui| {
+                    if !atelier.generation
+                        && (!atelier.brouillon.trim().is_empty() || !atelier.tours.is_empty())
+                        && bouton(
+                            ui,
+                            "conversation-vers-mission",
+                            "Préparer une mission à partir de ma demande",
+                            false,
+                        )
+                        .clicked()
+                    {
+                        if self.preparation.attempted_id().is_some()
+                            && self.preparation.error().is_none()
+                            && !self.preparation.pending()
+                        {
+                            self.preparation.reset();
+                        }
+                        if self.preparation.attempted_id().is_none() {
+                            self.preparation.intent = if atelier.brouillon.trim().is_empty() {
+                                atelier
+                                    .tours
+                                    .last()
+                                    .map(|t| t.demande.clone())
+                                    .unwrap_or_default()
+                            } else {
+                                atelier.brouillon.clone()
+                            };
+                        }
+                        self.composing = true;
+                        atelier.page = Page::Accueil;
+                        self.preparation.discover(&ctx);
+                    }
+                    conversation(ui, atelier);
+                }),
                 Page::Modeles => largeur(ui, 1100.0, |ui| modeles(ui, atelier)),
                 Page::Activite => largeur(ui, 1100.0, |ui| systeme(ui, scene)),
             });
@@ -325,7 +374,7 @@ impl Supervision {
         }
     }
 
-    fn accueil(&mut self, ui: &mut egui::Ui, atelier: &mut Atelier, scene: &Scene) {
+    fn accueil(&mut self, ui: &mut egui::Ui, scene: &Scene) {
         let compact = ui.available_width() < 850.0;
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -347,7 +396,14 @@ impl Supervision {
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if action(ui, "preparer-mission", "+ Préparer un objectif").clicked() {
-                    atelier.page = Page::Conversation;
+                    self.composing = true;
+                    if self.preparation.attempted_id().is_some()
+                        && self.preparation.error().is_none()
+                        && !self.preparation.pending()
+                    {
+                        self.preparation.reset();
+                    }
+                    self.preparation.discover(ui.ctx());
                 }
             });
         });
@@ -367,6 +423,18 @@ impl Supervision {
             }
         });
         ui.add_space(12.0);
+        if let Some(id) = &self.prepared_selection {
+            if scene.courants.iter().any(|c| &c.tache == id) {
+                self.selection = self.prepared_selection.take();
+            } else {
+                self.missions.select(Some(id));
+                ui.label("Plan confirmé. Mise à jour de l'espace de supervision…");
+                if let Some(error) = self.missions.error() {
+                    ui.label(error);
+                }
+                return;
+            }
+        }
         let visibles: Vec<_> = scene
             .courants
             .iter()
@@ -397,7 +465,7 @@ impl Supervision {
                     ui.add_space(16.0);
                     ui.separator();
                     ui.add_space(8.0);
-                    petit(ui, "Préparer un objectif ouvre le dialogue local. Le lancement d'agents depuis ce dialogue reste à intégrer.");
+                    petit(ui, "Définissez un objectif, choisissez son contexte et examinez le plan avant de le lancer.");
                 });
             });
             return;

@@ -278,7 +278,7 @@ impl Missions {
     }
 }
 
-fn rpc(socket: PathBuf, method: &str, params: Value) -> Result<Value, String> {
+pub(crate) fn rpc(socket: PathBuf, method: &str, params: Value) -> Result<Value, String> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
