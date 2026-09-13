@@ -246,12 +246,22 @@ pkgs.testers.runNixOSTest {
             machine.sleep(1)
             machine.send_chars("mot-de-passe-incorrect")
             machine.send_key("ret")
-            machine.sleep(2)
+            # pam_unix impose un délai après un refus : un mot de passe tapé pendant ce délai
+            # peut être perdu (vu en CI le 13 septembre : le bon mot de passe, tapé 2,3 s après
+            # le refus, n'a jamais déverrouillé). On laisse passer le délai, et on retape une
+            # fois si l'écran reste verrouillé, comme le ferait l'humain.
+            machine.sleep(4)
             machine.succeed(lock)
             machine.screenshot("bureau-verrouille")
             machine.send_chars("essai-bureau")
             machine.send_key("ret")
-            machine.wait_until_fails(lock, timeout=30)
+            try:
+                machine.wait_until_fails(lock, timeout=timedelta(seconds=20))
+            except Exception:
+                machine.screenshot("bureau-verrouille-encore")
+                machine.send_chars("essai-bureau")
+                machine.send_key("ret")
+                machine.wait_until_fails(lock, timeout=timedelta(seconds=30))
             after = window_ids()
             assert surface["id"] in before and before == after, (before, after)
             machine.screenshot("bureau-reprise")

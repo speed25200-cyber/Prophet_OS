@@ -289,7 +289,15 @@ Le parcours du système installé sous UEFI échoue à l'attache de la séance d
 document illisible au service au moment de la capture ; ce scénario n'avait jamais atteint ce
 point en CI (le sélecteur Mousepad le faisait échouer avant). Le test crée désormais le document
 sous l'identité de l'humain et vérifie qu'agentd le lit avant d'attacher ; correction dans le
-commit portant ce rapport, à confirmer par la CI.
+commit portant ce rapport, à confirmer par la CI. La CI de `9242b37` (avec le lanceur de pilotes,
+deux modèles dans l'image, la parole) le confirme : `check`, isolation, protocole du moteur,
+surface, sept services, installeur, ISO et ses démarrages, construction du système installé et
+son démarrage sans UEFI réussissent ; le parcours UEFI franchit désormais le scénario du bureau
+(séance attachée, éditeur piloté) et échoue plus loin, au déverrouillage de l'écran : le bon mot
+de passe, tapé 2,3 s après un refus volontaire, n'a jamais déverrouillé en 30 s, alors que le
+même geste passait le 13 septembre à 14 h 38. Cause la plus plausible : le délai que pam_unix
+impose après un refus, pendant lequel la saisie se perd. Le test laisse passer ce délai et
+retape une fois si l'écran reste verrouillé ; à confirmer par la CI.
 
 Deux modèles dans l'image, 13 septembre 2026, dans le commit portant ce rapport :
 `prophet.localEngine.executeWeights` ajoute le modèle d'exécution du relais (Qwen3-0.6B Q8_0,
