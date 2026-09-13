@@ -18,6 +18,13 @@ chiffres ; il dit maintenant l'essentiel par des formes, sans rien animer au rep
   restent visibles sans défiler.
 - Le module `instruments` fournit l'arc, l'anneau, le monogramme et la ligne d'instruments ;
   ses tests vérifient les monogrammes et la géométrie des arcs.
+- **Les Modèles disent aussi où en sont les clients officiels** : Claude Code, Codex et
+  Gemini sondés par leurs propres commandes (version, session ouverte ou connexion requise,
+  absent), sans lire ni copier leurs identifiants, chacun avec son monogramme et un bouton qui
+  l'ouvre par le lanceur du bureau. Une scène de démonstration reçoit des cartes d'exemple.
+
+  ![Modèles — clients officiels](../images/atelier-modeles-1440.png)
+
 - **Le Système montre l'échelle d'isolation** : trois niveaux, ceux que la machine offre en
   couleur et cochés, le premier inatteignable avec ce qui lui manque, et les missions reçues
   avec le monogramme de leur pilote.

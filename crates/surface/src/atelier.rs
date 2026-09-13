@@ -36,8 +36,24 @@ pub struct Tour {
     pub erreur: Option<String>,
 }
 
+/// Ce qu'un client officiel dit de lui-même, sondé sans jamais lire ses identifiants.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientCard {
+    /// Nom du pilote : `claude-code`, `codex`, `gemini`.
+    pub driver: String,
+    /// Le programme est installé.
+    pub present: bool,
+    /// Version rendue par le programme, si sondée.
+    pub version: Option<String>,
+    /// État de connexion lisible, tel que le pilote le formule.
+    pub connection: String,
+    /// Une session est ouverte : le client peut travailler pour l'humain.
+    pub connected: bool,
+}
+
 enum Evenement {
     Modeles(Result<Vec<String>, String>),
+    Clients(Vec<ClientCard>),
     Fragment(u64, String),
     Fin(u64, Result<Completion, String>),
 }
@@ -66,6 +82,10 @@ pub struct Atelier {
     pub demonstration: bool,
     /// Base HTTP locale utilisée.
     pub endpoint: String,
+    /// Les clients officiels, tels que sondés ; vide tant que la sonde n'a pas répondu.
+    pub clients: Vec<ClientCard>,
+    /// Une sonde des clients est partie ou a déjà répondu.
+    pub clients_sondes: bool,
     tx: Sender<Evenement>,
     rx: Receiver<Evenement>,
     cancel: Option<watch::Sender<bool>>,
@@ -89,11 +109,75 @@ impl Atelier {
             mouvement_reduit: false,
             demonstration,
             endpoint,
+            clients: Vec::new(),
+            clients_sondes: false,
             tx,
             rx,
             cancel: None,
             numero: 0,
         }
+    }
+
+    /// Sonde une fois les clients officiels, en arrière-plan : version et état de session,
+    /// par leurs propres commandes, sans lire ni copier leurs fichiers d'identifiants.
+    ///
+    /// Une scène de démonstration reçoit des cartes d'exemple, jamais une vraie sonde.
+    pub fn sonder_les_clients(&mut self, ctx: &egui::Context) {
+        if self.clients_sondes {
+            return;
+        }
+        self.clients_sondes = true;
+        if self.demonstration {
+            self.clients = vec![
+                ClientCard {
+                    driver: "claude-code".into(),
+                    present: true,
+                    version: Some("exemple".into()),
+                    connection: "connecté".into(),
+                    connected: true,
+                },
+                ClientCard {
+                    driver: "codex".into(),
+                    present: true,
+                    version: Some("exemple".into()),
+                    connection: "connexion requise".into(),
+                    connected: false,
+                },
+                ClientCard {
+                    driver: "gemini".into(),
+                    present: false,
+                    version: None,
+                    connection: "client absent".into(),
+                    connected: false,
+                },
+            ];
+            return;
+        }
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            use providers::official::{ClientProfile, ConnectionState, OfficialDriver};
+            let root = std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("/nonexistent"))
+                .join(".local/state/prophet");
+            let user = std::env::var("USER").unwrap_or_else(|_| "inconnu".to_owned());
+            let cards = ClientProfile::all()
+                .into_iter()
+                .map(|profile| {
+                    let diagnostic = OfficialDriver::new(profile, &root, &user).diagnostic();
+                    ClientCard {
+                        driver: diagnostic.driver,
+                        present: diagnostic.executable.is_some(),
+                        version: diagnostic.version,
+                        connection: diagnostic.connection.label().to_owned(),
+                        connected: diagnostic.connection == ConnectionState::Connected,
+                    }
+                })
+                .collect();
+            let _ = tx.send(Evenement::Clients(cards));
+            ctx.request_repaint();
+        });
     }
 
     /// Interroge le moteur en arrière-plan, avec un délai court pour une découverte.
@@ -141,6 +225,9 @@ impl Atelier {
                             self.erreur = Some(error);
                         }
                     }
+                }
+                Evenement::Clients(cards) => {
+                    self.clients = cards;
                 }
                 Evenement::Fragment(id, text) if id == self.numero => {
                     if let Some(tour) = self.tours.last_mut() {

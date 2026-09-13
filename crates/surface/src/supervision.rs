@@ -761,17 +761,145 @@ fn conversation(ui: &mut egui::Ui, atelier: &mut Atelier) {
     });
 }
 
+/// Lance une application du bureau par le lanceur de la session, s'il est installé.
+fn ouvrir_application(app: &str) {
+    let Some(launcher) = std::env::var_os("PATH").and_then(|path| {
+        std::env::split_paths(&path)
+            .map(|dir| dir.join("prophet-ouvrir"))
+            .find(|candidate| candidate.is_file())
+    }) else {
+        return;
+    };
+    let _ = std::process::Command::new(launcher)
+        .arg(app)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
+    petit(ui, "CLIENTS OFFICIELS");
+    ui.add_space(6.0);
+    petit(
+        ui,
+        "Sondés par leurs propres commandes ; l'OS ne lit ni ne copie leurs identifiants.",
+    );
+    ui.add_space(12.0);
+    if atelier.clients.is_empty() {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            petit(ui, "Sonde des clients en cours…");
+        });
+        return;
+    }
+    let width = ui.available_width();
+    let gap = 12.0;
+    let tile = ((width - 2.0 * gap) / 3.0).max(150.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        for card in &atelier.clients {
+            let (rect, _) = ui.allocate_exact_size(vec2(tile, 118.0), egui::Sense::hover());
+            let p = ui.painter();
+            p.rect_filled(rect, 14, crate::instruments::TUILE);
+            crate::instruments::monogramme(p, rect.min + vec2(30.0, 30.0), &card.driver, 24.0);
+            p.text(
+                rect.min + vec2(52.0, 22.0),
+                Align2::LEFT_CENTER,
+                &card.driver,
+                FontId::new(16.0, egui::FontFamily::Name("Inter600".into())),
+                crate::instruments::ENCRE,
+            );
+            p.text(
+                rect.min + vec2(52.0, 40.0),
+                Align2::LEFT_CENTER,
+                card.version
+                    .as_deref()
+                    .map_or_else(|| "version inconnue".to_owned(), |v| format!("version {v}")),
+                FontId::proportional(11.0),
+                DISCRET,
+            );
+            let (dot, label) = if card.connected {
+                (VERT, "Session ouverte")
+            } else if card.present {
+                (AMBRE, "Installé, connexion requise")
+            } else {
+                (DISCRET, "Absent de cette machine")
+            };
+            p.circle_filled(rect.min + vec2(24.0, 70.0), 3.0, dot);
+            p.text(
+                rect.min + vec2(34.0, 70.0),
+                Align2::LEFT_CENTER,
+                label,
+                FontId::proportional(12.0),
+                dot,
+            );
+            p.text(
+                rect.min + vec2(20.0, 92.0),
+                Align2::LEFT_CENTER,
+                &card.connection,
+                FontId::proportional(11.0),
+                DISCRET,
+            );
+            if card.present && matches!(card.driver.as_str(), "claude-code" | "codex") {
+                let button = egui::Rect::from_min_size(
+                    pos2(rect.right() - 82.0, rect.bottom() - 40.0),
+                    vec2(66.0, 26.0),
+                );
+                let response = ui.interact(
+                    button,
+                    egui::Id::new(format!("client-open-{}", card.driver)),
+                    egui::Sense::click(),
+                );
+                let p = ui.painter();
+                p.rect_filled(
+                    button,
+                    8,
+                    if response.hovered() {
+                        Color32::from_rgb(230, 234, 240)
+                    } else {
+                        BLANC
+                    },
+                );
+                p.rect_stroke(button, 8, Stroke::new(1.0, TRAIT), egui::StrokeKind::Inside);
+                p.text(
+                    button.center(),
+                    Align2::CENTER_CENTER,
+                    "Ouvrir",
+                    FontId::proportional(12.0),
+                    TEXTE,
+                );
+                if response
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    ouvrir_application(&card.driver);
+                }
+            }
+        }
+    });
+}
+
 fn modeles(ui: &mut egui::Ui, atelier: &mut Atelier) {
     ui.label(
         RichText::new("L'intelligence sur votre machine.")
             .size(30.0)
             .family(egui::FontFamily::Name("Inter600".into())),
     );
-    petit(ui, "Modèles réellement exposés par le moteur local");
+    petit(
+        ui,
+        "Modèles du moteur local et clients officiels, tels qu'ils répondent",
+    );
     ui.add_space(22.0);
+    atelier.sonder_les_clients(&ui.ctx().clone());
     egui::ScrollArea::vertical()
         .id_salt("bibliotheque")
         .show(ui, |ui| {
+            surface().show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                clients_officiels(ui, atelier);
+            });
+            ui.add_space(14.0);
             surface().show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal_wrapped(|ui| {
