@@ -20,6 +20,8 @@ pub struct Bureau {
     champ: Champ,
     logiciel: bool,
     supervision: Supervision,
+    /// La voix de l'OS, si Piper et une voix sont configurés : les fins de mission se disent.
+    voix: Option<voice::Tools>,
 }
 
 impl Bureau {
@@ -40,6 +42,9 @@ impl Bureau {
             ctx,
             atelier: Atelier::nouveau(endpoint, demonstration),
             supervision: Supervision::default(),
+            voix: voice::Tools::from_env()
+                .ok()
+                .filter(voice::Tools::can_speak),
             champ: Champ::nouveau(&contexte.device, format, contexte.logiciel),
             logiciel: contexte.logiciel,
             rendu: egui_wgpu::Renderer::new(&contexte.device, format, Default::default()),
@@ -123,6 +128,16 @@ impl Bureau {
     ) -> (egui::FullOutput, Option<Reponse>) {
         self.atelier.actualiser();
         self.supervision.missions.update();
+        if let Some(texte) = self.supervision.missions.take_announcement()
+            && let Some(voix) = self.voix.clone()
+        {
+            // Hors du fil graphique : la synthèse et la lecture prennent des secondes.
+            std::thread::spawn(move || {
+                if let Err(e) = voix.say(&texte) {
+                    eprintln!("prophet-surface : résultat non dit : {e}");
+                }
+            });
+        }
         let mut scene = scene.clone();
         self.supervision.missions.align_scene(&mut scene);
         let temps = input.time.unwrap_or(0.0);

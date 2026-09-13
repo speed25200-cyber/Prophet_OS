@@ -277,11 +277,13 @@ jobs:
             echo "PROPHET_PIPER_VOICE=$PWD/chaine-vocale/share/prophet/voix/fr_FR-siwis-medium.onnx"
           } >> "$GITHUB_ENV"
       - name: L'OS écoute une phrase, parle, et se réécoute
-        run: cargo test -p voice --test dictee -- --ignored --nocapture
+        run: cargo test -p voice --test dictee -- --ignored --nocapture --test-threads=1
+      # Un essai à la fois : chacun fait tourner Whisper et Piper sur tous les cœurs, et deux
+      # essais en même temps se ralentissent jusqu'à dépasser l'attente du service simulé.
       - name: Une phrase dite devient une mission ; « Prophète, … » la déclenche
-        run: cargo test -p prophet-cli --test task_service -- --ignored --nocapture
+        run: cargo test -p prophet-cli --test task_service -- --ignored --nocapture --test-threads=1
       - name: L'atelier écoute « Prophète » sans bouton
-        run: cargo test -p surface --lib -- --ignored --nocapture
+        run: cargo test -p surface --lib -- --ignored --nocapture --test-threads=1
 
   isolation:
     name: Niveaux d'isolation (matériel réel)

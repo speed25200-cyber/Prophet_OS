@@ -69,6 +69,12 @@ pub fn voice_ready() -> bool {
     voice::Tools::from_env().is_ok()
 }
 
+/// L'OS peut parler sur cette machine (Piper et une voix, en plus de la parole).
+#[must_use]
+pub fn speech_ready() -> bool {
+    voice::Tools::from_env().is_ok_and(|tools| tools.can_speak())
+}
+
 impl Preparation {
     /// Branche le contrôleur au même service que les commandes de mission.
     #[must_use]
@@ -554,6 +560,7 @@ mod tests {
     #[ignore = "needs_voice_stack: PROPHET_WHISPER_MODEL, PROPHET_WHISPER, PROPHET_PIPER, PROPHET_PIPER_VOICE"]
     fn l_ecoute_permanente_ne_retient_que_la_phrase_qui_commence_par_le_mot() {
         let mut tools = voice::Tools::from_env().unwrap();
+        tools.deterministic = true;
         assert!(tools.can_speak(), "{tools:?}");
         let temp = tempfile::tempdir().unwrap();
         let bruit = temp.path().join("bruit.wav");

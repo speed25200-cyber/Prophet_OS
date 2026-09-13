@@ -10,7 +10,8 @@
 #[ignore = "needs_whisper_model: PROPHET_WHISPER_MODEL, whisper-cli et PROPHET_TEST_ESPEAK"]
 fn une_phrase_synthetisee_est_transcrite_avec_ses_mots_cles() {
     let espeak = std::env::var("PROPHET_TEST_ESPEAK").unwrap();
-    let tools = voice::Tools::from_env().unwrap();
+    let mut tools = voice::Tools::from_env().unwrap();
+    tools.deterministic = true;
     let dir = tempfile::tempdir().unwrap();
     let wav = dir.path().join("phrase.wav");
     let status = std::process::Command::new(&espeak)
@@ -43,7 +44,8 @@ fn une_phrase_synthetisee_est_transcrite_avec_ses_mots_cles() {
 #[test]
 #[ignore = "needs_piper_voice: PROPHET_PIPER, PROPHET_PIPER_VOICE, PROPHET_WHISPER_MODEL"]
 fn l_os_parle_et_se_reecoute() {
-    let tools = voice::Tools::from_env().unwrap();
+    let mut tools = voice::Tools::from_env().unwrap();
+    tools.deterministic = true;
     assert!(tools.can_speak(), "{tools:?}");
     let dir = tempfile::tempdir().unwrap();
     let wav = dir.path().join("reponse.wav");

@@ -1,4 +1,5 @@
 //! Lecture et commandes des missions, sans attente réseau dans la boucle de rendu.
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
@@ -151,6 +152,12 @@ pub struct Missions {
     snapshot: Option<Inspection>,
     error: Option<String>,
     notice: Option<Notice>,
+    /// Lire à voix haute le résultat d'une mission qu'on regarde finir (ADR 0036).
+    announce: bool,
+    /// Missions déjà lues : une fin ne se dit qu'une fois.
+    announced: HashSet<String>,
+    /// La phrase à dire, prise par l'application à la prochaine image.
+    announcement: Option<String>,
     tx: Sender<Reply>,
     rx: Receiver<Reply>,
 }
@@ -174,6 +181,9 @@ impl Default for Missions {
             snapshot: None,
             error: None,
             notice: None,
+            announce: crate::preparation::speech_ready(),
+            announced: HashSet::new(),
+            announcement: None,
             tx,
             rx,
         }
@@ -233,6 +243,22 @@ impl Missions {
                                         .is_some_and(|n| !n.error && n.task == info.task.id)
                                 {
                                     self.notice = None;
+                                }
+                                // Une mission qu'on regardait courir vient de finir : l'OS le
+                                // dit, une fois. Une mission déjà finie quand on la choisit
+                                // n'est pas relue : l'humain l'a sous les yeux.
+                                if self.announce
+                                    && info.task.state.is_terminal()
+                                    && self.snapshot.as_ref().is_some_and(|avant| {
+                                        avant.task.id == info.task.id
+                                            && !avant.task.state.is_terminal()
+                                    })
+                                    && self.announced.insert(info.task.id.clone())
+                                {
+                                    let vide = json!({"state": info.task.state});
+                                    self.announcement = Some(voice::resume_du_resultat(
+                                        info.result.as_ref().unwrap_or(&vide),
+                                    ));
                                 }
                                 self.snapshot = Some(*info);
                                 self.error = None;
@@ -346,6 +372,25 @@ impl Missions {
     #[must_use]
     pub fn snapshot(&self) -> Option<&Inspection> {
         self.snapshot.as_ref()
+    }
+
+    /// Les résultats des missions qu'on regarde finir sont lus à voix haute.
+    #[must_use]
+    pub fn announce(&self) -> bool {
+        self.announce
+    }
+
+    /// Active ou coupe la lecture des résultats.
+    pub fn set_announce(&mut self, on: bool) {
+        self.announce = on;
+        if !on {
+            self.announcement = None;
+        }
+    }
+
+    /// La phrase que l'OS doit dire maintenant, s'il y en a une ; prise une seule fois.
+    pub fn take_announcement(&mut self) -> Option<String> {
+        self.announcement.take()
     }
 
     /// Ouvre une version conservée d'un changement reçu dans le résultat de cette mission.
@@ -545,6 +590,81 @@ mod tests {
             .unwrap();
         missions.update();
         assert_eq!(missions.snapshot().unwrap().task.id, "b");
+    }
+
+    /// Une mission regardée pendant qu'elle court, puis finie : sa fin est dite, une fois. Une
+    /// mission déjà finie quand on la choisit n'est pas lue, et l'écoute coupée ne dit rien.
+    #[test]
+    fn la_fin_d_une_mission_regardee_est_dite_une_fois() {
+        let mut missions = Missions::default();
+        missions.set_announce(true);
+        missions.select(Some("a"));
+        let inspect = |state: State, result: Option<Value>| {
+            let mut info = inspection("a", state);
+            info.result = result;
+            info
+        };
+        missions
+            .tx
+            .send(Reply::Inspect(
+                missions.revision,
+                Ok(inspect(State::Running, None).into()),
+            ))
+            .unwrap();
+        missions.update();
+        assert!(missions.take_announcement().is_none());
+        let fini = json!({
+            "state": "done",
+            "text": "La note de réunion est écrite dans vos documents.",
+            "diff": {"changes": [{"path": "docs/note.md", "kind": "added"}]}
+        });
+        missions
+            .tx
+            .send(Reply::Inspect(
+                missions.revision,
+                Ok(inspect(State::Done, Some(fini.clone())).into()),
+            ))
+            .unwrap();
+        missions.update();
+        assert_eq!(
+            missions.take_announcement().as_deref(),
+            Some(
+                "Mission terminée. La note de réunion est écrite dans vos documents. Un changement est à examiner."
+            )
+        );
+        // Une relecture du même état ne redit rien.
+        missions
+            .tx
+            .send(Reply::Inspect(
+                missions.revision,
+                Ok(inspect(State::Done, Some(fini.clone())).into()),
+            ))
+            .unwrap();
+        missions.update();
+        assert!(missions.take_announcement().is_none());
+        // Une mission choisie déjà finie n'est pas lue.
+        missions.select(Some("b"));
+        let mut deja = inspection("b", State::Done);
+        deja.result = Some(fini.clone());
+        missions
+            .tx
+            .send(Reply::Inspect(missions.revision, Ok(deja.into())))
+            .unwrap();
+        missions.update();
+        assert!(missions.take_announcement().is_none());
+        // Écoute coupée : une fin regardée reste muette.
+        missions.set_announce(false);
+        missions.select(Some("c"));
+        for state in [State::Running, State::Failed] {
+            let mut info = inspection("c", state);
+            info.result = Some(json!({"state": "failed", "reason": "budget épuisé"}));
+            missions
+                .tx
+                .send(Reply::Inspect(missions.revision, Ok(info.into())))
+                .unwrap();
+            missions.update();
+        }
+        assert!(missions.take_announcement().is_none());
     }
 
     #[test]

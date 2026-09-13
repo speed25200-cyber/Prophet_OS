@@ -47,9 +47,10 @@ fn invoke_seq(
     let server = std::thread::spawn(move || {
         let mut requests = Vec::new();
         for (method, result) in responses {
-            // Chaque tranche d'écoute peut coûter plusieurs secondes de synthèse et de
-            // transcription avant l'appel suivant.
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+            // Chaque tranche d'écoute coûte plusieurs secondes de synthèse et de transcription
+            // avant l'appel suivant, bien plus quand d'autres essais vocaux tournent en même
+            // temps sur les mêmes cœurs.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
             let (mut stream, _) = loop {
                 match listener.accept() {
                     Ok(connection) => break connection,
@@ -168,7 +169,8 @@ fn une_phrase_dite_devient_une_mission_et_l_os_repond() {
 #[test]
 #[ignore = "needs_voice_stack: PROPHET_WHISPER_MODEL, PROPHET_WHISPER, PROPHET_PIPER, PROPHET_PIPER_VOICE"]
 fn la_voix_prepare_lance_puis_fait_dire_le_resultat() {
-    let tools = voice::Tools::from_env().unwrap();
+    let mut tools = voice::Tools::from_env().unwrap();
+    tools.deterministic = true;
     assert!(tools.can_speak(), "{tools:?}");
     let temp = tempfile::tempdir().unwrap();
     let synth = |nom: &str, phrase: &str| {
@@ -332,7 +334,8 @@ fn sans_voix_le_resultat_n_est_pas_dit_et_la_commande_le_dit() {
 fn le_mot_d_activation_declenche_une_mission_et_le_reste_est_ignore() {
     // Les phrases sont dites par la voix de l'OS elle-même (Piper) : Whisper la comprend bien
     // mieux que la voix d'espeak, dont il n'attrape pas le mot d'activation.
-    let tools = voice::Tools::from_env().unwrap();
+    let mut tools = voice::Tools::from_env().unwrap();
+    tools.deterministic = true;
     assert!(tools.can_speak(), "{tools:?}");
     let temp = tempfile::tempdir().unwrap();
     let synth = |nom: &str, phrase: &str| {

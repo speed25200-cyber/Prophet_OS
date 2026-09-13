@@ -352,7 +352,9 @@ continue, « Prophète, lance la mission » lance la dernière mission préparé
 dite) et « Prophète, résultat » fait dire son résultat : un test joue les trois ordres à la
 suite sur un service simulé, `task.prepare`, `task.start`, `task.result` sur la même mission,
 dernière réponse réécoutée « mission terminée. la note de réunion est écrite dans vos
-documents. un changement est à examiner. » Ni voix humaine
+documents. un changement est à examiner. » L'atelier dit de lui-même la fin d'une mission
+qu'on regarde courir (même résumé, dans le crate `voice` ; bouton « Voix : lue / muette ») ;
+son test de contrôleur est écrit et joué par la CI, pas sur cette machine. Ni voix humaine
 mesurée, ni lecture vérifiée sur une vraie sortie audio : voir
 l'[ADR 0036](adr/0036-la-parole-de-l-humain.md) et le [rapport](reports/parole-2026-09-13.md).
 

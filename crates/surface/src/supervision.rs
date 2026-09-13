@@ -353,6 +353,21 @@ impl Supervision {
                     self.isolate = false;
                 }
             }
+            if crate::preparation::speech_ready() {
+                ui.add_space(6.0);
+                let lit = self.missions.announce();
+                if bouton(
+                    ui,
+                    "voice-results",
+                    if lit { "Voix : lue" } else { "Voix : muette" },
+                    lit,
+                )
+                .on_hover_text("Lire à voix haute le résultat d'une mission qu'on regarde finir")
+                .clicked()
+                {
+                    self.missions.set_announce(!lit);
+                }
+            }
             ui.add_space(10.0);
             let search_id = egui::Id::new("mission-search");
             if ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::K)) {

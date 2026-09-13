@@ -69,8 +69,12 @@ distant ; et la parole ne donne aucun droit, elle produit un texte que l'humain 
   mission préparée dans cette écoute : « lance la mission » la lance (l'approbation de
   l'humain, dite) et « résultat » fait dire son résultat ; toute autre phrase est une intention
   à préparer, y compris une phrase longue qui commence par « lance ».
+- L'atelier dit la fin d'une mission qu'on regarde courir : quand la mission choisie passe à
+  un état final, son résultat est résumé (`voice::resume_du_resultat`, le même texte que la
+  CLI) et dit hors du fil graphique, une fois ; une mission déjà finie quand on la choisit
+  n'est pas relue, l'humain l'a sous les yeux. Un bouton « Voix : lue / muette » dans la barre
+  des missions coupe ou rend la lecture ; il n'apparaît que si Piper et une voix sont là.
 - Ce qui n'est pas livré : la voix humaine (le test parle avec une voix de synthèse ; la
   qualité sur un vrai micro reste à mesurer), la lecture réelle sur une sortie audio (vérifiée
-  par ses refus seulement), et la lecture des résultats d'elle-même à la fin d'une mission ou
-  dans l'atelier. Le modèle `base` est un compromis vitesse/qualité sur processeur ; un modèle plus
+  par ses refus seulement), et l'annonce des missions qui finissent sans être regardées. Le modèle `base` est un compromis vitesse/qualité sur processeur ; un modèle plus
   grand s'installe par `prophet.voice.model`, une autre voix par `prophet.voice.speaker`.

@@ -50,4 +50,6 @@ Les essais ignorés synthétisent une phrase française (espeak-ng, ou la voix d
 transcrivent avec le vrai modèle ; ils exigent les programmes et les poids, et `just check` ne
 les lance pas. Le travail « Parole (Whisper et Piper réels) » de l'intégration continue les
 exerce à chaque poussée, ainsi que ceux de la CLI (`prophet voice --prepare`, `--listen`) et
-de l'atelier (écoute permanente).
+de l'atelier (écoute permanente). Les essais qui synthétisent leurs propres entrées posent
+`Tools::deterministic` (ou `PROPHET_PIPER_DETERMINISTIC=1`) : Piper sans bruit rend le même son
+pour le même texte, que Whisper entend toujours pareil ; la voix pour l'humain reste naturelle.

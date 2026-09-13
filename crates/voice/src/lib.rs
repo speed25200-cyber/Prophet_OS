@@ -74,6 +74,11 @@ pub struct Tools {
     pub speaker: Option<PathBuf>,
     /// Lecteur audio de la session (`pw-play`, sinon `aplay`), s'il y en a un.
     pub player: Option<PathBuf>,
+    /// Synthèse reproductible : Piper sans bruit (`--noise-scale 0 --noise-w-scale 0`), la
+    /// même phrase donne le même son. La voix naturelle varie d'une fois à l'autre, et Whisper
+    /// n'entend pas toujours pareil une phrase courte ; les essais préfèrent le même son.
+    /// `PROPHET_PIPER_DETERMINISTIC=1` dans l'environnement, ou le champ, l'active.
+    pub deterministic: bool,
 }
 
 /// Ce que la synthèse a produit.
@@ -129,6 +134,7 @@ impl Tools {
                 .map(PathBuf::from)
                 .or_else(|| which("pw-play"))
                 .or_else(|| which("aplay")),
+            deterministic: std::env::var("PROPHET_PIPER_DETERMINISTIC").as_deref() == Ok("1"),
         })
     }
 
@@ -159,11 +165,16 @@ impl Tools {
             )
         })?;
         let started = Instant::now();
-        let mut child = Command::new(piper)
+        let mut command = Command::new(piper);
+        command
             .arg("--model")
             .arg(speaker)
             .arg("--output_file")
-            .arg(out)
+            .arg(out);
+        if self.deterministic {
+            command.args(["--noise-scale", "0", "--noise-w-scale", "0"]);
+        }
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -487,9 +498,139 @@ pub fn which(program: &str) -> Option<PathBuf> {
     })
 }
 
+impl Tools {
+    /// Dit `text` sur la sortie audio de la session : synthèse dans un fichier temporaire, lecture,
+    /// effacement. Rien ne quitte la machine.
+    ///
+    /// # Errors
+    /// Piper, la voix ou le lecteur absents ; texte vide ou trop long.
+    pub fn say(&self, text: &str) -> Result<Speech, Error> {
+        let dir =
+            std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, PathBuf::from);
+        let wav = dir.join(format!(
+            "prophet-dit-{}-{}.wav",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis())
+        ));
+        let speech = self.speak(text, &wav)?;
+        let played = self.play(&wav);
+        let _ = std::fs::remove_file(&wav);
+        played?;
+        Ok(speech)
+    }
+}
+
+/// Ce que l'OS dit d'un résultat de mission (la réponse de `task.result`) : son état en un mot,
+/// le début de son texte (ou la raison d'un échec), le nombre de changements à examiner. Un
+/// résultat long n'est pas lu en entier : les premières phrases, puis « la suite est à l'écran ».
+/// La mise en forme (titres, listes, code) est retirée : dite, elle n'est que du bruit.
+#[must_use]
+pub fn resume_du_resultat(result: &serde_json::Value) -> String {
+    const LONGUEUR_MAX: usize = 360;
+    let state = result["state"].as_str().unwrap_or("inconnu");
+    let text = result["text"].as_str().unwrap_or("");
+    let reason = result["reason"].as_str().unwrap_or("");
+    let mut phrase = match state {
+        "done" => "Mission terminée.".to_owned(),
+        "failed" => "Mission échouée.".to_owned(),
+        "cancelled" => "Mission annulée.".to_owned(),
+        "rolled_back" => "Mission annulée après validation.".to_owned(),
+        "waiting_approval" => "Mission en attente de votre décision.".to_owned(),
+        "running" => "Mission en cours.".to_owned(),
+        "paused" => "Mission suspendue.".to_owned(),
+        autre => format!("Mission {}.", autre.replace('_', " ")),
+    };
+    let corps = if state == "failed" && !reason.trim().is_empty() {
+        reason
+    } else if !text.trim().is_empty() {
+        text
+    } else {
+        reason
+    };
+    let corps = corps
+        .lines()
+        .map(|ligne| {
+            ligne
+                .trim()
+                .trim_start_matches(['#', '*', '-', '>', '`', '|', ' '])
+                .replace(['*', '`', '_', '|'], "")
+        })
+        .filter(|ligne| !ligne.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let corps = corps.split_whitespace().collect::<Vec<_>>().join(" ");
+    if !corps.is_empty() {
+        phrase.push(' ');
+        if corps.chars().count() <= LONGUEUR_MAX {
+            phrase.push_str(&corps);
+        } else {
+            // Couper à la fin d'une phrase avant la limite, sinon au dernier mot.
+            let debut: String = corps.chars().take(LONGUEUR_MAX).collect();
+            let coupe = debut
+                .rfind(['.', '!', '?'])
+                .map(|i| i + 1)
+                .or_else(|| debut.rfind(' '))
+                .unwrap_or(debut.len());
+            phrase.push_str(debut[..coupe].trim_end());
+            phrase.push_str(" La suite est à l'écran.");
+        }
+        if !phrase.ends_with(['.', '!', '?']) {
+            phrase.push('.');
+        }
+    }
+    if let Some(changes) = result["diff"]["changes"].as_array() {
+        match changes.len() {
+            0 => {}
+            1 => phrase.push_str(" Un changement est à examiner."),
+            n => phrase.push_str(&format!(" {n} changements sont à examiner.")),
+        }
+    }
+    phrase
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn le_resume_d_un_resultat_est_court_sans_mise_en_forme_et_compte_les_changements() {
+        let fini = serde_json::json!({
+            "state": "done",
+            "text": "# Note\n\n- La **note de réunion** est écrite dans `docs/note.md`.\n- Trois points la résument.\n",
+            "diff": {"changes": [{"path": "docs/note.md", "kind": "added"}]}
+        });
+        assert_eq!(
+            resume_du_resultat(&fini),
+            "Mission terminée. Note La note de réunion est écrite dans docs/note.md. Trois points la résument. Un changement est à examiner."
+        );
+        let echec = serde_json::json!({"state": "failed", "reason": "budget épuisé", "text": "…"});
+        assert_eq!(
+            resume_du_resultat(&echec),
+            "Mission échouée. budget épuisé."
+        );
+        let long = serde_json::json!({
+            "state": "done",
+            "text": format!("{} Fin.", "Une phrase de plus. ".repeat(40)),
+            "diff": {"changes": [{}, {}, {}]}
+        });
+        let phrase = resume_du_resultat(&long);
+        assert!(
+            phrase.starts_with("Mission terminée. Une phrase de plus."),
+            "{phrase}"
+        );
+        assert!(phrase.contains("La suite est à l'écran."), "{phrase}");
+        assert!(
+            phrase.ends_with("3 changements sont à examiner."),
+            "{phrase}"
+        );
+        assert!(phrase.chars().count() < 460, "{}", phrase.chars().count());
+        assert_eq!(
+            resume_du_resultat(&serde_json::json!({"state": "waiting_approval"})),
+            "Mission en attente de votre décision."
+        );
+    }
 
     #[test]
     fn la_sortie_de_whisper_devient_un_texte_propre() {
@@ -547,6 +688,7 @@ mod tests {
             piper: None,
             speaker: None,
             player: None,
+            deterministic: false,
         };
         assert!(matches!(
             tools.record(0, Path::new("/tmp/x.wav")),

@@ -721,7 +721,7 @@ fn dire_le_resultat(
         serde_json::json!({"id": id}),
     ) {
         Ok(result) => {
-            let phrase = phrase_du_resultat(&result);
+            let phrase = voice::resume_du_resultat(&result);
             let spoken = dire_si_demande(tools, reply, &phrase)?;
             if as_json {
                 return Ok(format!(
@@ -841,73 +841,6 @@ fn chemin_temporaire(prefixe: &str) -> std::path::PathBuf {
     ))
 }
 
-/// Ce que l'OS dit d'un résultat de mission : son état en un mot, le début de son texte (ou
-/// la raison d'un échec), le nombre de changements à examiner. Un résultat long n'est pas lu en
-/// entier : les premières phrases, puis « la suite est à l'écran ». La mise en forme (titres,
-/// listes, code) est retirée : dite, elle n'est que du bruit.
-fn phrase_du_resultat(result: &serde_json::Value) -> String {
-    const LONGUEUR_MAX: usize = 360;
-    let state = result["state"].as_str().unwrap_or("inconnu");
-    let text = result["text"].as_str().unwrap_or("");
-    let reason = result["reason"].as_str().unwrap_or("");
-    let mut phrase = match state {
-        "done" => "Mission terminée.".to_owned(),
-        "failed" => "Mission échouée.".to_owned(),
-        "cancelled" => "Mission annulée.".to_owned(),
-        "rolled_back" => "Mission annulée après validation.".to_owned(),
-        "waiting_approval" => "Mission en attente de votre décision.".to_owned(),
-        "running" => "Mission en cours.".to_owned(),
-        "paused" => "Mission suspendue.".to_owned(),
-        autre => format!("Mission {}.", autre.replace('_', " ")),
-    };
-    let corps = if state == "failed" && !reason.trim().is_empty() {
-        reason
-    } else if !text.trim().is_empty() {
-        text
-    } else {
-        reason
-    };
-    let corps = corps
-        .lines()
-        .map(|ligne| {
-            ligne
-                .trim()
-                .trim_start_matches(['#', '*', '-', '>', '`', '|', ' '])
-                .replace(['*', '`', '_', '|'], "")
-        })
-        .filter(|ligne| !ligne.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-    let corps = corps.split_whitespace().collect::<Vec<_>>().join(" ");
-    if !corps.is_empty() {
-        phrase.push(' ');
-        if corps.chars().count() <= LONGUEUR_MAX {
-            phrase.push_str(&corps);
-        } else {
-            // Couper à la fin d'une phrase avant la limite, sinon au dernier mot.
-            let debut: String = corps.chars().take(LONGUEUR_MAX).collect();
-            let coupe = debut
-                .rfind(['.', '!', '?'])
-                .map(|i| i + 1)
-                .or_else(|| debut.rfind(' '))
-                .unwrap_or(debut.len());
-            phrase.push_str(debut[..coupe].trim_end());
-            phrase.push_str(" La suite est à l'écran.");
-        }
-        if !phrase.ends_with(['.', '!', '?']) {
-            phrase.push('.');
-        }
-    }
-    if let Some(changes) = result["diff"]["changes"].as_array() {
-        match changes.len() {
-            0 => {}
-            1 => phrase.push_str(" Un changement est à examiner."),
-            n => phrase.push_str(&format!(" {n} changements sont à examiner.")),
-        }
-    }
-    phrase
-}
-
 /// Dit `texte` sur la sortie audio de la session, ou l'écrit dans `out`.
 fn reply_aloud(
     tools: &voice::Tools,
@@ -916,14 +849,7 @@ fn reply_aloud(
 ) -> anyhow::Result<voice::Speech> {
     match out {
         Some(path) => Ok(tools.speak(texte, path)?),
-        None => {
-            let wav = chemin_temporaire("prophet-reponse");
-            let speech = tools.speak(texte, &wav)?;
-            let played = tools.play(&wav);
-            let _ = std::fs::remove_file(&wav);
-            played?;
-            Ok(speech)
-        }
+        None => Ok(tools.say(texte)?),
     }
 }
 
@@ -1211,7 +1137,7 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
             // L'OS lit le résultat : ce qu'il dit est écrit aussi, pour qu'on puisse le relire.
             let dit = if *say {
                 let tools = voice::Tools::from_env()?;
-                let phrase = phrase_du_resultat(&result);
+                let phrase = voice::resume_du_resultat(&result);
                 let speech = reply_aloud(&tools, &phrase, out.as_deref())?;
                 if let Some(object) = result.as_object_mut() {
                     object.insert(
@@ -2264,44 +2190,6 @@ mod tests {
         ] {
             assert_eq!(ordre_vocal(intention), Ordre::Preparer, "{intention}");
         }
-    }
-
-    #[test]
-    fn le_resultat_dit_est_court_sans_mise_en_forme_et_compte_les_changements() {
-        let fini = serde_json::json!({
-            "state": "done",
-            "text": "# Note\n\n- La **note de réunion** est écrite dans `docs/note.md`.\n- Trois points la résument.\n",
-            "diff": {"changes": [{"path": "docs/note.md", "kind": "added"}]}
-        });
-        assert_eq!(
-            phrase_du_resultat(&fini),
-            "Mission terminée. Note La note de réunion est écrite dans docs/note.md. Trois points la résument. Un changement est à examiner."
-        );
-        let echec = serde_json::json!({"state": "failed", "reason": "budget épuisé", "text": "…"});
-        assert_eq!(
-            phrase_du_resultat(&echec),
-            "Mission échouée. budget épuisé."
-        );
-        let long = serde_json::json!({
-            "state": "done",
-            "text": format!("{} Fin.", "Une phrase de plus. ".repeat(40)),
-            "diff": {"changes": [{}, {}, {}]}
-        });
-        let phrase = phrase_du_resultat(&long);
-        assert!(
-            phrase.starts_with("Mission terminée. Une phrase de plus."),
-            "{phrase}"
-        );
-        assert!(phrase.contains("La suite est à l'écran."), "{phrase}");
-        assert!(
-            phrase.ends_with("3 changements sont à examiner."),
-            "{phrase}"
-        );
-        assert!(phrase.chars().count() < 460, "{}", phrase.chars().count());
-        assert_eq!(
-            phrase_du_resultat(&serde_json::json!({"state": "waiting_approval"})),
-            "Mission en attente de votre décision."
-        );
     }
 
     #[test]
