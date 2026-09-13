@@ -864,3 +864,58 @@ async fn inspect(chain: &Chain) -> Value {
         .await
         .unwrap()
 }
+
+#[tokio::test]
+async fn une_revocation_apres_la_mission_interdit_la_publication() {
+    let model = controlled_model().await;
+    let chain = Chain::new(&model.endpoint).await;
+    chain.plan("controlled", "Écris une note").await;
+    chain
+        .agents
+        .call("task.start", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    model.received.await.unwrap();
+    model.release.send(()).unwrap();
+    assert_eq!(chain.wait_terminal().await["state"], "done");
+    let note = chain.dir.path().join("home/docs/note.txt");
+
+    // Le propriétaire retire ses droits à la mission après coup : ce qu'elle a préparé ne
+    // doit plus pouvoir atteindre ses documents, même approuvé, et le refus se lit au journal.
+    Client::connect(chain.dir.path().join("cap.sock"))
+        .await
+        .unwrap()
+        .call("cap.revoke", json!({"subject":"local-test"}))
+        .await
+        .unwrap();
+    let refused = chain
+        .agents
+        .call("task.apply", json!({"id":"local-test"}))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        refused.code,
+        prophet_ipc::ErrorCode::PolicyDenied,
+        "{refused:?}"
+    );
+    assert!(refused.message.contains("capd"), "{}", refused.message);
+    assert!(!note.exists(), "un refus de capd ne doit rien écrire");
+    let info = inspect(&chain).await;
+    assert_eq!(info["publication"], "open", "{info}");
+    assert_eq!(info["task"]["state"], "done");
+    let events = chain
+        .journal
+        .call("ledger.query", json!({"task":"local-test"}))
+        .await
+        .unwrap();
+    let events = events.as_array().unwrap();
+    let deny = events
+        .iter()
+        .find(|e| e["kind"] == "policy.deny" && e["payload"]["stage"] == "publish")
+        .unwrap_or_else(|| panic!("refus de publication absent du journal : {events:?}"));
+    assert_eq!(deny["payload"]["path"], "docs/note.txt", "{deny}");
+    assert!(
+        !events.iter().any(|e| e["kind"] == "fs.commit"),
+        "aucune publication ne doit être consignée : {events:?}"
+    );
+}

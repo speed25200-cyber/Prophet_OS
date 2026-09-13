@@ -251,6 +251,9 @@ pub struct EtatPersistant {
     /// UID constaté sur le socket à la création, distinct d'une identité déclarée dans le plan.
     #[serde(default)]
     pub owners: BTreeMap<String, u32>,
+    /// Manifestes des missions, pour émettre un jeton lié à l'index exact au moment de publier.
+    #[serde(default)]
+    pub manifests: BTreeMap<String, Manifest>,
 }
 
 /// Le runtime.
@@ -269,6 +272,7 @@ pub struct Runtime {
     plans: BTreeMap<String, TaskPlan>,
     results: BTreeMap<String, serde_json::Value>,
     owners: BTreeMap<String, u32>,
+    manifests: BTreeMap<String, Manifest>,
 }
 
 impl std::fmt::Debug for Runtime {
@@ -294,6 +298,7 @@ impl Runtime {
             plans: BTreeMap::new(),
             results: BTreeMap::new(),
             owners: BTreeMap::new(),
+            manifests: BTreeMap::new(),
         }
     }
 
@@ -314,6 +319,7 @@ impl Runtime {
             plans: BTreeMap::new(),
             results: BTreeMap::new(),
             owners: BTreeMap::new(),
+            manifests: BTreeMap::new(),
         }
     }
 
@@ -336,6 +342,7 @@ impl Runtime {
             plans: self.plans.clone(),
             results: self.results.clone(),
             owners: self.owners.clone(),
+            manifests: self.manifests.clone(),
         }
     }
 
@@ -352,6 +359,7 @@ impl Runtime {
         self.plans.extend(etat.plans);
         self.results.extend(etat.results);
         self.owners.extend(etat.owners);
+        self.manifests.extend(etat.manifests);
     }
 
     /// Événements journalisés.
@@ -558,6 +566,53 @@ impl Runtime {
             }
         }
         Ok(())
+    }
+
+    /// Ce qu'il faut demander à capd avant de publier : le manifeste de la mission, son
+    /// utilisateur, et un grant d'écriture par fichier de l'index exact.
+    ///
+    /// Le jeton de la mission a pu expirer pendant l'examen humain ; un jeton neuf, borné à
+    /// ces chemins, est la seule façon de faire trancher capd sur ce qui va réellement changer.
+    ///
+    /// # Errors
+    /// Mission planifiée sans manifeste conservé.
+    pub fn publication_grants(
+        &self,
+        id: &str,
+        review: &sfs::ReviewIndex,
+    ) -> Result<(Manifest, String, Vec<Grant>), String> {
+        let manifest = self.manifests.get(id).ok_or(
+            "Cette mission a été planifiée sans manifeste conservé ; replanifiez-la avant de publier.",
+        )?;
+        let user = self
+            .tasks
+            .get(id)
+            .map(|task| task.user.clone())
+            .ok_or("Mission inconnue.")?;
+        let grants = review
+            .diff()
+            .changes
+            .iter()
+            .map(|change| Grant::new(Res::Fs, Act::Write, format!("~/{}", change.path.display())))
+            .collect();
+        Ok((manifest.clone(), user, grants))
+    }
+
+    /// Consigne un refus de capd au moment de publier, sans changer l'état de la tâche.
+    pub fn record_publication_denied(
+        &mut self,
+        id: &str,
+        path: &str,
+        reason: &str,
+        now: OffsetDateTime,
+    ) {
+        self.record(
+            id,
+            EventKind::PolicyDeny,
+            Actor::daemon("agentd"),
+            json!({"stage":"publish","path":path,"reason":reason}),
+            now,
+        );
     }
 
     /// Annule une tâche qui n'a pas de travailleur lancé.
@@ -796,6 +851,7 @@ impl Runtime {
             scopes: scopes.iter().map(|s| (*s).to_owned()).collect(),
         };
         self.plans.insert(id.to_owned(), plan.clone());
+        self.manifests.insert(id.to_owned(), manifest.clone());
         Ok(plan)
     }
 

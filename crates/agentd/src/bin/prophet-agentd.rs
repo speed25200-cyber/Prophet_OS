@@ -405,6 +405,9 @@ impl Agents {
             .await
             .publication_context(&id, uid)
             .map_err(|e| Error::new(ErrorCode::PolicyDenied, e))?;
+        if outcome == Publication::Applied {
+            self.autoriser_la_publication(&id, &home, &review).await?;
+        }
         let permit = self.publications.clone().try_acquire_owned().map_err(|_| {
             Error::new(
                 ErrorCode::Conflict,
@@ -452,6 +455,88 @@ impl Agents {
                 Ok(json!({"undone":id,"state":"rolled_back","changes":counts}))
             }
         }
+    }
+
+    /// Fait trancher capd sur chaque fichier de l'index exact avant la première mutation.
+    ///
+    /// Un jeton neuf est émis avec, pour seuls grants, les chemins de l'index : capd applique
+    /// alors son plafond de manifeste, sa politique Cedar et la révocation de la mission au
+    /// moment même où l'humain publie, sans dépendre de l'expiration du jeton de la mission.
+    /// Un refus est journalisé avant d'être rendu, et rien n'a été écrit.
+    async fn autoriser_la_publication(
+        &self,
+        id: &str,
+        home: &std::path::Path,
+        review: &sfs::ReviewIndex,
+    ) -> Result<(), Error> {
+        let (manifest, user, grants) = self
+            .runtime
+            .lock()
+            .await
+            .publication_grants(id, review)
+            .map_err(|e| Error::new(ErrorCode::PolicyDenied, e))?;
+        if grants.is_empty() {
+            return Ok(());
+        }
+        let jeton = match self
+            .jeton_avec_duree(&manifest, id, &user, &grants, 120)
+            .await
+        {
+            Ok(jeton) => jeton,
+            Err(erreur) => {
+                self.refuser_la_publication(id, "*", &erreur.message).await;
+                return Err(Error::new(
+                    ErrorCode::PolicyDenied,
+                    format!("capd refuse la publication : {}", erreur.message),
+                ));
+            }
+        };
+        let client = Client::connect(&self.capd)
+            .await
+            .map_err(|e| Error::new(ErrorCode::InternalError, format!("capd injoignable ({e})")))?;
+        for change in &review.diff().changes {
+            let target = home.join(&change.path).display().to_string();
+            let decision: prophet_types::cap::Decision = client
+                .call(
+                    "cap.check",
+                    json!({
+                        "token": jeton,
+                        "res": prophet_types::cap::Res::Fs,
+                        "act": prophet_types::cap::Act::Write,
+                        "target": target,
+                        "sandbox_level": 0,
+                        "irreversible": false,
+                        "external": false,
+                        "context": prophet_types::cap::CheckContext::default(),
+                    }),
+                )
+                .await
+                .and_then(|v| {
+                    serde_json::from_value(v)
+                        .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))
+                })?;
+            if let prophet_types::cap::Decision::Deny { reason, rule } = decision {
+                let motif = rule
+                    .map(|rule| format!("{reason:?} ({rule})"))
+                    .unwrap_or_else(|| format!("{reason:?}"));
+                let chemin = change.path.display().to_string();
+                self.refuser_la_publication(id, &chemin, &motif).await;
+                return Err(Error::new(
+                    ErrorCode::PolicyDenied,
+                    format!("capd refuse la publication de {chemin} : {motif}"),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    async fn refuser_la_publication(&self, id: &str, chemin: &str, motif: &str) {
+        {
+            let mut runtime = self.runtime.lock().await;
+            runtime.record_publication_denied(id, chemin, motif, OffsetDateTime::now_utc());
+        }
+        self.vider_le_journal().await;
+        tracing::warn!(tache = %id, chemin, motif, "publication refusée par capd");
     }
 
     async fn start_local(&self, id: String) -> Result<Value, Error> {
@@ -563,13 +648,25 @@ impl Agents {
         utilisateur: &str,
         demandes: &[Grant],
     ) -> Result<Token, Error> {
+        let duree = i64::try_from(manifeste.wall_time_seconds().unwrap_or(1200)).unwrap_or(1200);
+        self.jeton_avec_duree(manifeste, tache, utilisateur, demandes, duree)
+            .await
+    }
+
+    async fn jeton_avec_duree(
+        &self,
+        manifeste: &Manifest,
+        tache: &str,
+        utilisateur: &str,
+        demandes: &[Grant],
+        duree: i64,
+    ) -> Result<Token, Error> {
         let client = Client::connect(&self.capd).await.map_err(|e| {
             Error::new(
                 ErrorCode::InternalError,
                 format!("capd injoignable ({e}) : aucune tâche ne peut être planifiée sans jeton"),
             )
         })?;
-        let duree = manifeste.wall_time_seconds().unwrap_or(1200);
         let brut = client
             .call(
                 "cap.mint",
