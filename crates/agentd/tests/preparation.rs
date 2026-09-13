@@ -390,14 +390,14 @@ fn le_catalogue_refuse_les_profils_hors_perimetre_et_accepte_une_ecriture_plus_e
     std::fs::write(&path, json!([web]).to_string()).unwrap();
     let loaded = agentd::preparation::load(&path).unwrap();
     assert!(loaded[0].uses_browser());
-    assert!(loaded[0].view(&[]).web);
+    assert!(loaded[0].view(&[], &[]).web);
     let mut fetch_only = profile.clone();
     fetch_only["manifest"]["capabilities"]["max"]["net.egress"] = json!(["exemple.fr"]);
     fetch_only["manifest"]["capabilities"]["max"]["tool.call"] =
         json!(["fs.read", "fs.write", "http.fetch"]);
     std::fs::write(&path, json!([fetch_only]).to_string()).unwrap();
     let loaded = agentd::preparation::load(&path).unwrap();
-    assert!(!loaded[0].uses_browser() && !loaded[0].view(&[]).web);
+    assert!(!loaded[0].uses_browser() && !loaded[0].view(&[], &[]).web);
     // Une application de bureau nommée est admise pour `ui.read` / `ui.act`, avec les outils
     // d'interface ; ni joker, ni outil d'interface sans application.
     let mut bureau = profile.clone();
@@ -407,15 +407,15 @@ fn le_catalogue_refuse_les_profils_hors_perimetre_et_accepte_une_ecriture_plus_e
         json!(["fs.read", "fs.write", "ui.apps", "ui.tree", "ui.act"]);
     std::fs::write(&path, json!([bureau]).to_string()).unwrap();
     let loaded = agentd::preparation::load(&path).unwrap();
-    assert!(!loaded[0].uses_browser() && !loaded[0].view(&[]).web);
+    assert!(!loaded[0].uses_browser() && !loaded[0].view(&[], &[]).web);
     assert!(
         loaded[0]
-            .view(&[])
+            .view(&[], &[])
             .grants
             .iter()
             .any(|g| g == "ui.act sur mousepad"),
         "{:?}",
-        loaded[0].view(&[]).grants
+        loaded[0].view(&[], &[]).grants
     );
     for bad in [
         {

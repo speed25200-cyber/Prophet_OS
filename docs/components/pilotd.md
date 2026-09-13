@@ -1,0 +1,38 @@
+# pilotd — lanceur de pilotes de la session
+
+- Programme : `prophet-pilotd`, service utilisateur de la session graphique (`prophet-pilotd.service`,
+  partie de `sway-session.target`), sous l'identité de l'humain
+- Socket : `/run/prophet/pilot.sock`, groupe `prophet-system` ; seul `agentd` est admis (`SO_PEERCRED`)
+- Rôle : lancer un client officiel non modifié (Claude Code, Codex, Gemini) dans une mission
+  préparée, avec son profil privé et la configuration MCP du pont `prophet-mcp`, et rendre sa
+  réponse finale (ADR 0035). Il ne décide d'aucun droit.
+
+## Méthodes
+
+| Méthode | Effet |
+|---|---|
+| `pilot.status` | Chaque client : installé, connecté (sondé par sa propre commande), version, sans lire ses fichiers |
+| `pilot.run` | `{task, driver, intent, wall_time_s}` : écrit la configuration MCP en 0600, lance le client en mode non interactif, attend (tué au délai), rend `{exit_code, text, duration_ms, output_bytes}` |
+
+## Comment agentd s'en sert
+
+`task.options` interroge le lanceur (trois secondes au plus) et ne propose un rôle `driver:` que
+si le client est prêt. `task.delegate {role}` résolu en `driver:<client>` prépare la sous-mission
+pour une séance d'outils (jeton délégué par capd, filiation, budget prélevé, rôle, même
+propriétaire), puis appelle `pilot.run` et attend. Le client rejoint la séance par le pont
+(`task.attach`, sous l'identité de l'humain, propriétaire de la mission), appelle ses outils
+(`task.call`, chacun tranché par capd et journalisé, compté sous `client:<nom>` sans tokens), se
+retire (`task.detach`). Une séance laissée ouverte est conclue par le service avec le texte du
+client ; un client qui ne s'attache pas fait échouer la sous-mission en le disant.
+
+## Limites
+
+- Le client n'est pas confiné par la séance : ce qu'il fait hors de la mission lui appartient
+  (ADR 0026). Le confinement des clients reste un critère de livraison.
+- Le vrai Claude Code et le vrai Codex exigent une connexion que seul l'humain effectue ; les
+  preuves de ce composant emploient un client de remplacement par le même chemin. Le paramètre
+  `-c` de Codex pour ses serveurs MCP suit sa documentation, sans vérification sur le binaire ;
+  Gemini n'a pas de configuration MCP raccordée.
+- Le parent ne reçoit que le texte final du client, pas ses événements intermédiaires.
+
+Voir le [guide du crate](../../crates/pilotd/README.md) et l'[ADR 0035](../adr/0035-clients-officiels-comme-roles-par-le-lanceur-de-session.md).

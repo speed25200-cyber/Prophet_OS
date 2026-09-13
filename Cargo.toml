@@ -25,6 +25,7 @@ providers = { path = "crates/providers" }
 memoryd = { path = "crates/memoryd" }
 sup = { path = "crates/sup" }
 supd = { path = "crates/supd" }
+pilotd = { path = "crates/pilotd" }
 browser-bridge = { path = "crates/browser-bridge" }
 shell = { path = "crates/shell" }
 

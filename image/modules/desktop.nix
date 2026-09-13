@@ -11,6 +11,7 @@ let
   # Le socket de l'adaptateur d'accessibilité : dans le répertoire d'exécution des services,
   # que le groupe système de Prophet peut écrire (l'humain en est membre) et joindre (agentd).
   supSocket = "/run/prophet/sup.sock";
+  pilotSocket = "/run/prophet/pilot.sock";
   launcher = pkgs.writeShellApplication {
     name = "prophet-ouvrir";
     runtimeInputs = [ pkgs.coreutils pkgs.jq pkgs.fuzzel pkgs.foot compositor ];
@@ -368,6 +369,31 @@ in {
       };
     };
     systemd.services.prophet-agentd.environment.PROPHET_SUP_SOCKET = supSocket;
+    # Le lanceur de pilotes, dans la session : il lance Claude Code, Codex ou Gemini, sans
+    # modification, sous l'identité de l'humain et avec le profil privé de chaque client, dans
+    # une mission préparée par agentd (séance MCP), quand un rôle du relais les désigne
+    # (ADR 0035). Il n'admet qu'agentd ; l'OS ne lit jamais les identifiants des clients.
+    systemd.user.services.prophet-pilotd = {
+      description = "Prophet OS — lanceur de pilotes de la session";
+      wantedBy = [ "sway-session.target" ];
+      partOf = [ "sway-session.target" ];
+      after = [ "graphical-session-pre.target" ];
+      path = [ pkgs.claude-code pkgs.codex ];
+      environment = {
+        PROPHET_PILOT_SOCKET = pilotSocket;
+        PROPHET_PILOT_CLIENT = "agentd";
+        PROPHET_PILOT_GROUP = "prophet-system";
+        PROPHET_MCP_BRIDGE = "${prophet}/bin/prophet-mcp";
+      };
+      unitConfig = { StartLimitIntervalSec = 60; StartLimitBurst = 3; ConditionUser = human; };
+      serviceConfig = {
+        ExecStart = "${prophet}/bin/prophet-pilotd";
+        Restart = "on-failure";
+        RestartSec = "3s";
+        UMask = "0007";
+      };
+    };
+    systemd.services.prophet-agentd.environment.PROPHET_PILOT_SOCKET = pilotSocket;
     systemd.user.services.prophet-supervision = {
       description = "Prophet OS — supervision humaine";
       wantedBy = [ "sway-session.target" ];

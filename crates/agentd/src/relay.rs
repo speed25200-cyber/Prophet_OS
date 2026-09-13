@@ -21,18 +21,20 @@ pub struct Context {
     pub roles: BTreeMap<String, Vec<String>>,
 }
 
-/// Le modèle qu'un rôle désigne dans ces `roles`, parmi ceux que le moteur sert en ce moment.
+/// Le modèle qu'un rôle désigne dans ces `roles`, parmi ceux qui sont réellement disponibles :
+/// les modèles locaux que le moteur sert (`available`, sans préfixe) et les pilotes officiels
+/// que le lanceur de la session dit connectés (`drivers`, sans préfixe).
 ///
-/// `available` est la liste rendue par le moteur, sans préfixe ; le résultat garde le préfixe
-/// `local:` du manifeste. Le premier modèle admis et présent l'emporte : l'ordre du profil est
-/// une préférence, pas une garantie.
+/// Le résultat garde le préfixe du manifeste (`local:` ou `driver:`). Le premier modèle admis
+/// et présent l'emporte : l'ordre du profil est une préférence, pas une garantie.
 ///
 /// # Errors
-/// Rôle inconnu du profil, ou aucun de ses modèles servi par le moteur.
+/// Rôle inconnu du profil, ou aucun de ses modèles disponible.
 pub fn resolve(
     roles: &BTreeMap<String, Vec<String>>,
     role: &str,
     available: &[String],
+    drivers: &[String],
 ) -> Result<String, String> {
     let role = role.trim().to_lowercase();
     if !MODEL_ROLES.contains(&role.as_str()) {
@@ -51,11 +53,14 @@ pub fn resolve(
             reference
                 .strip_prefix("local:")
                 .is_some_and(|name| available.iter().any(|a| a == name))
+                || reference
+                    .strip_prefix("driver:")
+                    .is_some_and(|name| drivers.iter().any(|d| d == name))
         })
         .cloned()
         .ok_or_else(|| {
             format!(
-                "aucun modèle du rôle {role} n'est servi par le moteur (attendus : {})",
+                "aucun modèle du rôle {role} n'est disponible : ni servi par le moteur, ni client connecté (attendus : {})",
                 models.join(", ")
             )
         })
@@ -157,29 +162,52 @@ mod tests {
     fn un_role_designe_le_premier_modele_servi() {
         let servis = vec!["grand".to_owned(), "petit".to_owned()];
         assert_eq!(
-            resolve(&roles(), "execute", &servis).unwrap(),
+            resolve(&roles(), "execute", &servis, &[]).unwrap(),
             "local:petit"
         );
         assert_eq!(
-            resolve(&roles(), "Reflect ", &servis).unwrap(),
+            resolve(&roles(), "Reflect ", &servis, &[]).unwrap(),
             "local:grand"
         );
+    }
+
+    #[test]
+    fn un_role_peut_designer_un_client_officiel_connecte() {
+        let mut roles = roles();
+        roles.insert(
+            "code".to_owned(),
+            vec!["driver:codex".to_owned(), "local:petit".to_owned()],
+        );
+        let servis = vec!["petit".to_owned()];
+        // Codex connecté : il l'emporte, dans l'ordre du profil.
+        assert_eq!(
+            resolve(&roles, "code", &servis, &["codex".to_owned()]).unwrap(),
+            "driver:codex"
+        );
+        // Codex absent : le modèle local suivant.
+        assert_eq!(
+            resolve(&roles, "code", &servis, &[]).unwrap(),
+            "local:petit"
+        );
+        // Rien de disponible : l'erreur nomme les deux voies.
+        let erreur = resolve(&roles, "code", &[], &[]).unwrap_err();
+        assert!(erreur.contains("ni client connecté"), "{erreur}");
     }
 
     #[test]
     fn un_role_inconnu_ou_sans_modele_servi_est_une_erreur_nommee() {
         let servis = vec!["grand".to_owned()];
         assert!(
-            resolve(&roles(), "muse", &servis)
+            resolve(&roles(), "muse", &servis, &[])
                 .unwrap_err()
                 .contains("rôle inconnu")
         );
         assert!(
-            resolve(&roles(), "code", &servis)
+            resolve(&roles(), "code", &servis, &[])
                 .unwrap_err()
                 .contains("ne définit pas le rôle code")
         );
-        let erreur = resolve(&roles(), "execute", &servis).unwrap_err();
+        let erreur = resolve(&roles(), "execute", &servis, &[]).unwrap_err();
         assert!(erreur.contains("aucun modèle du rôle execute"), "{erreur}");
         assert!(erreur.contains("local:petit"), "{erreur}");
     }

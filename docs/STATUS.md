@@ -260,6 +260,26 @@ officiels ne sont pas encore des cibles de rôle exécutables par le service. Vo
 [rapport du relais](reports/relais-2026-09-13.md) et l'[ADR 0034](adr/0034-relais-de-modeles-par-role.md).
 Aucune case complète de FRONTIER n'est cochée.
 
+Clients officiels comme rôles du relais, 13 septembre 2026, dans le commit portant ce rapport :
+un nouveau service de session, `prophet-pilotd` (crate `pilotd`), lance Claude Code, Codex ou
+Gemini, sans modification, sous l'identité de l'humain et avec le profil privé du client, dans une
+mission préparée par agentd, avec la configuration MCP du pont ; il n'admet qu'agentd et ne lit
+jamais les identifiants. Les profils admettent `driver:claude-code|codex|gemini` dans `preferred`
+et `roles` ; `task.options` ne propose ces rôles que si le lanceur dit le client connecté ;
+`task.delegate {role}` résolu en `driver:` prépare la sous-mission pour une séance (jeton délégué
+par capd, filiation, budget prélevé, rôle), demande le lancement, attend, conclut la séance si le
+client l'a laissée ouverte, et rend son texte au parent ; sans lanceur, le rôle retombe sur le
+modèle local suivant. L'image installe le lanceur dans la session et un profil « Atelier des
+agents » (Claude Code réfléchit, Codex code, le modèle local exécute) ; cette partie attend la CI.
+Preuves : un test avec les vrais capd, ledger, agentd, `prophet-pilotd` et CLI où un script joue
+Codex par le même chemin (séance, écriture, retrait, texte revenu au parent, compte sous
+`client:codex`) ; un test du repli sans lanceur ; cinq tests unitaires du lanceur (commandes,
+configuration MCP en 0600, client tué au délai, client absent refusé, extraction de la réponse).
+Ni Claude Code ni Codex ne sont installés sur la machine de construction et leur connexion
+appartient à l'humain : leur exécution réelle reste un essai `needs_claude_login` /
+`needs_chatgpt_login`. Voir l'[ADR 0035](adr/0035-clients-officiels-comme-roles-par-le-lanceur-de-session.md)
+et le [composant](components/pilotd.md). Aucune case complète de FRONTIER n'est cochée.
+
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 
 - `c3b0c08` — moteur local réel, CLI et gel d'un processus possédé par sandboxd.

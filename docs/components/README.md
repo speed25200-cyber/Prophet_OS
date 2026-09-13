@@ -14,6 +14,8 @@ diagnostique par ses absences.
 | [`memoryd`](memoryd.md) | `memoryd.sock` | les agents n'ont pas de mémoire longue |
 | [`agentd`](agentd.md) | `agentd.sock` | aucune tâche n'est planifiée |
 | [`surface`](surface.md) | — (écran) | l'écran reste noir ; la ligne de commande fonctionne |
+| [`supd`](supd.md) | `sup.sock` (session) | aucune application du bureau n'est lue ni pilotée |
+| [`pilotd`](pilotd.md) | `pilot.sock` (session) | aucun rôle ne peut désigner Claude Code, Codex ou Gemini ; le relais reste local |
 
 Tous les sockets sont en `0660`, dans `/run/prophet` qui est en `0770` pour le groupe
 `prophet-system`. Un pair est accepté dans quatre cas : il est le service lui-même ; son groupe

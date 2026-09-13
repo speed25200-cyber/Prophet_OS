@@ -1,0 +1,27 @@
+[package]
+name = "pilotd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Lanceur de pilotes de la session humaine : Claude Code, Codex et Gemini rejoignent une mission Prophet par leur séance d'outils, lancés sous l'identité de l'humain, sans que l'OS touche à leurs identifiants."
+
+[[bin]]
+name = "prophet-pilotd"
+path = "src/bin/prophet-pilotd.rs"
+
+[dependencies]
+prophet-ipc = { workspace = true }
+providers = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

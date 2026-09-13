@@ -351,6 +351,7 @@ mod tests {
                 }],
                 model_error: None,
                 browser: None,
+                pilot: None,
             }),
             ..Default::default()
         };

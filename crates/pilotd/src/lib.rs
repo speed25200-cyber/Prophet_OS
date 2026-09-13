@@ -1,0 +1,630 @@
+//! `pilotd` : les clients officiels de l'humain (Claude Code, Codex, Gemini) comme rôles d'un
+//! relais de modèles, lancés dans sa session (ADR 0035).
+//!
+//! Le service `agentd` ne peut pas lancer ces clients : leurs identifiants appartiennent à
+//! l'humain, dans le répertoire privé de chaque client, et l'OS ne les lit jamais. Ce lanceur
+//! tourne donc **dans la session de l'humain**, sous son identité, comme le lanceur du bureau
+//! qui ouvre « Claude Code · mission ». Il n'admet qu'`agentd` (`SO_PEERCRED`), ne décide
+//! d'aucun droit, et fait une seule chose : lancer un client officiel, **sans modification**,
+//! en mode non interactif, avec la configuration MCP qui le raccorde à la séance d'outils de
+//! la mission (ADR 0026), puis rendre ce que le client a répondu.
+//!
+//! Ce que le client fait dans la mission passe par le pont `prophet-mcp`, donc par le jeton
+//! délégué par capd et par le journal. Ce que le client fait *hors* de la mission n'est pas
+//! confiné par ce lanceur : c'est la limite déjà nommée de la séance MCP.
+
+use std::collections::BTreeMap;
+use std::io::Read as _;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+use providers::official::{ClientProfile, ConnectionState, OfficialDriver};
+use serde::{Deserialize, Serialize};
+
+/// Socket par défaut, dans le répertoire des services : agentd en est membre par le groupe
+/// système, le reste de la machine non.
+pub const DEFAULT_SOCKET: &str = "/run/prophet/pilot.sock";
+/// Méthode : l'état des clients (installés, connectés).
+pub const METHOD_STATUS: &str = "pilot.status";
+/// Méthode : lancer un client dans une mission et attendre sa fin.
+pub const METHOD_RUN: &str = "pilot.run";
+/// Ce qu'on garde de la sortie du client, au plus : le reste n'est ni lu ni journalisé.
+const MAX_OUTPUT_BYTES: usize = 1 << 20;
+/// Ce qu'on rend au parent, au plus.
+const MAX_TEXT_CHARS: usize = 16_384;
+
+/// Erreurs du lanceur.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// Pilote inconnu du lanceur.
+    #[error("pilote inconnu : {0}")]
+    UnknownDriver(String),
+    /// Le client n'est pas installé ou pas connecté.
+    #[error("{driver} : {state}")]
+    NotReady {
+        /// Pilote visé.
+        driver: String,
+        /// État constaté.
+        state: String,
+    },
+    /// Le client n'a pas pu être lancé ou lu.
+    #[error("lancement de {driver} : {source}")]
+    Launch {
+        /// Pilote visé.
+        driver: String,
+        /// Cause.
+        source: std::io::Error,
+    },
+    /// Le client a dépassé la durée accordée.
+    #[error("{driver} interrompu après {seconds} s")]
+    Timeout {
+        /// Pilote visé.
+        driver: String,
+        /// Durée accordée.
+        seconds: u64,
+    },
+    /// Requête invalide.
+    #[error("{0}")]
+    Invalid(String),
+}
+
+/// Ce que le lanceur sait d'un client.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriverState {
+    /// Nom du pilote (`claude-code`, `codex`, `gemini`).
+    pub driver: String,
+    /// `connected`, `login_required`, `missing`, `probe_failed`, `unknown` ou `simulated`.
+    pub connection: String,
+    /// Exécutable résolu, s'il y en a un.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executable: Option<String>,
+    /// Version annoncée par le client, s'il répond.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+}
+
+impl DriverState {
+    /// Le pilote peut être lancé dans une mission.
+    #[must_use]
+    pub fn ready(&self) -> bool {
+        matches!(self.connection.as_str(), "connected" | "simulated")
+    }
+}
+
+/// Réponse de `pilot.status`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Status {
+    /// Un état par pilote connu.
+    pub drivers: Vec<DriverState>,
+}
+
+/// Requête de `pilot.run`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunRequest {
+    /// Mission préparée pour ce client (séance à rejoindre par le pont).
+    pub task: String,
+    /// Pilote à lancer.
+    pub driver: String,
+    /// Objectif remis au client.
+    pub intent: String,
+    /// Durée accordée, en secondes ; au-delà, le client est tué.
+    pub wall_time_s: u64,
+}
+
+/// Réponse de `pilot.run`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunResult {
+    /// Code de sortie du client, `None` s'il a été tué.
+    pub exit_code: Option<i32>,
+    /// Réponse finale du client, bornée ; pour Claude Code, le champ `result` de sa sortie.
+    pub text: String,
+    /// Durée réelle.
+    pub duration_ms: u64,
+    /// Octets lus sur la sortie standard, avant troncature.
+    pub output_bytes: usize,
+}
+
+/// Un client de remplacement, pour les essais : programme et arguments (`{intent}` remplacé),
+/// reçoit le même environnement qu'un vrai client.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Override {
+    /// Programme à lancer.
+    pub program: String,
+    /// Arguments, `{intent}` étant remplacé par l'objectif.
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+/// La commande qui lance un client dans une mission.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientCommand {
+    /// Programme.
+    pub program: String,
+    /// Arguments.
+    pub args: Vec<String>,
+    /// Variables d'environnement ajoutées à celles de la session.
+    pub env: Vec<(String, String)>,
+}
+
+/// Le lanceur : où sont les profils privés des clients, le socket d'agentd que le pont doit
+/// joindre, le pont lui-même, et d'éventuels clients de remplacement pour les essais.
+#[derive(Debug, Clone)]
+pub struct Launcher {
+    /// Racine des profils privés (`<root>/providers/<pilote>/<utilisateur>`).
+    pub root: PathBuf,
+    /// Utilisateur de la session, nom du sous-répertoire de profil.
+    pub user: String,
+    /// Socket d'agentd que le pont joindra.
+    pub agentd_socket: PathBuf,
+    /// Le pont `prophet-mcp`.
+    pub bridge: PathBuf,
+    /// Où écrire les configurations MCP, une par mission, en 0600.
+    pub runtime_dir: PathBuf,
+    /// Répertoire de travail des clients.
+    pub workdir: PathBuf,
+    /// Clients de remplacement, par pilote (essais).
+    pub overrides: BTreeMap<String, Override>,
+}
+
+impl Launcher {
+    /// Lit les clients de remplacement d'une variable JSON (`{"codex": {"program": …}}`).
+    ///
+    /// # Errors
+    /// JSON illisible.
+    pub fn parse_overrides(json: &str) -> Result<BTreeMap<String, Override>, Error> {
+        serde_json::from_str(json)
+            .map_err(|e| Error::Invalid(format!("clients de remplacement : {e}")))
+    }
+
+    /// L'état de chaque pilote connu, sondé par sa propre commande, sans lire ses fichiers.
+    #[must_use]
+    pub fn status(&self) -> Status {
+        let drivers = ClientProfile::all()
+            .into_iter()
+            .map(|profile| {
+                if let Some(over) = self.overrides.get(&profile.driver) {
+                    return DriverState {
+                        driver: profile.driver,
+                        connection: "simulated".into(),
+                        executable: Some(over.program.clone()),
+                        version: None,
+                    };
+                }
+                let diagnostic =
+                    OfficialDriver::new(profile.clone(), &self.root, &self.user).diagnostic();
+                DriverState {
+                    driver: profile.driver,
+                    connection: connection_name(diagnostic.connection).into(),
+                    executable: diagnostic.executable.map(|p| p.display().to_string()),
+                    version: diagnostic.version,
+                }
+            })
+            .collect();
+        Status { drivers }
+    }
+
+    /// La configuration MCP qui raccorde un client à la séance de `task`, écrite en 0600.
+    ///
+    /// # Errors
+    /// Répertoire ou fichier impossible à écrire.
+    pub fn write_mcp_config(&self, task: &str) -> Result<PathBuf, std::io::Error> {
+        std::fs::create_dir_all(&self.runtime_dir)?;
+        let path = self.runtime_dir.join(format!("{task}.json"));
+        let config = serde_json::json!({
+            "mcpServers": {
+                "prophet": {
+                    "command": self.bridge.display().to_string(),
+                    "args": [],
+                    "env": {
+                        "PROPHET_TASK": task,
+                        "PROPHET_AGENTD_SOCKET": self.agentd_socket.display().to_string()
+                    }
+                }
+            }
+        });
+        write_private(&path, serde_json::to_string_pretty(&config)?.as_bytes())?;
+        Ok(path)
+    }
+
+    /// La commande d'un pilote pour une mission : programme, arguments, environnement.
+    ///
+    /// # Errors
+    /// Pilote inconnu.
+    pub fn command(&self, request: &RunRequest, mcp_config: &Path) -> Result<ClientCommand, Error> {
+        let profile = ClientProfile::all()
+            .into_iter()
+            .find(|p| p.driver == request.driver)
+            .ok_or_else(|| Error::UnknownDriver(request.driver.clone()))?;
+        let config = mcp_config.display().to_string();
+        let env = vec![
+            (
+                profile.config_home_env.clone(),
+                providers::official::private_config_dir(&self.root, &profile.driver, &self.user)
+                    .display()
+                    .to_string(),
+            ),
+            ("PROPHET_TASK".to_owned(), request.task.clone()),
+            (
+                "PROPHET_AGENTD_SOCKET".to_owned(),
+                self.agentd_socket.display().to_string(),
+            ),
+            ("PROPHET_MCP_CONFIG".to_owned(), config.clone()),
+        ];
+        if let Some(over) = self.overrides.get(&request.driver) {
+            let args = over
+                .args
+                .iter()
+                .map(|a| a.replace("{intent}", &request.intent))
+                .collect();
+            return Ok(ClientCommand {
+                program: over.program.clone(),
+                args,
+                env,
+            });
+        }
+        let mut args = profile.command_line(&request.intent, &config, None);
+        if profile.driver == "codex" {
+            // Codex ne prend pas de fichier MCP en argument : ses serveurs viennent de sa
+            // configuration, que `-c` sait surcharger pour cette seule exécution.
+            args.splice(
+                1..1,
+                [
+                    "-c".to_owned(),
+                    format!(
+                        "mcp_servers.prophet.command={}",
+                        toml_string(&self.bridge.display().to_string())
+                    ),
+                    "-c".to_owned(),
+                    format!(
+                        "mcp_servers.prophet.env={{PROPHET_TASK={},PROPHET_AGENTD_SOCKET={}}}",
+                        toml_string(&request.task),
+                        toml_string(&self.agentd_socket.display().to_string())
+                    ),
+                ],
+            );
+        }
+        Ok(ClientCommand {
+            program: profile.program,
+            args,
+            env,
+        })
+    }
+
+    /// Lance le client dans la mission et attend sa fin, au plus `wall_time_s` secondes.
+    ///
+    /// # Errors
+    /// Pilote inconnu, client absent ou non connecté, lancement impossible, délai dépassé.
+    pub fn run(&self, request: &RunRequest) -> Result<RunResult, Error> {
+        if request.task.trim().is_empty() || request.intent.trim().is_empty() {
+            return Err(Error::Invalid("task et intent sont requis".into()));
+        }
+        if request.wall_time_s == 0 {
+            return Err(Error::Invalid("wall_time_s doit être positif".into()));
+        }
+        let state = self
+            .status()
+            .drivers
+            .into_iter()
+            .find(|d| d.driver == request.driver)
+            .ok_or_else(|| Error::UnknownDriver(request.driver.clone()))?;
+        if !state.ready() {
+            return Err(Error::NotReady {
+                driver: request.driver.clone(),
+                state: state.connection,
+            });
+        }
+        let mcp_config = self
+            .write_mcp_config(&request.task)
+            .map_err(|source| Error::Launch {
+                driver: request.driver.clone(),
+                source,
+            })?;
+        let ClientCommand { program, args, env } = self.command(request, &mcp_config)?;
+        let started = Instant::now();
+        let mut child = Command::new(&program)
+            .args(&args)
+            .envs(env)
+            .current_dir(&self.workdir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|source| Error::Launch {
+                driver: request.driver.clone(),
+                source,
+            })?;
+        let mut stdout = child.stdout.take().expect("sortie standard demandée");
+        let reader = std::thread::spawn(move || {
+            let mut buffer = Vec::new();
+            let mut total = 0usize;
+            let mut chunk = [0u8; 8192];
+            loop {
+                match stdout.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        total += n;
+                        if buffer.len() < MAX_OUTPUT_BYTES {
+                            let keep = n.min(MAX_OUTPUT_BYTES - buffer.len());
+                            buffer.extend_from_slice(&chunk[..keep]);
+                        }
+                    }
+                }
+            }
+            (buffer, total)
+        });
+        let deadline = started + Duration::from_secs(request.wall_time_s);
+        let exit_code = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status.code(),
+                Ok(None) if Instant::now() >= deadline => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = reader.join();
+                    let _ = std::fs::remove_file(&mcp_config);
+                    return Err(Error::Timeout {
+                        driver: request.driver.clone(),
+                        seconds: request.wall_time_s,
+                    });
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+                Err(source) => {
+                    let _ = child.kill();
+                    let _ = reader.join();
+                    let _ = std::fs::remove_file(&mcp_config);
+                    return Err(Error::Launch {
+                        driver: request.driver.clone(),
+                        source,
+                    });
+                }
+            }
+        };
+        let (output, output_bytes) = reader.join().unwrap_or_default();
+        let _ = std::fs::remove_file(&mcp_config);
+        Ok(RunResult {
+            exit_code,
+            text: final_text(&request.driver, &output),
+            duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            output_bytes,
+        })
+    }
+}
+
+/// La réponse finale d'un client, d'après sa sortie : le champ `result` du dernier événement
+/// `result` de Claude Code, le dernier `agent_message` de Codex, sinon la dernière ligne.
+#[must_use]
+pub fn final_text(driver: &str, output: &[u8]) -> String {
+    let text = String::from_utf8_lossy(output);
+    let mut found: Option<String> = None;
+    for line in text.lines() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            continue;
+        };
+        let candidate = match driver {
+            "claude-code" if value["type"] == "result" => value["result"].as_str(),
+            "codex" => value["item"]["text"]
+                .as_str()
+                .filter(|_| value["item"]["type"] == "agent_message")
+                .or_else(|| value["msg"]["message"].as_str()),
+            _ => None,
+        };
+        if let Some(candidate) = candidate.filter(|c| !c.trim().is_empty()) {
+            found = Some(candidate.to_owned());
+        }
+    }
+    let chosen = found.unwrap_or_else(|| {
+        text.lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or_default()
+            .to_owned()
+    });
+    chosen.chars().take(MAX_TEXT_CHARS).collect()
+}
+
+fn connection_name(state: ConnectionState) -> &'static str {
+    match state {
+        ConnectionState::Connected => "connected",
+        ConnectionState::LoginRequired => "login_required",
+        ConnectionState::ClientMissing => "missing",
+        ConnectionState::ProbeFailed => "probe_failed",
+        _ => "unknown",
+    }
+}
+
+fn toml_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+fn write_private(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
+    use std::io::Write as _;
+    #[cfg(unix)]
+    let mut file = {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?
+    };
+    #[cfg(not(unix))]
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn launcher(dir: &Path) -> Launcher {
+        Launcher {
+            root: dir.join("state"),
+            user: "humain".into(),
+            agentd_socket: dir.join("agent.sock"),
+            bridge: dir.join("prophet-mcp"),
+            runtime_dir: dir.join("run"),
+            workdir: dir.to_path_buf(),
+            overrides: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn la_configuration_mcp_nomme_le_pont_la_mission_et_le_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = launcher(dir.path()).write_mcp_config("m-1").unwrap();
+        let config: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            config["mcpServers"]["prophet"]["env"]["PROPHET_TASK"],
+            "m-1"
+        );
+        assert!(
+            config["mcpServers"]["prophet"]["command"]
+                .as_str()
+                .unwrap()
+                .ends_with("prophet-mcp")
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn la_commande_de_chaque_client_porte_la_mission_et_le_profil_prive() {
+        let dir = tempfile::tempdir().unwrap();
+        let launcher = launcher(dir.path());
+        let config = dir.path().join("run/m.json");
+        let claude = launcher
+            .command(
+                &RunRequest {
+                    task: "m".into(),
+                    driver: "claude-code".into(),
+                    intent: "Écris".into(),
+                    wall_time_s: 10,
+                },
+                &config,
+            )
+            .unwrap();
+        assert_eq!(claude.program, "claude");
+        assert!(claude.args.iter().any(|a| a.starts_with("--mcp-config=")));
+        assert_eq!(claude.args.last().unwrap(), "Écris");
+        assert!(
+            claude
+                .env
+                .iter()
+                .any(|(k, v)| k == "CLAUDE_CONFIG_DIR"
+                    && v.ends_with("providers/claude-code/humain"))
+        );
+        assert!(
+            claude
+                .env
+                .iter()
+                .any(|(k, v)| k == "PROPHET_TASK" && v == "m")
+        );
+        let codex = launcher
+            .command(
+                &RunRequest {
+                    task: "m".into(),
+                    driver: "codex".into(),
+                    intent: "Code".into(),
+                    wall_time_s: 10,
+                },
+                &config,
+            )
+            .unwrap();
+        assert_eq!(codex.program, "codex");
+        assert_eq!(codex.args[0], "exec");
+        assert!(
+            codex
+                .args
+                .iter()
+                .any(|a| a.starts_with("mcp_servers.prophet.command="))
+        );
+        assert!(codex.env.iter().any(|(k, _)| k == "CODEX_HOME"));
+        assert!(matches!(
+            launcher.command(
+                &RunRequest {
+                    task: "m".into(),
+                    driver: "muse".into(),
+                    intent: "?".into(),
+                    wall_time_s: 1
+                },
+                &config
+            ),
+            Err(Error::UnknownDriver(_))
+        ));
+    }
+
+    #[test]
+    fn un_client_de_remplacement_recoit_l_intention_et_l_environnement() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut launcher = launcher(dir.path());
+        launcher.overrides = Launcher::parse_overrides(
+            r#"{"codex": {"program": "/bin/echo", "args": ["fait :", "{intent}"]}}"#,
+        )
+        .unwrap();
+        assert_eq!(launcher.status().drivers[1].connection, "simulated");
+        assert!(launcher.status().drivers[1].ready());
+        let result = launcher
+            .run(&RunRequest {
+                task: "m".into(),
+                driver: "codex".into(),
+                intent: "écrire".into(),
+                wall_time_s: 10,
+            })
+            .unwrap();
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(result.text, "fait : écrire");
+        assert!(
+            !dir.path().join("run/m.json").exists(),
+            "la configuration est retirée après"
+        );
+    }
+
+    #[test]
+    fn un_client_trop_long_est_tue_et_un_client_absent_refuse() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut launcher = launcher(dir.path());
+        launcher.overrides =
+            Launcher::parse_overrides(r#"{"gemini": {"program": "/bin/sleep", "args": ["30"]}}"#)
+                .unwrap();
+        let debut = Instant::now();
+        let erreur = launcher
+            .run(&RunRequest {
+                task: "m".into(),
+                driver: "gemini".into(),
+                intent: "attendre".into(),
+                wall_time_s: 1,
+            })
+            .unwrap_err();
+        assert!(matches!(erreur, Error::Timeout { .. }), "{erreur}");
+        assert!(debut.elapsed() < Duration::from_secs(10));
+        // Sans remplacement, un client absent de cette machine n'est pas lancé.
+        let erreur = launcher
+            .run(&RunRequest {
+                task: "m".into(),
+                driver: "claude-code".into(),
+                intent: "x".into(),
+                wall_time_s: 1,
+            })
+            .unwrap_err();
+        assert!(matches!(erreur, Error::NotReady { .. }), "{erreur}");
+    }
+
+    #[test]
+    fn la_reponse_finale_est_extraite_de_la_sortie_structuree() {
+        let claude = b"{\"type\":\"system\"}\n{\"type\":\"result\",\"result\":\"Fini.\"}\n";
+        assert_eq!(final_text("claude-code", claude), "Fini.");
+        let codex = "{\"item\":{\"type\":\"agent_message\",\"text\":\"Code écrit.\"}}\n";
+        assert_eq!(final_text("codex", codex.as_bytes()), "Code écrit.");
+        assert_eq!(final_text("gemini", b"a\nb\n\n"), "b");
+        assert_eq!(final_text("codex", b"pas du json"), "pas du json");
+    }
+}

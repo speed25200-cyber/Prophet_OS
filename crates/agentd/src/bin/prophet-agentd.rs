@@ -52,6 +52,9 @@ struct Agents {
     browser_root: std::path::PathBuf,
     /// Socket de l'adaptateur d'accessibilité de la session humaine, s'il est configuré.
     sup_socket: Option<std::path::PathBuf>,
+    /// Socket du lanceur de pilotes de la session humaine (`prophet-pilotd`), s'il est
+    /// configuré : sans lui, aucun rôle ne peut désigner un client officiel (ADR 0035).
+    pilot: Option<std::path::PathBuf>,
     /// Socket de sandboxd, pour les commandes confinées de `proc.exec`.
     sandboxd: std::path::PathBuf,
     /// Séances d'outils ouvertes pour des clients MCP, une par mission attachée.
@@ -59,6 +62,37 @@ struct Agents {
     /// Où l'état est écrit entre deux démarrages.
     etat: std::path::PathBuf,
     pairs: commun::Pairs,
+}
+
+/// L'état des clients officiels selon le lanceur de la session, en trois secondes au plus ;
+/// `None` sans lanceur configuré ou s'il ne répond pas.
+async fn pilot_status(socket: Option<&std::path::Path>) -> Option<pilotd::Status> {
+    let socket = socket?;
+    let status = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        let client = Client::connect(socket).await.ok()?;
+        let value = client.call(pilotd::METHOD_STATUS, json!({})).await.ok()?;
+        serde_json::from_value::<pilotd::Status>(value).ok()
+    })
+    .await
+    .ok()
+    .flatten();
+    if status.is_none() {
+        tracing::warn!(socket = %socket.display(), "lanceur de pilotes muet");
+    }
+    status
+}
+
+/// Les clients officiels prêts à être lancés, sans préfixe (`codex`, `claude-code`…).
+fn ready_drivers(status: Option<&pilotd::Status>) -> Vec<String> {
+    status
+        .map(|s| {
+            s.drivers
+                .iter()
+                .filter(|d| d.ready())
+                .map(|d| d.driver.clone())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 impl Handler for Agents {
@@ -82,10 +116,17 @@ impl Handler for Agents {
                     Ok(models) => (models, None),
                     Err(error) => (Vec::new(), Some(error.message)),
                 };
+                let pilot = pilot_status(self.pilot.as_deref()).await;
+                let drivers = ready_drivers(pilot.as_ref());
                 commun::repondre(&agentd::preparation::Options {
-                    profiles: self.profiles.iter().map(|p| p.view(&models)).collect(),
+                    profiles: self
+                        .profiles
+                        .iter()
+                        .map(|p| p.view(&models, &drivers))
+                        .collect(),
                     model_error,
                     browser: self.browser_state(),
+                    pilot,
                 })
             }
 
@@ -609,7 +650,9 @@ impl Agents {
         }
         let launch = {
             let mut runtime = self.runtime.lock().await;
-            match runtime.begin_local(&id) {
+            // Une séance : aucun modèle ni processus lancé par le service, le client s'attache ;
+            // un plan sur un client officiel y est admis (ADR 0035).
+            match runtime.begin_seance(&id) {
                 Ok(launch) => match ecrire(&self.etat, &runtime.etat()) {
                     Ok(()) => Ok(launch),
                     Err(error) => {
@@ -1090,8 +1133,10 @@ impl Agents {
             browser: self.browser.clone(),
             browser_root: self.browser_root.clone(),
             sup_socket: self.sup_socket.clone(),
+            pilot: self.pilot.clone(),
             sandboxd: self.sandboxd.clone(),
             jobs: self.jobs.clone(),
+            seances: self.seances.clone(),
         }))
     }
 }
@@ -1108,8 +1153,12 @@ struct DelegationContext {
     browser: Option<std::path::PathBuf>,
     browser_root: std::path::PathBuf,
     sup_socket: Option<std::path::PathBuf>,
+    /// Socket du lanceur de pilotes de la session, pour les rôles `driver:` (ADR 0035).
+    pilot: Option<std::path::PathBuf>,
     sandboxd: std::path::PathBuf,
     jobs: Arc<std::sync::Mutex<BTreeMap<String, Arc<AtomicBool>>>>,
+    /// Les séances ouvertes : une sous-mission confiée à un client officiel y a la sienne.
+    seances: Seances,
 }
 
 fn delegation_fn(ctx: Arc<DelegationContext>) -> agentd::local::Delegate {
@@ -1247,8 +1296,28 @@ fn deleguer(
     let role_model = match (&explicit, &request.role) {
         (None, Some(role)) => {
             let served = modeles_servis(&endpoint)?;
-            let reference = agentd::relay::resolve(&profile.manifest.model.roles, role, &served)
-                .map_err(|e| (Code::Invalid, format!("Rôle {role} : {e}.")))?;
+            let pilot = ctx.pilot.clone();
+            let status = bloquer(async move { Ok(pilot_status(pilot.as_deref()).await) })?;
+            let drivers = ready_drivers(status.as_ref());
+            let reference =
+                agentd::relay::resolve(&profile.manifest.model.roles, role, &served, &drivers)
+                    .map_err(|e| (Code::Invalid, format!("Rôle {role} : {e}.")))?;
+            if let Some(driver) = reference.strip_prefix("driver:") {
+                // Un client officiel : la sous-mission est une séance d'outils que le client
+                // rejoint, lancé dans la session de l'humain par le lanceur de pilotes, sous
+                // l'identité de l'humain et avec son propre profil (ADR 0035).
+                return deleguer_pilote(
+                    ctx,
+                    parent_id,
+                    parent_token,
+                    &request,
+                    profile,
+                    driver,
+                    &child_id,
+                    &user,
+                    owner,
+                );
+            }
             reference.strip_prefix("local:").map(str::to_owned)
         }
         _ => None,
@@ -1421,6 +1490,191 @@ fn deleguer(
     }))
 }
 
+/// Une sous-mission confiée à un client officiel (ADR 0035) : préparée ici pour une séance
+/// d'outils sous un jeton délégué par capd, rattachée au parent, puis le lanceur de pilotes
+/// de la session lance le client, sous l'identité de l'humain, avec la configuration MCP qui
+/// le raccorde à cette séance ; le client y travaille par le pont, se retire, et son texte
+/// revient au parent comme le résultat d'un outil. Le service ne touche ni au client ni à
+/// ses identifiants : il attend.
+#[allow(clippy::too_many_arguments)]
+fn deleguer_pilote(
+    ctx: &Arc<DelegationContext>,
+    parent_id: &str,
+    parent_token: &Token,
+    request: &agentd::local::Delegation,
+    profile: &agentd::preparation::Profile,
+    driver: &str,
+    child_id: &str,
+    user: &str,
+    owner: Option<u32>,
+) -> Result<Value, (mcp_system::protocol::ErrorCode, String)> {
+    use mcp_system::protocol::ErrorCode as Code;
+    let pilot_socket = ctx.pilot.clone().ok_or_else(|| {
+        (
+            Code::SandboxError,
+            "aucun lanceur de pilotes de session configuré".to_owned(),
+        )
+    })?;
+    let reference = format!("driver:{driver}");
+    let mut manifest = profile.manifest.clone();
+    manifest.model.preferred = vec![reference.clone()];
+    let grants = profile.grants().map_err(|e| (Code::SandboxError, e))?;
+    let ttl = i64::try_from(manifest.wall_time_seconds().unwrap_or(1200)).unwrap_or(1200);
+    let capd = ctx.capd.clone();
+    let child_for_capd = child_id.to_owned();
+    let child_token: Token = bloquer(async move {
+        let client = Client::connect(&capd)
+            .await
+            .map_err(|e| (Code::SandboxError, format!("capd injoignable : {e}")))?;
+        let brut = client
+            .call(
+                "cap.delegate",
+                json!({"parent": parent_token, "grants": grants, "task": child_for_capd, "ttl_seconds": ttl}),
+            )
+            .await
+            .map_err(|e| (Code::PolicyDenied, format!("délégation refusée par capd : {}", e.message)))?;
+        serde_json::from_value(brut).map_err(|e| {
+            (
+                Code::SandboxError,
+                format!("jeton illisible rendu par capd : {e}"),
+            )
+        })
+    })?;
+    let scopes: Vec<&str> = profile.scopes.iter().map(String::as_str).collect();
+    let availability = Availability {
+        logged_in_drivers: vec![driver.to_owned()],
+        ..Default::default()
+    };
+    let wall_time_s = {
+        let mut runtime = ctx.runtime.blocking_lock();
+        runtime
+            .plan_with_token(
+                &PlanRequest {
+                    id: child_id,
+                    intent: request.intent.trim(),
+                    manifest: &manifest,
+                    user,
+                    requested: &profile.grants().map_err(|e| (Code::SandboxError, e))?,
+                    scopes: &scopes,
+                    availability: &availability,
+                },
+                child_token,
+                OffsetDateTime::now_utc(),
+            )
+            .map_err(|e| (Code::SandboxError, e.to_string()))?;
+        runtime
+            .link_child(child_id, parent_id, 0.5)
+            .map_err(|e| (Code::PolicyDenied, e.to_string()))?;
+        let role = request
+            .role
+            .as_deref()
+            .map(|r| r.trim().to_lowercase())
+            .or_else(|| manifest.model.role_of(&reference).map(str::to_owned));
+        runtime.set_role(child_id, role);
+        if let Some(uid) = owner {
+            runtime
+                .bind_owner(child_id, uid)
+                .map_err(|e| (Code::SandboxError, e))?;
+        }
+        ecrire(&ctx.etat, &runtime.etat())
+            .map_err(|e| (Code::SandboxError, format!("état non enregistré : {e}")))?;
+        runtime
+            .task(child_id)
+            .map_or(1200, |t| t.budget.limits.wall_time_s.max(1))
+    };
+    // Le client est lancé dans la session ; ce fil attend sa fin. Son texte final revient
+    // même si la séance a déjà été conclue par le pont.
+    let run = {
+        let pilot = pilot_socket.clone();
+        let requete = pilotd::RunRequest {
+            task: child_id.to_owned(),
+            driver: driver.to_owned(),
+            intent: request.intent.trim().to_owned(),
+            wall_time_s,
+        };
+        bloquer(async move {
+            let client = Client::connect(&pilot).await.map_err(|e| {
+                (
+                    Code::SandboxError,
+                    format!("lanceur de pilotes injoignable : {e}"),
+                )
+            })?;
+            let brut = client
+                .call(
+                    pilotd::METHOD_RUN,
+                    serde_json::to_value(&requete).unwrap_or_default(),
+                )
+                .await
+                .map_err(|e| (Code::SandboxError, format!("{driver} : {}", e.message)))?;
+            serde_json::from_value::<pilotd::RunResult>(brut).map_err(|e| {
+                (
+                    Code::SandboxError,
+                    format!("réponse illisible du lanceur : {e}"),
+                )
+            })
+        })
+    };
+    let (client_text, launch_error) = match run {
+        Ok(result) => (result.text, None),
+        Err((_, message)) => (String::new(), Some(message)),
+    };
+    // Le client est parti. S'il a laissé sa séance ouverte, elle est conclue ici avec son texte ;
+    // s'il ne l'a jamais rejointe, la sous-mission échoue en le disant.
+    let seance = ctx
+        .seances
+        .lock()
+        .ok()
+        .and_then(|mut all| all.remove(child_id));
+    if let Ok(mut jobs) = ctx.jobs.lock() {
+        jobs.remove(child_id);
+    }
+    if let Some(seance) = seance
+        && let Ok(mut guard) = seance.lock()
+        && let Some(taken) = guard.take()
+    {
+        taken.finish(Some(client_text.clone()).filter(|t| !t.is_empty()));
+    }
+    let (state, reason, result) = {
+        let mut runtime = ctx.runtime.blocking_lock();
+        if let Some(mut task) = runtime.task(child_id).cloned()
+            && !task.state.is_terminal()
+        {
+            task.state = agentd::State::Failed;
+            task.history.push(agentd::State::Failed);
+            task.reason = Some(launch_error.clone().unwrap_or_else(|| {
+                format!("le client {driver} s'est terminé sans rejoindre la mission")
+            }));
+            let resume = json!({
+                "state": task.state,
+                "reason": task.reason,
+                "budget": task.budget,
+                "usage": task.usage,
+                "role": task.role,
+                "driver": task.driver,
+                "text": client_text,
+            });
+            runtime.publish_local(task, Some(resume));
+        }
+        runtime.absorb_child(child_id, parent_id);
+        let _ = ecrire(&ctx.etat, &runtime.etat());
+        let task = runtime.task(child_id).cloned();
+        (
+            task.as_ref().map(|t| t.state),
+            task.and_then(|t| t.reason),
+            runtime.result(child_id).cloned(),
+        )
+    };
+    Ok(json!({
+        "task": child_id,
+        "state": state,
+        "reason": reason,
+        "result": result,
+        "driver": reference,
+        "client_text": client_text,
+        "note": "La sous-mission a été menée par un client officiel dans sa propre séance ; ses changements sont à examiner et à appliquer comme les vôtres.",
+    }))
+}
+
 /// Attend une opération asynchrone depuis un fil sans exécuteur : chaque délégation en crée un,
 /// le temps d'un appel à capd.
 fn bloquer<T>(
@@ -1553,6 +1807,9 @@ async fn main() -> anyhow::Result<()> {
     // Les applications du bureau ne sont pilotées que si l'administrateur nomme le socket de
     // l'adaptateur de session ; sans lui, les outils `ui.*` n'existent pas.
     let sup_socket = std::env::var_os("PROPHET_SUP_SOCKET").map(std::path::PathBuf::from);
+    // Les clients officiels ne sont des rôles du relais que si l'administrateur nomme le socket
+    // du lanceur de pilotes de la session ; le service ne lance jamais un client lui-même.
+    let pilot = std::env::var_os("PROPHET_PILOT_SOCKET").map(std::path::PathBuf::from);
     // La sonde tourne sous les contraintes réelles du service, une fois, sans retarder le socket :
     // `task.options` répond « sonde en cours » jusqu'à son verdict.
     let browser_state = Arc::new(std::sync::RwLock::new(
@@ -1638,6 +1895,7 @@ async fn main() -> anyhow::Result<()> {
             browser_state,
             browser_root,
             sup_socket,
+            pilot,
             sandboxd,
             seances: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
             etat: fichier_etat,

@@ -187,3 +187,14 @@ Cela fait progresser le critère des moteurs locaux (budgets de contexte et de t
 concurrence de deux modèles) sans le cocher : le moteur de l'image sert un modèle, la matrice
 GPU et le cycle de vie des poids restent ouverts, et les clients officiels ne sont pas encore
 des cibles de rôle que le service lance.
+
+L'[ADR 0035](adr/0035-clients-officiels-comme-roles-par-le-lanceur-de-session.md) ouvre ensuite
+les rôles aux clients officiels : un lanceur de pilotes dans la session (`prophet-pilotd`) lance
+Claude Code, Codex ou Gemini, sans modification et sous l'identité de l'humain, dans la séance
+d'outils d'une sous-mission préparée par agentd sous un jeton délégué par capd ; `task.delegate
+{role: "code"}` peut ainsi faire travailler Codex, et `role: "reflect"` Claude Code, sans que
+l'OS touche à leurs identifiants. La preuve est un client de remplacement sur le même chemin,
+avec les vrais services ; l'exécution des vrais clients exige une connexion que seul l'humain
+fait. Le critère « clients officiels exécutés dans le confinement requis » progresse (lancement
+par le service via la session, événements réduits au texte final) sans être coché : le client
+n'est pas confiné, et ses événements et demandes de permission ne sont pas traduits.

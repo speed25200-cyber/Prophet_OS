@@ -751,6 +751,27 @@ impl Runtime {
         &mut self,
         id: &str,
     ) -> Result<(Task, Token, TaskPlan, PathBuf), RuntimeError> {
+        self.begin(id, false)
+    }
+
+    /// Réserve une mission pour une séance d'outils : le service n'y lance aucun modèle ni
+    /// processus, le client de l'humain s'y attache. Un plan sur un client officiel
+    /// (`driver:`) y est admis : c'est précisément ainsi qu'il travaille (ADR 0026, 0035).
+    ///
+    /// # Errors
+    /// Tâche non planifiée, plan absent, isolation non raccordée.
+    pub fn begin_seance(
+        &mut self,
+        id: &str,
+    ) -> Result<(Task, Token, TaskPlan, PathBuf), RuntimeError> {
+        self.begin(id, true)
+    }
+
+    fn begin(
+        &mut self,
+        id: &str,
+        seance: bool,
+    ) -> Result<(Task, Token, TaskPlan, PathBuf), RuntimeError> {
         let task = self
             .tasks
             .get_mut(id)
@@ -759,7 +780,10 @@ impl Runtime {
             .plans
             .get(id)
             .ok_or_else(|| RuntimeError::Workspace("plan absent : recréer la mission".into()))?;
-        if !plan.choice.reference.starts_with("local:") || plan.sandbox_level != 0 {
+        let reference = &plan.choice.reference;
+        let admissible =
+            reference.starts_with("local:") || (seance && reference.starts_with("driver:"));
+        if !admissible || plan.sandbox_level != 0 {
             return Err(RuntimeError::NoDriver("le lanceur local d'outils ne lance aucun processus non fiable ; les pilotes isolés restent à raccorder".into()));
         }
         let token = self.tokens.get(id).filter(|t| t.sub == id).ok_or_else(|| {

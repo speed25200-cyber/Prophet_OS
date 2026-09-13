@@ -18,6 +18,17 @@ const WEB_TOOLS: &[&str] = &["http.fetch", "web.open", "web.tree", "web.act"];
 /// Les outils d'interface des applications de bureau (ADR 0027).
 const UI_TOOLS: &[&str] = &["ui.apps", "ui.tree", "ui.act"];
 
+/// Les clients officiels que le lanceur de pilotes de la session sait lancer (ADR 0035).
+pub const OFFICIAL_DRIVERS: [&str; 3] = ["claude-code", "codex", "gemini"];
+
+/// Vrai pour `driver:<client officiel>`.
+#[must_use]
+pub fn is_official_driver(reference: &str) -> bool {
+    reference
+        .strip_prefix("driver:")
+        .is_some_and(|d| OFFICIAL_DRIVERS.contains(&d))
+}
+
 /// Un nom d'application tel que l'adaptateur de session l'identifie : minuscules, chiffres,
 /// point, tiret, soulignement ; ni joker ni chemin, pour qu'un droit désigne une application.
 fn is_app_name(pattern: &str) -> bool {
@@ -112,6 +123,10 @@ pub struct Options {
     /// Navigateur piloté : `None` si le service n'en configure aucun.
     #[serde(default)]
     pub browser: Option<BrowserState>,
+    /// Clients officiels que le lanceur de pilotes de la session connaît : `None` si le
+    /// service n'en configure aucun ou s'il ne répond pas (ADR 0035).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pilot: Option<pilotd::Status>,
 }
 
 /// Intention explicite : le client ne fournit ni manifeste, ni identité, ni droits.
@@ -168,9 +183,11 @@ impl Profile {
         self.manifest.ceiling().map_err(|e| e.to_string())
     }
 
-    /// Vue bornée au moteur effectivement disponible.
+    /// Vue bornée à ce qui est effectivement disponible : les modèles que le moteur sert, et
+    /// les clients officiels que le lanceur de la session dit connectés (`drivers`, sans
+    /// préfixe), rendus dans les rôles sous leur référence `driver:<nom>` (ADR 0035).
     #[must_use]
-    pub fn view(&self, models: &[String]) -> ProfileView {
+    pub fn view(&self, models: &[String], drivers: &[String]) -> ProfileView {
         ProfileView {
             id: self.id.clone(),
             name: self.name.clone(),
@@ -201,9 +218,15 @@ impl Profile {
                     (
                         role.clone(),
                         refs.iter()
-                            .filter_map(|r| r.strip_prefix("local:"))
-                            .filter(|m| models.iter().any(|v| v == m))
-                            .map(str::to_owned)
+                            .filter_map(|r| {
+                                if let Some(m) = r.strip_prefix("local:") {
+                                    models.iter().any(|v| v == m).then(|| m.to_owned())
+                                } else if let Some(d) = r.strip_prefix("driver:") {
+                                    drivers.iter().any(|v| v == d).then(|| r.clone())
+                                } else {
+                                    None
+                                }
+                            })
                             .collect(),
                     )
                 })
@@ -263,12 +286,14 @@ impl Profile {
             || self.manifest.sandbox.min_level != 0
             || self.scopes.is_empty()
             || self.scopes.len() > 16
+            // Un modèle local du moteur, ou un client officiel lancé dans la session de
+            // l'humain par le lanceur de pilotes (ADR 0035) ; jamais une API à clé.
             || self
                 .manifest
                 .model
                 .preferred
                 .iter()
-                .any(|m| !m.starts_with("local:"))
+                .any(|m| !m.starts_with("local:") && !is_official_driver(m))
         {
             return Err("Profil de mission locale invalide.".into());
         }

@@ -92,6 +92,42 @@ let
         budget.default = { tokens = 30000; wall_time = "180s"; approvals = 3; };
       };
     }
+    # L'atelier : les clients officiels de l'humain comme rôles du relais (ADR 0034, 0035).
+    # Claude Code réfléchit, Codex code, le modèle local exécute ; chacun n'est proposé que si
+    # le lanceur de la session le dit connecté, sinon le rôle retombe sur le modèle local. Les
+    # clients rejoignent leur sous-mission par une séance d'outils, sous un jeton délégué par
+    # capd ; l'OS ne touche jamais à leurs identifiants.
+    {
+      id = "atelier";
+      name = "Atelier des agents";
+      description = "Faire avancer Claude Code, Codex et le modèle local ensemble sur un objectif dans ~/Documents/Prophet : la réflexion à Claude Code, le code à Codex, les étapes simples au modèle local, chacun dans sa propre mission contrôlée. Les clients doivent être connectés dans leur profil Prophet.";
+      scopes = [ "~/Documents/Prophet" ];
+      manifest = {
+        agent = {
+          id = "org.prophet.atelier";
+          version = "1.0.0";
+          name = "Atelier des agents";
+          publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        };
+        model = {
+          preferred = [ "driver:claude-code" "driver:codex" "local:${cfg.model}" ];
+          privacy = "local-preferred";
+          roles = {
+            reflect = [ "driver:claude-code" "local:${cfg.model}" ];
+            code = [ "driver:codex" "driver:claude-code" "local:${cfg.model}" ];
+            execute = [ "local:${cfg.model}" ];
+          };
+        };
+        sandbox.min_level = 0;
+        capabilities.max = {
+          "fs.read" = [ "~/Documents/Prophet/**" ];
+          "fs.write" = [ "~/Documents/Prophet/**" ];
+          "task.spawn" = [ "atelier" "documents" ];
+          "tool.call" = [ "fs.read" "doc.read" "fs.write" "task.delegate" ];
+        };
+        budget.default = { tokens = 60000; wall_time = "900s"; approvals = 3; };
+      };
+    }
   ]);
 in {
   options.prophet.localEngine = {
