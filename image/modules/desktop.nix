@@ -5,27 +5,44 @@ let
   human = config.prophet.user;
   prophet = pkgs.callPackage ../packages/prophet-os.nix { };
   chatgpt = pkgs.callPackage ../packages/chatgpt-linux.nix { };
+  # Le navigateur de la session humaine et des applications web installées par défaut (X).
+  chromium = pkgs.chromium;
   compositor = config.programs.sway.package;
   launcher = pkgs.writeShellApplication {
     name = "prophet-ouvrir";
     runtimeInputs = [ pkgs.coreutils pkgs.jq pkgs.fuzzel pkgs.foot compositor ];
     text = ''
       human=${lib.escapeShellArg human}
+      app="''${1:-applications}"
+      # La liste des applications, lisible sans session graphique : c'est ce que le test du
+      # bureau vérifie, et ce que l'humain voit dans le lanceur.
+      entrees='Supervision
+ChatGPT
+Claude Code
+Codex
+Navigateur
+X
+Fichiers
+Terminal
+Verrouiller
+Déconnexion'
+      if [ "$app" = --liste ]; then
+        printf '%s\n' "$entrees"
+        exit 0
+      fi
       if [ "$(id -un)" != "$human" ] || [ -z "''${WAYLAND_DISPLAY:-}" ]; then
         echo "Ouvrez une session graphique avec le compte $human." >&2
         exit 1
       fi
       umask 077
-      app="''${1:-applications}"
       if [ "$app" = applications ]; then
-        selection=$(printf '%s\n' Supervision ChatGPT 'Claude Code' Codex Fichiers Terminal Navigateur Verrouiller 'Déconnexion' |
-          fuzzel --dmenu --prompt='Ouvrir  ') || exit 0
+        selection=$(printf '%s\n' "$entrees" | fuzzel --dmenu --prompt='Ouvrir  ') || exit 0
         case "$selection" in
           Supervision) app=supervision ;; ChatGPT) app=chatgpt ;;
           'Claude Code') app=claude-code ;; Codex) app=codex ;;
           Fichiers) app=fichiers ;; Terminal) app=terminal ;;
-          Navigateur) app=navigateur ;; Verrouiller) app=verrouiller ;;
-          Déconnexion) app=deconnexion ;;
+          Navigateur) app=navigateur ;; X) app=x ;;
+          Verrouiller) app=verrouiller ;; Déconnexion) app=deconnexion ;;
           *) exit 0 ;;
         esac
       fi
@@ -79,8 +96,27 @@ let
           launch ${chatgpt}/bin/chatgpt --ozone-platform=x11
           ;;
         navigateur)
+          # Le navigateur partagé : un profil Prophet distinct des profils des clients
+          # officiels, ouvert dans l'espace Recherche. L'agent, lui, navigue par son propre
+          # navigateur piloté (outils web) ; ce qu'il ouvre se lit dans la supervision.
           swaymsg 'workspace "4: Recherche"' >/dev/null
-          launch ${pkgs.firefox}/bin/firefox
+          focus org.prophet.Navigateur && exit 0
+          profile="$HOME/.local/state/prophet/navigateur"
+          install -d -m 0700 -- "$profile"
+          launch ${chromium}/bin/chromium --ozone-platform=wayland \
+            --user-data-dir="$profile" --class=org.prophet.Navigateur --no-first-run \
+            --no-default-browser-check "''${2:-about:blank}"
+          ;;
+        x)
+          # X, en fenêtre d'application dédiée : son propre profil, jamais celui du navigateur
+          # partagé ni ceux des clients officiels ; la session appartient à l'humain.
+          swaymsg 'workspace "3: Dialogue"' >/dev/null
+          focus org.prophet.X && exit 0
+          profile="$HOME/.local/state/prophet/apps/x"
+          install -d -m 0700 -- "$profile"
+          launch ${chromium}/bin/chromium --ozone-platform=wayland \
+            --user-data-dir="$profile" --class=org.prophet.X --no-first-run \
+            --no-default-browser-check --app=https://x.com/
           ;;
         verrouiller) exec ${pkgs.swaylock}/bin/swaylock --color 171b22 ;;
         deconnexion)
@@ -169,11 +205,11 @@ in {
     xdg.portal = { enable = true; wlr.enable = true; extraPortals = [ pkgs.xdg-desktop-portal-gtk ]; };
     security.pam.services.swaylock = { };
     environment.systemPackages = [
-      launcher session chatgpt pkgs.foot pkgs.thunar pkgs.firefox pkgs.wl-clipboard
+      launcher session chatgpt chromium pkgs.foot pkgs.thunar pkgs.wl-clipboard
       pkgs.fuzzel pkgs.waybar pkgs.swaylock pkgs.adwaita-icon-theme
     ];
     environment.sessionVariables = {
-      BROWSER = "${pkgs.firefox}/bin/firefox";
+      BROWSER = "${launcher}/bin/prophet-ouvrir navigateur";
       TERMINAL = "${pkgs.foot}/bin/foot";
       GTK_USE_PORTAL = "1";
     };
@@ -197,6 +233,8 @@ in {
       bindsym $mod+space exec ${launcher}/bin/prophet-ouvrir
       bindsym $mod+Return exec ${launcher}/bin/prophet-ouvrir terminal
       bindsym $mod+e exec ${launcher}/bin/prophet-ouvrir fichiers
+      bindsym $mod+n exec ${launcher}/bin/prophet-ouvrir navigateur
+      bindsym $mod+x exec ${launcher}/bin/prophet-ouvrir x
       bindsym $mod+l exec ${launcher}/bin/prophet-ouvrir verrouiller
       bindsym $mod+1 workspace "1: Supervision"
       bindsym $mod+2 workspace "2: Atelier"

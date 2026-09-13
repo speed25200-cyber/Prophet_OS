@@ -225,6 +225,12 @@ pkgs.testers.runNixOSTest {
             assert surface["id"] in before and before == after, (before, after)
             machine.screenshot("bureau-reprise")
 
+        with subtest("le lanceur connaît le navigateur partagé et l'application X"):
+            entries = machine.succeed("su - pilot -c 'prophet-ouvrir --liste'").split("\n")
+            for entry in ["Navigateur", "X", "ChatGPT", "Claude Code", "Codex", "Supervision"]:
+                assert entry in entries, entries
+            machine.succeed("test -x ${pkgs.chromium}/bin/chromium")
+
         with subtest("le lanceur clavier et la déconnexion demandent une action explicite"):
             machine.send_key("meta_l-spc")
             wait_text("Ouvrir", timeout=timedelta(seconds=30))
