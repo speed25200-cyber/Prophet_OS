@@ -188,6 +188,58 @@ impl ClientProfile {
         args
     }
 
+    /// Ligne de commande d'une sous-mission déléguée (ADR 0034) : le mode non interactif, sans
+    /// aucun outil intégré du client, avec pour seuls outils ceux du pont MCP de Prophet, sans
+    /// question de permission (ce qui en poserait une est refusé), et un nombre de tours borné.
+    /// `None` si ce client ne sait pas être délégué ainsi.
+    #[must_use]
+    pub fn delegated_command_line(&self, intent: &str, bridge: &McpBridge) -> Option<Vec<String>> {
+        match self.driver.as_str() {
+            "claude-code" => Some(vec![
+                "-p".into(),
+                "--output-format".into(),
+                "stream-json".into(),
+                "--verbose".into(),
+                "--tools".into(),
+                String::new(),
+                "--strict-mcp-config".into(),
+                format!("--mcp-config={}", bridge.config_path),
+                "--allowedTools".into(),
+                "mcp__prophet".into(),
+                "--permission-prompts".into(),
+                "none".into(),
+                "--max-turns".into(),
+                "40".into(),
+                "--".into(),
+                intent.into(),
+            ]),
+            "codex" => {
+                let env = bridge
+                    .env
+                    .iter()
+                    .map(|(k, v)| format!("{k}={}", toml_string(v)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Some(vec![
+                    "exec".into(),
+                    "--sandbox".into(),
+                    "read-only".into(),
+                    "-c".into(),
+                    format!(
+                        "mcp_servers.prophet.command={}",
+                        toml_string(&bridge.command)
+                    ),
+                    "-c".into(),
+                    format!("mcp_servers.prophet.env={{{env}}}"),
+                    "--json".into(),
+                    "--".into(),
+                    intent.into(),
+                ])
+            }
+            _ => None,
+        }
+    }
+
     /// Commande interactive de connexion du client.
     #[must_use]
     pub fn login_args(&self) -> Vec<&str> {
@@ -205,6 +257,35 @@ impl ClientProfile {
             _ => None,
         }
     }
+}
+
+/// Le pont MCP qu'un client délégué lance pour joindre la séance d'outils de sa mission.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpBridge {
+    /// Fichier de configuration MCP écrit pour ce lancement, pour les clients qui en prennent un.
+    pub config_path: String,
+    /// Programme du pont (`prophet-mcp`), pour les clients qui prennent la commande en ligne.
+    pub command: String,
+    /// Environnement du pont : la mission (`PROPHET_TASK`), et le socket d'agentd s'il n'est pas
+    /// celui du système.
+    pub env: Vec<(String, String)>,
+}
+
+/// Une chaîne TOML entre guillemets, pour une option `-c` de Codex.
+fn toml_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for c in value.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// Répertoire de configuration privé d'un client, pour un utilisateur.
@@ -251,12 +332,18 @@ impl OfficialDriver {
         self
     }
 
-    fn locate(&self) -> Option<PathBuf> {
+    /// L'exécutable du client, s'il est installé.
+    #[must_use]
+    pub fn executable(&self) -> Option<PathBuf> {
         let path = match &self.search_path {
             Some(path) => path.clone(),
             None => std::env::var_os("PATH")?,
         };
         which(&self.profile.program, &path)
+    }
+
+    fn locate(&self) -> Option<PathBuf> {
+        self.executable()
     }
 
     /// Profil piloté.
@@ -521,6 +608,44 @@ mod tests {
         assert_eq!(args[0], "-p");
         assert_eq!(args.last().unwrap(), "prépare le rapport");
         assert!(args.contains(&"--mcp-config=/run/prophet/mcp.json".to_owned()));
+    }
+
+    #[test]
+    fn la_ligne_deleguee_ne_laisse_au_client_que_le_pont() {
+        let bridge = McpBridge {
+            config_path: "/run/user/1000/prophet-client/t/mcp.json".into(),
+            command: "/run/current-system/sw/bin/prophet-mcp".into(),
+            env: vec![("PROPHET_TASK".into(), "t.1".into())],
+        };
+        let args = ClientProfile::claude_code()
+            .delegated_command_line("écris la note", &bridge)
+            .unwrap();
+        let position = |flag: &str| args.iter().position(|a| a == flag).unwrap();
+        assert_eq!(args[position("--tools") + 1], "", "aucun outil intégré");
+        assert!(args.contains(&"--strict-mcp-config".to_owned()));
+        assert_eq!(args[position("--allowedTools") + 1], "mcp__prophet");
+        assert_eq!(args[position("--permission-prompts") + 1], "none");
+        assert!(args.contains(&format!("--mcp-config={}", bridge.config_path)));
+        assert_eq!(args.last().unwrap(), "écris la note");
+        assert!(!args.iter().any(|a| a.contains("dangerously")));
+
+        let codex = ClientProfile::codex()
+            .delegated_command_line("écris", &bridge)
+            .unwrap();
+        assert_eq!(codex[0], "exec");
+        assert!(codex.contains(&"read-only".to_owned()));
+        assert!(
+            codex
+                .iter()
+                .any(|a| a.starts_with("mcp_servers.prophet.command=\""))
+        );
+        assert!(codex.iter().any(|a| a.contains("PROPHET_TASK=\"t.1\"")));
+        assert!(
+            ClientProfile::gemini()
+                .delegated_command_line("x", &bridge)
+                .is_none()
+        );
+        assert_eq!(toml_string("a\"b\\c"), "\"a\\\"b\\\\c\"");
     }
 
     #[test]

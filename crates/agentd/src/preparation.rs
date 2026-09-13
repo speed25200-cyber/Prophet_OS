@@ -230,12 +230,12 @@ impl Profile {
             || self.manifest.sandbox.min_level != 0
             || self.scopes.is_empty()
             || self.scopes.len() > 16
-            || self
-                .manifest
-                .model
-                .preferred
-                .iter()
-                .any(|m| !m.starts_with("local:"))
+            // Un modèle local, ou un client officiel de l'humain que le contexte admet en
+            // sous-mission ou en séance (ADR 0026, 0034) ; jamais une API par clé.
+            || self.manifest.model.preferred.iter().any(|m| {
+                !(m.starts_with("local:")
+                    || matches!(m.as_str(), "driver:claude-code" | "driver:codex" | "driver:gemini"))
+            })
         {
             return Err("Profil de mission locale invalide.".into());
         }

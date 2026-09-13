@@ -31,7 +31,8 @@ pub struct Delegation {
     pub intent: String,
     /// Contexte (profil) du catalogue qui encadre la sous-mission.
     pub profile: String,
-    /// Modèle local demandé ; celui du parent sinon.
+    /// Modèle local demandé, ou client officiel connecté (`claude-code`, `codex`, ADR 0034) ;
+    /// le modèle du parent sinon.
     #[serde(default)]
     pub model: Option<String>,
 }

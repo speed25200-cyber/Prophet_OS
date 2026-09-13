@@ -724,7 +724,12 @@ impl Runtime {
             .plans
             .get(id)
             .ok_or_else(|| RuntimeError::Workspace("plan absent : recréer la mission".into()))?;
-        if !plan.choice.reference.starts_with("local:") || plan.sandbox_level != 0 {
+        // Un modèle local, ou un client officiel qui rejoint une séance d'outils par le pont
+        // (ADR 0026, 0034) : dans les deux cas le service ne lance ici aucun processus non fiable.
+        let reference = &plan.choice.reference;
+        if !(reference.starts_with("local:") || reference.starts_with("driver:"))
+            || plan.sandbox_level != 0
+        {
             return Err(RuntimeError::NoDriver("le lanceur local d'outils ne lance aucun processus non fiable ; les pilotes isolés restent à raccorder".into()));
         }
         let token = self.tokens.get(id).filter(|t| t.sub == id).ok_or_else(|| {

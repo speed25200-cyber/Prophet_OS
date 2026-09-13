@@ -147,6 +147,16 @@ test du daemon a montré qu'un `sleep` survivait au délai avant cela. Tests du 
 règles, refus) sans sandboxd ; exécution réelle prouvée par `sandbox.run` sur cette machine.
 Voir l'[ADR 0031](adr/0031-execution-de-programmes-sous-sandboxd.md).
 
+Client officiel en sous-mission, 13 septembre 2026, dans le commit portant ce rapport :
+`task.delegate` accepte `model = "claude-code"` ou `"codex"`. L'enfant est préparé comme une
+séance d'outils ; `prophet-supd`, dans la session de l'humain, lance son client (`client.run`,
+réservé à agentd) sans aucun outil intégré, avec le seul pont `prophet-mcp` de la mission, un
+délai et un nombre de tours bornés ; le client rejoint la mission, travaille sous le jeton
+délégué, se retire, et son texte final complète le résultat. Le service ne lit jamais ses
+identifiants. Prouvé de bout en bout avec un faux client qui parle MCP par le vrai pont (capd,
+agentd, supd, prophet-mcp réels) ; un vrai Claude Code exige un compte connecté. Voir
+l'[ADR 0034](adr/0034-un-client-officiel-comme-sous-mission.md).
+
 Modèle local par défaut, 13 septembre 2026, dans le commit portant ce rapport : la configuration
 de référence pointe Qwen3-1.7B-Q8_0 (1,83 Go), téléchargé à l'installation ; l'installeur vérifie
 huggingface.co avant d'effacer le disque ; `prophet-ci` et l'ISO restent sans poids. Une machine

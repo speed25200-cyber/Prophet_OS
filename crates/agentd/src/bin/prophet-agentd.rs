@@ -1077,6 +1077,7 @@ impl Agents {
             sup_socket: self.sup_socket.clone(),
             sandboxd: self.sandboxd.clone(),
             jobs: self.jobs.clone(),
+            seances: self.seances.clone(),
         }))
     }
 }
@@ -1095,6 +1096,12 @@ struct DelegationContext {
     sup_socket: Option<std::path::PathBuf>,
     sandboxd: std::path::PathBuf,
     jobs: Arc<std::sync::Mutex<BTreeMap<String, Arc<AtomicBool>>>>,
+    seances: Seances,
+}
+
+/// Les clients officiels qu'une sous-mission peut être confiée à (ADR 0034).
+fn client_officiel(model: &str) -> Option<&str> {
+    matches!(model, "claude-code" | "codex" | "gemini").then_some(model)
 }
 
 fn delegation_fn(ctx: Arc<DelegationContext>) -> agentd::local::Delegate {
@@ -1117,6 +1124,9 @@ fn deleguer(
         .iter()
         .find(|p| p.id == request.profile.trim().to_lowercase())
         .ok_or_else(|| (Code::Invalid, "Contexte de mission inconnu.".to_owned()))?;
+    if let Some(driver) = request.model.as_deref().and_then(client_officiel) {
+        return deleguer_a_un_client(ctx, parent_id, parent_token, &request, profile, driver);
+    }
     let endpoint = ctx.local_endpoint.clone().ok_or_else(|| {
         (
             Code::SandboxError,
@@ -1291,6 +1301,241 @@ fn deleguer(
         "reason": reason,
         "result": result,
         "note": "La sous-mission a travaillé dans son propre espace ; ses changements sont à examiner et à appliquer comme les vôtres.",
+    }))
+}
+
+/// Une sous-mission confiée à un client officiel de l'humain (ADR 0034) : l'enfant est préparé
+/// comme une séance d'outils, la session de l'humain lance son client sur elle par le pont MCP,
+/// et le parent attend. Le client apporte son modèle et son abonnement ; le service tient le
+/// jeton délégué, le registre, le travail SFS et le journal, exactement comme pour un client
+/// que l'humain aurait lancé lui-même.
+fn deleguer_a_un_client(
+    ctx: &Arc<DelegationContext>,
+    parent_id: &str,
+    parent_token: &Token,
+    request: &agentd::local::Delegation,
+    profile: &agentd::preparation::Profile,
+    driver: &str,
+) -> Result<Value, (mcp_system::protocol::ErrorCode, String)> {
+    use mcp_system::protocol::ErrorCode as Code;
+    use sup::session::{ClientRunOutcome, ClientStatus, METHOD_CLIENT_RUN, METHOD_CLIENT_STATUS};
+    let sup = ctx.sup_socket.clone().ok_or_else(|| {
+        (
+            Code::SandboxError,
+            "aucune session humaine n'est raccordée au service : un client officiel ne peut pas être lancé".to_owned(),
+        )
+    })?;
+    let reference = format!("driver:{driver}");
+    if !profile.manifest.model.preferred.contains(&reference) {
+        return Err((
+            Code::PolicyDenied,
+            format!("Le contexte {} n'admet pas le client {driver}.", profile.id),
+        ));
+    }
+    if profile.manifest.model.privacy == prophet_types::manifest::Privacy::LocalOnly {
+        return Err((
+            Code::PolicyDenied,
+            format!("Le contexte {} est local seulement.", profile.id),
+        ));
+    }
+    // Le client est-il là et connecté ? Demandé à la session avant de créer quoi que ce soit.
+    let status: ClientStatus = bloquer({
+        let sup = sup.clone();
+        let driver = driver.to_owned();
+        async move {
+            let client = Client::connect(&sup).await.map_err(|e| {
+                (
+                    Code::SandboxError,
+                    format!("session humaine injoignable : {e}"),
+                )
+            })?;
+            let brut = client
+                .call(METHOD_CLIENT_STATUS, json!({"driver": driver}))
+                .await
+                .map_err(|e| (Code::SandboxError, e.message))?;
+            serde_json::from_value(brut).map_err(|e| (Code::SandboxError, e.to_string()))
+        }
+    })?;
+    if !status.logged_in {
+        return Err((
+            Code::SandboxError,
+            format!(
+                "{driver} n'est pas connecté sur la session ({}) : l'humain le connecte par « prophet provider login {driver} »",
+                status.detail
+            ),
+        ));
+    }
+    let (child_id, user, owner) = {
+        let runtime = ctx.runtime.blocking_lock();
+        let parent = runtime
+            .task(parent_id)
+            .ok_or_else(|| (Code::NotFound, "mission parente inconnue".to_owned()))?;
+        let n = runtime.children_of(parent_id).len() + 1;
+        (
+            format!("{parent_id}.{n}"),
+            parent.user.clone(),
+            runtime.owner_of(parent_id),
+        )
+    };
+    // Le client s'attachera sous l'identité de l'humain : la mission parente doit en avoir une.
+    let owner = owner.ok_or_else(|| {
+        (
+            Code::SandboxError,
+            "mission parente sans propriétaire de session : un client ne pourrait pas la rejoindre"
+                .to_owned(),
+        )
+    })?;
+    let mut manifest = profile.manifest.clone();
+    manifest.model.preferred = vec![reference];
+    let grants = profile.grants().map_err(|e| (Code::SandboxError, e))?;
+    let wall = manifest.wall_time_seconds().unwrap_or(1200).min(3600);
+    let ttl = i64::try_from(wall).unwrap_or(1200);
+    let child_token: Token = bloquer({
+        let capd = ctx.capd.clone();
+        let child = child_id.clone();
+        let parent_token = parent_token.clone();
+        let grants = grants.clone();
+        async move {
+            let client = Client::connect(&capd)
+                .await
+                .map_err(|e| (Code::SandboxError, format!("capd injoignable : {e}")))?;
+            let brut = client
+                .call(
+                    "cap.delegate",
+                    json!({"parent": parent_token, "grants": grants, "task": child, "ttl_seconds": ttl}),
+                )
+                .await
+                .map_err(|e| (Code::PolicyDenied, format!("délégation refusée par capd : {}", e.message)))?;
+            serde_json::from_value(brut).map_err(|e| {
+                (
+                    Code::SandboxError,
+                    format!("jeton illisible rendu par capd : {e}"),
+                )
+            })
+        }
+    })?;
+    let scopes: Vec<&str> = profile.scopes.iter().map(String::as_str).collect();
+    let availability = Availability {
+        logged_in_drivers: vec![driver.to_owned()],
+        ..Default::default()
+    };
+    {
+        let mut runtime = ctx.runtime.blocking_lock();
+        runtime
+            .plan_with_token(
+                &PlanRequest {
+                    id: &child_id,
+                    intent: request.intent.trim(),
+                    manifest: &manifest,
+                    user: &user,
+                    requested: &grants,
+                    scopes: &scopes,
+                    availability: &availability,
+                },
+                child_token,
+                OffsetDateTime::now_utc(),
+            )
+            .map_err(|e| (Code::SandboxError, e.to_string()))?;
+        runtime
+            .link_child(&child_id, parent_id, 0.5)
+            .map_err(|e| (Code::PolicyDenied, e.to_string()))?;
+        runtime
+            .bind_owner(&child_id, owner)
+            .map_err(|e| (Code::SandboxError, e))?;
+        ecrire(&ctx.etat, &runtime.etat())
+            .map_err(|e| (Code::SandboxError, format!("état non enregistré : {e}")))?;
+    }
+    // La session lance le client ; le parent attend. Le client rejoint la mission par le pont
+    // (task.attach), y travaille (task.call) et s'en retire quand il finit (task.detach) : ces
+    // appels arrivent au service pendant cette attente, sous l'identité de l'humain.
+    let outcome: Result<ClientRunOutcome, String> = bloquer({
+        let sup = sup.clone();
+        let params = json!({
+            "task": child_id,
+            "driver": driver,
+            "intent": request.intent.trim(),
+            "timeout_s": wall,
+        });
+        async move {
+            let issue = match Client::connect(&sup).await {
+                Err(e) => Err(format!("session humaine injoignable : {e}")),
+                Ok(client) => match client.call(METHOD_CLIENT_RUN, params).await {
+                    Err(e) => Err(e.message),
+                    Ok(brut) => {
+                        serde_json::from_value::<ClientRunOutcome>(brut).map_err(|e| e.to_string())
+                    }
+                },
+            };
+            Ok::<_, (Code, String)>(issue)
+        }
+    })
+    .unwrap_or_else(|(_, m)| Err(m));
+    // Une séance encore ouverte à ce point est celle d'un client arrêté avant de se retirer.
+    if let Some(seance) = ctx
+        .seances
+        .lock()
+        .ok()
+        .and_then(|mut m| m.remove(&child_id))
+        && let Ok(mut guard) = seance.lock()
+        && let Some(taken) = guard.take()
+    {
+        taken.abort("client officiel arrêté avant de se retirer de la mission");
+    }
+    if let Ok(mut jobs) = ctx.jobs.lock() {
+        jobs.remove(&child_id);
+    }
+    let (state, reason, result) = {
+        let mut runtime = ctx.runtime.blocking_lock();
+        if let Some(task) = runtime.task(&child_id).cloned() {
+            match (&outcome, task.state) {
+                // Jamais attaché : le client s'est arrêté sans rejoindre la mission.
+                (issue, agentd::State::Planned) => {
+                    let mut task = task;
+                    task.state = agentd::State::Failed;
+                    task.history.push(agentd::State::Failed);
+                    task.reason = Some(match issue {
+                        Ok(o) => format!(
+                            "le client {driver} s'est arrêté sans rejoindre la mission (code {:?}{}) : {}",
+                            o.exit_code,
+                            if o.timed_out {
+                                ", délai dépassé"
+                            } else {
+                                ""
+                            },
+                            o.stderr.trim()
+                        ),
+                        Err(e) => e.clone(),
+                    });
+                    runtime.publish_local(task, None);
+                }
+                // Fini : le texte final du client complète le résultat de la séance.
+                (Ok(o), agentd::State::Done) if !o.text.trim().is_empty() => {
+                    if let Some(mut result) = runtime.result(&child_id).cloned()
+                        && result["text"].as_str().unwrap_or("").trim().is_empty()
+                    {
+                        result["text"] = json!(o.text);
+                        runtime.publish_local(task, Some(result));
+                    }
+                }
+                _ => {}
+            }
+        }
+        runtime.absorb_child(&child_id, parent_id);
+        let _ = ecrire(&ctx.etat, &runtime.etat());
+        let task = runtime.task(&child_id).cloned();
+        (
+            task.as_ref().map(|t| t.state),
+            task.and_then(|t| t.reason),
+            runtime.result(&child_id).cloned(),
+        )
+    };
+    Ok(json!({
+        "task": child_id,
+        "state": state,
+        "reason": reason,
+        "result": result,
+        "driver": format!("driver:{driver}"),
+        "note": "La sous-mission a été menée par un client officiel de l'humain, avec vos outils et sous vos droits ; ses changements sont à examiner et à appliquer comme les vôtres.",
     }))
 }
 

@@ -26,6 +26,63 @@ pub const METHOD_TREE: &str = "sup.tree";
 pub const METHOD_ACT: &str = "sup.act";
 /// `sup.status` : l'adaptateur répond-il, et le bus d'accessibilité est-il joignable ?
 pub const METHOD_STATUS: &str = "sup.status";
+/// `client.status` : un client officiel de l'humain est-il installé et connecté ?
+pub const METHOD_CLIENT_STATUS: &str = "client.status";
+/// `client.run` : lancer un client officiel de l'humain sur une mission préparée, sans autre
+/// outil que le pont MCP de Prophet, et attendre qu'il ait fini (ADR 0034).
+pub const METHOD_CLIENT_RUN: &str = "client.run";
+
+/// Paramètres de `client.status`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientStatusRequest {
+    /// Pilote : `claude-code`, `codex`, `gemini`.
+    pub driver: String,
+}
+
+/// Réponse de `client.status`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientStatus {
+    /// Pilote interrogé.
+    pub driver: String,
+    /// Le client est installé sur la session.
+    pub available: bool,
+    /// Le client rapporte une session ouverte ; l'adaptateur ne lit jamais ses fichiers.
+    pub logged_in: bool,
+    /// État lisible.
+    pub detail: String,
+}
+
+/// Paramètres de `client.run`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientRunRequest {
+    /// Mission préparée que le client rejoindra par le pont MCP (`PROPHET_TASK`).
+    pub task: String,
+    /// Pilote à lancer.
+    pub driver: String,
+    /// Objectif complet donné au client.
+    pub intent: String,
+    /// Délai au-delà duquel le client est arrêté.
+    #[serde(default = "default_client_timeout")]
+    pub timeout_s: u64,
+}
+
+fn default_client_timeout() -> u64 {
+    1200
+}
+
+/// Issue de `client.run` : ce que le client a fait de sa sortie, pas ce qu'il a fait dans la
+/// mission — cela, agentd le sait par la séance.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientRunOutcome {
+    /// Code de retour du client, s'il a fini.
+    pub exit_code: Option<i32>,
+    /// Le délai l'a arrêté.
+    pub timed_out: bool,
+    /// Texte final rendu par le client, borné.
+    pub text: String,
+    /// Fin de sa sortie d'erreur, bornée, pour le diagnostic.
+    pub stderr: String,
+}
 
 /// Une application vue par l'adaptateur.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

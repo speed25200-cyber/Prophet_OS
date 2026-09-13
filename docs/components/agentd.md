@@ -6,7 +6,7 @@
 - Dépendances du lancement local : capd, ledger, home autorisé et moteur HTTP local configuré
 - Sortie réseau des outils : le socket d'egress (`PROPHET_EGRESS_SOCKET`, `/run/prophet/egress.sock` par défaut)
 - Navigateur piloté : absent sauf `PROPHET_BROWSER` ; profils par tâche sous l'état du service ;
-`PROPHET_SUP_SOCKET` nomme le socket de l'adaptateur d'accessibilité de la session (ADR 0027) ; sans lui, aucun outil `ui.*`. `doc.read` lit tout format sous `fs.read` et emploie `pdftotext`, `pdfinfo`, `ffprobe` et `tesseract` s'ils sont sur le chemin du service (ADR 0028). `task.delegate` crée, lance et attend une sous-mission sous un jeton délégué par capd, pour un profil qui accorde `task.spawn` sur un contexte nommé (ADR 0029).
+`PROPHET_SUP_SOCKET` nomme le socket de l'adaptateur d'accessibilité de la session (ADR 0027) ; sans lui, aucun outil `ui.*`. `doc.read` lit tout format sous `fs.read` et emploie `pdftotext`, `pdfinfo`, `ffprobe` et `tesseract` s'ils sont sur le chemin du service (ADR 0028). `task.delegate` crée, lance et attend une sous-mission sous un jeton délégué par capd, pour un profil qui accorde `task.spawn` sur un contexte nommé (ADR 0029) ; si le modèle demandé est un client officiel (`claude-code`, `codex`), c'est la session de l'humain qui le lance sur la sous-mission par `client.run` de `prophet-supd`, et le client la rejoint par le pont `prophet-mcp` (ADR 0034).
   sondé une fois au démarrage, verdict rendu par `task.options` (`browser`)
 
 ## Méthodes

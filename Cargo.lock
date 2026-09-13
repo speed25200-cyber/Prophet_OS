@@ -150,6 +150,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sfs",
+ "sup",
  "tempfile",
  "thiserror 2.0.20",
  "time",
@@ -4843,7 +4844,9 @@ version = "0.1.0"
 dependencies = [
  "atspi-common",
  "atspi-proxies",
+ "nix",
  "prophet-ipc",
+ "providers",
  "serde",
  "serde_json",
  "sup",

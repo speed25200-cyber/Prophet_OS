@@ -20,7 +20,9 @@ let
           name = "Documents Prophet";
           publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
         };
-        model.preferred = [ "local:${cfg.model}" ];
+        # Le modèle local d'abord ; un client officiel connecté de l'humain peut être appelé en
+        # sous-mission (task.delegate, ADR 0034) ou rejoindre une séance (ADR 0026).
+        model.preferred = [ "local:${cfg.model}" "driver:claude-code" "driver:codex" ];
         sandbox.min_level = 0;
         capabilities.max = {
           "fs.read" = [ "~/Documents/Prophet/**" ];
@@ -46,7 +48,9 @@ let
           name = "Recherche web Prophet";
           publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
         };
-        model.preferred = [ "local:${cfg.model}" ];
+        # Le modèle local d'abord ; un client officiel connecté de l'humain peut être appelé en
+        # sous-mission (task.delegate, ADR 0034) ou rejoindre une séance (ADR 0026).
+        model.preferred = [ "local:${cfg.model}" "driver:claude-code" "driver:codex" ];
         sandbox.min_level = 0;
         capabilities.max = {
           "fs.read" = [ "~/Documents/Prophet/**" ];
@@ -78,7 +82,9 @@ let
           name = "Éditeur du bureau";
           publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
         };
-        model.preferred = [ "local:${cfg.model}" ];
+        # Le modèle local d'abord ; un client officiel connecté de l'humain peut être appelé en
+        # sous-mission (task.delegate, ADR 0034) ou rejoindre une séance (ADR 0026).
+        model.preferred = [ "local:${cfg.model}" "driver:claude-code" "driver:codex" ];
         sandbox.min_level = 0;
         capabilities.max = {
           "fs.read" = [ "~/Documents/Prophet/**" ];

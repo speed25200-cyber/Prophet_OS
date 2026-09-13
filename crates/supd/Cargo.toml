@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Adaptateur d'accessibilité de la session humaine : les applications GTK et Qt, lues et pilotées par leur arbre AT-SPI, rendues en SUP au service."
+description = "Adaptateur de la session humaine : les applications GTK et Qt lues et pilotées par leur arbre AT-SPI, et les clients officiels de l'humain lancés sur une mission, pour le service."
 
 [[bin]]
 name = "prophet-supd"
@@ -13,6 +13,8 @@ path = "src/bin/prophet-supd.rs"
 [dependencies]
 sup = { workspace = true }
 prophet-ipc = { workspace = true }
+providers = { workspace = true }
+nix = { version = "0.29", features = ["signal", "process"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

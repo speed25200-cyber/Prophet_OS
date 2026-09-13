@@ -1,9 +1,10 @@
-//! `prophet-supd` : l'adaptateur d'accessibilité, dans la session de l'humain.
+//! `prophet-supd` : l'adaptateur de la session de l'humain.
 //!
 //! Il écoute sur un socket que seul `agentd` est admis à appeler (attesté par `SO_PEERCRED`),
 //! joint le bus d'accessibilité de la session à la demande, et rend les arbres SUP des
-//! applications ou y exécute une action. Il ne décide d'aucun droit : c'est `agentd` qui fait
-//! trancher capd avant de l'appeler ; lui vérifie seulement qui l'appelle.
+//! applications ou y exécute une action ; il lance aussi, sur demande, un client officiel de
+//! l'humain sur une mission préparée (ADR 0034). Il ne décide d'aucun droit : c'est `agentd`
+//! qui fait trancher capd avant de l'appeler ; lui vérifie seulement qui l'appelle.
 
 use std::sync::Arc;
 
@@ -11,10 +12,11 @@ use prophet_ipc::{Error, ErrorCode};
 use prophet_ipc::{Handler, PeerIdentity, Server};
 use serde_json::Value;
 use sup::session::{
-    ActRequest, DEFAULT_SOCKET, METHOD_ACT, METHOD_APPS, METHOD_STATUS, METHOD_TREE, Status,
-    TreeRequest,
+    ActRequest, ClientRunRequest, ClientStatusRequest, DEFAULT_SOCKET, METHOD_ACT, METHOD_APPS,
+    METHOD_CLIENT_RUN, METHOD_CLIENT_STATUS, METHOD_STATUS, METHOD_TREE, Status, TreeRequest,
 };
 use supd::Desktop;
+use supd::client::Launcher;
 use tokio::sync::Mutex;
 
 struct Adapter {
@@ -22,6 +24,7 @@ struct Adapter {
     /// s'il l'a demandé explicitement (essais).
     allowed: Vec<u32>,
     desktop: Mutex<Option<Desktop>>,
+    launcher: Launcher,
 }
 
 impl Adapter {
@@ -60,6 +63,11 @@ impl Handler for Adapter {
         method: String,
         params: Value,
     ) -> Result<Value, Error> {
+        // `ping` dit seulement que le service répond, comme chez les autres daemons ; tout le
+        // reste exige l'identité admise.
+        if method == "ping" {
+            return Ok(serde_json::json!("pong"));
+        }
         if !self.allowed.contains(&peer.uid) {
             return Err(Error::new(
                 ErrorCode::Unauthorized,
@@ -115,6 +123,29 @@ impl Handler for Adapter {
                     .act(&request)
                     .await
                     .map_err(|e| Error::new(code(&e), e.to_string()))?;
+                Ok(serde_json::to_value(outcome).unwrap_or(Value::Null))
+            }
+            METHOD_CLIENT_STATUS => {
+                let request: ClientStatusRequest = serde_json::from_value(params)
+                    .map_err(|e| Error::new(ErrorCode::InvalidParams, e.to_string()))?;
+                Ok(serde_json::to_value(self.launcher.status(&request.driver))
+                    .unwrap_or(Value::Null))
+            }
+            METHOD_CLIENT_RUN => {
+                let request: ClientRunRequest = serde_json::from_value(params)
+                    .map_err(|e| Error::new(ErrorCode::InvalidParams, e.to_string()))?;
+                tracing::info!(tache = %request.task, pilote = %request.driver, "client officiel lancé sur une mission");
+                let outcome = self.launcher.run(&request).await.map_err(|e| {
+                    let code = match e {
+                        supd::client::Error::UnknownDriver(_)
+                        | supd::client::Error::Invalid(_)
+                        | supd::client::Error::Unsupported(_) => ErrorCode::InvalidParams,
+                        supd::client::Error::NotConnected(_) => ErrorCode::Unauthorized,
+                        supd::client::Error::Io(_) => ErrorCode::InternalError,
+                    };
+                    Error::new(code, e.to_string())
+                })?;
+                tracing::info!(tache = %request.task, code = ?outcome.exit_code, delai = outcome.timed_out, "client officiel terminé");
                 Ok(serde_json::to_value(outcome).unwrap_or(Value::Null))
             }
             _ => Err(Error::new(ErrorCode::MethodNotFound, "méthode inconnue")),
@@ -180,10 +211,11 @@ async fn main() {
             tracing::warn!(groupe = %group, "groupe inconnu : le socket garde celui de la session")
         }
     }
-    tracing::info!(socket, admis = ?allowed, "adaptateur d'accessibilité prêt");
+    tracing::info!(socket, admis = ?allowed, "adaptateur de session prêt");
     let adapter = Arc::new(Adapter {
         allowed,
         desktop: Mutex::new(None),
+        launcher: Launcher::from_env(),
     });
     if let Err(e) = server.serve(adapter).await {
         tracing::error!(erreur = %e, "service interrompu");

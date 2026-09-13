@@ -32,8 +32,8 @@ runtime, le lancement et le retour du résultat.
 
 - Des modèles différents coopèrent sur une tâche sous le contrôle de capd et sous les yeux de
   l'humain : chaque sous-mission est une ligne de la supervision, avec son parent.
-- Aujourd'hui, l'enfant est un modèle local du même moteur ; un pilote officiel (Claude Code,
-  Codex) ne peut être enfant que par une séance ouverte par l'humain (ADR 0026), pas de lui-même :
-  les identifiants du client sont à l'humain, et le service ne les touche pas.
+- L'enfant est un modèle local du même moteur, ou, depuis l'ADR 0034, un client officiel
+  connecté de l'humain (Claude Code, Codex) que sa session lance sur la sous-mission par le pont
+  MCP : les identifiants du client restent à l'humain, et le service ne les touche pas.
 - Le parent est bloqué le temps de l'enfant, et une profondeur de trois est le maximum. Le
   passage de fichiers entre parent et enfant n'existe pas encore : ils se parlent par texte.

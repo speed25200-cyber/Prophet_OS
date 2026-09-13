@@ -347,10 +347,11 @@ in {
     # Les applications Qt (FreeCAD) ne publient leur accessibilité que si on le leur demande ;
     # GTK le fait dès que le bus est là.
     environment.sessionVariables.QT_LINUX_ACCESSIBILITY_ALWAYS_ON = "1";
-    # L'adaptateur d'accessibilité, dans la session : il joint le bus de la session, écoute sur
-    # un socket du répertoire des services (groupe système de Prophet) et n'admet qu'agentd.
+    # L'adaptateur de la session : il joint le bus d'accessibilité de la session, lance sur
+    # demande les clients officiels de l'humain sur une mission (ADR 0034), écoute sur un socket
+    # du répertoire des services (groupe système de Prophet) et n'admet qu'agentd.
     systemd.user.services.prophet-supd = {
-      description = "Prophet OS — adaptateur d'accessibilité de la session";
+      description = "Prophet OS — adaptateur de la session (accessibilité, clients officiels)";
       wantedBy = [ "sway-session.target" ];
       partOf = [ "sway-session.target" ];
       after = [ "graphical-session-pre.target" ];
@@ -358,6 +359,7 @@ in {
         PROPHET_SUP_SOCKET = supSocket;
         PROPHET_SUP_CLIENT = "agentd";
         PROPHET_SUP_GROUP = "prophet-system";
+        PROPHET_MCP_BRIDGE = "${prophet}/bin/prophet-mcp";
       };
       unitConfig = { StartLimitIntervalSec = 60; StartLimitBurst = 3; ConditionUser = human; };
       serviceConfig = {
