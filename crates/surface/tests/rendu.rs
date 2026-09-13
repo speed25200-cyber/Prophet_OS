@@ -26,6 +26,8 @@ fn scene(avec_decision: bool) -> Scene {
                 debit: 30.0,
                 budget_consomme: 0.2,
                 etapes: 40,
+                task_state: None,
+                task_revision: 0,
             },
             Courant {
                 tache: "t2".to_owned(),
@@ -39,6 +41,8 @@ fn scene(avec_decision: bool) -> Scene {
                 debit: 8.0,
                 budget_consomme: 0.4,
                 etapes: 20,
+                task_state: None,
+                task_revision: 0,
             },
         ],
         decision: avec_decision.then(|| Decision {

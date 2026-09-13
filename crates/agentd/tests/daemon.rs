@@ -306,28 +306,28 @@ async fn un_redemarrage_ne_perd_pas_les_taches() {
 }
 
 #[tokio::test]
-async fn un_etat_corrompu_ne_bloque_pas_le_demarrage() {
-    // Un daemon qui refuserait de démarrer parce qu'il n'arrive pas à relire son état ferait
-    // perdre bien plus que les tâches en cours : il emporterait tout le reste avec lui.
+async fn un_etat_corrompu_est_preserve_pour_reparation() {
     let temp = tempfile::tempdir().expect("répertoire temporaire");
     let etat = temp.path().join("etat");
     std::fs::create_dir_all(&etat).expect("répertoire");
     std::fs::write(etat.join("taches.json"), b"{ ceci n'est pas du JSON").expect("écriture");
 
-    let agentd = Daemon::lancer_avec(
-        AGENTD,
-        &temp.path().join("agentd.sock"),
-        &etat,
-        &[
-            ("PROPHET_CAPD_SOCKET", "/nulle/part/capd.sock"),
-            ("PROPHET_LEDGER_SOCKET", "/nulle/part/ledger.sock"),
-            ("PROPHET_HOME", temp.path().to_str().expect("chemin")),
-        ],
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::process::Command::new(AGENTD)
+            .env("PROPHET_SOCKET", temp.path().join("agentd.sock"))
+            .env("STATE_DIRECTORY", &etat)
+            .env("PROPHET_HOME", temp.path())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .expect("le refus est rapide")
+    .unwrap();
+    assert!(!output.status.success());
+    assert!(!temp.path().join("agentd.sock").exists());
+    assert_eq!(
+        std::fs::read(etat.join("taches.json")).unwrap(),
+        b"{ ceci n'est pas du JSON"
     );
-    let agents = agentd.joindre().await;
-    let liste = agents
-        .call("task.list", json!({}))
-        .await
-        .expect("le daemon sert malgré un état illisible");
-    assert_eq!(liste.as_array().map(Vec::len), Some(0));
 }

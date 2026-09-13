@@ -1,0 +1,31 @@
+{
+  "id": "note-locale",
+  "intent": "Écris une courte note de bienvenue dans ~/Documents/Prophet/bienvenue.txt avec fs.write, puis résume le changement proposé.",
+  "user": "prophet",
+  "manifest": {
+    "agent": {
+      "id": "org.prophet.note-locale",
+      "version": "1.0.0",
+      "name": "Note locale",
+      "publisher_key": "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    },
+    "model": { "preferred": ["local:qwen3-0.6b"] },
+    "sandbox": { "min_level": 0 },
+    "capabilities": {
+      "max": {
+        "fs.read": ["~/Documents/Prophet/**"],
+        "fs.write": ["~/Documents/Prophet/**"],
+        "tool.call": ["fs.read", "fs.write"]
+      }
+    },
+    "budget": { "default": { "tokens": 20000, "wall_time": "90s", "approvals": 3 } }
+  },
+  "requested": [
+    { "res": "fs", "act": "read", "match": "~/Documents/Prophet/**" },
+    { "res": "fs", "act": "write", "match": "~/Documents/Prophet/**" },
+    { "res": "tool", "act": "call", "match": "fs.read" },
+    { "res": "tool", "act": "call", "match": "fs.write" }
+  ],
+  "scopes": ["~/Documents/Prophet"],
+  "availability": { "local_models": ["qwen3-0.6b"] }
+}

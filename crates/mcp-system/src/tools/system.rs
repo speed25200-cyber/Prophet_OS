@@ -547,19 +547,20 @@ impl Tool for ListModels {
         None
     }
 
-    fn call(&self, _args: &Value, _context: &ToolContext) -> CallResult {
-        let racine = std::path::Path::new("/var/lib/prophet");
-        let utilisateur = std::env::var("USER").unwrap_or_else(|_| "inconnu".to_owned());
+    fn call(&self, _args: &Value, context: &ToolContext) -> CallResult {
+        let racine = std::path::Path::new(&context.home).join(".local/state/prophet");
+        let utilisateur = &context.token.user;
         let pilotes: Vec<Value> = providers::official::ClientProfile::all()
             .into_iter()
             .map(|profile| {
                 let driver =
-                    providers::official::OfficialDriver::new(profile.clone(), racine, &utilisateur);
+                    providers::official::OfficialDriver::new(profile.clone(), &racine, utilisateur);
                 json!({
                     "driver": profile.driver,
-                    "auth": "subscription",
+                    "preferred_auth": "subscription",
                     "client_present": driver.client_available(),
-                    "logged_in": driver.logged_in()
+                    "connection": driver.connection_state(),
+                    "agent_execution_ready": false
                 })
             })
             .collect();

@@ -146,14 +146,24 @@ pkgs.testers.runNixOSTest {
             f"un membre déclaré du groupe système doit être servi :\n{vu}"
         )
 
+    with subtest("Codex et Claude Code sont réellement livrés et répondent"):
+        import json
+        for pilote, programme in [("codex", "codex"), ("claude-code", "claude")]:
+            version = machine.succeed(f"timeout 15 {programme} --version").strip()
+            assert version, f"{programme} doit annoncer sa version"
+            diagnostic = json.loads(machine.succeed(
+                f"su - prophet -c 'timeout 20 prophet --json provider doctor {pilote}'"
+            ))
+            assert diagnostic["executable"], diagnostic
+            assert diagnostic["version"], diagnostic
+            assert diagnostic["connection"] == "login_required", diagnostic
+            assert diagnostic["agent_execution_ready"] is False, diagnostic
+            instructions = machine.succeed(
+                f"su - prophet -c 'prophet provider login {pilote}'"
+            )
+            assert "/home/prophet/.local/state/prophet/providers/" in instructions, instructions
+
     with subtest("ce que `provider ls` annonce est ce que la machine a"):
-        # `prophet provider login claude-code` répond « lancez `claude login` ». Si `claude`
-        # n'existe pas sur la machine, cette phrase envoie quelqu'un dans le vide — et il ne s'en
-        # aperçoit qu'après avoir formaté son disque.
-        #
-        # Ce qui est vérifié ici n'est pas que les clients soient là : ils viennent de nixpkgs et
-        # peuvent en disparaître. C'est que `provider ls` **dise la vérité** sur ceux qui y sont.
-        # Annoncer un client absent est pire que de dire qu'il manque.
         annonce = machine.succeed("timeout 30 prophet provider ls")
         print(annonce)
         for pilote, programme in [
@@ -256,6 +266,14 @@ pkgs.testers.runNixOSTest {
         taches = machine.succeed("timeout 30 prophet task ls")
         print(taches)
         assert "task:essai-vm" in taches, taches
+        # Les captures demeurent privées même lorsque le propriétaire consulte ses missions.
+        machine.fail("su - prophet -c 'ls /home/prophet/.prophet/tasks'")
+        taches = machine.succeed("su - prophet -c 'prophet task ls'")
+        assert "task:essai-vm" in taches, taches
+        detail = machine.succeed("su - prophet -c 'prophet task show task:essai-vm'")
+        assert "task:essai-vm" in detail and "local:qwen3-8b" in detail, detail
+        # Une tâche seulement planifiée n'a aucun diff à présenter : pas de faux diff vide.
+        machine.fail("su - prophet -c 'prophet task diff task:essai-vm'")
 
     with subtest("sandboxd peut réellement isoler, et pas seulement le dire"):
         # Le module donne à `sandboxd` les capacités CAP_SETUID et CAP_SYS_ADMIN, puis lui laisse

@@ -178,6 +178,12 @@ fn demande(params: &Value) -> Result<CheckRequest, Error> {
         .get("external")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    if params.get("context").is_some() {
+        demande.context = lire(params, "context")?;
+        // La racine vient de la configuration de capd, jamais du contrôleur distant.
+        demande.context.home.clear();
+        demande.context.target.clear();
+    }
     Ok(demande)
 }
 
@@ -284,4 +290,22 @@ async fn main() -> anyhow::Result<()> {
         }))
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod service_context_tests {
+    use super::*;
+
+    #[test]
+    fn un_pair_ne_peut_pas_remapper_la_racine_ou_la_cible_par_le_contexte() {
+        let request = demande(&json!({
+            "res":"fs","act":"read","target":"/home/prophet/docs/note.txt",
+            "context":{"home":"/outside","target":"/allowed","bytes":42}
+        }))
+        .unwrap();
+        assert!(request.context.home.is_empty());
+        assert!(request.context.target.is_empty());
+        assert_eq!(request.target, "/home/prophet/docs/note.txt");
+        assert_eq!(request.context.bytes, Some(42));
+    }
 }

@@ -10,6 +10,8 @@ default:
 check:
     cargo fmt --all --check
     cargo clippy --all-targets --all-features -- -D warnings
+    # Les tests interservices lancent aussi les binaires voisins, dont la CLI sans test d'intégration propre.
+    cargo build --workspace --bins
     cargo test --workspace
     ./tools/verifier-les-services.sh
     ./tools/verifier-le-durcissement.sh
@@ -62,6 +64,18 @@ iso:
 # Exige Nix et KVM.
 test-vm:
     nix build .#checks.x86_64-linux.services --print-build-logs
+
+# Contrat du parseur et de la grammaire du paquet moteur local, sans télécharger de poids.
+test-local-engine:
+    nix build .#checks.x86_64-linux.llama-tool-grammar --print-build-logs
+
+# KVM, 4 Go de RAM pour la VM et 1,83 Go de poids : services installés et mission réelle.
+test-local-engine-vm:
+    nix build .#local-engine-vm --print-build-logs
+
+# KVM, 4 Go de RAM pour la VM : connexion et applications de la session humaine.
+test-desktop:
+    nix build .#checks.x86_64-linux.desktop-session --print-build-logs
 
 # Démarre l'image dans QEMU.
 vm:

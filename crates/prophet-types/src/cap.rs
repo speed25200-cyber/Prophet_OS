@@ -275,7 +275,8 @@ impl Grant {
 }
 
 /// Contexte d'un contrôle d'accès concret.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct CheckContext {
     /// Cible concrète (chemin absolu, hôte, nom d'outil).
     pub target: String,

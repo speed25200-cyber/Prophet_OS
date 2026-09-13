@@ -2,13 +2,24 @@
 //!
 //! Ce que l'humain voit pendant que les agents travaillent.
 
+pub mod atelier;
+pub mod bureau;
 pub mod depuis;
+mod desk;
 pub mod disposition;
 pub mod fenetre;
+mod file_review;
+mod file_review_view;
+mod glyphes;
 pub mod gpu;
+mod mission_details;
+pub mod missions;
+pub mod preparation;
+mod preparation_view;
 pub mod reel;
 pub mod rendu;
 pub mod scene;
+mod supervision;
 pub mod theme;
 
 #[cfg(test)]

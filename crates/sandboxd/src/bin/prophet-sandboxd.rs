@@ -106,6 +106,20 @@ impl Handler for Isolation {
 
             // Geler plutôt que tuer : une tâche gelée peut être reprise après une décision
             // humaine, une tâche tuée a perdu son état.
+            "sandbox.freeze_all" => {
+                let mut vivantes = self.vivantes.lock().await;
+                let mut frozen = Vec::new();
+                let mut errors = Vec::new();
+                for (task, handle) in vivantes.iter_mut() {
+                    match self.manager.freeze(handle) {
+                        Ok(()) => frozen.push(task.clone()),
+                        Err(error) => errors.push(json!({"task":task, "error":error.to_string()})),
+                    }
+                }
+                frozen.sort();
+                Ok(json!({"frozen":frozen, "errors":errors}))
+            }
+
             "sandbox.freeze" | "sandbox.thaw" => {
                 let tache = commun::texte(&params, "task")?;
                 let mut vivantes = self.vivantes.lock().await;

@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/speed25200-cyber/Prophet_OS"
-rust-version = "1.90"
+rust-version = "1.95"
 
 [workspace.dependencies]
 prophet-types = { path = "crates/prophet-types" }
@@ -44,6 +44,7 @@ clap = { version = "4", features = ["derive"] }
 toml = "0.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
 libc = "0.2"
+rustix = { version = "1.1.4", features = ["fs"] }
 tempfile = "3"
 
 [workspace.lints.rust]

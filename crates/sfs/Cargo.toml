@@ -7,6 +7,7 @@ repository.workspace = true
 description = "Semantic FS : un espace de travail par tâche, diff lisible, validation et annulation."
 
 [dependencies]
+rustix = { workspace = true }
 prophet-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

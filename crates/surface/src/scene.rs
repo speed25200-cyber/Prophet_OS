@@ -1,27 +1,9 @@
 //! Ce qu'il y a à voir, avant qu'on sache comment le dessiner.
 //!
-//! # L'humain n'est pas un utilisateur
-//!
-//! Sur une machine d'agents, la personne devant l'écran n'a rien à piloter : les tâches avancent
-//! sans elle. La surface a donc deux états, et deux seulement.
-//!
-//! **Contemplation.** L'état ordinaire, celui de presque tout le temps. Rien n'est demandé. On
-//! voit ce qui travaille, à quelle vitesse, et sur quoi. Il faut pouvoir le lire depuis l'autre
-//! bout de la pièce, sans lunettes et sans lire un mot.
-//!
-//! **Décision.** Une approbation attend. C'est le seul moment où le système a besoin d'un humain,
-//! parce que c'est le seul moment où le choix lui revient vraiment. Tout le reste recule alors, et
-//! la question vient devant.
-//!
-//! # Le mouvement porte l'information
-//!
-//! Le champ de particules n'est pas un fond animé. **Chaque tâche est un courant.** Sa vitesse est
-//! son débit d'étapes, sa clarté est ce qu'il lui reste de budget, et un agent bloqué se voit
-//! figer. On lit l'état de la machine dans le mouvement — c'est ce qui permet de ne pas la lire.
-//!
-//! Ce module décide de cette traduction, et rien d'autre. Il ne connaît ni GPU ni fenêtre, ce qui
-//! le rend vérifiable sans l'un ni l'autre : les règles ci-dessous sont testées, alors que le
-//! dessin ne peut l'être que sur une machine équipée.
+//! La personne définit les objectifs, examine les accès et supervise les missions. La scène
+//! transporte leur état vers l'interface sans dépendre du GPU. L'ancien rendu de courants utilise
+//! encore quatre catégories visuelles ; l'espace de supervision affiche aussi l'état exact du
+//! runtime et conserve les missions terminées pour permettre l'examen du travail.
 
 /// Où en est une tâche.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +35,10 @@ pub struct Courant {
     pub budget_consomme: f32,
     /// Nombre d'étapes franchies.
     pub etapes: u32,
+    /// État exact reçu du runtime, absent dans les anciennes scènes de démonstration.
+    pub task_state: Option<agentd::State>,
+    /// Longueur de l'historique reçu ; distingue notamment une reprise d'une ancienne exécution.
+    pub task_revision: usize,
 }
 
 /// La décision qu'on attend d'un humain.
@@ -193,6 +179,8 @@ mod tests {
             debit,
             budget_consomme: budget,
             etapes: 12,
+            task_state: None,
+            task_revision: 0,
         }
     }
 

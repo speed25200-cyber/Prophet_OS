@@ -7,20 +7,30 @@ repository.workspace = true
 rust-version.workspace = true
 description = "La surface d'observation de Prophet OS : ce que l'humain voit pendant que les agents travaillent"
 
+[features]
+# Essais explicites avec poids et moteur fournis ; absents du rendu contrôlé de la CI.
+real-model-tests = []
+
 [dependencies]
 serde_json = { workspace = true }
+clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 prophet-ipc = { workspace = true }
 prophet-types = { workspace = true }
 agentd = { workspace = true }
+providers = { workspace = true }
 capd = { workspace = true }
 shell = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
+ulid = { workspace = true }
 
 wgpu = "30"
+egui = "0.36.2"
+egui-wgpu = { version = "0.36.2", default-features = false }
+egui-winit = { version = "0.36.2", default-features = false, features = ["wayland", "clipboard", "accesskit"] }
 glyphon = "0.12"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"

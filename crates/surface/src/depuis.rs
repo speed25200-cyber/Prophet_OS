@@ -49,30 +49,27 @@ pub const fn etat(state: State) -> Etat {
         // Une tâche en pause ou planifiée n'avance pas davantage qu'une tâche empêchée ; le champ
         // la fige pareillement, parce que c'est ce que la personne devant l'écran constate.
         State::Paused | State::Pending | State::Planned | State::Failed => Etat::Bloque,
-        // Une tâche annulée après coup est finie, elle aussi : ce qu'elle avait fait a été
-        // défait, et il n'y a plus rien à surveiller.
+        // L'animation s'arrête ; l'inspecteur conserve l'état exact et les fichiers à examiner.
         State::Done | State::Cancelled | State::RolledBack => Etat::Fini,
     }
 }
 
 /// Débit d'une tâche, en étapes par minute.
 ///
-/// Il se déduit des étapes franchies et du temps écoulé. Une tâche qui vient de naître n'a pas
-/// encore de débit mesurable : on lui en prête un, faible, plutôt que zéro — un zéro la figerait,
-/// et figer veut dire « empêchée » dans ce langage.
+/// Il se déduit des étapes franchies et du temps écoulé. Sans temps mesuré, aucun débit
+/// positif n'est inventé. L'état de la tâche indique séparément si elle travaille.
 #[must_use]
 pub fn debit(budget: &Budget) -> f32 {
     let secondes = budget.spent.wall_time_s;
-    if secondes < 5 {
-        return 6.0;
+    if secondes == 0 {
+        return 0.0;
     }
     f32::from(u16::try_from(budget.spent.steps).unwrap_or(u16::MAX)) * 60.0 / secondes as f32
 }
 
 /// Construit la scène à montrer.
 ///
-/// Les tâches terminées sont écartées : leur courant s'éteindrait de toute façon, et elles
-/// prendraient la place de ce qui travaille. Ce qui est fini n'a plus besoin d'être surveillé.
+/// Les tâches terminées restent accessibles pour examiner les résultats et les erreurs.
 #[must_use]
 pub fn scene(
     taches: &[Task],
@@ -85,7 +82,6 @@ pub fn scene(
 ) -> Scene {
     let courants = taches
         .iter()
-        .filter(|t| !matches!(t.state, State::Done | State::Cancelled | State::RolledBack))
         .map(|t| Courant {
             tache: t.id.clone(),
             intitule: t.intent.clone(),
@@ -94,6 +90,8 @@ pub fn scene(
             debit: debit(&t.budget),
             budget_consomme: budget_consomme(&t.budget),
             etapes: t.budget.spent.steps,
+            task_state: Some(t.state),
+            task_revision: t.history.len(),
         })
         .collect();
 
@@ -146,6 +144,33 @@ fn consequence(approbation: &Approval) -> String {
 mod tests {
     use super::*;
     use agentd::budget::{Limits, Spent};
+
+    #[test]
+    fn les_missions_terminees_restent_disponibles_pour_examen() {
+        let now = OffsetDateTime::now_utc();
+        let tasks: Vec<_> = [State::Done, State::Cancelled, State::Failed]
+            .into_iter()
+            .enumerate()
+            .map(|(n, state)| {
+                let mut task = Task::new(
+                    format!("t{n}"),
+                    "Travail à examiner",
+                    "local",
+                    "user",
+                    Budget::new(limites()),
+                    now,
+                );
+                task.state = state;
+                task
+            })
+            .collect();
+        let scene = scene(&tasks, &[], 0, None, String::new(), String::new(), now);
+        assert_eq!(
+            scene.courants.len(),
+            3,
+            "aucune mission terminale ne doit disparaître"
+        );
+    }
 
     fn approbation(id: &str, action: &str, irreversible: bool, age_s: i64) -> Approval {
         let creee = OffsetDateTime::now_utc() - time::Duration::seconds(age_s);
@@ -244,11 +269,9 @@ mod tests {
     }
 
     #[test]
-    fn une_tache_qui_vient_de_naitre_n_est_pas_figee() {
-        // Zéro étape en zéro seconde donnerait un débit nul, donc un courant immobile, donc
-        // « empêchée » — ce qui serait faux et alarmant.
+    fn une_tache_sans_mesure_n_invente_pas_un_debit() {
         let jeune = budget(limites(), Spent { ..rien() });
-        assert!(debit(&jeune) > 0.0);
+        assert_eq!(debit(&jeune), 0.0);
     }
 
     #[test]

@@ -2,7 +2,11 @@
 
 - **Version** : 0.1
 - **Types Rust** : `prophet_types::driver`
-- **Implémentations** : `providers::claude_code`, `providers::codex`, `providers::gemini`, `providers::prophet_agent`, `providers::mock`
+- **Implémentations** : `providers::official`, `providers::native`, `providers::local`, `providers::local_async`, `providers::mock`
+
+État du 12 septembre 2026 : ce document décrit le contrat cible. Le socket `providers.sock`
+et l'exécution des clients officiels ne sont pas encore implémentés. Le diagnostic CLI est
+opérationnel ; voir [les preuves et limites](../components/providers.md).
 
 ## Rôle
 
@@ -89,7 +93,7 @@ Entrée : `{driver}`. Lance le flux de connexion **du client** (navigateur ou co
 | journalisation d'outils | hooks avant et après outil → `prophet-hook` | événements de sa sortie structurée | hooks ou sortie structurée | natif |
 | délégation de permission | outil de demande de permission externe → `prophet-permission` | politique d'approbation + serveur d'application | équivalent | natif |
 | reprise | identifiant de session | identifiant de session | selon version | checkpoint complet |
-| sandbox interne du client | désactivée ou minimale ; `sandboxd` fait foi | idem | idem | sans objet |
+| sandbox interne du client | conservée ; `sandboxd` ajoute les contraintes de l'OS | idem | idem | sans objet |
 
 Les noms exacts des options se vérifient dans la documentation du client au moment de l'implémentation (M8) et sont consignés dans `docs/components/providers.md` avec la version testée.
 

@@ -17,6 +17,78 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  local-engine-system:
+    name: Mission locale sous NixOS (modèle réel)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Préparer KVM
+        run: |
+          PROPHET_AUTORISER_KVM=1 sudo -E ./tools/install-isolation.sh kvm
+          python3 -c "open('/dev/kvm', 'r+b').close()"
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+            max-jobs = 1
+            cores = 2
+      - name: Charger Qwen3 et exercer les services installés
+        run: nix build .#local-engine-vm --print-build-logs
+
+  local-engine:
+    name: Moteur local (protocole)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+            max-jobs = 1
+            cores = 2
+      - name: Vérifier la grammaire et le parseur du moteur corrigé
+        run: nix build .#checks.x86_64-linux.llama-tool-grammar --print-build-logs
+
+  chatgpt:
+    name: ChatGPT sous NixOS (compatibilité)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Préparer la virtualisation du test
+        run: |
+          PROPHET_AUTORISER_KVM=1 sudo -E ./tools/install-isolation.sh kvm
+          python3 -c "open('/dev/kvm', 'r+b').close()"
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+            max-jobs = 2
+            cores = 2
+      - name: Ouvrir le client officiel dans une session Sway et XWayland
+        run: |
+          mkdir -p chatgpt-diagnostics
+          test_output=$(nix eval --raw .#checks.x86_64-linux.chatgpt-desktop.outPath)
+          status=0
+          nix build .#checks.x86_64-linux.chatgpt-desktop --print-build-logs --keep-failed --out-link result-chatgpt || status=$?
+          if [ -d "$test_output" ]; then
+            find "$test_output" -maxdepth 1 -name '*.png' -exec cp -- {} chatgpt-diagnostics/ \;
+          fi
+          exit "$status"
+      - name: Publier les captures de la VM sans compte connecté
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-nixos
+          path: chatgpt-diagnostics/*.png
+          if-no-files-found: warn
+          retention-days: 14
+
   check:
     runs-on: ubuntu-latest
     steps:
@@ -64,7 +136,9 @@ jobs:
       - name: Lints
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Tests
-        run: cargo test --workspace
+        run: |
+          cargo build --workspace --bins
+          cargo test --workspace
         env:
           # Sans navigateur, les tests du pont CDP passent sans rien essayer. Ici, le vert doit
           # vouloir dire qu'ils ont tourné.
@@ -107,15 +181,24 @@ jobs:
           fc-list | head -3
           test "$(fc-list | wc -l)" -gt 0 || { echo "::error::aucune police installée"; exit 1; }
 
+      - name: Construire les services du parcours de supervision
+        run: cargo build --release -p agentd -p capd -p ledger --bins
+
       - name: Exercer la surface
+        env:
+          PROPHET_CAPTURE_DIR: ${{ github.workspace }}
         run: cargo test -p surface --release -- --ignored --test-threads=1 --nocapture
 
-      - name: Capturer les deux états
+      - name: Capturer les états et les tailles de l'espace natif
         run: |
           cargo run --release -p surface --bin prophet-surface -- \
-            --capture surface-contemplation.png
+            --capture surface-contemplation.png --demonstration
           cargo run --release -p surface --bin prophet-surface -- \
-            --capture surface-decision.png --decision
+            --capture surface-decision.png --demonstration --decision
+          cargo run --release -p surface --bin prophet-surface -- \
+            --capture surface-compacte.png --largeur 1280 --hauteur 720 --demonstration
+          cargo run --release -p surface --bin prophet-surface -- \
+            --capture surface-modele-absent.png --page modeles --endpoint http://127.0.0.1:1/v1
           ls -lh surface-*.png
 
       - name: Publier les images

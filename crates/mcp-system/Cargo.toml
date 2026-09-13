@@ -12,6 +12,7 @@ path = "src/bin/prophet-mcp.rs"
 
 [dependencies]
 prophet-types = { workspace = true }
+prophet-ipc = { workspace = true }
 capd = { workspace = true }
 sfs = { workspace = true }
 egress = { workspace = true }
@@ -28,6 +29,7 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 ed25519-dalek = { workspace = true }
 rand = { workspace = true }
+rustix = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

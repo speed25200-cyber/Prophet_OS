@@ -6,6 +6,7 @@
 //! ne reçoit la main qu'après.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use capd::{Broker, CheckRequest};
@@ -40,18 +41,82 @@ pub trait Tool: Send + Sync {
 
     /// Cible concrète de l'appel, déduite des arguments, sur laquelle porte le contrôle d'accès.
     ///
-    /// Retourner `None` signifie « aucune cible spécifique » : le contrôle porte alors sur le nom
-    /// de l'outil.
+    /// `None` n'est accepté que pour une exigence `tool.call`. Une capacité de ressource exige
+    /// une cible concrète non vide ; son absence provoque un refus avant l'exécution.
     fn target(&self, args: &Value, context: &ToolContext) -> Option<String>;
 
     /// Exécute l'appel. N'est appelé qu'après autorisation.
     fn call(&self, args: &Value, context: &ToolContext) -> CallResult;
+
+    /// Exécute en pouvant recontrôler les ressources découvertes pendant l'appel.
+    fn call_checked(
+        &self,
+        args: &Value,
+        context: &ToolContext,
+        _access: &dyn ResourceAccess,
+    ) -> CallResult {
+        self.call(args, context)
+    }
+}
+
+/// Contrôle de ressources supplémentaires, fourni par le registre à l'outil.
+pub trait ResourceAccess {
+    /// Vérifie un droit sur un chemin logique, avec le jeton et les révocations courants.
+    fn permits(&self, act: Act, path: &str) -> bool;
+}
+
+/// Autorité de capacités, locale aux tests ou reliée au service capd.
+pub trait Authority: Send + Sync {
+    /// Vérifie la demande complète ; une panne doit produire un refus.
+    fn check(&self, token: &Token, request: &CheckRequest, now: OffsetDateTime) -> Decision;
+}
+
+impl Authority for Mutex<Broker> {
+    fn check(&self, token: &Token, request: &CheckRequest, now: OffsetDateTime) -> Decision {
+        self.lock()
+            .ok()
+            .and_then(|b| b.check(token, request, now).ok())
+            .unwrap_or_else(|| Decision::deny(DenyReason::PolicyDenied))
+    }
+}
+
+struct FileAccess<'a> {
+    registry: &'a Registry,
+    context: &'a ToolContext,
+    tool: &'a str,
+    now: OffsetDateTime,
+    started: std::time::Instant,
+}
+
+impl ResourceAccess for FileAccess<'_> {
+    fn permits(&self, act: Act, path: &str) -> bool {
+        let now = self.now.saturating_add(
+            time::Duration::try_from(self.started.elapsed()).unwrap_or(time::Duration::MAX),
+        );
+        // La recherche peut durer : une révocation ou une expiration doit arrêter les accès
+        // suivants. Le droit d'appeler l'outil est lui aussi revérifié.
+        [
+            CheckRequest::new(Res::Tool, Act::Call, self.tool),
+            CheckRequest::new(Res::Fs, act, path),
+        ]
+        .into_iter()
+        .all(|r| {
+            self.registry
+                .authority
+                .check(
+                    &self.context.token,
+                    &r.sandbox_level(self.context.sandbox_level),
+                    now,
+                )
+                .is_allow()
+        })
+    }
 }
 
 /// Journalisation des appels.
 pub trait Journal: Send + Sync {
-    /// Enregistre un événement.
-    fn record(&self, draft: Draft);
+    /// Enregistre un événement ; une erreur interdit de poursuivre les outils de la tâche.
+    fn record(&self, draft: Draft) -> Result<(), String>;
 }
 
 /// Journal en mémoire, utile aux tests et au mode dégradé.
@@ -81,18 +146,21 @@ impl MemoryJournal {
 }
 
 impl Journal for MemoryJournal {
-    fn record(&self, draft: Draft) {
-        if let Ok(mut events) = self.events.lock() {
-            events.push(draft);
-        }
+    fn record(&self, draft: Draft) -> Result<(), String> {
+        self.events
+            .lock()
+            .map_err(|_| "journal verrouillé".to_owned())?
+            .push(draft);
+        Ok(())
     }
 }
 
 /// Registre d'outils.
 pub struct Registry {
     tools: BTreeMap<String, Arc<dyn Tool>>,
-    broker: Arc<Mutex<Broker>>,
+    authority: Arc<dyn Authority>,
     journal: Arc<dyn Journal>,
+    journal_failed: AtomicBool,
 }
 
 impl std::fmt::Debug for Registry {
@@ -107,10 +175,17 @@ impl Registry {
     /// Registre vide.
     #[must_use]
     pub fn new(broker: Arc<Mutex<Broker>>, journal: Arc<dyn Journal>) -> Self {
+        Self::with_authority(broker, journal)
+    }
+
+    /// Registre dont les contrôles peuvent être réalisés par le vrai service capd.
+    #[must_use]
+    pub fn with_authority(authority: Arc<dyn Authority>, journal: Arc<dyn Journal>) -> Self {
         Self {
             tools: BTreeMap::new(),
-            broker,
+            authority,
             journal,
+            journal_failed: AtomicBool::new(false),
         }
     }
 
@@ -165,15 +240,37 @@ impl Registry {
         context: &ToolContext,
         now: OffsetDateTime,
     ) -> CallResult {
+        if self.journal_failed.load(Ordering::Acquire) {
+            return journal_error();
+        }
+        match self.call_recorded(name, args, context, now) {
+            Ok(result) => result,
+            Err(_) => {
+                self.journal_failed.store(true, Ordering::Release);
+                journal_error()
+            }
+        }
+    }
+
+    fn call_recorded(
+        &self,
+        name: &str,
+        args: &Value,
+        context: &ToolContext,
+        now: OffsetDateTime,
+    ) -> Result<CallResult, String> {
         let Some(tool) = self.tools.get(name) else {
-            return CallResult::error(ErrorCode::NotFound, format!("outil inconnu : {name}"));
+            return Ok(CallResult::error(
+                ErrorCode::NotFound,
+                format!("outil inconnu : {name}"),
+            ));
         };
         let spec = tool.spec();
         let Some(meta) = spec.meta.clone() else {
-            return CallResult::error(
+            return Ok(CallResult::error(
                 ErrorCode::Internal,
                 format!("l'outil {name} ne déclare pas ses exigences"),
-            );
+            ));
         };
 
         let args_digest = digest(args);
@@ -191,7 +288,7 @@ impl Registry {
             )
             .task(&context.task)
             .step(context.step),
-        );
+        )?;
 
         let decision = self.authorize(name, &meta, args, context, now);
         if let Decision::Deny { reason, rule } = &decision {
@@ -210,7 +307,7 @@ impl Registry {
                 )
                 .task(&context.task)
                 .step(context.step),
-            );
+            )?;
             let code = if *reason == DenyReason::ApprovalRequired {
                 ErrorCode::ApprovalRequired
             } else {
@@ -223,13 +320,20 @@ impl Registry {
                     rule.as_ref().map(|r| format!(" ({r})")).unwrap_or_default()
                 ),
             );
-            self.record_result(name, &result, context, now);
-            return result;
+            self.record_result(name, &result, context, now)?;
+            return Ok(result);
         }
 
-        let result = tool.call(args, context);
-        self.record_result(name, &result, context, now);
-        result
+        let access = FileAccess {
+            registry: self,
+            context,
+            tool: name,
+            now,
+            started: std::time::Instant::now(),
+        };
+        let result = tool.call_checked(args, context, &access);
+        self.record_result(name, &result, context, now)?;
+        Ok(result)
     }
 
     fn authorize(
@@ -240,9 +344,20 @@ impl Registry {
         context: &ToolContext,
         now: OffsetDateTime,
     ) -> Decision {
-        let Ok(broker) = self.broker.lock() else {
+        // Une description incomplète ou un contexte incohérent ne doivent jamais transformer
+        // une autorisation impossible à vérifier en permission implicite.
+        let Some((res, act)) = parse_requires(&meta.requires) else {
             return Decision::deny(DenyReason::PolicyDenied);
         };
+        if context.task != context.token.sub
+            || context.sandbox_level > 2
+            || meta
+                .sandbox_level_min
+                .is_some_and(|minimum| context.sandbox_level < minimum)
+            || (res == Res::Tool && act != Act::Call)
+        {
+            return Decision::deny(DenyReason::PolicyDenied);
+        }
 
         // Premier contrôle : le droit d'appeler cet outil.
         let mut call_request =
@@ -253,19 +368,13 @@ impl Registry {
         if meta.external {
             call_request = call_request.external();
         }
-        let decision = match broker.check(&context.token, &call_request, now) {
-            Ok(decision) => decision,
-            Err(_) => return Decision::deny(DenyReason::PolicyDenied),
-        };
+        let decision = self.authority.check(&context.token, &call_request, now);
         if !decision.is_allow() {
             return decision;
         }
 
         // Second contrôle : la ressource que l'outil va toucher. Le droit d'appeler `fs.read` ne
         // dit rien sur le fichier visé ; c'est ici que le périmètre est vérifié.
-        let Some((res, act)) = parse_requires(&meta.requires) else {
-            return decision;
-        };
         if res == Res::Tool {
             return decision;
         }
@@ -273,8 +382,11 @@ impl Registry {
             return Decision::deny(DenyReason::PolicyDenied);
         };
         let Some(target) = tool.target(args, context) else {
-            return decision;
+            return Decision::deny(DenyReason::PolicyDenied);
         };
+        if target.trim().is_empty() {
+            return Decision::deny(DenyReason::PolicyDenied);
+        }
         let mut request = CheckRequest::new(res, act, target).sandbox_level(context.sandbox_level);
         if meta.irreversible {
             request = request.irreversible();
@@ -282,9 +394,7 @@ impl Registry {
         if meta.external {
             request = request.external();
         }
-        broker
-            .check(&context.token, &request, now)
-            .unwrap_or_else(|_| Decision::deny(DenyReason::PolicyDenied))
+        self.authority.check(&context.token, &request, now)
     }
 
     fn record_result(
@@ -293,7 +403,7 @@ impl Registry {
         result: &CallResult,
         context: &ToolContext,
         now: OffsetDateTime,
-    ) {
+    ) -> Result<(), String> {
         let code = result
             .structured
             .as_ref()
@@ -314,8 +424,15 @@ impl Registry {
             )
             .task(&context.task)
             .step(context.step),
-        );
+        )
     }
+}
+
+fn journal_error() -> CallResult {
+    CallResult::error(
+        ErrorCode::Internal,
+        "journal non confirmé : l'action peut avoir eu lieu ; tâche suspendue, ne pas réessayer automatiquement",
+    )
 }
 
 /// Empreinte d'une valeur, pour le journal. Le contenu n'y figure jamais.
@@ -531,5 +648,82 @@ preferred = ["local:test"]
     fn doublon_refuse() {
         let (mut registry, _, _) = registre();
         registry.register(Arc::new(Faux));
+    }
+
+    struct Exigences {
+        requires: &'static str,
+        level: Option<u8>,
+        target: Option<&'static str>,
+    }
+
+    impl Tool for Exigences {
+        fn spec(&self) -> ToolSpec {
+            let mut spec = Faux.spec();
+            spec.name = "test.exigences".into();
+            let meta = spec.meta.as_mut().unwrap();
+            meta.requires = self.requires.into();
+            meta.sandbox_level_min = self.level;
+            spec
+        }
+
+        fn target(&self, _: &Value, _: &ToolContext) -> Option<String> {
+            self.target.map(str::to_owned)
+        }
+
+        fn call(&self, _: &Value, _: &ToolContext) -> CallResult {
+            panic!("le registre doit refuser avant de passer la main à l'outil")
+        }
+    }
+
+    #[test]
+    fn les_exigences_invalides_ou_inapplicables_ne_sont_pas_ignorees() {
+        for tool in [
+            Exigences {
+                requires: "inconnue.action",
+                level: None,
+                target: None,
+            },
+            Exigences {
+                requires: "tool.read",
+                level: None,
+                target: None,
+            },
+            Exigences {
+                requires: "fs.read",
+                level: None,
+                target: None,
+            },
+            Exigences {
+                requires: "fs.read",
+                level: None,
+                target: Some(""),
+            },
+            Exigences {
+                requires: "tool.call",
+                level: Some(2),
+                target: None,
+            },
+        ] {
+            let (mut registry, _, broker) = registre();
+            let context = contexte(&mut broker.lock().unwrap(), &["test.*"]);
+            registry.register(Arc::new(tool));
+            let result = registry.call("test.exigences", &json!({}), &context, now());
+            assert!(result.is_error);
+        }
+    }
+
+    #[test]
+    fn un_jeton_ne_peut_pas_agir_pour_une_autre_tache() {
+        let (mut registry, _, broker) = registre();
+        let mut context = contexte(&mut broker.lock().unwrap(), &["test.*"]);
+        context.task = "task:autre".into();
+        registry.register(Arc::new(Exigences {
+            requires: "tool.call",
+            level: None,
+            target: None,
+        }));
+        let result = registry.call("test.exigences", &json!({}), &context, now());
+        assert!(result.is_error);
+        assert_eq!(result.structured.unwrap()["code"], "PolicyDenied");
     }
 }

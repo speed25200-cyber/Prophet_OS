@@ -27,6 +27,44 @@ use time::OffsetDateTime;
 use crate::budget::{Budget, Dimension, Limits};
 use crate::task::{State, Task, TaskError};
 
+#[cfg(test)]
+mod review_ownership {
+    use super::*;
+
+    #[test]
+    fn le_pair_observe_est_persistant_et_ne_se_deduit_pas_du_nom_declare() {
+        let mut runtime = Runtime::sans_broker("/home/test");
+        let mut task = Task::new(
+            "one",
+            "Objectif",
+            "local:test",
+            "uid:2000",
+            Budget::new(Default::default()),
+            OffsetDateTime::now_utc(),
+        );
+        task.state = State::Done;
+        runtime.tasks.insert(task.id.clone(), task);
+        runtime
+            .results
+            .insert("one".into(), json!({"review":{"entries":[]}}));
+        assert!(runtime.review_context("one", 1000).is_err());
+        runtime.bind_owner("one", 1000).unwrap();
+        assert!(runtime.bind_owner("one", 2000).is_err());
+        assert!(runtime.review_context("one", 2000).is_err());
+        assert!(runtime.review_context("one", 0).is_err());
+        let encoded = serde_json::to_vec(&runtime.etat()).unwrap();
+        let mut restored = Runtime::sans_broker("/home/test");
+        restored.reprendre(serde_json::from_slice(&encoded).unwrap());
+        assert!(restored.review_context("one", 1000).is_ok());
+        assert!(restored.review_context("one", 2000).is_err());
+        let mut legacy: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
+        legacy.as_object_mut().unwrap().remove("owners");
+        let mut legacy_runtime = Runtime::sans_broker("/home/test");
+        legacy_runtime.reprendre(serde_json::from_value(legacy).unwrap());
+        assert!(legacy_runtime.review_context("one", 1000).is_err());
+    }
+}
+
 /// Erreur du runtime.
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
@@ -95,6 +133,23 @@ pub struct TaskPlan {
     pub scopes: Vec<String>,
 }
 
+/// Vue atomique destinée à la supervision, sans jeton ni état interne du broker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Inspection {
+    /// État et budget observés.
+    pub task: Task,
+    /// Plan conservé, absent pour certaines anciennes tâches.
+    pub plan: Option<TaskPlan>,
+    /// Résultat conservé, absent avant la fin.
+    pub result: Option<serde_json::Value>,
+    /// Le service possède le parcours de lancement correspondant à ce plan.
+    pub can_start: bool,
+    /// Une annulation peut être demandée au service.
+    pub can_cancel: bool,
+    /// Pourquoi un plan ne peut pas être lancé ici.
+    pub start_reason: Option<String>,
+}
+
 impl TaskPlan {
     /// Rendu lisible, tel que le shell l'affiche avant de demander le feu vert.
     #[must_use]
@@ -152,6 +207,15 @@ pub struct EtatPersistant {
     pub taches: Vec<Task>,
     /// Leurs jetons, indexés par tâche.
     pub jetons: BTreeMap<String, Token>,
+    /// Plans retenus, y compris les périmètres nécessaires au lancement.
+    #[serde(default)]
+    pub plans: BTreeMap<String, TaskPlan>,
+    /// Résultats de missions relisibles après redémarrage.
+    #[serde(default)]
+    pub results: BTreeMap<String, serde_json::Value>,
+    /// UID constaté sur le socket à la création, distinct d'une identité déclarée dans le plan.
+    #[serde(default)]
+    pub owners: BTreeMap<String, u32>,
 }
 
 /// Le runtime.
@@ -167,6 +231,9 @@ pub struct Runtime {
     tokens: BTreeMap<String, Token>,
     journal: Vec<Draft>,
     quota_policy: QuotaPolicy,
+    plans: BTreeMap<String, TaskPlan>,
+    results: BTreeMap<String, serde_json::Value>,
+    owners: BTreeMap<String, u32>,
 }
 
 impl std::fmt::Debug for Runtime {
@@ -189,6 +256,9 @@ impl Runtime {
             tokens: BTreeMap::new(),
             journal: Vec::new(),
             quota_policy: QuotaPolicy::default(),
+            plans: BTreeMap::new(),
+            results: BTreeMap::new(),
+            owners: BTreeMap::new(),
         }
     }
 
@@ -206,6 +276,9 @@ impl Runtime {
             tokens: BTreeMap::new(),
             journal: Vec::new(),
             quota_policy: QuotaPolicy::default(),
+            plans: BTreeMap::new(),
+            results: BTreeMap::new(),
+            owners: BTreeMap::new(),
         }
     }
 
@@ -225,6 +298,9 @@ impl Runtime {
         EtatPersistant {
             taches: self.tasks.values().cloned().collect(),
             jetons: self.tokens.clone(),
+            plans: self.plans.clone(),
+            results: self.results.clone(),
+            owners: self.owners.clone(),
         }
     }
 
@@ -238,6 +314,9 @@ impl Runtime {
             self.tasks.insert(tache.id.clone(), tache);
         }
         self.tokens.extend(etat.jetons);
+        self.plans.extend(etat.plans);
+        self.results.extend(etat.results);
+        self.owners.extend(etat.owners);
     }
 
     /// Événements journalisés.
@@ -265,6 +344,153 @@ impl Runtime {
     #[must_use]
     pub fn task(&self, id: &str) -> Option<&Task> {
         self.tasks.get(id)
+    }
+
+    /// Résultat durable d'une mission terminée.
+    #[must_use]
+    pub fn result(&self, id: &str) -> Option<&serde_json::Value> {
+        self.results.get(id)
+    }
+
+    /// Lie une nouvelle mission au pair réellement observé. Aucune méthode IPC ne permet de changer ce lien.
+    ///
+    /// # Errors
+    /// Tâche absente ou déjà liée à une autre identité.
+    pub fn bind_owner(&mut self, id: &str, uid: u32) -> Result<(), String> {
+        if !self.tasks.contains_key(id) || self.owners.get(id).is_some_and(|owner| *owner != uid) {
+            return Err("Propriétaire de mission incohérent.".into());
+        }
+        self.owners.insert(id.into(), uid);
+        Ok(())
+    }
+
+    /// Donne au créateur l'index de ses versions capturées, pour une lecture hors du verrou du runtime.
+    ///
+    /// # Errors
+    /// Identité absente ou différente, mission non terminée, anciennes versions indisponibles.
+    pub fn review_context(
+        &self,
+        id: &str,
+        uid: u32,
+    ) -> Result<(PathBuf, sfs::ReviewIndex), String> {
+        if self.owners.get(id) != Some(&uid) {
+            return Err("L'examen des fichiers est réservé au créateur de cette mission.".into());
+        }
+        if self
+            .tasks
+            .get(id)
+            .is_none_or(|task| task.state != State::Done)
+        {
+            return Err("Les versions ne sont disponibles qu'après la fin de la mission.".into());
+        }
+        let index = self
+            .results
+            .get(id)
+            .and_then(|result| result.get("review"))
+            .ok_or("Cette mission ne contient pas de versions vérifiables.")?;
+        let index =
+            serde_json::from_value(index.clone()).map_err(|_| "Index des versions illisible.")?;
+        Ok((self.home.clone(), index))
+    }
+
+    /// Vue de supervision cohérente, créée sous le verrou du service.
+    ///
+    /// # Errors
+    /// Tâche inconnue.
+    pub fn inspect(
+        &self,
+        id: &str,
+        local_configured: bool,
+        has_worker: bool,
+    ) -> Result<Inspection, RuntimeError> {
+        let task = self
+            .tasks
+            .get(id)
+            .ok_or_else(|| RuntimeError::Unknown(id.into()))?
+            .clone();
+        let plan = self.plans.get(id).cloned();
+        let start_reason = if !local_configured {
+            Some("Le moteur local du service n'est pas configuré.".into())
+        } else if plan.is_none() {
+            Some("Aucun plan conservé : cette mission doit être recréée.".into())
+        } else if plan
+            .as_ref()
+            .is_none_or(|p| !p.choice.reference.starts_with("local:") || p.sandbox_level != 0)
+        {
+            Some("Ce plan nécessite un pilote isolé qui reste à raccorder.".into())
+        } else {
+            None
+        };
+        Ok(Inspection {
+            can_start: task.state == State::Planned && start_reason.is_none(),
+            can_cancel: !task.state.is_terminal()
+                && (has_worker || matches!(task.state, State::Pending | State::Planned)),
+            task,
+            plan,
+            result: self.results.get(id).cloned(),
+            start_reason,
+        })
+    }
+
+    /// Annule une tâche qui n'a pas de travailleur lancé.
+    ///
+    /// # Errors
+    /// Tâche inconnue, déjà lancée ou terminée.
+    pub fn cancel_unstarted(&mut self, id: &str, now: OffsetDateTime) -> Result<(), RuntimeError> {
+        let task = self
+            .tasks
+            .get_mut(id)
+            .ok_or_else(|| RuntimeError::Unknown(id.into()))?;
+        if !matches!(task.state, State::Pending | State::Planned) {
+            return Err(TaskError::BadTransition {
+                from: task.state,
+                to: State::Cancelled,
+            }
+            .into());
+        }
+        task.transition(State::Cancelled, Some("annulée par l'utilisateur".into()))?;
+        self.record(
+            id,
+            EventKind::TaskCancelled,
+            Actor::user(),
+            json!({"reason":"annulée par l'utilisateur"}),
+            now,
+        );
+        Ok(())
+    }
+
+    /// Réserve le lancement local sans laisser deux travailleurs prendre la même mission.
+    ///
+    /// # Errors
+    /// Tâche non planifiée, plan absent, client officiel ou isolation non raccordée.
+    pub fn begin_local(
+        &mut self,
+        id: &str,
+    ) -> Result<(Task, Token, TaskPlan, PathBuf), RuntimeError> {
+        let task = self
+            .tasks
+            .get_mut(id)
+            .ok_or_else(|| RuntimeError::Unknown(id.into()))?;
+        let plan = self
+            .plans
+            .get(id)
+            .ok_or_else(|| RuntimeError::Workspace("plan absent : recréer la mission".into()))?;
+        if !plan.choice.reference.starts_with("local:") || plan.sandbox_level != 0 {
+            return Err(RuntimeError::NoDriver("le lanceur local d'outils ne lance aucun processus non fiable ; les pilotes isolés restent à raccorder".into()));
+        }
+        let token = self.tokens.get(id).filter(|t| t.sub == id).ok_or_else(|| {
+            RuntimeError::Capability("jeton de tâche absent ou incohérent".into())
+        })?;
+        task.transition(State::Running, None)?;
+        Ok((task.clone(), token.clone(), plan.clone(), self.home.clone()))
+    }
+
+    /// Publie un état de travailleur et, à la fin, le résultat à conserver.
+    pub fn publish_local(&mut self, task: Task, result: Option<serde_json::Value>) {
+        if let Some(result) = result {
+            self.results.insert(task.id.clone(), result);
+        }
+        self.tasks.insert(task.id.clone(), task);
     }
 
     fn record(
@@ -323,6 +549,22 @@ impl Runtime {
             scopes,
             availability,
         } = *request;
+        let path = std::path::Path::new(id);
+        if !id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
+            || self.tasks.contains_key(id)
+            || id.len() > 160
+            || path.components().count() != 1
+            || !matches!(
+                path.components().next(),
+                Some(std::path::Component::Normal(_))
+            )
+        {
+            return Err(RuntimeError::Capability(
+                "identifiant de tâche invalide ou déjà utilisé".into(),
+            ));
+        }
         let limits = Limits {
             tokens: manifest.budget.default.tokens,
             wall_time_s: manifest.wall_time_seconds().unwrap_or(1200),
@@ -416,7 +658,7 @@ impl Runtime {
         self.tasks.insert(id.to_owned(), task);
         self.tokens.insert(id.to_owned(), token);
 
-        Ok(TaskPlan {
+        let plan = TaskPlan {
             task: id.to_owned(),
             intent: intent.to_owned(),
             choice,
@@ -424,7 +666,9 @@ impl Runtime {
             grants,
             limits,
             scopes: scopes.iter().map(|s| (*s).to_owned()).collect(),
-        })
+        };
+        self.plans.insert(id.to_owned(), plan.clone());
+        Ok(plan)
     }
 
     /// Annule une tâche en cours.

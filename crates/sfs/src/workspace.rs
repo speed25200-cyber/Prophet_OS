@@ -1,8 +1,7 @@
 //! Espace de travail d'une tâche : ouverture, diff, validation, annulation.
 //!
-//! Invariant central : **rien de ce qu'une tâche écrit n'atteint l'espace de l'utilisateur avant
-//! une validation explicite**, et toute validation reste annulable tant que le point de
-//! restauration existe.
+//! Le travail reste privé jusqu'à publication. L'appelant doit autoriser celle-ci ; l'annulation
+//! exige des versions publiées et des sauvegardes intactes. Un lot peut être partiellement visible.
 
 use std::path::{Path, PathBuf};
 
@@ -10,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::backend::{Backend, detect_backend};
-use crate::diff::{self, ChangeKind, Diff, Fingerprints};
-use crate::provenance::{Provenance, write_provenance};
+use crate::diff::{self, Diff, Fingerprints};
+use crate::provenance::Provenance;
 
 /// Erreur du système de fichiers sémantique.
 #[derive(Debug, thiserror::Error)]
@@ -45,6 +44,12 @@ pub enum SfsError {
 pub enum WorkspaceState {
     /// Ouvert, la tâche peut écrire.
     Open,
+    /// Publication commencée, dont le journal doit être repris après une interruption.
+    Applying,
+    /// Annulation commencée, dont le journal doit être repris après une interruption.
+    Undoing,
+    /// Publication interrompue sur une divergence ; les fichiers déplacés sont conservés.
+    Conflict,
     /// Validé : les changements ont atteint l'espace de l'utilisateur.
     Committed,
     /// Annulé après validation.
@@ -77,8 +82,6 @@ pub struct Workspace {
 
 /// Nom du répertoire de travail dans l'espace de la tâche.
 const WORK: &str = "work";
-/// Nom du répertoire des copies de restauration.
-const RESTORE: &str = "restore";
 /// Nom du fichier d'état.
 const META: &str = "meta.json";
 /// Nom du répertoire des transactions en cours.
@@ -88,6 +91,57 @@ const META: &str = "meta.json";
 const TX: &str = "tx";
 
 impl Workspace {
+    /// Fige les empreintes des changements d'une capture autorisée, pour leur examen humain.
+    ///
+    /// # Errors
+    /// Capture historique sans versions conservées, lien, fichier spécial ou travail trop grand.
+    pub fn seal_review(&self) -> Result<crate::ReviewIndex, SfsError> {
+        crate::review::seal(&self.home, &self.meta.task, &self.meta.base).map_err(Into::into)
+    }
+
+    /// Capture de service : droits vérifiés par descendant et ouvertures Linux sans liens.
+    ///
+    /// # Errors
+    /// Identifiant existant, périmètre refusé, source instable ou plafond de capture atteint.
+    pub fn begin_authorized(
+        home: &Path,
+        task: &str,
+        scopes: &[String],
+        now: OffsetDateTime,
+        permits: &dyn Fn(&Path) -> bool,
+    ) -> Result<Self, SfsError> {
+        let mut resolved = Vec::new();
+        for scope in scopes {
+            let absolute = scope_path(home, scope)?;
+            let relative = absolute
+                .strip_prefix(home)
+                .map_err(|_| SfsError::ScopeOutsideHome(scope.clone()))?
+                .to_path_buf();
+            if resolved
+                .iter()
+                .any(|p: &PathBuf| relative.starts_with(p) || p.starts_with(&relative))
+            {
+                return Err(SfsError::ScopeOutsideHome("périmètres chevauchants".into()));
+            }
+            resolved.push(relative);
+        }
+        let base = crate::snapshot::capture(home, task, &resolved, permits)?;
+        let workspace = Self {
+            root: Self::root_for(home).join(task),
+            home: home.into(),
+            meta: Meta {
+                task: task.into(),
+                scopes: resolved,
+                state: WorkspaceState::Open,
+                opened: now,
+                committed: None,
+                base,
+            },
+            backend: detect_backend(home),
+        };
+        workspace.save()?;
+        Ok(workspace)
+    }
     /// Racine des espaces de travail d'un utilisateur.
     #[must_use]
     pub fn root_for(home: &Path) -> PathBuf {
@@ -107,45 +161,8 @@ impl Workspace {
         scopes: &[&str],
         now: OffsetDateTime,
     ) -> Result<Self, SfsError> {
-        let home = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
-        let root = Self::root_for(&home).join(task);
-        std::fs::create_dir_all(root.join(WORK))?;
-        std::fs::create_dir_all(root.join(RESTORE))?;
-
-        let mut resolved = Vec::new();
-        let mut base = Fingerprints::new();
-        for scope in scopes {
-            let absolute = resolve_scope(&home, scope)?;
-            let relative = absolute
-                .strip_prefix(&home)
-                .map_err(|_| SfsError::ScopeOutsideHome(scope.to_string()))?
-                .to_path_buf();
-            let work_scope = root.join(WORK).join(&relative);
-            std::fs::create_dir_all(&work_scope)?;
-            copy_tree(&absolute, &work_scope)?;
-            for (path, fingerprint) in diff::fingerprint_tree(&absolute)? {
-                base.insert(relative.join(path), fingerprint);
-            }
-            resolved.push(relative);
-        }
-
-        let meta = Meta {
-            task: task.to_owned(),
-            scopes: resolved,
-            state: WorkspaceState::Open,
-            opened: now,
-            committed: None,
-            base,
-        };
-        let backend = detect_backend(&home);
-        let workspace = Self {
-            root,
-            home,
-            meta,
-            backend,
-        };
-        workspace.save()?;
-        Ok(workspace)
+        let scopes: Vec<String> = scopes.iter().map(|scope| (*scope).to_owned()).collect();
+        Self::begin_authorized(home, task, &scopes, now, &|_| true)
     }
 
     /// Liste les espaces de travail présents sur le disque, avec leur état.
@@ -163,15 +180,27 @@ impl Workspace {
         let mut out = Vec::new();
         for entry in std::fs::read_dir(&racine)? {
             let entry = entry?;
-            let meta_path = entry.path().join(META);
-            if !meta_path.exists() {
+            if !entry.file_type()?.is_dir() {
                 continue;
             }
-            let Ok(meta) = serde_json::from_str::<Meta>(&std::fs::read_to_string(&meta_path)?)
-            else {
+            let Some(task) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
-            out.push((meta.task, meta.state));
+            // Même lecture bornée et ancrée que l'ouverture individuelle. Ne jamais suivre
+            // meta.json par un chemin ordinaire, ni croire son identifiant sans le comparer.
+            let root = crate::review::task_root(home, &task)?;
+            let meta: Meta = match crate::publication::read_json(&root, META) {
+                Ok(meta) => meta,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if meta.task != task {
+                return Err(SfsError::UnknownTask(task));
+            }
+            // Une capture inachevée sans meta peut être ignorée ; un journal existant dont
+            // le manifeste a disparu doit au contraire signaler son état illisible.
+            let journal = crate::publication::read_journal(home, &task)?;
+            out.push((task, journal.map_or(meta.state, |journal| journal.state)));
         }
         out.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(out)
@@ -182,20 +211,19 @@ impl Workspace {
     /// # Erreurs
     /// Si la tâche est inconnue ou son état illisible.
     pub fn open(home: &Path, task: &str) -> Result<Self, SfsError> {
-        let home = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
-        let root = Self::root_for(&home).join(task);
-        let meta_path = root.join(META);
-        if !meta_path.exists() {
-            return Err(SfsError::UnknownTask(task.to_owned()));
+        let directory = crate::review::task_root(home, task)?;
+        let meta: Meta = crate::publication::read_json(&directory, META)?;
+        if meta.task != task {
+            return Err(SfsError::UnknownTask(task.into()));
         }
-        let meta: Meta = serde_json::from_str(&std::fs::read_to_string(&meta_path)?)?;
-        let backend = detect_backend(&home);
-        Ok(Self {
-            root,
-            home,
+        let mut workspace = Self {
+            root: Self::root_for(home).join(task),
+            home: home.into(),
             meta,
-            backend,
-        })
+            backend: detect_backend(home),
+        };
+        workspace.refresh_publication()?;
+        Ok(workspace)
     }
 
     /// Répertoire dans lequel la tâche travaille.
@@ -235,10 +263,15 @@ impl Workspace {
     }
 
     fn save(&self) -> Result<(), SfsError> {
-        let text = serde_json::to_string_pretty(&self.meta)?;
-        let temp = self.root.join(format!("{META}.tmp"));
-        std::fs::write(&temp, text)?;
-        std::fs::rename(temp, self.root.join(META))?;
+        let root = crate::review::task_root(&self.home, &self.meta.task)?;
+        crate::publication::atomic_json(&root, META, &self.meta).map_err(Into::into)
+    }
+
+    fn refresh_publication(&mut self) -> Result<(), SfsError> {
+        if let Some(journal) = crate::publication::read_journal(&self.home, &self.meta.task)? {
+            self.meta.state = journal.state;
+            self.meta.committed = Some(journal.committed);
+        }
         Ok(())
     }
 
@@ -250,110 +283,93 @@ impl Workspace {
         Ok(diff::compute(&self.meta.base, &self.root.join(WORK))?)
     }
 
-    /// Valide les changements : sauvegarde l'existant puis applique.
+    /// Publie les changements courants avec contrôle des conflits et journal de reprise.
     ///
-    /// La sauvegarde précède l'application, de sorte qu'une interruption au milieu laisse de quoi
-    /// revenir en arrière.
+    /// Le code appelant est responsable de l'autorisation humaine. Pour publier exactement
+    /// un index déjà examiné, employer [`Self::commit_review`]. Le lot n'est pas instantané.
     ///
-    /// # Erreurs
-    /// Si l'état n'est pas `Open`, ou en cas d'erreur d'entrée-sortie.
+    /// # Errors
+    /// État incompatible, conflit, lien, version altérée ou erreur de synchronisation.
     pub fn commit(
         &mut self,
         now: OffsetDateTime,
         provenance: Option<&Provenance>,
     ) -> Result<Diff, SfsError> {
+        let review = self.seal_review()?;
+        self.commit_review(&review, now, provenance)
+    }
+
+    /// Publie uniquement l'index exact fourni par l'appelant, après relecture de ses versions.
+    ///
+    /// Cette API de fichiers ne délivre aucune autorisation : l'identité, le consentement
+    /// et les droits doivent être contrôlés par l'appelant avant cet appel.
+    ///
+    /// # Errors
+    /// Index différent, fichier hors périmètre, conflit ou erreur de stockage.
+    pub fn commit_review(
+        &mut self,
+        review: &crate::ReviewIndex,
+        now: OffsetDateTime,
+        provenance: Option<&Provenance>,
+    ) -> Result<Diff, SfsError> {
+        self.refresh_publication()?;
         if self.meta.state != WorkspaceState::Open {
             return Err(SfsError::BadState {
                 state: self.meta.state,
             });
         }
-        let diff = self.diff()?;
-        let restore = self.root.join(RESTORE);
-        std::fs::create_dir_all(&restore)?;
-
-        // 1. Sauvegarde de l'existant, pour tout ce qui sera écrasé ou supprimé.
-        for change in &diff.changes {
-            let real = self.home.join(&change.path);
-            if matches!(change.kind, ChangeKind::Modified | ChangeKind::Deleted) && real.exists() {
-                let saved = restore.join(&change.path);
-                if let Some(parent) = saved.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                std::fs::copy(&real, &saved)?;
-            }
+        if *review != self.seal_review()?
+            || review.entries.iter().any(|entry| {
+                !self
+                    .meta
+                    .scopes
+                    .iter()
+                    .any(|scope| entry.path.starts_with(scope))
+            })
+        {
+            return Err(SfsError::Io(std::io::Error::other(
+                "Les versions examinées ou leur périmètre ont changé.",
+            )));
         }
-        std::fs::write(
-            restore.join("changes.json"),
-            serde_json::to_string_pretty(&diff)?,
-        )?;
-
-        // 2. Application.
-        for change in &diff.changes {
-            let real = self.home.join(&change.path);
-            let work = self.root.join(WORK).join(&change.path);
-            match change.kind {
-                ChangeKind::Added | ChangeKind::Modified => {
-                    if let Some(parent) = real.parent() {
-                        std::fs::create_dir_all(parent)?;
-                    }
-                    std::fs::copy(&work, &real)?;
-                    if let Some(provenance) = provenance {
-                        let _ = write_provenance(&real, provenance);
-                    }
-                }
-                ChangeKind::Deleted => {
-                    if real.exists() {
-                        std::fs::remove_file(&real)?;
-                    }
-                }
-            }
+        let result =
+            crate::publication::apply(&self.home, &self.meta.task, review, now, provenance);
+        self.refresh_publication()?;
+        if result.is_ok() {
+            self.save()?;
         }
-
-        self.meta.state = WorkspaceState::Committed;
-        self.meta.committed = Some(now);
-        self.save()?;
-        Ok(diff)
+        result.map_err(Into::into)
     }
 
-    /// Annule la dernière validation, en restaurant l'état d'avant.
+    /// Annule une publication dont les fichiers correspondent encore aux versions publiées.
     ///
-    /// # Erreurs
-    /// Si rien n'a été validé, ou en cas d'erreur d'entrée-sortie.
+    /// # Errors
+    /// Journal absent, état incompatible, document retouché ou sauvegarde altérée.
     pub fn undo(&mut self) -> Result<Diff, SfsError> {
+        self.refresh_publication()?;
         if self.meta.state != WorkspaceState::Committed {
             return Err(SfsError::BadState {
                 state: self.meta.state,
             });
         }
-        let restore = self.root.join(RESTORE);
-        let changes_path = restore.join("changes.json");
-        if !changes_path.exists() {
-            return Err(SfsError::NothingToUndo);
+        let result = crate::publication::undo(&self.home, &self.meta.task);
+        self.refresh_publication()?;
+        if result.is_ok() {
+            self.save()?;
         }
-        let diff: Diff = serde_json::from_str(&std::fs::read_to_string(&changes_path)?)?;
+        result.map_err(Into::into)
+    }
 
-        for change in &diff.changes {
-            let real = self.home.join(&change.path);
-            let saved = restore.join(&change.path);
-            match change.kind {
-                ChangeKind::Added => {
-                    if real.exists() {
-                        std::fs::remove_file(&real)?;
-                    }
-                }
-                ChangeKind::Modified | ChangeKind::Deleted => {
-                    if saved.exists() {
-                        if let Some(parent) = real.parent() {
-                            std::fs::create_dir_all(parent)?;
-                        }
-                        std::fs::copy(&saved, &real)?;
-                    }
-                }
-            }
+    /// Reprend explicitement l'intention enregistrée après interruption, sans nouvel index.
+    ///
+    /// # Errors
+    /// Journal absent, identités ambiguës, modification indépendante ou erreur de stockage.
+    pub fn recover_publication(&mut self) -> Result<Diff, SfsError> {
+        let result = crate::publication::recover(&self.home, &self.meta.task);
+        self.refresh_publication()?;
+        if result.is_ok() {
+            self.save()?;
         }
-        self.meta.state = WorkspaceState::RolledBack;
-        self.save()?;
-        Ok(diff)
+        result.map_err(Into::into)
     }
 
     /// Abandonne l'espace de travail sans rien appliquer.
@@ -361,6 +377,7 @@ impl Workspace {
     /// # Erreurs
     /// Si l'état n'est pas `Open`, ou en cas d'erreur d'entrée-sortie.
     pub fn abandon(&mut self) -> Result<(), SfsError> {
+        self.refresh_publication()?;
         if self.meta.state != WorkspaceState::Open {
             return Err(SfsError::BadState {
                 state: self.meta.state,
@@ -375,9 +392,10 @@ impl Workspace {
 
     /// Ouvre une transaction d'écriture multi-fichiers.
     ///
-    /// Les écritures atterrissent dans un répertoire temporaire ; elles n'apparaissent dans
-    /// l'espace de travail qu'à la validation de la transaction. Une tâche tuée au milieu ne
-    /// laisse donc aucun état partiel.
+    /// API historique pour appelants de confiance : les chemins ne sont pas confinés ici.
+    /// La préparation est privée, mais sa validation déplace les fichiers successivement et
+    /// peut laisser un état partiel après interruption. Employer le moteur de publication
+    /// journalisée pour les versions destinées aux documents humains.
     ///
     /// # Erreurs
     /// En cas d'erreur d'entrée-sortie.
@@ -435,6 +453,8 @@ impl Transaction {
 
     /// Publie toutes les écritures dans l'espace de travail.
     ///
+    /// Les déplacements sont successifs, sans atomicité du lot ni journal de reprise.
+    ///
     /// # Erreurs
     /// En cas d'erreur d'entrée-sortie.
     pub fn commit(self) -> Result<usize, SfsError> {
@@ -461,7 +481,7 @@ impl Transaction {
     }
 }
 
-fn resolve_scope(home: &Path, scope: &str) -> Result<PathBuf, SfsError> {
+fn scope_path(home: &Path, scope: &str) -> Result<PathBuf, SfsError> {
     let candidate = if let Some(rest) = scope.strip_prefix("~/") {
         home.join(rest)
     } else if scope.starts_with('/') {
@@ -478,37 +498,5 @@ fn resolve_scope(home: &Path, scope: &str) -> Result<PathBuf, SfsError> {
     if !candidate.starts_with(home) {
         return Err(SfsError::ScopeOutsideHome(scope.to_owned()));
     }
-    std::fs::create_dir_all(&candidate)?;
     Ok(candidate)
-}
-
-fn copy_tree(source: &Path, target: &Path) -> std::io::Result<()> {
-    if !source.exists() {
-        return Ok(());
-    }
-    let mut stack = vec![source.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            let metadata = std::fs::symlink_metadata(&path)?;
-            if metadata.is_symlink() {
-                continue;
-            }
-            let Ok(relative) = path.strip_prefix(source) else {
-                continue;
-            };
-            let destination = target.join(relative);
-            if metadata.is_dir() {
-                std::fs::create_dir_all(&destination)?;
-                stack.push(path);
-            } else if metadata.is_file() {
-                if let Some(parent) = destination.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                std::fs::copy(&path, &destination)?;
-            }
-        }
-    }
-    Ok(())
 }

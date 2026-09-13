@@ -61,6 +61,22 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum TaskAction {
+    /// Planifie une mission depuis une requête JSON, sans la démarrer.
+    #[command(alias = "plan")]
+    New {
+        /// Fichier contenant intent, manifest, requested, scopes et availability.
+        request: std::path::PathBuf,
+    },
+    /// Lance une mission déjà planifiée par agentd.
+    Start {
+        /// Identifiant de la mission.
+        id: String,
+    },
+    /// Relit le résultat conservé par agentd et les changements à examiner.
+    Result {
+        /// Identifiant de la mission.
+        id: String,
+    },
     /// Liste les tâches.
     Ls,
     /// Détaille une tâche.
@@ -132,6 +148,34 @@ enum CapAction {
 enum ProviderAction {
     /// Liste les pilotes et leur état.
     Ls,
+    /// Vérifie la version et la connexion auprès du client officiel lui-même.
+    Doctor {
+        /// Nom du pilote (codex, claude-code ou gemini).
+        driver: String,
+    },
+    /// Modèles réellement chargés par un moteur local.
+    Models {
+        /// Base d'API du moteur local.
+        #[arg(long, default_value = "http://127.0.0.1:8080/v1")]
+        endpoint: String,
+    },
+    /// Adresse un message à un LLM local, sans lui donner d'outils système.
+    Chat {
+        /// Identifiant annoncé par le moteur.
+        #[arg(long)]
+        model: String,
+        /// Message envoyé au modèle.
+        prompt: String,
+        /// Base d'API du moteur local.
+        #[arg(long, default_value = "http://127.0.0.1:8080/v1")]
+        endpoint: String,
+        /// Durée maximale de la requête, en secondes.
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
+        /// Nombre maximal de tokens générés.
+        #[arg(long, default_value_t = 2048)]
+        max_tokens: u32,
+    },
     /// Explique comment connecter un pilote.
     Login {
         /// Nom du pilote.
@@ -190,20 +234,53 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
             ))
         }
         Command::Freeze => {
-            let manager = sandboxd::Manager::new("prophet-sandbox-helper");
-            let gelees = manager.freeze_all();
-            Ok(format!("{gelees} sandbox(es) gelée(s)\n"))
+            let socket = std::env::var("PROPHET_SANDBOXD_SOCKET").map_or_else(
+                |_| prophet_ipc::socket_path("sandboxd"),
+                std::path::PathBuf::from,
+            );
+            freeze(&socket, cli.json)
         }
-        Command::Provider { action } => provider(action),
+        Command::Provider { action } => provider(action, cli.json),
         Command::Memory { action } => memory(action),
         Command::Log { action } => log(action),
-        Command::Task { action } => task(action),
+        Command::Task { action } => task(action, cli.json),
         // Les approbations vivent dans un daemon en service : sans lui, la commande le dit au
         // lieu de faire semblant.
         Command::Cap { .. } => anyhow::bail!(
             "les approbations exigent capd en service. \
              Lancez `prophet status` pour voir ce qui est disponible sur cette machine."
         ),
+    }
+}
+
+fn freeze(socket: &std::path::Path, as_json: bool) -> anyhow::Result<String> {
+    let result = sous_delai(async {
+        let client = prophet_ipc::Client::connect(socket)
+            .await
+            .map_err(|e| format!("gel non effectué : sandboxd injoignable ({e})"))?;
+        client
+            .call("sandbox.freeze_all", serde_json::json!({}))
+            .await
+            .map_err(|e| format!("gel non confirmé : {}", e.message))
+    })
+    .map_err(anyhow::Error::msg)?;
+    let frozen = result["frozen"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("réponse de gel invalide"))?;
+    let errors = result["errors"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("réponse de gel invalide"))?;
+    if !errors.is_empty() {
+        anyhow::bail!(
+            "gel partiel : {} sandbox(es) gelée(s), {} échec(s) : {errors:?}",
+            frozen.len(),
+            errors.len()
+        );
+    }
+    if as_json {
+        Ok(format!("{result}\n"))
+    } else {
+        Ok(format!("{} sandbox(es) gelée(s)\n", frozen.len()))
     }
 }
 
@@ -413,20 +490,88 @@ fn rendre_verification(rapport: &ledger::VerifyReport) -> anyhow::Result<String>
     }
 }
 
-/// Tâches. Leur espace de travail vit sur le disque : diff et annulation fonctionnent donc sans
-/// daemon, ce qui compte, car c'est précisément quand quelque chose a mal tourné qu'on en a besoin.
-fn task(action: &TaskAction) -> anyhow::Result<String> {
+/// Missions du service. Les captures d'agentd restent privées ; seule la liste historique
+/// hors service et l'ancien undo de bibliothèque consultent encore le disque directement.
+fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
     let maison = home();
     match action {
+        TaskAction::New { request } => {
+            use std::io::Read as _;
+            let mut bytes = Vec::new();
+            std::fs::File::open(request)?
+                .take(1024 * 1024 + 1)
+                .read_to_end(&mut bytes)?;
+            anyhow::ensure!(
+                bytes.len() <= 1024 * 1024,
+                "requête de mission limitée à 1 Mio"
+            );
+            let params = serde_json::from_slice(&bytes)?;
+            let result = task_rpc(&socket_agentd(), "task.spawn", params)?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&result)?));
+            }
+            let plan: agentd::TaskPlan = serde_json::from_value(result)?;
+            Ok(format!(
+                "{}\nDémarrer : prophet task start {}\n",
+                plan.render(),
+                plan.task
+            ))
+        }
+        TaskAction::Start { id } => {
+            let result = task_rpc(&socket_agentd(), "task.start", serde_json::json!({"id":id}))?;
+            if as_json {
+                Ok(format!("{}\n", serde_json::to_string_pretty(&result)?))
+            } else {
+                Ok(format!(
+                    "Mission {id} lancée. Suivi : prophet task ls ; résultat : prophet task result {id}\n"
+                ))
+            }
+        }
+        TaskAction::Result { id } => {
+            let result = task_rpc(
+                &socket_agentd(),
+                "task.result",
+                serde_json::json!({"id":id}),
+            )?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&result)?));
+            }
+            let mut out = format!(
+                "Mission {id} · {}\n",
+                result["state"].as_str().unwrap_or("inconnu")
+            );
+            if let Some(text) = result["text"].as_str() {
+                out.push_str(text);
+                out.push('\n');
+            }
+            if let Some(reason) = result["reason"].as_str() {
+                out.push_str(reason);
+                out.push('\n');
+            }
+            if let Some(diff) = result.get("diff") {
+                let diff: sfs::Diff = serde_json::from_value(diff.clone())?;
+                out.push_str(&diff.render());
+                out.push_str("Changements conservés dans le travail ; validation non appliquée.\n");
+            }
+            Ok(out)
+        }
         TaskAction::Ls => {
-            // Deux questions différentes, et il vaut mieux les poser toutes les deux. `agentd` sait
-            // ce qui *tourne* ; les espaces de travail savent ce qui a *changé des fichiers*. Une
-            // tâche fraîchement planifiée n'a encore touché à rien, et n'apparaissait donc nulle
-            // part — ce qui donnait « aucune tâche » à quelqu'un qui venait d'en lancer une.
+            if as_json {
+                return Ok(format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&task_rpc(
+                        &socket_agentd(),
+                        "task.list",
+                        serde_json::json!({})
+                    )?)?
+                ));
+            }
+            // Le service conserve aussi les missions terminées. Ne pas tenter ensuite de lire
+            // ses captures privées : leur refus d'accès annulait une liste pourtant reçue.
             let mut out = String::new();
             match taches_en_cours(&socket_agentd()) {
                 Ok(taches) if taches.is_empty() => {
-                    out.push_str("aucune tâche en cours\n\n");
+                    return Ok("aucune tâche connue du service\n".into());
                 }
                 Ok(taches) => {
                     out.push_str(&format!(
@@ -442,7 +587,7 @@ fn task(action: &TaskAction) -> anyhow::Result<String> {
                             tache.intent,
                         ));
                     }
-                    out.push('\n');
+                    return Ok(out);
                 }
                 Err(raison) => {
                     // Le dire, plutôt que d'afficher les seuls espaces de travail comme si c'était
@@ -478,13 +623,56 @@ fn task(action: &TaskAction) -> anyhow::Result<String> {
             Ok(out)
         }
         TaskAction::Show { id } | TaskAction::Diff { id } => {
-            let espace = sfs::Workspace::open(&maison, id)?;
-            Ok(format!(
-                "Tâche {id}\n  espace de travail : {:?}\n  dorsale : {}\n\n{}",
-                espace.state(),
-                espace.backend().reason,
-                espace.diff()?.render()
-            ))
+            let inspection: agentd::Inspection = serde_json::from_value(task_rpc(
+                &socket_agentd(),
+                "task.inspect",
+                serde_json::json!({"id":id}),
+            )?)?;
+            anyhow::ensure!(inspection.task.id == *id, "réponse pour une autre mission");
+            if matches!(action, TaskAction::Show { .. }) && as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&inspection)?));
+            }
+            let diff = inspection
+                .result
+                .as_ref()
+                .and_then(|result| result.get("diff"))
+                .cloned()
+                .map(serde_json::from_value::<sfs::Diff>)
+                .transpose()?;
+            if matches!(action, TaskAction::Diff { .. }) {
+                let diff = diff.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Changements non disponibles pour {id}. Consultez `prophet task show {id}`."
+                    )
+                })?;
+                return if as_json {
+                    Ok(format!("{}\n", serde_json::to_string_pretty(&diff)?))
+                } else {
+                    Ok(format!("{}Changements non appliqués.\n", diff.render()))
+                };
+            }
+            let mut out = format!(
+                "Mission {id} : {}\nÉtat : {:?}\n",
+                inspection.task.intent, inspection.task.state
+            );
+            if let Some(plan) = inspection.plan {
+                out.push_str(&plan.render());
+            }
+            if let Some(reason) = inspection.task.reason {
+                out.push_str(&format!("{reason}\n"));
+            }
+            if let Some(result) = inspection.result
+                && let Some(text) = result["text"].as_str()
+            {
+                out.push_str(&format!("{text}\n"));
+            }
+            if let Some(diff) = diff {
+                out.push_str(&diff.render());
+                out.push_str("Changements non appliqués.\n");
+            } else {
+                out.push_str("Changements non disponibles.\n");
+            }
+            Ok(out)
         }
         TaskAction::Undo { id } => {
             let mut espace = sfs::Workspace::open(&maison, id)?;
@@ -494,56 +682,148 @@ fn task(action: &TaskAction) -> anyhow::Result<String> {
                 "tâche {id} annulée : {a} création(s) retirée(s), {m} modification(s) rétablie(s), {s} suppression(s) rétablie(s)\n"
             ))
         }
-        TaskAction::Cancel { .. } => anyhow::bail!(
-            "annuler une tâche en cours exige agentd en service ; \
-             pour défaire une tâche déjà validée, utilisez `prophet task undo`"
-        ),
+        TaskAction::Cancel { id } => {
+            let result = task_rpc(
+                &socket_agentd(),
+                "task.cancel",
+                serde_json::json!({"id":id}),
+            )
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "{e} ; pour défaire une tâche déjà validée, utilisez `prophet task undo`"
+                )
+            })?;
+            if as_json {
+                Ok(format!("{}\n", serde_json::to_string_pretty(&result)?))
+            } else if result.get("cancel_requested").is_some() {
+                Ok(format!(
+                    "Annulation demandée pour {id}. L'état final confirmera l'arrêt.\n"
+                ))
+            } else {
+                Ok(format!("Mission {id} annulée.\n"))
+            }
+        }
     }
 }
 
-fn provider(action: &ProviderAction) -> anyhow::Result<String> {
+fn provider(action: &ProviderAction, as_json: bool) -> anyhow::Result<String> {
+    use providers::local::LocalModel;
+    use providers::native::{ModelClient as _, ModelTurn};
     use providers::official::{ClientProfile, OfficialDriver};
-    let racine = std::path::Path::new("/var/lib/prophet");
+    let racine = home().join(".local/state/prophet");
     let utilisateur = std::env::var("USER").unwrap_or_else(|_| "inconnu".to_owned());
     match action {
+        ProviderAction::Models { endpoint } => {
+            let client = LocalModel::new(endpoint, "discovery", std::time::Duration::from_secs(5))?;
+            let models = client.models()?;
+            if as_json {
+                Ok(format!("{}\n", serde_json::to_string(&models)?))
+            } else if models.is_empty() {
+                Ok("aucun modèle chargé\n".into())
+            } else {
+                Ok(format!("{}\n", models.join("\n")))
+            }
+        }
+        ProviderAction::Chat {
+            model,
+            prompt,
+            endpoint,
+            timeout,
+            max_tokens,
+        } => {
+            let mut client =
+                LocalModel::new(endpoint, model, std::time::Duration::from_secs(*timeout))?
+                    .with_max_tokens(*max_tokens)?;
+            let started = std::time::Instant::now();
+            let (turn, usage) =
+                client.next_turn(&[serde_json::json!({"role":"user", "content":prompt})])?;
+            let ModelTurn::Final { text } = turn else {
+                anyhow::bail!("aucun outil n'est disponible dans cette conversation");
+            };
+            if as_json {
+                Ok(format!(
+                    "{}\n",
+                    serde_json::json!({"model":model, "text":text,
+                    "usage":usage, "elapsed_ms":started.elapsed().as_millis()})
+                ))
+            } else {
+                Ok(format!("{text}\n"))
+            }
+        }
         ProviderAction::Ls => {
+            let diagnostics: Vec<_> = ClientProfile::all()
+                .into_iter()
+                .map(|profile| OfficialDriver::new(profile, &racine, &utilisateur).diagnostic())
+                .collect();
+            if as_json {
+                return Ok(format!(
+                    "{}\n",
+                    serde_json::json!({
+                        "official_clients": diagnostics,
+                        "local_runtime": {"driver": "prophet-agent", "integrated": true}
+                    })
+                ));
+            }
             let mut out = format!(
                 "{:<16} {:<16} {:<14} {}\n",
-                "pilote", "authentification", "client", "session"
+                "pilote", "auth souhaitée", "client", "connexion"
             );
-            for profile in ClientProfile::all() {
-                let driver = OfficialDriver::new(profile.clone(), racine, &utilisateur);
+            for diagnostic in diagnostics {
                 out.push_str(&format!(
                     "{:<16} {:<16} {:<14} {}\n",
-                    profile.driver,
+                    diagnostic.driver,
                     "abonnement",
-                    if driver.client_available() {
+                    if diagnostic.executable.is_some() {
                         "présent"
                     } else {
                         "absent"
                     },
-                    if driver.logged_in() {
-                        "connectée"
-                    } else {
-                        "aucune"
-                    }
+                    diagnostic.connection.label()
                 ));
             }
             out.push_str(&format!(
                 "{:<16} {:<16} {:<14} {}\n",
                 "prophet-agent", "aucune", "intégré", "sans objet"
             ));
+            out.push_str("Exécution agentique des clients officiels : raccordement à réaliser.\n");
             Ok(out)
+        }
+        ProviderAction::Doctor { driver } => {
+            let profile = ClientProfile::all()
+                .into_iter()
+                .find(|p| &p.driver == driver)
+                .ok_or_else(|| anyhow::anyhow!("pilote inconnu : {driver}"))?;
+            let diagnostic = OfficialDriver::new(profile, &racine, &utilisateur).diagnostic();
+            if as_json {
+                Ok(format!("{}\n", serde_json::to_string(&diagnostic)?))
+            } else {
+                Ok(format!(
+                    "{} : {}\nVersion : {}\nConnexion : {}\nExécution agentique : raccordement à réaliser\n",
+                    diagnostic.driver,
+                    diagnostic
+                        .executable
+                        .as_deref()
+                        .map_or_else(|| "client absent".into(), |path| path.display().to_string()),
+                    diagnostic.version.as_deref().unwrap_or("non vérifiée"),
+                    diagnostic.connection.label()
+                ))
+            }
         }
         ProviderAction::Login { driver } => {
             let profile = ClientProfile::all()
                 .into_iter()
                 .find(|p| &p.driver == driver)
                 .ok_or_else(|| anyhow::anyhow!("pilote inconnu : {driver}"))?;
-            Ok(format!(
-                "{}\n",
-                OfficialDriver::new(profile, racine, &utilisateur).login_instructions()
-            ))
+            let instructions =
+                OfficialDriver::new(profile, &racine, &utilisateur).login_instructions();
+            if as_json {
+                Ok(format!(
+                    "{}\n",
+                    serde_json::json!({"driver": driver, "instructions": instructions})
+                ))
+            } else {
+                Ok(format!("{instructions}\n"))
+            }
         }
     }
 }
@@ -710,6 +990,20 @@ fn socket_agentd() -> std::path::PathBuf {
     )
 }
 
+fn task_rpc(
+    socket: &std::path::Path,
+    method: &str,
+    params: serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    sous_delai(async {
+        let client = prophet_ipc::Client::connect(socket)
+            .await
+            .map_err(|e| format!("agentd indisponible : {e}"))?;
+        client.call(method, params).await.map_err(|e| e.message)
+    })
+    .map_err(anyhow::Error::msg)
+}
+
 /// Les tâches que `agentd` tient en ce moment.
 ///
 /// La CLI parle au daemon plutôt que de deviner : lui seul sait ce qui est planifié, en cours ou
@@ -845,6 +1139,47 @@ mod sondes {
         let erreur = repond_en_temps_borne("capd", Path::new("/nulle/part/capd.sock"))
             .expect_err("rien n'écoute là");
         assert!(erreur.contains("injoignable"), "{erreur}");
+    }
+
+    #[test]
+    fn le_gel_utilise_le_gestionnaire_du_daemon() {
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("sandboxd.sock");
+        let recu = faux_service(
+            &socket,
+            Some(
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"frozen\":[\"task:1\",\"task:2\"],\"errors\":[]}}\n",
+            ),
+        );
+        let result = super::freeze(&socket, true).unwrap();
+        let request: serde_json::Value = serde_json::from_str(&recu.recv().unwrap()).unwrap();
+        assert_eq!(request["method"], "sandbox.freeze_all");
+        let response: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(response["frozen"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn un_gel_partiel_ou_un_daemon_absent_ne_passe_pas_pour_un_succes() {
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("sandboxd.sock");
+        assert!(
+            super::freeze(&socket, false)
+                .unwrap_err()
+                .to_string()
+                .contains("injoignable")
+        );
+        let _recu = faux_service(
+            &socket,
+            Some(
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"frozen\":[\"task:1\"],\"errors\":[{\"task\":\"task:2\",\"error\":\"refus\"}]}}\n",
+            ),
+        );
+        assert!(
+            super::freeze(&socket, false)
+                .unwrap_err()
+                .to_string()
+                .contains("gel partiel")
+        );
     }
 }
 

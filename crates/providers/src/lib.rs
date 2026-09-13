@@ -15,10 +15,12 @@
 #![warn(missing_docs)]
 
 pub mod conformance;
+pub mod local;
 pub mod mock;
 pub mod native;
 pub mod official;
 pub mod selection;
+pub mod stream;
 
 use prophet_types::driver::{DriverCapabilities, DriverEvent, StartRequest, StartResponse};
 

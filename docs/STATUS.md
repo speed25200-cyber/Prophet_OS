@@ -1,5 +1,292 @@
 # Prophet OS — Avancement
 
+> État au 13 septembre 2026 : les coches historiques ci-dessous décrivent parfois une
+> bibliothèque ou une simulation, pas le parcours installé complet. Les exigences de livraison
+> sont désormais suivies dans [FRONTIER.md](FRONTIER.md). Le moteur local possède un client HTTP
+> concret, une conversation en flux et des missions via MCP/agentd avec vrais capd/ledger.
+> L'examen des versions est implémenté ; leur application approuvée et le parcours installé
+> complet restent à établir. Voir le [dernier rapport de l'atelier](reports/atelier-2026-09-13.md)
+> et les exigences ouvertes, notamment la qualité graphique attendue et les sessions authentifiées.
+
+Correctifs d'accès humain du 13 septembre, après `a6b831c` : la CLI consulte la liste,
+le détail et le diff d'agentd sans ouvrir ses captures privées. Deux régressions échouent
+avant correction puis réussissent. Le secours graphique laisse getty afficher son avis et
+l'invite ; une VM KVM dédiée réussit la connexion malgré les avis de panne avant et pendant
+le mot de passe, puis dans la session ouverte (34,98 s). Le test installé complet est renforcé,
+mais son résultat sur cette nouvelle révision reste à établir. Les échecs de services et de
+connexion de `d20ef74` ne sont donc plus attribués à une cause inconnue. Voir le
+[rapport d'accès humain](reports/acces-humain-2026-09-13.md) et l'[ADR 0020](adr/0020-consultation-et-secours-humains.md).
+La CI de `ddd375b` réussit depuis les services, le démarrage installé et la mission avec modèle
+réel. Le test installé de cette révision prouve le secours et la connexion console, pas un bureau.
+Le nouveau module de [session humaine](reports/bureau-humain-2026-09-13.md), après `ddd375b`,
+passe le parcours `desktop-session` en 188,07 s : connexion PAM, supervision sous UID du
+propriétaire, fichier et presse-papiers réels, applications officielles, verrouillage et reconnexion.
+La variante sur disque installé échoue localement dans KVM/SMM avant les services. La
+[CI de `8ea4c7f`](https://github.com/speed25200-cyber/Prophet_OS/actions/runs/34748498023)
+réussit ensuite le démarrage systemd-boot, la vérification des empreintes du magasin ext4,
+la session PAM, les sept services, le terminal, Thunar et le presse-papiers. Le parcours
+échoue au relevé du processus Claude Code : sa capture montre le diagnostic `ENOTFOUND`
+suivi de sa fin dans la VM sans réseau. Le parcours installé complet reste rouge.
+Aucun critère complet de FRONTIER n'est coché.
+ChatGPT y est inclus à titre expérimental ; son défaut Fontconfig et son test strict rouge restent ouverts.
+`just check` réussit dans Nix : 633 tests, aucun échec, 29 ignorés, format, clippy,
+construction des binaires et contrôles du dépôt réussis.
+
+La [CI générale de `8ea4c7f`](https://github.com/speed25200-cyber/Prophet_OS/actions/runs/34748498818)
+réussit les contrôles du code, l'isolation, le protocole du moteur, la mission locale réelle
+et la surface d'observation. Elle échoue sur le contrôle strict Fontconfig de ChatGPT.
+
+Jalon de publication après `8ea4c7f` : `commit_review` vérifie les versions exactes et les
+originaux, `undo` refuse les modifications humaines ultérieures, et le journal permet la
+reprise après interruption. Les attributs, ACL, propriétaires et dates sont conservés.
+Les snapshots Btrfs ne sont plus annoncés comme implémentés. Le
+[rapport de publication](reports/publication-2026-09-13.md) précise les preuves et les limites.
+Validation locale : `just check` réussi, 663 tests sans échec, 29 ignorés ; les 61 tests SFS
+sont rejoués sous UID/GID 65534 sans échec, dont les 18 scénarios d'interruption et reprise.
+L'application sous l'UID humain, les droits capd liés à l'index, les dossiers parents concurrents
+et les commandes graphiques restent à livrer ; aucune case complète de FRONTIER n'est cochée.
+
+Jalons d'intégration réellement exercés le 12 septembre 2026 :
+
+- `c3b0c08` — moteur local réel, CLI et gel d'un processus possédé par sandboxd.
+- `766ce9e` — espace natif Wayland, conversation locale en flux, neuf tests de rendu réussis,
+  première image en fenêtre WSLg et capture d'une vraie réponse Qwen3.
+- `2abcf3f` — préparation MCP : le registre refuse désormais les exigences inconnues, les cibles absentes,
+  les niveaux d'isolation insuffisants et les contextes de tâche incohérents. La session exige
+  son initialisation et borne ses entrées. Quatre tests de régression ont d'abord échoué sur
+  l'ancien comportement. Le [guide du composant](../crates/mcp-system/README.md) précise les
+  accès fichiers et les raccordements aux daemons qui restent à corriger avant activation.
+  Validation locale après correction : `nix develop --command just check`, 569 tests réussis,
+  aucun échec, 16 ignorés ; format, clippy et contrôles du dépôt réussis.
+- `0f3f307` — clients officiels : Codex et Claude Code exigés par la configuration d'image. Versions et
+  connexion sondées par les vrais clients, sans inspection des fichiers d'identifiants ; profils
+  privés dans le répertoire utilisateur, reprise Codex et options de flux Claude corrigées.
+  Les capacités ne déclarent plus des fonctionnalités agentiques non raccordées. Validation
+  locale : `nix develop --command just check`, 575 tests réussis, aucun échec, 17 ignorés.
+  Test explicite supplémentaire sur les vrais binaires : Codex 0.153.4 et Claude Code 2.1.266,
+  versions reconnues et connexion requise dans des profils vierges ; commandes CLI doctor,
+  login et ls JSON exercées avec succès. La CI de cette révision a réussi ses trois travaux,
+  puis la construction de l'ISO, son démarrage, la construction du système installé, son
+  démarrage et les tests des services. Le bureau humain, l'application
+  ChatGPT et les sessions authentifiées restent à intégrer. Voir le
+  [guide des pilotes](components/providers.md) et l'[ADR 0009](adr/0009-clients-officiels-et-bureau.md).
+- `f8e263e` et correctifs de compatibilité — paquet ChatGPT Linux expérimental construit depuis
+  le `.deb` officiel 26.908.40834 ; empreinte du binaire principal inchangée. La VM NixOS sous
+  KVM confirme une fenêtre XWayland visible et l'écran de connexion par reconnaissance de texte,
+  avec le binaire officiel sous UID 1000. La copie des plugins est corrigée, leur initialisation
+  se termine. **Le test graphique strict reste en échec** sur une erreur Fontconfig dans un
+  renderer secondaire ; le paquet reste hors de l'image installée. Aucun compte n'est connecté.
+  Un test de régression protège aussi les valeurs d'options de Claude Code. Validation locale
+  des composants : `just check` dans Nix, 576 tests réussis, aucun échec, 17 ignorés. La CI de
+  `f8e263e` réussit les composants, l'isolation, la surface, les services, l'installeur, l'ISO et
+  les deux démarrages ; son travail ChatGPT a échoué sur la classe de fenêtre, corrigée depuis.
+  Les résultats de cette révision ne valident pas les correctifs suivants. Voir le
+  [rapport ChatGPT Linux](reports/chatgpt-linux-2026-09-12.md).
+
+La CI de `f132518` a depuis réussi les composants, l'isolation, le rendu de la surface, les
+services, l'installeur, les constructions et le démarrage de l'ISO. Le travail ChatGPT reste en
+échec. Le test du système installé a aussi échoué lors de l'ouverture de session du propriétaire
+après son délai de 900 secondes ; sa cause reste à diagnostiquer. Cette observation précède la
+refonte Iris et ne constitue pas une validation du système installé pour cette révision.
+
+Jalon d'interface du 13 septembre 2026 : **Iris** remplace la présentation de l'espace natif
+par une composition centrée, une sculpture irisée native, un dock flottant, Inter embarquée
+et des contrôles adaptés à la taille de la fenêtre. Les captures finales incluent une vraie
+conversation Qwen locale et des formats de 640 × 480 à 1920 × 1080. Validation locale :
+`just check`, 576 tests réussis, aucun échec, 18 ignorés ; dix tests graphiques explicites
+réussis et première image soumise à Wayland sous WSLg. La nouvelle révision reste à valider
+en CI. Ce jalon ne résout pas les échecs installés et ChatGPT décrits ci-dessus. Voir le
+[rapport Iris et ses captures](reports/interface-iris-2026-09-13.md).
+
+Le même jour, l'utilisateur rejette Iris et demande un espace réellement conçu pour les agents
+et la supervision humaine. La nouvelle direction supprime la sculpture, adopte un thème clair
+et place les missions, leur contexte et les décisions au premier plan. Les filtres, la sélection,
+le retour aux missions sur petit écran et l'examen explicite sont implémentés. Validation locale :
+`just check`, 577 tests réussis, aucun échec, 20 ignorés ; douze tests graphiques explicites
+réussis (six parcours natifs et six tests du rendu historique). Les commandes d'agents, livrables,
+diffs, permissions détaillées et acquittements restent à intégrer. La validation de cette nouvelle
+révision en CI reste à réaliser. Voir le [rapport de supervision](reports/supervision-2026-09-13.md)
+et l'[ADR 0011](adr/0011-supervision-humaine.md). La qualité visuelle reste à apprécier par
+l'utilisateur ; ce jalon ne constitue pas une certification SOTA ni une équivalence avec Apple.
+
+Jalon fichiers MCP du 13 septembre 2026, après `bee035d` : accès Linux relatifs à des descripteurs,
+refus des liens et fichiers spéciaux, remplacement atomique dans le travail, descendants
+recontrôlés et parcours bornés. Les six régressions initiales ont échoué avant correction ; les
+douze nouveaux tests ordinaires passent désormais. `RegistryExecutor` raccorde les outils à la
+boucle native : un vrai Qwen3 écrit un fichier, reçoit son résultat et termine ; SFS expose le
+changement sans modifier le home. **`just check` réussi : 589 tests, aucun échec, 21 ignorés**,
+format, clippy et contrôles du dépôt réussis. L'essai modèle ignoré par défaut a été exécuté
+séparément et réussit en 10,57 secondes. Le Broker et le journal sont en mémoire dans cet essai.
+Le binaire MCP, le contexte de service fiable, les racines privées, les commits/undo SFS
+concurrents et le parcours depuis l'interface restent à intégrer. Voir le
+[rapport MCP](reports/mcp-fichiers-2026-09-13.md) et l'[ADR 0012](adr/0012-acces-fichiers-mcp.md).
+
+Résultats CI relus pour `bee035d` : composants, isolation et rendu réussis ; ChatGPT en échec.
+Le workflow d'image réussit les services, l'installeur, les constructions et les deux démarrages
+(ISO et système installé). Le délai de session de `f132518` ne s'est pas reproduit dans ce run,
+sans que sa cause soit établie. Le rapport MCP référence ces exécutions. Ces observations ne
+valident pas encore le nouveau correctif MCP en CI.
+
+Jalon de service du 13 septembre 2026, après `d7b5c90` : `task.start` lance une mission locale
+en arrière-plan avec les vrais capd et ledger ; `task.result` conserve le résultat. La CLI
+planifie, lance, suit et demande l'annulation. La capture SFS et les outils contrôlent les
+périmètres, les générations tronquées restent comptées avant toute action et les erreurs de
+journal interdisent la répétition automatique. Les tâches interrompues par redémarrage ont
+un échec explicite et l'état corrompu est préservé pour réparation. Le lanceur n'exécute que
+des outils natifs de confiance de niveau 0, sans lancer de programme non fiable.
+
+**Les trois essais Qwen3-0.6B du parcours agentd échouent** : le serveur déclare une génération
+incomplète au plafond de 2 048 tokens ; le dernier protocole observé contient aussi un texte
+altéré. Le refus est maintenu, sans exécuter l'appel incomplet. **`just check` réussi : 604 tests,
+aucun échec, 22 ignorés**, format, clippy, construction des programmes et contrôles du dépôt.
+Les neuf scénarios ordinaires du parcours agentd, avec moteur HTTP contrôlé et vrais services,
+passent ; les essais de modèle réel restent distincts et en échec.
+Voir le [rapport de missions](reports/missions-locales-2026-09-13.md),
+l'[ADR 0013](adr/0013-missions-locales-agentd.md) et l'[exemple CLI](../crates/agentd/README.md).
+La reprise par checkpoints, les résultats vérifiés, le lancement depuis l'interface, les
+processus sous sandboxd et l'intégration à l'image restent ouverts. Aucun critère complet
+de FRONTIER.md n'est coché pour ce jalon. La CI de `d7b5c90` a réussi composants, isolation
+et surface ; le test ChatGPT reste en échec (run `34726143307`).
+
+Jalon de supervision du 13 septembre 2026, commit `2eb86f8` :
+`task.inspect` expose le plan et le résultat sans jeton. L'interface native permet de lancer
+un plan existant, de demander l'arrêt et de lire ou copier le résultat ; les missions terminées
+restent consultables. Les commandes attendent les réponses du service et les lectures anciennes
+sont écartées. La liste et le détail réconcilient leurs états, y compris après pause et reprise.
+Le client IPC borne les lectures et contrôle la corrélation et la forme des réponses.
+
+**`just check` réussi : 615 tests, aucun échec, 24 ignorés**, avec format, clippy, reconstruction
+des binaires et contrôles du dépôt. **Les 14 tests graphiques explicites réussissent** ; les
+deux nouveaux parcours utilisent les widgets natifs, agentd, capd et ledger réels, avec un
+serveur HTTP de modèle contrôlé. Douze captures montrent le plan, l'exécution, le résultat,
+le parcours, l'arrêt et l'échec, sur quatre largeurs. Un délai de lecture de cinq secondes
+pendant un essai d'arrêt ne s'est pas reproduit dans les exécutions suivantes ; sa cause reste
+inconnue. Voir le [rapport et les captures](reports/commandes-supervision-2026-09-13.md)
+et l'[ADR 0014](adr/0014-inspection-et-commandes-de-mission.md).
+
+Ce jalon ne valide pas la chaîne agentd avec un LLM réel : les trois échecs Qwen3 ci-dessus
+restent ouverts. La CI de `a91ed22` a réussi composants, isolation et surface ; le travail
+ChatGPT échoue toujours sur Fontconfig (run `34728460203`). La nouvelle révision reste à
+vérifier en CI. La création de plans depuis le dialogue, le contenu des diffs et leur validation,
+les processus isolés, les sessions authentifiées et l'intégration complète à l'image restent
+à réaliser. Aucun critère complet de FRONTIER.md n'est coché pour ce jalon.
+
+Jalon de préparation du 13 septembre 2026, après `2eb86f8`, dans le commit portant ce rapport :
+une intention saisie dans la surface peut devenir un plan avec `task.prepare`. Le contexte
+et les modèles admis viennent de profils configurés dans agentd ; le moteur est interrogé
+réellement avant de proposer puis de préparer le modèle choisi. L'identité vient du pair Unix.
+L'humain examine le plan puis le lance séparément. Une demande du dialogue peut devenir un
+nouveau brouillon ; les réponses du modèle ne fournissent ni droits ni profil.
+
+Le contrôleur garde la référence envoyée après une erreur et propose une relecture du plan
+sans nouvelle création. Il conserve aussi le modèle de la tentative incertaine. Le formulaire
+adapte son organisation aux fenêtres étroites et moins hautes. Un essai graphique a rencontré
+un délai de confirmation, puis le même binaire a réussi en exécution isolée ; sa cause reste
+inconnue. **`just check` réussi : 622 tests, aucun échec, 25 ignorés**, avec format, clippy,
+reconstruction des programmes et contrôles du dépôt. **Les 15 tests graphiques explicites
+réussissent**, dont le parcours de préparation avec modèle HTTP contrôlé et trois vrais
+services, puis le transfert d'une nouvelle demande du dialogue vers un nouveau brouillon.
+Voir le [rapport et les captures](reports/preparation-missions-2026-09-13.md)
+et l'[ADR 0015](adr/0015-intention-et-profils-de-mission.md).
+
+La CI de `2eb86f8` a réussi composants, isolation et surface ; le travail ChatGPT a échoué
+(run `34731398933`). Les trois échecs Qwen3-0.6B restent ouverts. Les profils, moteurs et la
+session humaine installée restent à intégrer ; aucune session authentifiée ChatGPT/Claude Code
+n'est validée. L'examen et la validation du contenu, les checkpoints, l'undo robuste et les
+processus isolés restent à réaliser. Aucun critère complet de FRONTIER.md n'est coché.
+
+Jalon du moteur local du 13 septembre 2026, après `a16472a`, dans le commit portant ce rapport :
+la cause d'une répétition après appel est isolée dans la grammaire de llama.cpp. Un patch
+du paquet Nix respecte le mode séquentiel et supprime la répétition d'appels optionnels.
+Huit assertions échouent sur le moteur original ; le paquet corrigé passe **60 vérifications**
+sur les templates Qwen3 et Qwen2.5. Le pilote, les tests Rust et les contrôles d'exécution
+restent inchangés. **`just check` réussi : 622 tests, aucun échec, 25 ignorés**.
+
+Avec le paquet final, **Qwen3-1.7B-Q8_0 réussit trois missions réelles sur trois**, en
+12,42 / 12,96 / 13,02 secondes pour le test complet. Fichier exact, diff SFS, vrais capd/ledger
+et résultat relu après redémarrage sont vérifiés. Qwen3-0.6B ne réussit qu'un essai sur trois ;
+les deux autres terminent mais produisent un contenu erroné. Les trois anciennes générations
+tronquées restent dans le rapport historique. Cette nouvelle preuve porte sur une seule
+tâche d'écriture répétée, sans modifier ses assertions ; elle ne démontre pas une fiabilité
+générale, une validation des objectifs par agentd ou l'utilisation depuis l'image installée.
+
+Voir le [diagnostic, les mesures et les limites](reports/grammaire-locale-2026-09-13.md)
+et l'[ADR 0016](adr/0016-grammaire-du-moteur-local.md). La CI de `a16472a` a réussi composants,
+isolation et surface ; ChatGPT reste en échec (run `34733626591`). Le moteur et ses poids
+ne sont pas encore provisionnés dans la session installée. GPU, autres familles, résultats
+vérifiés, graphisme et sessions authentifiées restent ouverts. Aucun critère complet de
+FRONTIER.md n'est coché.
+
+Raccordement du 13 septembre 2026, après `395ecbb` : le module système installe le moteur
+corrigé, un profil `Documents Prophet` et des paramètres communs au dialogue et à agentd.
+Les poids restent un choix de configuration explicite. capd et agentd utilisent le home du
+propriétaire configuré ; le contexte partagé et les travaux privés reçoivent des permissions
+distinctes. **Trois essais graphiques réels sur trois réussissent avec Qwen3-1.7B**, après un
+premier essai également réussi : widgets natifs, vrais services, contenu exact et originaux
+intacts. **`just check` réussi : 622 tests, aucun échec, 25 ignorés** ; le test graphique réel
+reste séparé sous une feature explicite. Le test NixOS avec poids réels est ajouté à la CI.
+Les 15 tests graphiques contrôlés passent aussi après ce raccordement.
+Son exécution et la construction du nouveau paquet restent à confirmer ; l'évaluation Nix
+réussit. La construction locale a été interrompue avec seulement 6 Go libres sur le disque
+hôte. Le cache incrémental Linux a été réduit d'environ 15 Go, sans gain physique confirmé
+sur Windows. Voir le [rapport](reports/moteur-installe-2026-09-13.md) et l'[ADR 0017](adr/0017-moteur-installe-et-contexte-partage.md).
+
+La CI de `395ecbb` réussit le protocole du moteur, les composants, l'isolation et la surface ;
+ChatGPT demeure en échec. Le kiosque, la gestion graphique des poids, le contenu des diffs,
+leur validation, les clients authentifiés et la refonte visuelle demandée restent ouverts.
+Aucun critère complet de FRONTIER.md n'est coché pour ce raccordement.
+
+Examen des fichiers du 13 septembre 2026, après `1640e1c`, dans le commit portant ce rapport :
+la surface compare les versions initiales et proposées, permet la copie exacte et retire un
+aperçu altéré à l'actualisation. SFS conserve les octets initiaux et vérifie l'index final ;
+`task.change` exige l'UID créateur constaté et persisté. Les lectures et le calcul de lignes se
+font en arrière-plan. Les anciennes missions sans versions ne reçoivent pas d'aperçu inventé.
+Le [rapport](reports/examen-fichiers-2026-09-13.md) contient les preuves et captures ;
+l'[ADR 0018](adr/0018-examen-des-versions.md) décrit les bornes et les limites.
+
+**`just check` final réussi : 631 tests, aucun échec, 26 ignorés** ; les **16 tests graphiques
+explicites réussissent**. Trois essais Qwen3-1.7B lisent le contenu exact dans l'aperçu natif ;
+un quatrième réussit après compactage de la vue Fichiers. Les contrôles du propriétaire,
+des versions altérées, de la comparaison de longs textes et de la relecture après redémarrage
+sont inclus. Les captures finales sont examinées en trois tailles. Une lecture de journal WSL
+a expiré pendant les contrôles ; la connexion a repris et les tests ont abouti, sans arrêt forcé.
+
+La CI de `1640e1c` réussit composants, isolation et protocole du moteur. La surface échoue sur
+un bouton encore absent pendant la synchronisation ; son attente est corrigée dans le test.
+La VM charge Qwen3 puis échoue avant génération : `RestrictSUIDSGID` interdit l'ouverture sûre
+utilisée par SFS. L'erreur 38 est reproduite sous systemd puis supprimée avec le retrait ciblé
+de cette restriction pour agentd ; les autres protections sont conservées. La nouvelle VM
+doit confirmer le parcours complet. ChatGPT échoue toujours au contrôle Fontconfig.
+L'application et l'undo des fichiers, les droits des autres méthodes, le bureau humain complet,
+les clients authentifiés et la direction graphique demandée restent ouverts. Aucun critère
+complet de FRONTIER.md n'est coché pour cet examen.
+
+Atelier du 13 septembre 2026, après `d20ef74`, dans le commit portant le
+[rapport](reports/atelier-2026-09-13.md) : navigation graphite, galerie de missions, Focale et
+recherche Ctrl+K. Une mission seule reçoit directement l'espace d'examen ; les plans préparés
+effacent la recherche précédente. Le mélange des transparences d'egui est corrigé dans une vue
+Unorm compatible ; le test blanc sur blanc reproduisait un gris de 220 avant correction.
+L'[ADR 0019](adr/0019-atelier-et-focale.md) décrit la composition et ses limites.
+
+**`just check` final réussi : 631 tests, aucun échec, 29 ignorés**, avec format, clippy,
+construction des programmes et contrôles du dépôt. La première tentative avait rencontré
+trois délais de commande du navigateur ; les quatre tests concernés passent ensuite sans
+modification du pont, puis la suite complète réussit. Un démarrage d'agentd dépasse aussi le
+délai lors d'un essai graphique ; cet incident reste dans le rapport.
+Les **19 tests graphiques réussissent** au passage final. La galerie de mille missions mesure
+8,592 ms en médiane et 13,785 ms en p95 pour la composition et la soumission, sans attente de
+présentation. Les captures finales sont examinées. La série Qwen3-1.7B reste **à deux réussites
+sur trois** : le premier essai refuse la capture SFS avant l'inférence, avec une cause précise
+non établie ; les deux autres vérifient le fichier exact et l'aperçu natif. Le diagnostic du
+refus reste ouvert, sans assouplissement des droits.
+
+La CI de `d20ef74` réussit composants, surface, isolation, protocole et mission réelle sous
+NixOS : poids sous un compte distinct, contenu exact, examen des versions et relecture après
+redémarrage, avec refus sous l'UID 0. ChatGPT reste en échec sur Fontconfig. La session humaine
+complète, les clients authentifiés, l'application et l'undo, les autres familles et GPU,
+la qualité graphique attendue et les mesures matérielles restent ouverts. Aucun critère
+complet de FRONTIER.md n'est coché.
+
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 
 Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'environnement de construction** ; le détail est dans `docs/reports/phase0.md` section 5.
@@ -90,7 +377,7 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 - [x] M8-T4 — Pilote `claude-code` (2026-09-12, 24b8338) — ligne de commande, environnement, détection de session
 - [x] M8-T5 — Pilote `codex` (2026-09-12, 24b8338) — pilote Codex CLI
 - [x] M8-T6 — Pilote `gemini` (2026-09-12, 24b8338) — pilote Gemini CLI
-- [ ] ⛔ M8-T7 — Moteurs locaux — bloqué : exige un GPU et un modèle du catalogue
+- [ ] M8-T7 — Moteurs locaux — client HTTP, flux annulable, interface de conversation et essai Qwen3/CPU réalisés ; restent le service de modèles, le raccordement à agentd, les budgets de tokens/VRAM et la matrice GPU/modèles
 - [x] M8-T8 — Pilote `prophet-agent` (2026-09-12, 24b8338) — boucle native : points de reprise, fork, rejeu
 - [x] M8-T9 — Sélection de pilote (2026-09-12, 24b8338) — sélection expliquée, confidentialité locale respectée
 - [x] M8-T10 — CLI (2026-09-12, 24b8338) — `prophet provider ls|login`

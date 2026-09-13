@@ -12,7 +12,9 @@
 //! qui est le seul écrivain, parce que le chaînage par hachage ne prouve quelque chose que s'il
 //! existe une seule séquence de numéros.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use agentd::runtime::PlanRequest;
 use agentd::{EtatPersistant, Runtime};
@@ -26,7 +28,12 @@ use time::OffsetDateTime;
 use tokio::sync::Mutex;
 
 struct Agents {
-    runtime: Mutex<Runtime>,
+    runtime: Arc<Mutex<Runtime>>,
+    jobs: Arc<std::sync::Mutex<BTreeMap<String, Arc<AtomicBool>>>>,
+    local_endpoint: Option<String>,
+    profiles: Vec<agentd::preparation::Profile>,
+    preparing: Mutex<()>,
+    reviews: Arc<tokio::sync::Semaphore>,
     capd: std::path::PathBuf,
     ledger: std::path::PathBuf,
     /// Où l'état est écrit entre deux démarrages.
@@ -50,11 +57,118 @@ impl Handler for Agents {
         match methode.as_str() {
             "ping" => Ok(json!("pong")),
 
+            "task.options" => {
+                let (models, model_error) = match self.local_models().await {
+                    Ok(models) => (models, None),
+                    Err(error) => (Vec::new(), Some(error.message)),
+                };
+                commun::repondre(&agentd::preparation::Options {
+                    profiles: self.profiles.iter().map(|p| p.view(&models)).collect(),
+                    model_error,
+                })
+            }
+
+            "task.prepare" => {
+                let request: agentd::preparation::Request = serde_json::from_value(params)
+                    .map_err(|e| Error::new(ErrorCode::InvalidParams, e.to_string()))?;
+                request
+                    .validate()
+                    .map_err(|e| Error::new(ErrorCode::InvalidParams, e))?;
+                let profile = self
+                    .profiles
+                    .iter()
+                    .find(|p| p.id == request.profile)
+                    .ok_or_else(|| {
+                        Error::new(ErrorCode::InvalidParams, "Profil de mission inconnu.")
+                    })?;
+                let reference = format!("local:{}", request.model);
+                if !profile.manifest.model.preferred.contains(&reference) {
+                    return Err(Error::new(
+                        ErrorCode::PolicyDenied,
+                        "Modèle non admis par ce profil.",
+                    ));
+                }
+                // Sérialise les préparations pour refuser une seconde émission pour le même id.
+                let _preparing = self.preparing.lock().await;
+                if self.runtime.lock().await.task(&request.id).is_some() {
+                    return Err(Error::new(
+                        ErrorCode::Conflict,
+                        "Cette référence existe déjà. Relisez son plan.",
+                    ));
+                }
+                let models = self.local_models().await?;
+                if !models.contains(&request.model) {
+                    return Err(Error::new(
+                        ErrorCode::Conflict,
+                        "Le modèle choisi n'est plus disponible.",
+                    ));
+                }
+                let mut manifest = profile.manifest.clone();
+                manifest.model.preferred = vec![reference];
+                let grants = profile
+                    .grants()
+                    .map_err(|e| Error::new(ErrorCode::InternalError, e))?;
+                let user = format!("uid:{}", pair.uid);
+                let token = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    self.demander_un_jeton(&manifest, &request.id, &user, &grants),
+                )
+                .await
+                .map_err(|_| {
+                    Error::new(
+                        ErrorCode::InternalError,
+                        "capd ne répond pas dans le délai.",
+                    )
+                })??;
+                let availability = Availability {
+                    local_models: models,
+                    ..Default::default()
+                };
+                let scopes: Vec<&str> = profile.scopes.iter().map(String::as_str).collect();
+                let plan = {
+                    let mut runtime = self.runtime.lock().await;
+                    let plan = runtime
+                        .plan_with_token(
+                            &PlanRequest {
+                                id: &request.id,
+                                intent: &request.intent,
+                                manifest: &manifest,
+                                user: &user,
+                                requested: &grants,
+                                scopes: &scopes,
+                                availability: &availability,
+                            },
+                            token,
+                            OffsetDateTime::now_utc(),
+                        )
+                        .map_err(runtime_erreur)?;
+                    runtime
+                        .bind_owner(&request.id, pair.uid)
+                        .map_err(|e| Error::new(ErrorCode::InternalError, e))?;
+                    ecrire(&self.etat, &runtime.etat()).map_err(|e| {
+                        Error::new(
+                            ErrorCode::InternalError,
+                            format!("Plan non confirmé sur disque : {e}"),
+                        )
+                    })?;
+                    plan
+                };
+                self.vider_le_journal().await;
+                commun::repondre(&plan)
+            }
+
             // Planifier, c'est décider *avant* : quel pilote, quel niveau d'isolation, quelles
             // capacités, quel budget. Le plan est rendu tel quel pour que l'humain puisse dire non
             // en connaissance de cause, ce qui suppose que tout y soit.
             "task.spawn" => {
                 let id = commun::texte(&params, "id")?;
+                let _preparing = self.preparing.lock().await;
+                if self.runtime.lock().await.task(&id).is_some() {
+                    return Err(Error::new(
+                        ErrorCode::Conflict,
+                        "Cette référence de mission existe déjà.",
+                    ));
+                }
                 let intention = commun::texte(&params, "intent")?;
                 let utilisateur = commun::texte(&params, "user")?;
                 let manifeste: Manifest = lire(&params, "manifest")?;
@@ -75,7 +189,7 @@ impl Handler for Agents {
                 let refs: Vec<&str> = perimetres.iter().map(String::as_str).collect();
                 let plan = {
                     let mut runtime = self.runtime.lock().await;
-                    runtime
+                    let plan = runtime
                         .plan_with_token(
                             &PlanRequest {
                                 id: &id,
@@ -89,9 +203,13 @@ impl Handler for Agents {
                             jeton,
                             maintenant,
                         )
-                        .map_err(runtime_erreur)?
+                        .map_err(runtime_erreur)?;
+                    runtime
+                        .bind_owner(&id, pair.uid)
+                        .map_err(|e| Error::new(ErrorCode::InternalError, e))?;
+                    plan
                 };
-                self.enregistrer().await;
+                self.enregistrer().await?;
                 self.vider_le_journal().await;
                 tracing::info!(tache = %id, pilote = %plan.choice.reference, "tâche planifiée");
                 commun::repondre(&plan)
@@ -111,19 +229,96 @@ impl Handler for Agents {
                 commun::repondre(tache)
             }
 
-            // L'annulation est un geste de l'humain : elle aboutit. Le pilote est prévenu, puis la
-            // tâche est close sans attendre sa confirmation.
+            "task.start" => self.start_local(commun::texte(&params, "id")?).await,
+
+            "task.inspect" => {
+                let id = commun::texte(&params, "id")?;
+                let has_worker = self
+                    .jobs
+                    .lock()
+                    .map_err(|_| {
+                        Error::new(ErrorCode::InternalError, "travailleurs indisponibles")
+                    })?
+                    .contains_key(&id);
+                let runtime = self.runtime.lock().await;
+                commun::repondre(
+                    &runtime
+                        .inspect(&id, self.local_endpoint.is_some(), has_worker)
+                        .map_err(runtime_erreur)?,
+                )
+            }
+
+            "task.result" => {
+                let id = commun::texte(&params, "id")?;
+                let runtime = self.runtime.lock().await;
+                let result = runtime
+                    .result(&id)
+                    .ok_or_else(|| Error::new(ErrorCode::NotFound, "résultat non disponible"))?;
+                Ok(result.clone())
+            }
+
+            "task.change" => {
+                #[derive(serde::Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Request {
+                    id: String,
+                    path: String,
+                }
+                let request: Request = serde_json::from_value(params)
+                    .map_err(|e| Error::new(ErrorCode::InvalidParams, e.to_string()))?;
+                if request.id.len() > 160 || request.path.len() > 4096 {
+                    return Err(Error::new(
+                        ErrorCode::InvalidParams,
+                        "Référence ou chemin trop long.",
+                    ));
+                }
+                let (home, index) = self
+                    .runtime
+                    .lock()
+                    .await
+                    .review_context(&request.id, pair.uid)
+                    .map_err(|e| Error::new(ErrorCode::PolicyDenied, e))?;
+                let task = request.id.clone();
+                let permit = self.reviews.clone().try_acquire_owned().map_err(|_| {
+                    Error::new(
+                        ErrorCode::Conflict,
+                        "Deux fichiers sont déjà en cours de lecture. Réessayez dans un instant.",
+                    )
+                })?;
+                let file = tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    index.read(&home, &request.id, &request.path)
+                })
+                .await
+                .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?
+                .map_err(|e| Error::new(ErrorCode::Conflict, e.to_string()))?;
+                commun::repondre(&agentd::ChangeReview { task, file })
+            }
+
+            // Une mission active accuse réception de la demande ; son travailleur confirme
+            // ensuite l'arrêt dans l'état final, après interruption de la requête au modèle.
             "task.cancel" => {
                 let id = commun::texte(&params, "id")?;
+                let stop = self
+                    .jobs
+                    .lock()
+                    .map_err(|_| {
+                        Error::new(ErrorCode::InternalError, "travailleurs indisponibles")
+                    })?
+                    .get(&id)
+                    .cloned();
+                if let Some(stop) = stop {
+                    stop.store(true, Ordering::Release);
+                    return Ok(json!({"cancel_requested":id}));
+                }
                 let maintenant = OffsetDateTime::now_utc();
                 {
                     let mut runtime = self.runtime.lock().await;
-                    let mut aucun = providers::mock::MockDriver::default();
                     runtime
-                        .cancel(&id, None, &mut aucun, maintenant)
+                        .cancel_unstarted(&id, maintenant)
                         .map_err(runtime_erreur)?;
                 }
-                self.enregistrer().await;
+                self.enregistrer().await?;
                 self.vider_le_journal().await;
                 tracing::info!(tache = %id, "tâche annulée");
                 Ok(json!({ "cancelled": id }))
@@ -135,6 +330,121 @@ impl Handler for Agents {
 }
 
 impl Agents {
+    async fn local_models(&self) -> Result<Vec<String>, Error> {
+        let endpoint = self.local_endpoint.as_deref().ok_or_else(|| {
+            Error::new(
+                ErrorCode::Conflict,
+                "Le moteur de mission local n'est pas configuré.",
+            )
+        })?;
+        providers::stream::ChatClient::new(endpoint, std::time::Duration::from_secs(3))
+            .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?
+            .models()
+            .await
+            .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))
+    }
+
+    async fn start_local(&self, id: String) -> Result<Value, Error> {
+        let endpoint = self.local_endpoint.clone().ok_or_else(|| {
+            Error::new(ErrorCode::Conflict, "moteur local du service non configuré")
+        })?;
+        let stop = Arc::new(AtomicBool::new(false));
+        {
+            let mut jobs = self
+                .jobs
+                .lock()
+                .map_err(|_| Error::new(ErrorCode::InternalError, "travailleurs indisponibles"))?;
+            if jobs.len() >= 2 || jobs.contains_key(&id) {
+                return Err(Error::new(
+                    ErrorCode::Conflict,
+                    "mission déjà lancée ou capacité de travail atteinte",
+                ));
+            }
+            jobs.insert(id.clone(), stop.clone());
+        }
+        let launch = {
+            let mut runtime = self.runtime.lock().await;
+            match runtime.begin_local(&id) {
+                Ok(launch) => match ecrire(&self.etat, &runtime.etat()) {
+                    Ok(()) => Ok(launch),
+                    Err(error) => {
+                        let mut task = launch.0;
+                        task.state = agentd::State::Failed;
+                        task.reason = Some("lancement non persisté".into());
+                        task.history.push(agentd::State::Failed);
+                        runtime.publish_local(task, None);
+                        Err(Error::new(
+                            ErrorCode::InternalError,
+                            format!("lancement non persisté : {error}"),
+                        ))
+                    }
+                },
+                Err(error) => Err(runtime_erreur(error)),
+            }
+        };
+        let (task, token, plan, home) = match launch {
+            Ok(value) => value,
+            Err(error) => {
+                if let Ok(mut jobs) = self.jobs.lock() {
+                    jobs.remove(&id);
+                }
+                return Err(error);
+            }
+        };
+        let state = self.runtime.clone();
+        let path = self.etat.clone();
+        let publish: agentd::local::Publish = Arc::new(move |task, result| {
+            let mut runtime = state.blocking_lock();
+            runtime.publish_local(task, result);
+            ecrire(&path, &runtime.etat()).map_err(|e| format!("état non enregistré : {e}"))
+        });
+        let jobs = self.jobs.clone();
+        let job_id = id.clone();
+        let failure_task = task.clone();
+        let failure_publish = publish.clone();
+        let mission = agentd::local::Mission {
+            task,
+            token,
+            plan,
+            home,
+            endpoint,
+            services: mcp_system::services::Services::new(self.capd.clone(), self.ledger.clone()),
+            stop,
+        };
+        if let Err(error) = std::thread::Builder::new()
+            .name(format!("mission-{id}"))
+            .spawn(move || {
+                if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| mission.run(publish)))
+                    .is_err()
+                {
+                    let mut task = failure_task;
+                    task.state = agentd::State::Failed;
+                    task.history.push(agentd::State::Failed);
+                    task.reason = Some("travailleur interrompu de manière inattendue".into());
+                    let _ = failure_publish(task, None);
+                }
+                if let Ok(mut jobs) = jobs.lock() {
+                    jobs.remove(&job_id);
+                }
+            })
+        {
+            if let Ok(mut jobs) = self.jobs.lock() {
+                jobs.remove(&id);
+            }
+            let mut runtime = self.runtime.lock().await;
+            if let Some(mut task) = runtime.task(&id).cloned() {
+                task.state = agentd::State::Failed;
+                task.reason = Some("travailleur non lancé".into());
+                task.history.push(agentd::State::Failed);
+                runtime.publish_local(task, None);
+            }
+            ecrire(&self.etat, &runtime.etat())
+                .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?;
+            return Err(Error::new(ErrorCode::InternalError, error.to_string()));
+        }
+        Ok(json!({"started":id,"state":"running"}))
+    }
+
     /// Demande à `capd` le jeton racine de la tâche.
     async fn demander_un_jeton(
         &self,
@@ -176,16 +486,14 @@ impl Agents {
     /// L'écriture passe par un fichier temporaire puis un renommage : un `systemctl restart` au
     /// mauvais moment laisserait sinon un fichier tronqué, et le daemon suivant refuserait de
     /// démarrer sur un état qu'il ne sait pas lire — perdant tout au lieu d'une écriture.
-    async fn enregistrer(&self) {
-        let etat = {
-            let runtime = self.runtime.lock().await;
-            runtime.etat()
-        };
-        if let Err(erreur) = ecrire(&self.etat, &etat) {
-            // Bruyant, mais non fatal : la tâche existe et tourne. Ce qui est perdu, c'est la
-            // capacité à la retrouver après un redémarrage.
-            tracing::error!(%erreur, chemin = %self.etat.display(), "état non enregistré");
-        }
+    async fn enregistrer(&self) -> Result<(), Error> {
+        let runtime = self.runtime.lock().await;
+        ecrire(&self.etat, &runtime.etat()).map_err(|e| {
+            Error::new(
+                ErrorCode::InternalError,
+                format!("état non enregistré : {e}"),
+            )
+        })
     }
 
     /// Pousse les événements accumulés vers le journal.
@@ -240,39 +548,43 @@ fn optionnel<T: serde::de::DeserializeOwned>(
 
 /// Écriture atomique : un fichier voisin, puis un renommage.
 fn ecrire(chemin: &std::path::Path, etat: &EtatPersistant) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt as _;
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
     if let Some(parent) = chemin.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let provisoire = chemin.with_extension("tmp");
-    std::fs::write(
-        &provisoire,
-        serde_json::to_vec_pretty(etat).map_err(std::io::Error::other)?,
-    )?;
-    // Les jetons sont des capacités : le fichier ne se partage pas.
-    std::fs::set_permissions(&provisoire, std::fs::Permissions::from_mode(0o600))?;
-    std::fs::rename(&provisoire, chemin)
+    let provisoire = chemin.with_extension(format!("{}.tmp", std::process::id()));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&provisoire)?;
+    let result = (|| {
+        file.write_all(&serde_json::to_vec_pretty(etat).map_err(std::io::Error::other)?)?;
+        file.sync_all()?;
+        std::fs::rename(&provisoire, chemin)?;
+        if let Some(parent) = chemin.parent() {
+            std::fs::File::open(parent)?.sync_all()?;
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&provisoire);
+    }
+    result
 }
 
 /// Relit l'état d'un démarrage précédent.
 ///
-/// Un fichier absent est normal — premier démarrage. Un fichier illisible ne l'est pas : on le
-/// signale et on repart vide, plutôt que de refuser de démarrer. Un daemon qui ne démarre plus
-/// parce qu'il n'arrive pas à relire son état ferait perdre bien plus que les tâches en cours.
-fn relire(chemin: &std::path::Path) -> EtatPersistant {
+/// Un fichier absent est normal au premier démarrage. Un fichier illisible bloque le lancement
+/// pour préserver les données et permettre leur réparation ; il n'est jamais remplacé par du vide.
+fn relire(chemin: &std::path::Path) -> anyhow::Result<EtatPersistant> {
     match std::fs::read(chemin) {
-        Err(erreur) if erreur.kind() == std::io::ErrorKind::NotFound => EtatPersistant::default(),
-        Err(erreur) => {
-            tracing::error!(%erreur, chemin = %chemin.display(), "état illisible, départ à vide");
-            EtatPersistant::default()
+        Err(erreur) if erreur.kind() == std::io::ErrorKind::NotFound => {
+            Ok(EtatPersistant::default())
         }
-        Ok(octets) => match serde_json::from_slice(&octets) {
-            Ok(etat) => etat,
-            Err(erreur) => {
-                tracing::error!(%erreur, chemin = %chemin.display(), "état corrompu, départ à vide");
-                EtatPersistant::default()
-            }
-        },
+        Err(erreur) => Err(erreur.into()),
+        Ok(octets) => Ok(serde_json::from_slice(&octets)?),
     }
 }
 
@@ -310,12 +622,33 @@ async fn main() -> anyhow::Result<()> {
     let maison = std::env::var("PROPHET_HOME").unwrap_or_else(|_| "/home/prophet".to_owned());
     let capd = chemin("PROPHET_CAPD_SOCKET", "capd");
     let ledger = chemin("PROPHET_LEDGER_SOCKET", "ledger");
+    let profiles = std::env::var_os("PROPHET_MISSION_PROFILES")
+        .map(|path| agentd::preparation::load(std::path::Path::new(&path)))
+        .transpose()
+        .map_err(anyhow::Error::msg)?
+        .unwrap_or_default();
 
     let fichier_etat = commun::etat("agentd").join("taches.json");
-    let repris = relire(&fichier_etat);
+    let mut repris = relire(&fichier_etat)?;
+    for task in &mut repris.taches {
+        if matches!(
+            task.state,
+            agentd::State::Running | agentd::State::WaitingApproval | agentd::State::Paused
+        ) {
+            task.state = agentd::State::Failed;
+            task.history.push(agentd::State::Failed);
+            task.reason =
+                Some("service redémarré pendant la mission ; reprise explicite nécessaire".into());
+            repris.results.insert(
+                task.id.clone(),
+                json!({"state":task.state,"reason":task.reason,"budget":task.budget}),
+            );
+        }
+    }
     let nombre = repris.taches.len();
     let mut runtime = Runtime::sans_broker(&maison);
     runtime.reprendre(repris);
+    ecrire(&fichier_etat, &runtime.etat())?;
     if nombre > 0 {
         tracing::info!(nombre, "tâches reprises du démarrage précédent");
     }
@@ -330,7 +663,12 @@ async fn main() -> anyhow::Result<()> {
 
     serveur
         .serve(Arc::new(Agents {
-            runtime: Mutex::new(runtime),
+            runtime: Arc::new(Mutex::new(runtime)),
+            jobs: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
+            local_endpoint: std::env::var("PROPHET_LOCAL_ENDPOINT").ok(),
+            profiles,
+            preparing: Mutex::new(()),
+            reviews: Arc::new(tokio::sync::Semaphore::new(2)),
             capd,
             ledger,
             etat: fichier_etat,

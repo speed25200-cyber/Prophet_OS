@@ -22,6 +22,51 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Driver, DriverError};
 
+/// État rapporté par la commande de diagnostic du client, sans inspecter ses identifiants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionState {
+    /// Le client rapporte une connexion active.
+    Connected,
+    /// Le client doit être connecté par son flux officiel.
+    LoginRequired,
+    /// Aucun exécutable utilisable n'a été trouvé.
+    ClientMissing,
+    /// Le client n'offre pas encore de sonde documentée dans ce pilote.
+    Unknown,
+    /// La sonde a échoué ou dépassé son délai.
+    ProbeFailed,
+}
+
+impl ConnectionState {
+    /// Libellé destiné à l'humain.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Connected => "connectée (client)",
+            Self::LoginRequired => "connexion requise",
+            Self::ClientMissing => "client absent",
+            Self::Unknown => "non vérifiée",
+            Self::ProbeFailed => "diagnostic en échec",
+        }
+    }
+}
+
+/// Diagnostic public, sans contenu des fichiers de connexion ni sortie brute d'authentification.
+#[derive(Debug, Serialize)]
+pub struct ClientDiagnostic {
+    /// Pilote concerné.
+    pub driver: String,
+    /// Exécutable réellement résolu.
+    pub executable: Option<PathBuf>,
+    /// Version annoncée par le client.
+    pub version: Option<String>,
+    /// État rapporté par le client.
+    pub connection: ConnectionState,
+    /// Le raccordement à l'exécution agentique est-il opérationnel ?
+    pub agent_execution_ready: bool,
+}
+
 /// Ce qu'il faut savoir d'un client officiel pour le piloter.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientProfile {
@@ -53,6 +98,8 @@ impl ClientProfile {
                 "{intent}".into(),
                 "--output-format".into(),
                 "stream-json".into(),
+                "--verbose".into(),
+                "--include-partial-messages".into(),
             ],
             mcp_config_arg: Some("--mcp-config".into()),
             config_home_env: "CLAUDE_CONFIG_DIR".into(),
@@ -103,27 +150,67 @@ impl ClientProfile {
         mcp_config: &str,
         resume: Option<&str>,
     ) -> Vec<String> {
+        if self.driver == "codex" {
+            let mut args = vec!["exec".into()];
+            if let Some(session) = resume {
+                args.extend([
+                    "resume".into(),
+                    "--json".into(),
+                    "--".into(),
+                    session.into(),
+                ]);
+            } else {
+                args.extend(["--json".into(), "--".into()]);
+            }
+            args.push(intent.into());
+            return args;
+        }
+        if self.driver == "gemini" {
+            return self
+                .headless_args
+                .iter()
+                .map(|arg| arg.replace("{intent}", intent))
+                .collect();
+        }
         let mut args: Vec<String> = self
             .headless_args
             .iter()
-            .map(|arg| arg.replace("{intent}", intent))
+            .filter(|arg| arg.as_str() != "{intent}")
+            .cloned()
             .collect();
         if let Some(flag) = &self.mcp_config_arg {
-            args.push(flag.clone());
-            args.push(mcp_config.to_owned());
+            args.push(format!("{flag}={mcp_config}"));
         }
         if let (Some(flag), Some(session)) = (&self.resume_arg, resume) {
-            args.push(flag.clone());
-            args.push(session.to_owned());
+            args.push(format!("{flag}={session}"));
         }
+        args.extend(["--".into(), intent.into()]);
         args
+    }
+
+    /// Commande interactive de connexion du client.
+    #[must_use]
+    pub fn login_args(&self) -> Vec<&str> {
+        match self.driver.as_str() {
+            "claude-code" => vec!["auth", "login"],
+            "codex" => vec!["login"],
+            _ => Vec::new(),
+        }
+    }
+
+    fn status_args(&self) -> Option<&[&str]> {
+        match self.driver.as_str() {
+            "claude-code" => Some(&["auth", "status"]),
+            "codex" => Some(&["login", "status"]),
+            _ => None,
+        }
     }
 }
 
 /// Répertoire de configuration privé d'un client, pour un utilisateur.
 ///
-/// Il contient la session de l'abonnement. Le pilote le **monte** dans la sandbox du client et
-/// n'en lit jamais le contenu.
+/// Il est réservé au client. Son montage dans la sandbox reste à raccorder ; le pilote n'en
+/// lit jamais le contenu.
 #[must_use]
 pub fn private_config_dir(root: &Path, driver: &str, user: &str) -> PathBuf {
     root.join("providers").join(driver).join(user)
@@ -164,17 +251,125 @@ impl OfficialDriver {
         private_config_dir(&self.config_root, &self.profile.driver, &self.user)
     }
 
-    /// Vrai si une session d'abonnement existe.
-    ///
-    /// La présence du répertoire suffit : le pilote n'ouvre aucun fichier pour le vérifier, car
-    /// cela reviendrait à lire des identifiants.
+    /// Vrai seulement si le client rapporte une connexion. Ne lit jamais ses fichiers privés.
     #[must_use]
     pub fn logged_in(&self) -> bool {
-        let dir = self.config_dir();
-        dir.exists()
-            && std::fs::read_dir(&dir)
-                .map(|mut entries| entries.next().is_some())
-                .unwrap_or(false)
+        self.connection_state() == ConnectionState::Connected
+    }
+
+    /// Interroge le client pendant au plus cinq secondes ; aucune sortie d'authentification
+    /// n'est capturée ni publiée.
+    #[must_use]
+    pub fn connection_state(&self) -> ConnectionState {
+        let Some(program) = which(&self.profile.program) else {
+            return ConnectionState::ClientMissing;
+        };
+        let Some(args) = self.profile.status_args() else {
+            return ConnectionState::Unknown;
+        };
+        if !self.config_dir().is_dir() {
+            return ConnectionState::LoginRequired;
+        }
+        match self.probe_command(&program, args, false) {
+            Ok((Some(0), _)) => ConnectionState::Connected,
+            Ok((Some(1), _)) => ConnectionState::LoginRequired,
+            _ => ConnectionState::ProbeFailed,
+        }
+    }
+
+    /// Version et connexion réellement sondées, en distinguant le client du pilote agentique.
+    #[must_use]
+    pub fn diagnostic(&self) -> ClientDiagnostic {
+        let executable = which(&self.profile.program);
+        let version = executable
+            .as_ref()
+            .and_then(|program| {
+                let (code, output) = self.probe_command(program, &["--version"], true).ok()?;
+                (code == Some(0)).then(|| {
+                    output
+                        .lines()
+                        .next()
+                        .unwrap_or_default()
+                        .chars()
+                        .filter(|c| !c.is_control())
+                        .take(128)
+                        .collect::<String>()
+                })
+            })
+            .filter(|text| !text.is_empty());
+        ClientDiagnostic {
+            driver: self.profile.driver.clone(),
+            executable,
+            version,
+            connection: self.connection_state(),
+            agent_execution_ready: false,
+        }
+    }
+
+    fn probe_command(
+        &self,
+        program: &Path,
+        args: &[&str],
+        capture: bool,
+    ) -> std::io::Result<(Option<i32>, String)> {
+        use std::process::Stdio;
+        use std::time::Duration;
+        use tokio::io::AsyncReadExt as _;
+        let program = program.to_owned();
+        let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
+        let environment = self.environment(&self.config_dir().display().to_string(), "");
+        // Une boucle dédiée évite d'imbriquer un runtime Tokio chez un appelant asynchrone.
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            runtime.block_on(async move {
+                let mut child = tokio::process::Command::new(program)
+                    .args(args)
+                    .env_clear()
+                    .envs(environment)
+                    .current_dir(std::env::temp_dir())
+                    .stdin(Stdio::null())
+                    .stderr(Stdio::null())
+                    .stdout(if capture {
+                        Stdio::piped()
+                    } else {
+                        Stdio::null()
+                    })
+                    .kill_on_drop(true)
+                    .spawn()?;
+                let result = tokio::time::timeout(Duration::from_secs(5), async {
+                    let mut bytes = Vec::new();
+                    if let Some(stdout) = child.stdout.take() {
+                        stdout.take(4097).read_to_end(&mut bytes).await?;
+                        if bytes.len() > 4096 {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                "diagnostic trop grand",
+                            ));
+                        }
+                    }
+                    let status = child.wait().await?;
+                    Ok((status.code(), String::from_utf8_lossy(&bytes).into_owned()))
+                })
+                .await
+                .map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "le client n'a pas répondu en cinq secondes",
+                    )
+                })
+                .and_then(std::convert::identity);
+                if result.is_err() {
+                    // kill().await attend aussi la terminaison : pas de processus laissé en vie
+                    // à la destruction du runtime après un délai ou une sortie trop volumineuse.
+                    let _ = child.kill().await;
+                }
+                result
+            })
+        })
+        .join()
+        .map_err(|_| std::io::Error::other("diagnostic interrompu"))?
     }
 
     /// Vrai si l'exécutable du client est présent.
@@ -185,8 +380,8 @@ impl OfficialDriver {
 
     /// Variables d'environnement transmises au client. Rien d'autre ne passe.
     ///
-    /// En particulier, aucune variable portant une clé d'API n'est propagée : ce pilote ne
-    /// fonctionne que par abonnement, et laisser passer une clé brouillerait cette garantie.
+    /// En particulier, aucune variable portant une clé d'API n'est propagée. Le parcours cible
+    /// utilise la connexion par abonnement ; le type effectif de session reste géré par le client.
     #[must_use]
     pub fn environment(&self, workdir: &str, mcp_config: &str) -> Vec<(String, String)> {
         vec![
@@ -195,12 +390,11 @@ impl OfficialDriver {
                 self.config_dir().display().to_string(),
             ),
             ("HOME".to_owned(), workdir.to_owned()),
-            ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
-            ("PROPHET_MCP_CONFIG".to_owned(), mcp_config.to_owned()),
             (
-                "PROPHET_PERMISSION_HELPER".to_owned(),
-                "/run/current-system/sw/bin/prophet-permission".to_owned(),
+                "PATH".to_owned(),
+                "/run/current-system/sw/bin:/usr/bin:/bin".to_owned(),
             ),
+            ("PROPHET_MCP_CONFIG".to_owned(), mcp_config.to_owned()),
         ]
     }
 
@@ -211,21 +405,35 @@ impl OfficialDriver {
     #[must_use]
     pub fn login_instructions(&self) -> String {
         format!(
-            "Connexion à {} : lancez `{} login` dans une session interactive. \
-             Le client écrira sa session dans {}. Prophet OS ne lit jamais ce répertoire ; \
-             il se contente de le monter dans la sandbox du client.",
+            "Connexion à {} : préparez le répertoire privé puis lancez le client dans votre terminal :\n\
+             install -d -m 700 -- {}\n\
+             env {}={} {} {}\n\
+             Prophet OS ne lit jamais les fichiers d'identifiants ; le client gère sa connexion. \
+             L'exécution agentique via sandboxd reste à raccorder.",
             self.profile.driver,
+            shell_quote(&self.config_dir().display().to_string()),
+            self.profile.config_home_env,
+            shell_quote(&self.config_dir().display().to_string()),
             self.profile.program,
-            self.config_dir().display()
+            self.profile.login_args().join(" ")
         )
     }
 }
 
 fn which(program: &str) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt as _;
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join(program))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| {
+            candidate
+                .metadata()
+                .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        })
+}
+
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\"'\"'"))
 }
 
 impl Driver for OfficialDriver {
@@ -234,18 +442,11 @@ impl Driver for OfficialDriver {
             driver: self.profile.driver.clone(),
             kind: DriverKind::OfficialClient,
             auth: AuthMode::Subscription,
-            supports: Supports {
-                resume: self.profile.resume_arg.is_some(),
-                checkpoint: false,
-                fork: false,
-                token_usage: true,
-                quota_estimate: true,
-                cost: false,
-                streaming_events: true,
-                permission_delegation: self.profile.permission_delegation,
-            },
+            // Le profil décrit le client amont ; le contrat décrit ce pilote. Tant que start,
+            // poll et resolve_permission ne sont pas raccordés, ces fonctions ne sont pas livrées.
+            supports: Supports::default(),
             logged_in: self.logged_in(),
-            models: vec!["default".into()],
+            models: Vec::new(),
         }
     }
 
@@ -259,15 +460,15 @@ impl Driver for OfficialDriver {
             return Err(DriverError::NotLoggedIn(self.profile.driver.clone()));
         }
         // Le lancement effectif passe par `sandboxd`, qui monte le répertoire privé et le socket
-        // du proxy, puis exécute la ligne construite ci-dessous. Cette étape est assurée par
-        // `agentd` en service ; le pilote en fournit la description exacte.
+        // du proxy, puis exécute la ligne construite ci-dessous. Le raccordement à `agentd`
+        // n'est pas encore implémenté ; la présence du service ne suffit pas.
         let _command = self.profile.command_line(
             &request.intent,
             &request.mcp_config,
             request.resume.as_deref(),
         );
         Err(DriverError::Io(format!(
-            "le lancement de {} exige sandboxd en service",
+            "le lancement agentique de {} via sandboxd n'est pas encore implémenté",
             self.profile.driver
         )))
     }
@@ -299,17 +500,25 @@ mod tests {
         let profile = ClientProfile::claude_code();
         let args = profile.command_line("prépare le rapport", "/run/prophet/mcp.json", None);
         assert_eq!(args[0], "-p");
-        assert_eq!(args[1], "prépare le rapport");
-        assert!(args.contains(&"--mcp-config".to_owned()));
-        assert!(args.contains(&"/run/prophet/mcp.json".to_owned()));
+        assert_eq!(args.last().unwrap(), "prépare le rapport");
+        assert!(args.contains(&"--mcp-config=/run/prophet/mcp.json".to_owned()));
     }
 
     #[test]
     fn reprise_de_session() {
         let profile = ClientProfile::claude_code();
         let args = profile.command_line("suite", "/x.json", Some("sess-42"));
-        assert!(args.contains(&"--resume".to_owned()));
-        assert!(args.contains(&"sess-42".to_owned()));
+        assert!(args.contains(&"--resume=sess-42".to_owned()));
+    }
+
+    #[test]
+    fn les_valeurs_de_claude_ne_deviennent_pas_des_options() {
+        let flag = "--dangerously-skip-permissions";
+        let args = ClientProfile::claude_code().command_line("bonjour", flag, Some(flag));
+        assert!(
+            !args.iter().any(|arg| arg == flag),
+            "une valeur ne doit pas devenir une option autonome : {args:?}"
+        );
     }
 
     #[test]
@@ -345,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn non_connecte_tant_que_le_repertoire_est_vide() {
+    fn un_fichier_de_configuration_ne_prouve_pas_une_connexion() {
         let dir = tempfile::tempdir().unwrap();
         let driver = OfficialDriver::new(ClientProfile::claude_code(), dir.path(), "u");
         assert!(!driver.logged_in());
@@ -358,7 +567,113 @@ mod tests {
         );
 
         std::fs::write(config.join(".credentials.json"), "{}").unwrap();
-        assert!(driver.logged_in());
+        assert!(
+            !driver.logged_in(),
+            "un fichier ne prouve pas une session active"
+        );
+    }
+
+    #[test]
+    fn claude_utilise_les_options_de_flux_documentees() {
+        let args = ClientProfile::claude_code().command_line("bonjour", "/mcp.json", None);
+        assert!(args.contains(&"--verbose".to_owned()));
+        assert!(args.contains(&"--include-partial-messages".to_owned()));
+    }
+
+    #[test]
+    fn codex_reprend_avant_de_recevoir_le_prompt() {
+        let args = ClientProfile::codex().command_line(
+            "--dangerously-bypass-approvals-and-sandbox",
+            "/mcp.json",
+            Some("session-42"),
+        );
+        assert_eq!(&args[..4], ["exec", "resume", "--json", "--"]);
+        assert_eq!(
+            &args[4..],
+            ["session-42", "--dangerously-bypass-approvals-and-sandbox"]
+        );
+    }
+
+    fn fake_client(script: &str) -> (tempfile::TempDir, OfficialDriver) {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let executable = dir.path().join("client");
+        std::fs::write(&executable, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut profile = ClientProfile::codex();
+        profile.program = executable.display().to_string();
+        let driver = OfficialDriver::new(profile, dir.path(), "user");
+        std::fs::create_dir_all(driver.config_dir()).unwrap();
+        (dir, driver)
+    }
+
+    #[test]
+    fn seule_la_reponse_du_client_atteste_la_connexion() {
+        for (code, state) in [
+            (0, ConnectionState::Connected),
+            (1, ConnectionState::LoginRequired),
+            (2, ConnectionState::ProbeFailed),
+        ] {
+            let (_dir, driver) = fake_client(&format!("exit {code}"));
+            assert_eq!(driver.connection_state(), state);
+        }
+    }
+
+    #[test]
+    fn le_diagnostic_ne_publie_pas_la_sortie_authentification() {
+        let (_dir, driver) = fake_client(
+            "if [ \"$1\" = --version ]; then echo 'client 1.2.3'; else echo 'sortie-auth-privee'; fi",
+        );
+        let diagnostic = driver.diagnostic();
+        assert_eq!(diagnostic.version.as_deref(), Some("client 1.2.3"));
+        assert_eq!(diagnostic.connection, ConnectionState::Connected);
+        assert!(!diagnostic.agent_execution_ready);
+        assert!(
+            !serde_json::to_string(&diagnostic)
+                .unwrap()
+                .contains("sortie-auth-privee")
+        );
+    }
+
+    #[test]
+    fn une_version_trop_grande_est_refusee() {
+        let (_dir, driver) =
+            fake_client("i=0; while [ $i -lt 4100 ]; do printf x; i=$((i + 1)); done");
+        let error = driver
+            .probe_command(Path::new(&driver.profile.program), &["--version"], true)
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn un_client_muet_est_arrete_apres_le_delai() {
+        // Boucle de shell sans sous-processus : la sonde doit terminer et récolter ce client.
+        let (_dir, driver) = fake_client("while :; do :; done");
+        let started = std::time::Instant::now();
+        let error = driver
+            .probe_command(Path::new(&driver.profile.program), &["--version"], true)
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < std::time::Duration::from_secs(8));
+    }
+
+    #[test]
+    #[ignore = "needs_official_clients : chemins PROPHET_TEST_CODEX et PROPHET_TEST_CLAUDE"]
+    fn needs_official_clients_versions_et_sessions_vierges() {
+        for (mut profile, variable) in [
+            (ClientProfile::codex(), "PROPHET_TEST_CODEX"),
+            (ClientProfile::claude_code(), "PROPHET_TEST_CLAUDE"),
+        ] {
+            profile.program = std::env::var(variable).expect("chemin du vrai client requis");
+            let dir = tempfile::tempdir().unwrap();
+            let driver = OfficialDriver::new(profile, dir.path(), "test");
+            std::fs::create_dir_all(driver.config_dir()).unwrap();
+            let diagnostic = driver.diagnostic();
+            eprintln!("{}", serde_json::to_string(&diagnostic).unwrap());
+            assert!(diagnostic.version.is_some());
+            assert_eq!(diagnostic.connection, ConnectionState::LoginRequired);
+            assert!(!diagnostic.agent_execution_ready);
+        }
     }
 
     #[test]
@@ -393,12 +708,13 @@ mod tests {
     }
 
     #[test]
-    fn les_capacites_refletent_le_profil() {
+    fn les_capacites_ne_promettent_pas_un_pilote_non_raccorde() {
         let dir = tempfile::tempdir().unwrap();
         let claude = OfficialDriver::new(ClientProfile::claude_code(), dir.path(), "u");
         assert_eq!(claude.capabilities().auth, AuthMode::Subscription);
         assert_eq!(claude.capabilities().kind, DriverKind::OfficialClient);
-        assert!(claude.capabilities().supports.resume);
+        assert_eq!(claude.capabilities().supports, Supports::default());
+        assert!(claude.capabilities().models.is_empty());
         assert!(
             !claude.capabilities().supports.checkpoint,
             "un client officiel n'expose pas de point de reprise complet"

@@ -285,13 +285,22 @@ fn le_protocole_mcp_repond_correctement() {
 
     let init = server
         .handle(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"essai","version":"1"}}}"#,
             now(),
         )
         .unwrap();
     assert_eq!(
         init["result"]["serverInfo"]["name"],
         json!("prophet-system")
+    );
+
+    assert!(
+        server
+            .handle(
+                r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+                now()
+            )
+            .is_none()
     );
 
     let liste = server
@@ -326,6 +335,103 @@ fn le_protocole_mcp_repond_correctement() {
         .handle(r#"{"jsonrpc":"2.0","id":4,"method":"inexistante"}"#, now())
         .unwrap();
     assert_eq!(inconnu["error"]["code"], json!(-32601));
+}
+
+#[test]
+fn le_protocole_refuse_une_operation_avant_initialisation() {
+    let m = monde();
+    let server = StdioServer::new("prophet-system", m.registry, m.context);
+    let result = server.handle(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fs.write","arguments":{"path":"~/ventes/out/trop-tot.txt","content":"interdit"}}}"#,
+        now(),
+    ).unwrap();
+    assert_eq!(result["error"]["code"], -32002);
+    assert!(m.journal.events().is_empty());
+}
+
+#[test]
+fn un_message_invalide_ne_devient_pas_une_notification_silencieuse() {
+    let m = monde();
+    let server = StdioServer::new("prophet-system", m.registry, m.context);
+    for raw in [
+        "[]",
+        "null",
+        "{}",
+        r#"{"jsonrpc":"1.0","method":"ping","id":1}"#,
+        r#"{"jsonrpc":"2.0","method":"ping","id":null}"#,
+        r#"{"jsonrpc":"2.0","method":"ping","id":true}"#,
+    ] {
+        let response = server
+            .handle(raw, now())
+            .expect("requête invalide, réponse attendue");
+        assert_eq!(response["error"]["code"], -32600, "{raw}");
+    }
+    let response = server
+        .handle(
+            r#"{"jsonrpc":"2.0","id":9,"method":"initialize","params":{}}"#,
+            now(),
+        )
+        .unwrap();
+    assert_eq!(response["error"]["code"], -32602);
+}
+
+#[test]
+fn le_transport_borne_les_entrees_et_exige_une_ligne_complete() {
+    let m = monde();
+    let server = StdioServer::new("prophet-system", m.registry, m.context);
+    let mut output = Vec::new();
+    let error = server
+        .serve(std::io::BufReader::new(std::io::repeat(b'x')), &mut output)
+        .unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(output.is_empty());
+
+    let error = server
+        .serve(
+            std::io::Cursor::new(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}"),
+            &mut output,
+        )
+        .unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof);
+    assert!(output.is_empty());
+
+    server
+        .serve(
+            std::io::Cursor::new(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\r\n"),
+            &mut output,
+        )
+        .unwrap();
+    let response: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(response["result"], json!({}));
+}
+
+#[test]
+fn la_notification_initialized_est_necessaire_et_ne_peut_pas_executer_un_outil() {
+    let m = monde();
+    let server = StdioServer::new("prophet-system", m.registry, m.context);
+    let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"essai","version":"1"}}}"#;
+    assert!(server.handle(init, now()).unwrap().get("result").is_some());
+    let list = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#;
+    assert_eq!(server.handle(list, now()).unwrap()["error"]["code"], -32002);
+    assert!(
+        server
+            .handle(
+                r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"clock.now"}}"#,
+                now()
+            )
+            .is_none()
+    );
+    assert!(m.journal.events().is_empty());
+    assert!(
+        server
+            .handle(
+                r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+                now()
+            )
+            .is_none()
+    );
+    assert!(server.handle(list, now()).unwrap()["result"]["tools"].is_array());
+    assert_eq!(server.handle(init, now()).unwrap()["error"]["code"], -32600);
 }
 
 #[test]

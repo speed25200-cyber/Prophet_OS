@@ -17,11 +17,11 @@
 
 | Outil | `requires` | irreversible | external | Notes |
 |---|---|---|---|---|
-| `fs.read` | fs.read chemin | non | non | `max_bytes` défaut 256 Kio |
-| `fs.write` | fs.write chemin | non (réversible via sfs) | non | via transaction sfs |
-| `fs.list` | fs.list chemin | non | non | |
+| `fs.read` | fs.read chemin | non | non | `max_bytes` défaut et plafond 256 Kio |
+| `fs.write` | fs.write chemin | non (réversible via sfs) | non | remplacement atomique dans le travail, contenu ≤ 1 Mio |
+| `fs.list` | fs.list chemin et descendants | non | non | fusion travail/origine ; ≤ 2000 résultats |
 | `fs.stat` | fs.read chemin | non | non | |
-| `fs.search` | fs.read racine | non | non | nom et contenu |
+| `fs.search` | fs.read racine et descendants | non | non | nom et contenu ; ≤ 200 résultats |
 | `fs.diff_task` | task courante | non | non | |
 | `proc.exec` | proc.exec binaire | selon commande | non | niveau de sandbox forcé à 2 hors liste blanche |
 | `proc.kill` | task courante | non | non | |
@@ -49,6 +49,35 @@
 | `model.status` | aucune | non | non | |
 
 Un outil sans `requires` explicite (autre que `aucune`) est refusé par le test `mcp_system::registry::all_tools_declare_requires`.
+
+## Accès fichiers actuellement implémentés
+
+Les chemins logiques sont relatifs au home de la tâche, sous la forme `~/docs/note.txt`,
+`docs/note.txt` ou d'un chemin absolu inclus dans ce home. Les `..`, chemins hors du home,
+noms `.prophet` et `.prophet-write-*` sont refusés. Les noms non UTF-8 sont omis des parcours.
+Le contexte vient du lanceur de confiance : son `workdir` doit correspondre exactement à
+`home/.prophet/tasks/<tâche>/work`. Une cohérence de chemins ne prouve pas l'identité du lanceur.
+
+Les accès relatifs utilisent `openat2` avec `RESOLVE_BENEATH`, `RESOLVE_NO_SYMLINKS` et
+`RESOLVE_NO_XDEV`. Les racines sont ouvertes sans lien symbolique. Les fichiers spéciaux et
+les lectures de fichiers ayant plusieurs liens physiques sont refusés. L'absence de cette
+primitive noyau provoque un échec ; aucun repli par canonicalisation/réouverture n'est permis.
+Le travail a priorité sur l'origine, et seule une absence autorise le repli. Les écritures
+créent leurs parents dans le travail, publient par renommage atomique et synchronisent fichier
+et répertoire. Elles ne valident pas la transaction SFS.
+
+La lecture de contenu est bornée à 256 Kio rendus (un octet supplémentaire sert à détecter la
+troncature). `max_bytes` doit être un entier positif ou nul et ne peut relever le plafond.
+La recherche lit au plus 8 Mio cumulés. Liste et recherche limitent les visites à 10 000, les
+résultats sérialisés à 512 Kio et vérifient un budget de deux secondes entre les opérations ;
+une opération noyau lente peut dépasser ce temps. La recherche descend jusqu'à 32 niveaux
+après sa racine. Les plafonds de résultats sont respectivement 2000 et 200. Les omissions
+dues aux plafonds donnent `truncated: true`. `scoped: true` signifie que les descendants sans
+capacité ne sont pas énumérés dans la réponse ; aucun total de fichiers interdits n'est rendu.
+Les limites du transport s'appliquent en plus de ces limites de contenu.
+
+Le contexte fiable, les racines privées, le confinement des processus et les commits/undo
+SFS concurrents restent des conditions d'intégration, détaillées dans l'[ADR 0012](../adr/0012-acces-fichiers-mcp.md).
 
 ## Fichier de registre
 

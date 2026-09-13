@@ -163,3 +163,53 @@ async fn une_sandbox_inconnue_ne_se_gele_pas() {
         );
     }
 }
+
+#[tokio::test]
+async fn le_gel_global_expose_les_resultats_du_service() {
+    let temp = tempfile::tempdir().unwrap();
+    let (_daemon, client) = daemon(&temp).await;
+    let result = client.call("sandbox.freeze_all", json!({})).await.unwrap();
+    assert_eq!(result, json!({"frozen":[],"errors":[]}));
+}
+
+#[tokio::test]
+#[ignore = "needs_userns: exercice de processus réellement confinés"]
+async fn le_gel_global_arrete_le_processus_possede_par_le_daemon() {
+    let temp = tempfile::tempdir().unwrap();
+    let (_daemon, client) = daemon(&temp).await;
+    let spec = sandboxd::SandboxSpec::new(0, "/bin/sleep", "/").args(["15"]);
+    let started = client
+        .call("sandbox.start", json!({"task":"task:freeze", "spec":spec}))
+        .await
+        .unwrap();
+    let pid = started["pid"].as_u64().unwrap();
+    // Le programme doit avoir franchi l'amorçage avant le gel, pas seulement son spawn.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let result = client.call("sandbox.freeze_all", json!({})).await.unwrap();
+    let mut stopped = false;
+    for _ in 0..50 {
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap_or_default();
+        if status
+            .lines()
+            .any(|line| line.starts_with("State:") && line.contains("T (stopped)"))
+        {
+            stopped = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let state = client
+        .call("sandbox.status", json!({"task":"task:freeze"}))
+        .await
+        .unwrap();
+    client
+        .call("sandbox.kill", json!({"task":"task:freeze"}))
+        .await
+        .unwrap();
+    assert_eq!(result, json!({"frozen":["task:freeze"],"errors":[]}));
+    assert_eq!(state["state"], "frozen");
+    assert!(
+        stopped,
+        "le noyau doit confirmer l'arrêt, pas seulement le JSON du service"
+    );
+}

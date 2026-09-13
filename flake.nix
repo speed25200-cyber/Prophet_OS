@@ -4,7 +4,7 @@
   inputs = {
     # Épinglé à une révision, et non à la branche `nixos-unstable`.
     #
-    # Ce dépôt n'a pas de `flake.lock` : sans épinglage, `nixos-unstable` est résolu au moment de
+    # `flake.lock` fige aussi les entrées transitives. Sans épinglage, `nixos-unstable` est résolu au moment de
     # chaque construction. Deux gravures de la même ISO à quinze jours d'écart installaient donc
     # deux systèmes différents, et un travail d'intégration continue vert la veille pouvait être
     # rouge le lendemain sans qu'une seule ligne du dépôt ait changé. Pour un système qu'on
@@ -16,9 +16,7 @@
     # les tests en machine virtuelle sont verts ce jour-là. La remonter est un geste explicite,
     # suivi d'une construction complète.
     nixpkgs.url = "github:NixOS/nixpkgs/8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe";
-    # `flake-utils` reste sur sa branche : il n'apporte que `eachDefaultSystem`, dont rien
-    # n'entre dans le système installé. L'épingler demanderait une révision que cette session
-    # n'a pas pu lire, et deviner une étiquette pour faire joli serait pire que de le dire.
+    # La référence déclarée suit le dépôt ; sa résolution exacte est conservée dans flake.lock.
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -35,7 +33,7 @@
       # importé par les tests en machine virtuelle — lesquels reçoivent un `pkgs` déjà construit,
       # et NixOS refuse qu'un module touche à `nixpkgs.config` dans ce cas. Un seul endroit, qui
       # sert aux deux.
-      clientsProprietaires = [ "claude-code" "gemini-cli" ];
+      clientsProprietaires = [ "claude-code" "gemini-cli" "chatgpt-linux" "chatgpt-linux-payload" ];
       autoriserLesClients = paquet:
         builtins.elem (nixpkgs.lib.getName paquet) clientsProprietaires;
 
@@ -54,6 +52,7 @@
           ./image/modules/hardware.nix
           ./image/modules/immutable.nix
           ./image/modules/surface.nix
+          ./image/modules/desktop.nix
           {
             prophet.enable = true;
             nixpkgs.config.allowUnfreePredicate = autoriserLesClients;
@@ -99,18 +98,38 @@
             gitleaks
             sqlite
             pkg-config
+            python3
           ];
           env = {
             PROPHET_BROWSER = "${pkgs.chromium}/bin/chromium";
             RUST_BACKTRACE = "1";
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+              pkgs.vulkan-loader pkgs.wayland pkgs.libxkbcommon pkgs.libGL
+            ];
           };
         };
 
         # Ce que `nix flake check` exerce : une vraie machine, avec de vrais services.
         checks = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          desktop-session = import ./image/tests/desktop-session.nix {
+            inherit pkgs;
+            module = nixosModules.prophet;
+          };
+          surface-rescue = import ./image/tests/surface-rescue.nix {
+            inherit pkgs;
+            module = nixosModules.prophet;
+          };
+          llama-tool-grammar = import ./image/tests/llama-tool-grammar.nix {
+            inherit pkgs;
+            engine = self.packages.${system}.llama-cpp;
+          };
           services = import ./image/tests/services.nix {
             inherit pkgs;
             module = nixosModules.prophet;
+          };
+          chatgpt-desktop = import ./image/tests/chatgpt-desktop.nix {
+            inherit pkgs;
+            chatgpt = pkgs.callPackage ./image/packages/chatgpt-linux.nix { };
           };
           # Et une vraie machine **installée** : racine en lecture seule, chargeur d'amorçage,
           # noyau verrouillé. Le support d'amorçage a démarré ; ce qu'il installe, jamais.
@@ -128,15 +147,9 @@
         };
 
         packages = {
-          default = pkgs.rustPlatform.buildRustPackage {
-            pname = "prophet-os";
-            version = "0.1.0";
-            src = ./.;
-            cargoLock.lockFile = ./Cargo.lock;
-            # Les tests d'intégration exigent des espaces de noms et un navigateur ; ils tournent
-            # par `just test-privileged`, pas pendant la construction du paquet.
-            doCheck = false;
-          };
+          llama-cpp = pkgs.callPackage ./image/packages/llama-cpp.nix { };
+          # Même paquet et mêmes bibliothèques graphiques dans l'atelier et dans l'image.
+          default = pkgs.callPackage ./image/packages/prophet-os.nix { };
         }
         # `nix build .#iso` produit le fichier à graver. L'attribut n'existe que sur
         # x86_64-linux : construire une image amorçable pour une architecture depuis une autre
@@ -144,6 +157,16 @@
         # pas produire serait la même faute que promettre une isolation qu'on ne sait pas mettre
         # en place. Absent vaut mieux que présent et cassé.
         // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          # Essai explicite : télécharge 1,83 Go de poids si absents du store. Hors checks sans poids.
+          local-engine-vm = import ./image/tests/local-engine.nix {
+            inherit pkgs;
+            module = nixosModules.prophet;
+            weights = pkgs.fetchurl {
+              url = "https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/90862c4b9d2787eaed51d12237eafdfe7c5f6077/Qwen3-1.7B-Q8_0.gguf";
+              sha256 = "061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a";
+            };
+          };
+          chatgpt-linux = pkgs.callPackage ./image/packages/chatgpt-linux.nix { };
           iso = self.nixosConfigurations.prophet-iso.config.system.build.isoImage;
         };
       });
