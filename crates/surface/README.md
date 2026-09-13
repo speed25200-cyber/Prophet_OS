@@ -14,6 +14,9 @@ inspecteur affiche les accès, l'état exact, le résultat textuel et les fichie
 L'onglet Fichiers compare les versions initiales et proposées, vérifiées par le service ; il
 permet de copier le texte exact et d'actualiser l'examen. L'arrêt est explicite et sa confirmation vient du service. Les missions terminées
 restent consultables. Une erreur de commande est affichée sans renvoi automatique.
+Une mission terminée offre à son créateur « Appliquer à mes documents », puis « Annuler la
+publication » ; l'état de publication lu dans SFS est affiché, y compris une intention
+interrompue à reprendre ou un conflit conservé.
 Le thème clair utilise Inter 4.1 embarquée sous licence SIL OFL et supprime la sculpture Iris.
 Les [captures et vérifications](../../docs/reports/atelier-2026-09-13.md) proviennent du
 binaire natif ; les scènes d'exemple sont explicitement marquées.

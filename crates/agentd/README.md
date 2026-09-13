@@ -59,6 +59,8 @@ prophet task start note-locale
 prophet --json task ls
 prophet task result note-locale
 prophet task cancel note-locale
+prophet task apply note-locale
+prophet task undo note-locale
 ```
 
 `new` rend le plan sans démarrer. `start` accuse réception du lancement en arrière-plan.
@@ -66,6 +68,10 @@ prophet task cancel note-locale
 `result` rend le texte, la raison d'arrêt, le budget et, en cas de fin normale, le diff SFS.
 Un identifiant déjà utilisé ne peut pas être relancé. Le jeton expire à partir de la
 planification ; un long délai de relecture peut donc nécessiter un nouveau plan.
+`apply` publie dans le home l'index exact conservé par le service, pour le créateur de la
+mission ; `undo` annule cette publication si les documents n'ont pas changé depuis. Les deux
+refusent un conflit sans rien écraser, et reprennent une intention interrompue. `show` affiche
+l'état de publication et la commande suivante.
 
 La surface appelle aussi `task.change` avec `{id,path}` pour lire les versions initiale et
 proposée d'un fichier du diff. Cette méthode exige une mission terminée, son index conservé

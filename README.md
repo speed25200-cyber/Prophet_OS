@@ -16,9 +16,11 @@ Un système d'exploitation PC conçu pour que des agents IA (Claude, GPT, Gemini
 
 Prophet OS est **en développement**. L'ISO démarre en machine virtuelle. Une mission saisie dans
 l'interface peut être planifiée, lancée avec Qwen3 et produire un fichier de travail examinable
-avec les vrais services. L'application approuvée des changements, l'undo, le confinement complet
-restent à intégrer. Le [moteur de publication](docs/reports/publication-2026-09-13.md) possède
-des contrôles de conflits et une reprise journalisée, encore séparés de l'approbation graphique.
+avec les vrais services. Le [moteur de publication](docs/reports/publication-2026-09-13.md)
+possède des contrôles de conflits et une reprise journalisée ; le créateur de la mission
+[publie et annule](docs/reports/approbation-2026-09-13.md) ces versions depuis la CLI et
+l'atelier, par agentd. L'écriture sous l'identité humaine sur l'image installée et le
+confinement complet restent à intégrer.
 Le parcours du bureau réussit en VM. Sur disque installé, la CI vérifie le démarrage, l'intégrité,
 la session et les fichiers, puis échoue en relevant le processus bref de Claude Code sans réseau.
 Le parcours installé complet et la compatibilité stricte de ChatGPT restent à valider. Les critères
@@ -56,6 +58,8 @@ prophet provider chat --model qwen3-0.6b "Bonjour /no_think"
 prophet task ls         # missions connues du service, y compris terminées
 prophet task show <id>  # plan, état et résultat conservés par agentd
 prophet task diff <id>  # changements proposés, non appliqués
+prophet task apply <id> # publie les versions examinées dans vos documents
+prophet task undo <id>  # annule cette publication si rien n'a changé depuis
 prophet log verify      # vérifier l'intégrité du journal
 ```
 

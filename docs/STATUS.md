@@ -4,7 +4,8 @@
 > bibliothèque ou une simulation, pas le parcours installé complet. Les exigences de livraison
 > sont désormais suivies dans [FRONTIER.md](FRONTIER.md). Le moteur local possède un client HTTP
 > concret, une conversation en flux et des missions via MCP/agentd avec vrais capd/ledger.
-> L'examen des versions est implémenté ; leur application approuvée et le parcours installé
+> L'examen des versions est implémenté, et leur publication commandée par le créateur depuis
+> agentd ; l'écriture sous l'identité humaine sur l'image et le parcours installé
 > complet restent à établir. Voir le [dernier rapport de l'atelier](reports/atelier-2026-09-13.md)
 > et les exigences ouvertes, notamment la qualité graphique attendue et les sessions authentifiées.
 
@@ -45,6 +46,19 @@ Validation locale : `just check` réussi, 663 tests sans échec, 29 ignorés ; l
 sont rejoués sous UID/GID 65534 sans échec, dont les 18 scénarios d'interruption et reprise.
 L'application sous l'UID humain, les droits capd liés à l'index, les dossiers parents concurrents
 et les commandes graphiques restent à livrer ; aucune case complète de FRONTIER n'est cochée.
+
+Approbation depuis le service, après `b8a7aa5`, dans le commit portant ce rapport : `agentd`
+expose `task.apply` et `task.undo`, réservés au créateur persisté d'une mission `done`, et
+`task.inspect` rend l'état de publication SFS avec `can_apply` / `can_undo`. `prophet task apply`
+et `prophet task undo` passent par le service ; l'ancien undo sur disque est retiré. L'inspecteur
+de l'atelier offre « Appliquer à mes documents » et « Annuler la publication », avec reprise
+d'une intention interrompue. Le journal reçoit `fs.commit`, `fs.undo` et `task.rolled_back`
+sous l'acteur `user`. Trois tests d'intégration avec les vrais capd, ledger, agentd et la CLI
+vérifient la publication réelle, le refus après retouche humaine et la relecture après
+redémarrage. Voir le [rapport d'approbation](reports/approbation-2026-09-13.md) et
+l'[ADR 0023](adr/0023-approbation-et-publication-par-agentd.md). Limite : les tests tournent
+sous un seul UID ; sur l'image installée, `agentd` n'a pas `CAP_CHOWN` et le remplacement d'un
+document du propriétaire n'est pas livré. Aucune case complète de FRONTIER n'est cochée.
 
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 
@@ -458,7 +472,7 @@ du filtre de chemins et restent libres.
 - [x] M12-T1 — Barre d'intentions (2026-09-12, 8091f4d) — proposition étroite, élargissements posés en questions
 - [x] M12-T2 — Timeline (2026-09-12, 24b8338) — timeline groupée par étape
 - [x] M12-T3 — Centre d'approbations (2026-09-12, 24b8338) — centre d'approbations lisible en cinq secondes
-- [x] M12-T4 — Undo (2026-09-12, 24b8338) — `prophet task undo`, sans daemon
+- [x] M12-T4 — Undo (2026-09-12, 24b8338) — `prophet task undo`, sans daemon ; depuis le 13 septembre, par `task.undo` d'agentd sous l'identité du créateur (ADR 0023)
 - [x] M12-T5 — Gel d'urgence (2026-09-12, 24b8338) — `prophet freeze`
 
 ### M13 — bench et adversarial

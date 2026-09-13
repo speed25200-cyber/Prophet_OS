@@ -1,6 +1,6 @@
 # 0022 — Publier les versions examinées avec un journal de reprise
 
-- **Statut** : moteur de bibliothèque implémenté ; raccordement humain ouvert
+- **Statut** : moteur de bibliothèque implémenté ; commandé par agentd depuis l'[ADR 0023](0023-approbation-et-publication-par-agentd.md) ; écrivain sous l'identité humaine ouvert
 - **Date** : 2026-09-13
 - **Tâches liées** : M4-T2, M4-T4, M8-T10, M12-T4
 

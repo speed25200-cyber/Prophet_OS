@@ -135,3 +135,10 @@ versions exactes, les conflits d'application et d'annulation, la conservation de
 et la reprise après 18 interruptions réelles de processus. La bibliothèque ne délivre aucune
 approbation ; l'intégration interservices sous l'identité humaine et la résolution graphique
 des conflits restent ouvertes. Cette preuve partielle ne coche pas le critère de durabilité complète.
+
+L'[approbation depuis le service](reports/approbation-2026-09-13.md) relie ensuite cet index
+au créateur constaté : `task.apply` et `task.undo` dans agentd, `prophet task apply` / `undo`
+et les boutons de l'atelier, avec journal sous l'acteur `user` et reprise d'une intention
+interrompue. Trois tests réels sous un seul UID le vérifient. Sur l'image installée, le service
+n'a pas `CAP_CHOWN` : remplacer un document du propriétaire n'est pas livré, et les droits capd
+liés à l'index restent absents. Le critère d'exécution locale complète reste donc ouvert.

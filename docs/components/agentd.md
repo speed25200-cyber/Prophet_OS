@@ -19,8 +19,11 @@
 | `task.result` | Rend le résultat conservé ; erreur tant qu'il n'est pas disponible |
 | `task.change` | Rend les versions vérifiées d'un fichier au créateur de la mission terminée |
 | `task.cancel` | Demande l'arrêt d'une mission active ou annule un plan non lancé |
+| `task.apply` | Publie dans le home l'index exact examiné, pour le créateur d'une mission `done` |
+| `task.undo` | Annule cette publication si les documents n'ont pas changé depuis |
 
-`task.start`, `task.status`, `task.inspect`, `task.result` et `task.cancel` prennent `{"id":"…"}`.
+`task.start`, `task.status`, `task.inspect`, `task.result`, `task.cancel`, `task.apply` et
+`task.undo` prennent `{"id":"…"}`.
 Le format de planification complet est illustré dans
 [`examples/missions/note-locale.json`](../../examples/missions/note-locale.json).
 Les méthodes sont réservées aux pairs de confiance. Le contrôle existant est global au
@@ -29,6 +32,14 @@ socket ; la nouvelle méthode `task.change` exige en plus l'UID créateur persis
 `done` et posséder ses versions conservées ; aucun propriétaire n'est déduit des anciennes
 identités déclarées. Deux lectures simultanées sont admises. Les autres méthodes conservent
 leur contrôle global et restent à traiter individuellement.
+
+`task.apply` et `task.undo` exigent le même UID créateur et la même mission `done`. La
+bibliothèque SFS relit l'index et les originaux avant la première mutation et refuse un
+document retouché ; le service n'ajoute que l'identité, la sérialisation (une publication à la
+fois) et le journal : `fs.commit`, ou `fs.undo` puis `task.rolled_back`, sous l'acteur `user`.
+Une intention interrompue (`applying`, `undoing`) se reprend par la même commande. `task.inspect`
+rend l'état SFS dans `publication`, et `can_apply` / `can_undo` au seul créateur. La publication
+s'exécute sous l'identité du service ; voir les limites de l'[ADR 0023](../adr/0023-approbation-et-publication-par-agentd.md).
 
 `task.prepare` prend uniquement `{id, intent, profile, model}`. Son utilisateur provient du pair
 Unix. `PROPHET_MISSION_PROFILES` fixe les manifestes et périmètres au démarrage ; les modèles sont
