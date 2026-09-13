@@ -279,6 +279,10 @@ impl Profile {
         let apps = grants
             .iter()
             .any(|g| g.res == Res::Ui && g.pattern != "browser" && is_app_name(&g.pattern));
+        // Déléguer suppose un contexte à confier ; le catalogue vérifie ensuite qu'il existe.
+        let spawns = grants
+            .iter()
+            .any(|g| g.res == Res::Task && g.act == Act::Spawn);
         for grant in grants {
             match (grant.res, grant.act) {
                 (Res::Fs, Act::Read | Act::Write | Act::List)
@@ -303,9 +307,12 @@ impl Profile {
                     ) => {}
                 (Res::Tool, Act::Call) if hosts && WEB_TOOLS.contains(&grant.pattern.as_str()) => {}
                 (Res::Tool, Act::Call) if apps && UI_TOOLS.contains(&grant.pattern.as_str()) => {}
+                // Une sous-mission se confie à un contexte nommé du catalogue, jamais à « tout ».
+                (Res::Task, Act::Spawn) if is_app_name(&grant.pattern) => {}
+                (Res::Tool, Act::Call) if spawns && grant.pattern == "task.delegate" => {}
                 _ => {
                     return Err(
-                        "Le profil dépasse les outils fichiers natifs, le web relayé par egress, les applications nommées et ses périmètres."
+                        "Le profil dépasse les outils fichiers natifs, le web relayé par egress, les applications nommées, la délégation à un contexte nommé et ses périmètres."
                             .into(),
                     );
                 }
@@ -337,6 +344,22 @@ pub fn load(path: &Path) -> Result<Vec<Profile>, String> {
         profile.validate()?;
         if !ids.insert(&profile.id) {
             return Err("Identifiant de profil dupliqué.".into());
+        }
+    }
+    // Un contexte ne se confie qu'à un contexte du même catalogue : une cible absente serait un
+    // refus certain, autant le dire à l'administrateur qu'à l'agent.
+    let connus: BTreeSet<&str> = profiles.iter().map(|p| p.id.as_str()).collect();
+    for profile in &profiles {
+        for grant in profile.grants()? {
+            if grant.res == Res::Task
+                && grant.act == Act::Spawn
+                && !connus.contains(grant.pattern.as_str())
+            {
+                return Err(format!(
+                    "Le profil {} délègue à un contexte inconnu : {}.",
+                    profile.id, grant.pattern
+                ));
+            }
         }
     }
     Ok(profiles)

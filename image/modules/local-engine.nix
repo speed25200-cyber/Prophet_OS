@@ -52,7 +52,10 @@ let
           "fs.read" = [ "~/Documents/Prophet/**" ];
           "fs.write" = [ "~/Documents/Prophet/**" ];
           "net.egress" = [ "*" ];
-          "tool.call" = [ "fs.read" "doc.read" "fs.write" "http.fetch" ]
+          # Le contexte web peut confier la rédaction au contexte documents : deux agents, deux
+          # modèles au besoin, sous un jeton délégué par capd (ADR 0029).
+          "task.spawn" = [ "documents" ];
+          "tool.call" = [ "fs.read" "doc.read" "fs.write" "http.fetch" "task.delegate" ]
             ++ lib.optionals navigateur [ "web.open" "web.tree" "web.act" ];
         } // lib.optionalAttrs navigateur {
           "ui.read" = [ "browser" ];

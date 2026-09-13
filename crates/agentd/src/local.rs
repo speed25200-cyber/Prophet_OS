@@ -23,6 +23,28 @@ use crate::{State, Task, TaskPlan};
 /// Publie l'état et le résultat sous le verrou de persistance du service.
 pub type Publish = Arc<dyn Fn(Task, Option<Value>) -> Result<(), String> + Send + Sync>;
 
+/// Une sous-mission telle que l'agent la demande : un objectif, un contexte du catalogue, et
+/// au choix un autre modèle (ADR 0029).
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct Delegation {
+    /// Objectif confié.
+    pub intent: String,
+    /// Contexte (profil) du catalogue qui encadre la sous-mission.
+    pub profile: String,
+    /// Modèle local demandé ; celui du parent sinon.
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+/// Ce que le service fait d'une délégation : créer la sous-mission sous un jeton délégué par
+/// capd, la lancer, l'attendre, et rendre son résultat au parent. Fourni par le daemon ; sans
+/// lui, l'outil `task.delegate` n'existe pas.
+pub type Delegate = Arc<
+    dyn Fn(&str, &Token, Delegation) -> Result<Value, (mcp_system::protocol::ErrorCode, String)>
+        + Send
+        + Sync,
+>;
+
 /// Contexte construit exclusivement par agentd à partir de la tâche planifiée.
 pub struct Mission {
     /// Tâche réservée en état Running.
@@ -46,6 +68,8 @@ pub struct Mission {
     /// Socket de l'adaptateur d'accessibilité de la session humaine, si le service en connaît
     /// un ; sinon aucun outil `ui.*`.
     pub sup_socket: Option<PathBuf>,
+    /// Comment déléguer une sous-mission ; sans lui, aucun outil `task.delegate`.
+    pub delegate: Option<Delegate>,
     /// Signal d'annulation. Le résultat final confirme l'arrêt.
     pub stop: Arc<AtomicBool>,
 }
@@ -361,6 +385,11 @@ impl Mission {
             for tool in mcp_system::tools::Desktop::at(socket.clone()).tools() {
                 registry.register(tool);
             }
+        }
+        // Un agent en fait travailler un autre : sous-mission à droits inclus, autre contexte ou
+        // autre modèle, résultat rendu ici. capd tranche `task.spawn` sur le contexte visé.
+        if let Some(delegate) = &self.delegate {
+            registry.register(Arc::new(crate::delegate::Tool::new(delegate.clone())));
         }
         registry
     }

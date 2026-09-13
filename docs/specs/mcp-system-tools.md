@@ -29,7 +29,7 @@
 | `task.status` | task courante | non | non | |
 | `task.diff` | task courante | non | non | |
 | `task.commit_request` | task courante | oui | non | déclenche approbation si fichiers sensibles |
-| `task.spawn_sub` | task.spawn | non | non | grants ⊆ |
+| `task.delegate` | task.spawn contexte | non | non | sous-mission à droits ⊆, autre contexte ou modèle, résultat rendu (ADR 0029) |
 | `approval.request` | task courante | non | non | |
 | `approval.wait` | task courante | non | non | |
 | `ledger.query` | ledger.read (ou read_all) | non | non | |

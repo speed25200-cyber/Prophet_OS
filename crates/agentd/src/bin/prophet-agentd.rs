@@ -590,7 +590,7 @@ impl Agents {
                 .jobs
                 .lock()
                 .map_err(|_| Error::new(ErrorCode::InternalError, "travailleurs indisponibles"))?;
-            if jobs.len() >= 2 || jobs.contains_key(&id) {
+            if jobs.len() >= 4 || jobs.contains_key(&id) {
                 return Err(Error::new(
                     ErrorCode::Conflict,
                     "mission déjà lancée ou capacité de travail atteinte",
@@ -643,6 +643,7 @@ impl Agents {
             browser: self.browser.clone(),
             browser_root: self.browser_root.clone(),
             sup_socket: self.sup_socket.clone(),
+            delegate: Some(self.delegator()),
             stop,
         };
         let opened =
@@ -904,6 +905,7 @@ impl Agents {
             browser: self.browser.clone(),
             browser_root: self.browser_root.clone(),
             sup_socket: self.sup_socket.clone(),
+            delegate: Some(self.delegator()),
             stop,
         };
         if let Err(error) = std::thread::Builder::new()
@@ -1054,6 +1056,249 @@ fn optionnel<T: serde::de::DeserializeOwned>(
 }
 
 /// Écriture atomique : un fichier voisin, puis un renommage.
+impl Agents {
+    /// La délégation que reçoivent les missions et les séances : tout ce qu'il faut pour créer,
+    /// lancer et attendre une sous-mission, sans tenir le service lui-même.
+    fn delegator(&self) -> agentd::local::Delegate {
+        delegation_fn(Arc::new(DelegationContext {
+            runtime: self.runtime.clone(),
+            etat: self.etat.clone(),
+            profiles: self.profiles.clone(),
+            local_endpoint: self.local_endpoint.clone(),
+            capd: self.capd.clone(),
+            ledger: self.ledger.clone(),
+            egress: self.egress.clone(),
+            browser: self.browser.clone(),
+            browser_root: self.browser_root.clone(),
+            sup_socket: self.sup_socket.clone(),
+            jobs: self.jobs.clone(),
+        }))
+    }
+}
+
+/// Ce qu'une délégation emploie du service, cloné pour vivre dans le fil de la mission.
+struct DelegationContext {
+    runtime: Arc<Mutex<Runtime>>,
+    etat: std::path::PathBuf,
+    profiles: Vec<agentd::preparation::Profile>,
+    local_endpoint: Option<String>,
+    capd: std::path::PathBuf,
+    ledger: std::path::PathBuf,
+    egress: std::path::PathBuf,
+    browser: Option<std::path::PathBuf>,
+    browser_root: std::path::PathBuf,
+    sup_socket: Option<std::path::PathBuf>,
+    jobs: Arc<std::sync::Mutex<BTreeMap<String, Arc<AtomicBool>>>>,
+}
+
+fn delegation_fn(ctx: Arc<DelegationContext>) -> agentd::local::Delegate {
+    Arc::new(move |parent, token, request| deleguer(&ctx, parent, token, request))
+}
+
+/// Une sous-mission, du jeton délégué au résultat rendu (ADR 0029).
+///
+/// Tourne dans le fil de la mission parente (ou de la séance), qui attend : le parent ne fait
+/// rien d'autre pendant que l'enfant travaille, et reçoit son résultat comme celui d'un outil.
+fn deleguer(
+    ctx: &Arc<DelegationContext>,
+    parent_id: &str,
+    parent_token: &Token,
+    request: agentd::local::Delegation,
+) -> Result<Value, (mcp_system::protocol::ErrorCode, String)> {
+    use mcp_system::protocol::ErrorCode as Code;
+    let profile = ctx
+        .profiles
+        .iter()
+        .find(|p| p.id == request.profile.trim().to_lowercase())
+        .ok_or_else(|| (Code::Invalid, "Contexte de mission inconnu.".to_owned()))?;
+    let endpoint = ctx.local_endpoint.clone().ok_or_else(|| {
+        (
+            Code::SandboxError,
+            "moteur local du service non configuré".to_owned(),
+        )
+    })?;
+    // L'enfant : son identifiant, l'utilisateur et le propriétaire du parent, le modèle du
+    // parent à défaut d'un autre.
+    let (child_id, user, owner, parent_model) = {
+        let runtime = ctx.runtime.blocking_lock();
+        let parent = runtime
+            .task(parent_id)
+            .ok_or_else(|| (Code::NotFound, "mission parente inconnue".to_owned()))?;
+        let n = runtime.children_of(parent_id).len() + 1;
+        (
+            format!("{parent_id}.{n}"),
+            parent.user.clone(),
+            runtime.owner_of(parent_id),
+            parent
+                .driver
+                .as_deref()
+                .and_then(|d| d.strip_prefix("local:"))
+                .map(str::to_owned),
+        )
+    };
+    let model = request.model.clone().or(parent_model).ok_or_else(|| {
+        (
+            Code::Invalid,
+            "aucun modèle local pour la sous-mission".to_owned(),
+        )
+    })?;
+    let reference = format!("local:{model}");
+    if !profile.manifest.model.preferred.contains(&reference) {
+        return Err((
+            Code::PolicyDenied,
+            format!("Le contexte {} n'admet pas le modèle {model}.", profile.id),
+        ));
+    }
+    let mut manifest = profile.manifest.clone();
+    manifest.model.preferred = vec![reference];
+    let grants = profile.grants().map_err(|e| (Code::SandboxError, e))?;
+    let ttl = i64::try_from(manifest.wall_time_seconds().unwrap_or(1200)).unwrap_or(1200);
+    // Le jeton de l'enfant est délégué par capd : un sous-ensemble de celui du parent, jamais
+    // plus, ni plus longtemps. Un contexte plus large que le parent est refusé ici.
+    let capd = ctx.capd.clone();
+    let child_for_capd = child_id.clone();
+    let child_token: Token = bloquer(async move {
+        let client = Client::connect(&capd)
+            .await
+            .map_err(|e| (Code::SandboxError, format!("capd injoignable : {e}")))?;
+        let brut = client
+            .call(
+                "cap.delegate",
+                json!({"parent": parent_token, "grants": grants, "task": child_for_capd, "ttl_seconds": ttl}),
+            )
+            .await
+            .map_err(|e| (Code::PolicyDenied, format!("délégation refusée par capd : {}", e.message)))?;
+        serde_json::from_value(brut).map_err(|e| {
+            (
+                Code::SandboxError,
+                format!("jeton illisible rendu par capd : {e}"),
+            )
+        })
+    })?;
+    let scopes: Vec<&str> = profile.scopes.iter().map(String::as_str).collect();
+    let availability = Availability {
+        local_models: vec![model.clone()],
+        ..Default::default()
+    };
+    {
+        let mut runtime = ctx.runtime.blocking_lock();
+        runtime
+            .plan_with_token(
+                &PlanRequest {
+                    id: &child_id,
+                    intent: request.intent.trim(),
+                    manifest: &manifest,
+                    user: &user,
+                    requested: &profile.grants().map_err(|e| (Code::SandboxError, e))?,
+                    scopes: &scopes,
+                    availability: &availability,
+                },
+                child_token,
+                OffsetDateTime::now_utc(),
+            )
+            .map_err(|e| (Code::SandboxError, e.to_string()))?;
+        runtime
+            .link_child(&child_id, parent_id, 0.5)
+            .map_err(|e| (Code::PolicyDenied, e.to_string()))?;
+        if let Some(uid) = owner {
+            runtime
+                .bind_owner(&child_id, uid)
+                .map_err(|e| (Code::SandboxError, e))?;
+        }
+        ecrire(&ctx.etat, &runtime.etat())
+            .map_err(|e| (Code::SandboxError, format!("état non enregistré : {e}")))?;
+    }
+    // Lancement, dans ce fil : le parent attend.
+    let stop = Arc::new(AtomicBool::new(false));
+    if let Ok(mut jobs) = ctx.jobs.lock() {
+        jobs.insert(child_id.clone(), stop.clone());
+    }
+    let launch = {
+        let mut runtime = ctx.runtime.blocking_lock();
+        runtime.begin_local(&child_id).and_then(|l| {
+            ecrire(&ctx.etat, &runtime.etat()).map(|()| l).map_err(|e| {
+                agentd::RuntimeError::Workspace(format!("lancement non persisté : {e}"))
+            })
+        })
+    };
+    let (task, token, plan, home) = match launch {
+        Ok(value) => value,
+        Err(error) => {
+            if let Ok(mut jobs) = ctx.jobs.lock() {
+                jobs.remove(&child_id);
+            }
+            return Err((Code::SandboxError, error.to_string()));
+        }
+    };
+    let publish: agentd::local::Publish = {
+        let state = ctx.runtime.clone();
+        let path = ctx.etat.clone();
+        Arc::new(move |task, result| {
+            let mut runtime = state.blocking_lock();
+            runtime.publish_local(task, result);
+            ecrire(&path, &runtime.etat()).map_err(|e| format!("état non enregistré : {e}"))
+        })
+    };
+    let failure_task = task.clone();
+    let mission = agentd::local::Mission {
+        task,
+        token,
+        plan,
+        home,
+        endpoint,
+        services: mcp_system::services::Services::new(ctx.capd.clone(), ctx.ledger.clone()),
+        egress: ctx.egress.clone(),
+        browser: ctx.browser.clone(),
+        browser_root: ctx.browser_root.clone(),
+        sup_socket: ctx.sup_socket.clone(),
+        delegate: Some(delegation_fn(ctx.clone())),
+        stop,
+    };
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        mission.run(publish.clone());
+    }));
+    if let Ok(mut jobs) = ctx.jobs.lock() {
+        jobs.remove(&child_id);
+    }
+    if outcome.is_err() {
+        let mut task = failure_task;
+        task.state = agentd::State::Failed;
+        task.history.push(agentd::State::Failed);
+        task.reason = Some("sous-mission interrompue de manière inattendue".into());
+        let _ = publish(task, None);
+    }
+    let (state, reason, result) = {
+        let mut runtime = ctx.runtime.blocking_lock();
+        runtime.absorb_child(&child_id, parent_id);
+        let _ = ecrire(&ctx.etat, &runtime.etat());
+        let task = runtime.task(&child_id).cloned();
+        (
+            task.as_ref().map(|t| t.state),
+            task.and_then(|t| t.reason),
+            runtime.result(&child_id).cloned(),
+        )
+    };
+    Ok(json!({
+        "task": child_id,
+        "state": state,
+        "reason": reason,
+        "result": result,
+        "note": "La sous-mission a travaillé dans son propre espace ; ses changements sont à examiner et à appliquer comme les vôtres.",
+    }))
+}
+
+/// Attend une opération asynchrone depuis un fil sans exécuteur : chaque délégation en crée un,
+/// le temps d'un appel à capd.
+fn bloquer<T>(
+    fut: impl std::future::Future<Output = Result<T, (mcp_system::protocol::ErrorCode, String)>>,
+) -> Result<T, (mcp_system::protocol::ErrorCode, String)> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| (mcp_system::protocol::ErrorCode::SandboxError, e.to_string()))?;
+    runtime.block_on(fut)
+}
+
 fn ecrire(chemin: &std::path::Path, etat: &EtatPersistant) -> std::io::Result<()> {
     use std::io::Write as _;
     use std::os::unix::fs::OpenOptionsExt as _;

@@ -410,6 +410,68 @@ impl Runtime {
         Ok(())
     }
 
+    /// Le propriétaire d'une mission, s'il est connu.
+    #[must_use]
+    pub fn owner_of(&self, id: &str) -> Option<u32> {
+        self.owners.get(id).copied()
+    }
+
+    /// Rattache une mission planifiée à son parent : filiation, profondeur, et un budget
+    /// **prélevé** sur celui du parent, jamais ajouté (ADR 0029).
+    ///
+    /// # Errors
+    /// Mission ou parent inconnus, profondeur maximale atteinte.
+    pub fn link_child(
+        &mut self,
+        child: &str,
+        parent: &str,
+        fraction: f64,
+    ) -> Result<(), RuntimeError> {
+        let (budget, depth) = {
+            let parent_task = self
+                .tasks
+                .get(parent)
+                .ok_or_else(|| RuntimeError::Unknown(parent.to_owned()))?;
+            if parent_task.depth + 1 > crate::task::MAX_DEPTH {
+                return Err(RuntimeError::Capability(format!(
+                    "profondeur maximale de sous-missions atteinte ({})",
+                    crate::task::MAX_DEPTH
+                )));
+            }
+            (parent_task.budget.reserve(fraction), parent_task.depth + 1)
+        };
+        let task = self
+            .tasks
+            .get_mut(child)
+            .ok_or_else(|| RuntimeError::Unknown(child.to_owned()))?;
+        task.parent = Some(parent.to_owned());
+        task.depth = depth;
+        task.budget = budget;
+        Ok(())
+    }
+
+    /// Impute au parent ce que la sous-mission a consommé.
+    pub fn absorb_child(&mut self, child: &str, parent: &str) {
+        let Some(spent) = self.tasks.get(child).map(|t| t.budget) else {
+            return;
+        };
+        if let Some(parent_task) = self.tasks.get_mut(parent) {
+            parent_task.budget.absorb(&spent);
+        }
+    }
+
+    /// Les sous-missions d'une mission, dans l'ordre de création.
+    #[must_use]
+    pub fn children_of(&self, parent: &str) -> Vec<&Task> {
+        let mut enfants: Vec<&Task> = self
+            .tasks
+            .values()
+            .filter(|t| t.parent.as_deref() == Some(parent))
+            .collect();
+        enfants.sort_by_key(|t| t.created);
+        enfants
+    }
+
     /// Donne au créateur l'index de ses versions capturées, pour une lecture hors du verrou du runtime.
     ///
     /// # Errors

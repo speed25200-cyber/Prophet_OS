@@ -105,7 +105,11 @@
             "http.fetch",
             "web.open",
             "web.tree",
-            "web.act"
+            "web.act",
+            "task.delegate"
+          ],
+          "task.spawn": [
+            "documents"
           ]
         }
       },

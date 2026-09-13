@@ -136,6 +136,19 @@ Code, lanceur, navigateur, X, verrouillage, déconnexion puis reconnexion) réus
 l'ISO, son démarrage et l'installeur ; seul ChatGPT reste en échec sur Fontconfig.
 Aucune case complète de FRONTIER n'est cochée.
 
+Délégation entre agents du 13 septembre 2026, dans le commit portant ce rapport : un agent en
+fait travailler un autre par `task.delegate {intent, profile, model?}`. La sous-mission reçoit
+un contexte du catalogue et, au choix, un autre modèle local ; son jeton est délégué par capd
+(`cap.delegate`, droits ⊆ ceux du parent, jamais plus longtemps), son budget est prélevé sur
+celui du parent puis imputé, elle est rattachée à lui (filiation, profondeur bornée, même
+propriétaire), lancée dans son fil, et son résultat lui revient comme celui d'un outil. Le
+profil doit accorder `task.spawn` sur un contexte nommé, vérifié au chargement du catalogue ;
+un contexte plus large que le parent est refusé par capd et interrompt la mission. Test avec
+les vrais capd, ledger et agentd et un moteur simulé qui note les modèles demandés : parent,
+enfant (autre modèle), enfant, parent ; l'enfant écrit dans son espace, le parent conclut. Les
+catalogues d'exemple et de l'image confient la rédaction du contexte web au contexte documents.
+Voir l'[ADR 0029](adr/0029-delegation-entre-agents.md).
+
 Lecture des formats du 13 septembre 2026, dans le commit portant ce rapport : `doc.read` lit un
 fichier du périmètre de `fs.read` quel que soit son format, reconnu aux octets : PDF par poppler
 (texte, pages), bureautique (`docx`, `xlsx`, `pptx`, `odt`, `ods`, `odp`) par archive et XML

@@ -103,6 +103,25 @@ impl Handler for Capd {
                 commun::repondre(&jeton)
             }
 
+            // Déléguer : une sous-tâche reçoit un sous-ensemble des droits de son parent, jamais
+            // plus, et pas plus longtemps. C'est ainsi qu'un agent en fait travailler un autre
+            // sans pouvoir lui donner ce qu'il n'a pas lui-même (ADR 0029).
+            "cap.delegate" => {
+                let parent: Token = lire(&params, "parent")?;
+                let grants: Vec<Grant> = lire(&params, "grants")?;
+                let tache = commun::texte(&params, "task")?;
+                let duree = params
+                    .get("ttl_seconds")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(1800);
+                let mut broker = self.broker.lock().await;
+                let jeton = broker
+                    .delegate(&parent, &tache, &grants, duree, maintenant)
+                    .map_err(|e| Error::new(ErrorCode::PolicyDenied, e.to_string()))?;
+                tracing::info!(%tache, parent = %parent.sub, grants = jeton.grants.len(), "jeton délégué");
+                commun::repondre(&jeton)
+            }
+
             "approval.pending" => {
                 let broker = self.broker.lock().await;
                 commun::repondre(&broker.approvals().pending())
