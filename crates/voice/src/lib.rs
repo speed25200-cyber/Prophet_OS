@@ -344,6 +344,106 @@ impl Tools {
     }
 }
 
+/// Ce qui suit le mot d'activation dans une phrase transcrite, si elle commence par lui.
+///
+/// La comparaison ignore la casse, les accents et la ponctuation : Whisper rend « Prophète, »
+/// ou « prophet » selon l'humeur de la voix. `wake` peut être un mot ou plusieurs.
+#[must_use]
+pub fn after_wake_word(text: &str, wake: &str) -> Option<String> {
+    let normalize = |s: &str| -> Vec<String> {
+        s.chars()
+            .map(|c| match c {
+                'à' | 'â' | 'ä' => 'a',
+                'é' | 'è' | 'ê' | 'ë' => 'e',
+                'î' | 'ï' => 'i',
+                'ô' | 'ö' => 'o',
+                'ù' | 'û' | 'ü' => 'u',
+                'ç' => 'c',
+                c if c.is_alphanumeric() => c.to_ascii_lowercase(),
+                _ => ' ',
+            })
+            .collect::<String>()
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect()
+    };
+    let wake_words = normalize(wake);
+    if wake_words.is_empty() {
+        return None;
+    }
+    let words = normalize(text);
+    if words.len() < wake_words.len()
+        || !words
+            .iter()
+            .zip(&wake_words)
+            .all(|(heard, wanted)| close_enough(heard, wanted))
+    {
+        return None;
+    }
+    // Le reste de la phrase, tel que dit : on retrouve la coupure dans le texte d'origine en
+    // comptant les mots, pour garder accents et ponctuation de l'intention.
+    let mut seen = 0;
+    let mut cut = 0;
+    let mut in_word = false;
+    for (i, c) in text.char_indices() {
+        let is_word = c.is_alphanumeric();
+        if is_word && !in_word {
+            if seen == wake_words.len() {
+                cut = i;
+                break;
+            }
+            seen += 1;
+        }
+        in_word = is_word;
+        cut = i + c.len_utf8();
+    }
+    let rest = text[cut..]
+        .trim()
+        .trim_start_matches([',', ':', ';', '.', '!', '?'])
+        .trim();
+    if rest.is_empty() {
+        None
+    } else {
+        Some(rest.to_owned())
+    }
+}
+
+/// Deux mots normalisés se valent si, une fois « ph » ramené à « f » et les lettres doublées
+/// réduites, ils sont égaux, ou ne diffèrent que par une lettre substituée, ou par une lettre
+/// de plus à la fin. Whisper entend « Profète », « Profette » ou « prophet » pour « Prophète » ;
+/// il n'entend pas « prophétie », qui reste distinct.
+fn close_enough(heard: &str, wanted: &str) -> bool {
+    let sound = |w: &str| -> Vec<char> {
+        let mut out: Vec<char> = Vec::new();
+        let mut chars = w.chars().peekable();
+        while let Some(c) = chars.next() {
+            let c = if c == 'p' && chars.peek() == Some(&'h') {
+                chars.next();
+                'f'
+            } else {
+                c
+            };
+            if out.last() != Some(&c) {
+                out.push(c);
+            }
+        }
+        out
+    };
+    let a = sound(heard);
+    let b = sound(wanted);
+    if a == b {
+        return true;
+    }
+    if b.len() < 4 {
+        return false;
+    }
+    if a.len() == b.len() {
+        return a.iter().zip(&b).filter(|(x, y)| x != y).count() <= 1;
+    }
+    let (short, long) = if a.len() < b.len() { (&a, &b) } else { (&b, &a) };
+    long.len() == short.len() + 1 && long[..short.len()] == short[..]
+}
+
 /// Lit la sortie JSON de whisper.cpp (`-oj`) : le texte des segments, la langue.
 ///
 /// # Errors
@@ -398,6 +498,39 @@ mod tests {
         assert_eq!(t.segments, 2);
         assert!(parse_whisper_json("{}").is_err());
         assert!(parse_whisper_json("pas du json").is_err());
+    }
+
+    #[test]
+    fn le_mot_d_activation_se_reconnait_malgre_casse_accents_et_ponctuation() {
+        assert_eq!(
+            after_wake_word("Prophète, écris une note dans mes documents.", "prophète").as_deref(),
+            Some("écris une note dans mes documents.")
+        );
+        assert_eq!(
+            after_wake_word(" prophet : Résume le rapport", "Prophète").as_deref(),
+            Some("Résume le rapport")
+        );
+        assert_eq!(
+            after_wake_word("Dis Prophète, résume", "dis prophète").as_deref(),
+            Some("résume")
+        );
+        // Sans le mot en tête, ou sans rien après, rien n'est déclenché.
+        assert_eq!(after_wake_word("Il fait beau, Prophète.", "prophète"), None);
+        assert_eq!(after_wake_word("Prophète.", "prophète"), None);
+        assert_eq!(after_wake_word("", "prophète"), None);
+        assert_eq!(after_wake_word("Prophète, vas-y", ""), None);
+        // « prophétie » n'est pas « prophète ».
+        assert_eq!(after_wake_word("Prophétie du jour", "prophète"), None);
+        // Ce que Whisper entend réellement d'une voix de synthèse : « Profète », « Profette ».
+        assert_eq!(
+            after_wake_word("Profète, écrite une note de réunion.", "prophète").as_deref(),
+            Some("écrite une note de réunion.")
+        );
+        assert_eq!(
+            after_wake_word("Profette, résume le rapport", "prophète").as_deref(),
+            Some("résume le rapport")
+        );
+        assert_eq!(after_wake_word("Profond, résume", "prophète"), None);
     }
 
     #[test]

@@ -318,8 +318,11 @@ voix française « siwis » (installée par la configuration de référence) et 
 preuve en boucle fermée, l'OS dit une phrase et Whisper la réécoute presque mot pour mot. La
 boucle complète existe : `prophet voice --prepare <contexte> --reply` transcrit la phrase dite,
 prépare la mission auprès d'agentd et répond à voix haute ce qu'il a compris et où examiner le
-plan ; un test de la CLI avec service simulé le prouve, réponse réécoutée par Whisper. Ni voix
-humaine mesurée, ni lecture vérifiée sur une vraie sortie audio, ni mot d'activation : voir
+plan ; un test de la CLI avec service simulé le prouve, réponse réécoutée par Whisper. Le mot
+d'activation existe : `prophet voice --listen` écoute par tranches et n'agit que sur « Prophète,
+… », comparé avec tolérance à ce que Whisper entend ; un test avec un faux enregistreur prouve
+qu'une tranche sans le mot est ignorée et que la suivante devient une mission avec réponse
+parlée. Ni voix humaine mesurée, ni lecture vérifiée sur une vraie sortie audio : voir
 l'[ADR 0036](adr/0036-la-parole-de-l-humain.md) et le [rapport](reports/parole-2026-09-13.md).
 
 Jalons d'intégration réellement exercés le 12 septembre 2026 :

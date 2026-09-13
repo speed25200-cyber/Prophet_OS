@@ -84,6 +84,16 @@ enum Command {
         /// préparée ; ou pourquoi rien n'a été préparé.
         #[arg(long, conflicts_with = "say")]
         reply: bool,
+        /// Écouter en continu, par tranches de `--seconds`, et n'agir que sur une phrase qui
+        /// commence par le mot d'activation (`--wake`) : le reste de la phrase est l'intention.
+        #[arg(long, conflicts_with_all = ["say", "file"])]
+        listen: bool,
+        /// Mot d'activation de l'écoute continue.
+        #[arg(long, default_value = "prophète")]
+        wake: String,
+        /// Avec `--listen` : nombre de tranches à écouter, 0 pour ne jamais s'arrêter.
+        #[arg(long, default_value_t = 0)]
+        rounds: u32,
         /// Avec `--say` ou `--reply` : écrire la réponse dans ce fichier WAV au lieu de la jouer.
         #[arg(long)]
         out: Option<std::path::PathBuf>,
@@ -348,19 +358,35 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
             model,
             say,
             reply,
+            listen: en_ecoute,
+            wake,
+            rounds,
             out,
-        } => match say {
-            Some(text) => speak(text, out.as_deref(), cli.json),
-            None => voice(
-                file.as_deref(),
-                *seconds,
-                language.as_deref(),
-                prepare.as_deref(),
-                model.clone(),
-                if *reply { Some(out.as_deref()) } else { None },
-                cli.json,
-            ),
-        },
+        } => {
+            let reponse = if *reply { Some(out.as_deref()) } else { None };
+            match say {
+                Some(text) => speak(text, out.as_deref(), cli.json),
+                None if *en_ecoute => listen(
+                    wake,
+                    *seconds,
+                    *rounds,
+                    language.as_deref(),
+                    prepare.as_deref(),
+                    model.clone(),
+                    reponse,
+                    cli.json,
+                ),
+                None => voice(
+                    file.as_deref(),
+                    *seconds,
+                    language.as_deref(),
+                    prepare.as_deref(),
+                    model.clone(),
+                    reponse,
+                    cli.json,
+                ),
+            }
+        }
         Command::Memory { action } => memory(action),
         Command::Log { action } => log(action),
         Command::Task { action } => task(action, cli.json),
@@ -418,6 +444,7 @@ fn speak(text: &str, out: Option<&std::path::Path>, as_json: bool) -> anyhow::Re
 
 /// La parole : un fichier ou le micro, transcrit en local, et au choix une mission préparée
 /// avec ce texte pour objectif (ADR 0036). Le son ne quitte pas la machine.
+#[allow(clippy::too_many_arguments)]
 fn voice(
     file: Option<&std::path::Path>,
     seconds: u32,
@@ -432,9 +459,7 @@ fn voice(
     let audio = match file {
         Some(path) => path,
         None => {
-            let dir = std::env::var_os("XDG_RUNTIME_DIR")
-                .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
-            recorded = dir.join(format!("prophet-voix-{}.wav", std::process::id()));
+            recorded = chemin_temporaire("prophet-voix");
             eprintln!("prophet : enregistrement du micro pendant {seconds} s…");
             tools.record(seconds, &recorded)?;
             &recorded
@@ -445,17 +470,94 @@ fn voice(
         let _ = std::fs::remove_file(audio);
     }
     let transcript = transcript?;
-    // La réponse parlée, si elle est demandée : dite tout de suite, ou écrite dans `--out`.
+    if transcript.text.is_empty() {
+        if let Some(out) = reply {
+            reply_aloud(&tools, "Je n'ai rien compris. Rien n'est préparé.", out)?;
+        }
+        anyhow::bail!("rien n'a été compris ; rien n'est préparé");
+    }
+    agir(&tools, &transcript, prepare, model, reply, as_json)
+}
+
+/// Écoute en continu, par tranches, et n'agit que sur une phrase qui commence par le mot
+/// d'activation : le reste est l'intention, traitée comme une dictée (ADR 0036). Le son de
+/// chaque tranche est effacé après transcription ; rien n'est conservé ni envoyé.
+#[allow(clippy::too_many_arguments)]
+fn listen(
+    wake: &str,
+    seconds: u32,
+    rounds: u32,
+    language: Option<&str>,
+    prepare: Option<&str>,
+    model: Option<String>,
+    reply: Option<Option<&std::path::Path>>,
+    as_json: bool,
+) -> anyhow::Result<String> {
+    let tools = voice::Tools::from_env()?;
+    if wake.trim().is_empty() {
+        anyhow::bail!("le mot d'activation ne peut pas être vide");
+    }
+    eprintln!(
+        "prophet : à l'écoute, dites « {wake} » puis votre demande ({seconds} s par tranche{})",
+        if rounds == 0 {
+            ", Ctrl+C pour arrêter".to_owned()
+        } else {
+            format!(", {rounds} tranche(s)")
+        }
+    );
+    let mut out = String::new();
+    let mut round = 0u32;
+    while rounds == 0 || round < rounds {
+        round += 1;
+        let wav = chemin_temporaire("prophet-ecoute");
+        let heard = tools
+            .record(seconds, &wav)
+            .and_then(|()| tools.transcribe(&wav, language));
+        let _ = std::fs::remove_file(&wav);
+        let transcript = match heard {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("prophet : tranche {round} : {e}");
+                continue;
+            }
+        };
+        let Some(intent) = voice::after_wake_word(&transcript.text, wake) else {
+            if !as_json && !transcript.text.is_empty() {
+                eprintln!("prophet : (entendu sans « {wake} ») {}", transcript.text);
+            }
+            continue;
+        };
+        let transcript = voice::Transcript {
+            text: intent,
+            ..transcript
+        };
+        match agir(&tools, &transcript, prepare, model.clone(), reply, as_json) {
+            Ok(text) => out.push_str(&text),
+            Err(e) => {
+                eprintln!("prophet : {e}");
+                out.push_str(&format!("« {} » : {e}\n", transcript.text));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Ce qu'on fait d'une phrase comprise : rien de plus que la rendre, ou préparer une mission
+/// avec elle pour objectif, et répondre à voix haute si on l'a demandé.
+fn agir(
+    tools: &voice::Tools,
+    transcript: &voice::Transcript,
+    prepare: Option<&str>,
+    model: Option<String>,
+    reply: Option<Option<&std::path::Path>>,
+    as_json: bool,
+) -> anyhow::Result<String> {
     let repondre = |texte: String| -> anyhow::Result<Option<voice::Speech>> {
         match reply {
             None => Ok(None),
-            Some(out) => reply_aloud(&tools, &texte, out).map(Some),
+            Some(out) => reply_aloud(tools, &texte, out).map(Some),
         }
     };
-    if transcript.text.is_empty() {
-        repondre("Je n'ai rien compris. Rien n'est préparé.".into())?;
-        anyhow::bail!("rien n'a été compris ; rien n'est préparé");
-    }
     let (plan, spoken) = match prepare {
         Some(profile) => {
             let id = format!("mission-{}", ulid::Ulid::new());
@@ -519,6 +621,19 @@ fn voice(
     Ok(out)
 }
 
+/// Un fichier temporaire de la session, dans son répertoire d'exécution s'il existe.
+fn chemin_temporaire(prefixe: &str) -> std::path::PathBuf {
+    let dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+    dir.join(format!(
+        "{prefixe}-{}-{}.wav",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis())
+    ))
+}
+
 /// Dit `texte` sur la sortie audio de la session, ou l'écrit dans `out`.
 fn reply_aloud(
     tools: &voice::Tools,
@@ -528,9 +643,7 @@ fn reply_aloud(
     match out {
         Some(path) => Ok(tools.speak(texte, path)?),
         None => {
-            let dir = std::env::var_os("XDG_RUNTIME_DIR")
-                .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
-            let wav = dir.join(format!("prophet-reponse-{}.wav", std::process::id()));
+            let wav = chemin_temporaire("prophet-reponse");
             let speech = tools.speak(texte, &wav)?;
             let played = tools.play(&wav);
             let _ = std::fs::remove_file(&wav);

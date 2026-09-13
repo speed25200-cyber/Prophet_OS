@@ -15,6 +15,11 @@ fn invoke(args: &[&str], method: &str, params: Value, result: Value) -> Output {
 /// Comme [`invoke`], mais rend la requête reçue par le service simulé au lieu d'en imposer les
 /// paramètres : utile quand une partie de la requête vient d'une transcription.
 fn invoke_with(args: &[&str], method: &str, result: Value) -> (Output, Value) {
+    invoke_env(args, &[], method, result)
+}
+
+/// Comme [`invoke_with`], avec des variables d'environnement pour la commande.
+fn invoke_env(args: &[&str], env: &[(&str, &str)], method: &str, result: Value) -> (Output, Value) {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");
     std::fs::create_dir_all(home.join(".prophet")).unwrap();
@@ -54,6 +59,7 @@ fn invoke_with(args: &[&str], method: &str, result: Value) -> (Output, Value) {
         .args(args)
         .env("HOME", &home)
         .env("PROPHET_AGENTD_SOCKET", &socket)
+        .envs(env.iter().copied())
         .output()
         .unwrap();
     let request = server.join().unwrap();
@@ -129,6 +135,99 @@ fn une_phrase_dite_devient_une_mission_et_l_os_repond() {
     let heard = heard.text.to_lowercase();
     assert!(heard.contains("prépar"), "{heard}");
     assert!(heard.contains("compris"), "{heard}");
+}
+
+/// Le mot d'activation, de bout en bout : un faux enregistreur (un script à la place de
+/// `pw-record`) livre d'abord une tranche sans le mot, puis « Prophète, écris une note de réunion
+/// dans mes documents » ; seule la seconde devient une mission, l'OS répond, et l'écoute s'arrête
+/// au nombre de tranches demandé. Exige la chaîne vocale des essais du crate `voice`.
+#[test]
+#[ignore = "needs_voice_stack: PROPHET_WHISPER_MODEL, PROPHET_WHISPER, PROPHET_PIPER, PROPHET_PIPER_VOICE, PROPHET_TEST_ESPEAK"]
+fn le_mot_d_activation_declenche_une_mission_et_le_reste_est_ignore() {
+    // Les phrases sont dites par la voix de l'OS elle-même (Piper) : Whisper la comprend bien
+    // mieux que la voix d'espeak, dont il n'attrape pas le mot d'activation.
+    let tools = voice::Tools::from_env().unwrap();
+    assert!(tools.can_speak(), "{tools:?}");
+    let temp = tempfile::tempdir().unwrap();
+    let synth = |nom: &str, phrase: &str| {
+        let wav = temp.path().join(nom);
+        tools.speak(phrase, &wav).unwrap();
+        wav
+    };
+    let bruit = synth("bruit.wav", "Il fait beau aujourd'hui.");
+    let ordre = synth(
+        "ordre.wav",
+        "Prophète, écris une note de réunion dans mes documents.",
+    );
+    // L'enregistreur factice : appelé comme pw-record (le fichier de sortie en dernier), il
+    // copie le bruit au premier appel, l'ordre ensuite.
+    let compteur = temp.path().join("appels");
+    let script = temp.path().join("faux-pw-record.sh");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nset -e\nn=0; [ -f {c} ] && n=$(cat {c}); n=$((n+1)); echo $n > {c}\n\
+             for last; do :; done\n\
+             if [ \"$n\" = 1 ]; then cp {b} \"$last\"; else cp {o} \"$last\"; fi\n",
+            c = compteur.display(),
+            b = bruit.display(),
+            o = ordre.display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let reponse = temp.path().join("reponse.wav");
+    let plan = json!({
+        "task": "mission-x", "intent": "…",
+        "choice": {"reference": "local:m", "reason": "essai"},
+        "sandbox_level": 0, "grants": [], "limits": agentd::Limits::default(),
+        "scopes": ["~/docs"]
+    });
+    // Le service simulé ne répond qu'à une requête : la tranche de bruit ne doit rien préparer.
+    let (output, request) = invoke_env(
+        &[
+            "voice",
+            "--listen",
+            "--wake",
+            "prophète",
+            "--seconds",
+            "1",
+            "--rounds",
+            "2",
+            "--language",
+            "fr",
+            "--prepare",
+            "docs",
+            "--model",
+            "m",
+            "--reply",
+            "--out",
+            reponse.to_str().unwrap(),
+        ],
+        &[("PROPHET_RECORDER", script.to_str().unwrap())],
+        "task.prepare",
+        plan,
+    );
+    let out = success(output);
+    assert_eq!(std::fs::read_to_string(&compteur).unwrap().trim(), "2");
+    let intent = request["params"]["intent"].as_str().unwrap().to_lowercase();
+    assert!(
+        intent.contains("note") && intent.contains("documents") && !intent.contains("proph"),
+        "{intent}"
+    );
+    assert!(out.contains("Réponse dite"), "{out}");
+    let heard = voice::Tools::from_env()
+        .unwrap()
+        .transcribe(&reponse, Some("fr"))
+        .unwrap()
+        .text
+        .to_lowercase();
+    eprintln!("réponse après le mot d'activation : « {heard} »");
+    assert!(heard.contains("prépar"), "{heard}");
 }
 
 fn success(output: Output) -> String {

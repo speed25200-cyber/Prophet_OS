@@ -25,7 +25,12 @@ prophet --json voice --file phrase.wav
 prophet voice --say "La note est écrite. Voulez-vous la publier ?"
 prophet voice --say "Bonjour" --out bonjour.wav
 prophet voice --prepare documents --reply     # écoute, prépare la mission, répond à voix haute
+prophet voice --listen --prepare documents --reply   # écoute continue : « Prophète, … » déclenche
 ```
+
+En écoute continue (`--listen`), seules les phrases qui commencent par le mot d'activation
+(`--wake`, « prophète » par défaut, casse, accents et ponctuation ignorés) déclenchent une
+action ; le reste de la phrase est l'intention. Chaque tranche est effacée après transcription.
 
 ## Validation
 

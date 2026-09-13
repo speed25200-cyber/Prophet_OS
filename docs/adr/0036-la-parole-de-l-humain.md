@@ -36,6 +36,18 @@ distant ; et la parole ne donne aucun droit, elle produit un texte que l'humain 
    les autres modèles ; sans voix, l'OS écoute mais ne parle pas, et le dit. La preuve est une
    boucle fermée : l'OS dit une phrase, Whisper la réécoute et retrouve ses mots.
 
+5. **Un mot d'activation, sans bouton.** `prophet voice --listen` écoute par tranches (six
+   secondes par défaut) et n'agit que sur une phrase qui commence par le mot d'activation
+   (`--wake`, « prophète » par défaut ; casse, accents et ponctuation ignorés) : le reste de la
+   phrase est l'intention, traitée comme une dictée, avec `--prepare` et `--reply` s'ils sont
+   demandés. Chaque tranche est effacée après transcription, rien n'est conservé ni envoyé ;
+   `--rounds` borne l'écoute (essais), sinon Ctrl+C. La reconnaissance du mot est une
+   comparaison de mots normalisés en tête de phrase, tolérante à ce que Whisper entend
+   réellement (« Profète », « Profette », « prophet » valent « Prophète » ; « prophétie » non) :
+   pas de détection acoustique séparée, donc un coût de transcription par tranche, et aucun
+   déclenchement au milieu d'une phrase. La voix d'espeak est trop mécanique pour que Whisper y
+   attrape le mot ; les essais parlent avec la voix de Piper, et le vrai micro reste à mesurer.
+
 ## Conséquences
 
 - Une phrase dite devient un plan de mission à examiner, sans réseau. Preuve : une phrase
