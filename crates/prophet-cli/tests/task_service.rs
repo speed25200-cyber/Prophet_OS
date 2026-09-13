@@ -89,6 +89,9 @@ fn inspection() -> Value {
         can_start: false,
         can_cancel: false,
         start_reason: None,
+        publication: None,
+        can_apply: false,
+        can_undo: false,
     })
 }
 

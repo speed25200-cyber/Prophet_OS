@@ -94,7 +94,12 @@ enum TaskAction {
         /// Identifiant.
         id: String,
     },
-    /// Annule les changements d'une tâche déjà validée.
+    /// Publie dans vos documents les versions examinées d'une mission terminée.
+    Apply {
+        /// Identifiant.
+        id: String,
+    },
+    /// Annule une publication effectuée, si vos documents n'ont pas changé depuis.
     Undo {
         /// Identifiant.
         id: String,
@@ -491,7 +496,8 @@ fn rendre_verification(rapport: &ledger::VerifyReport) -> anyhow::Result<String>
 }
 
 /// Missions du service. Les captures d'agentd restent privées ; seule la liste historique
-/// hors service et l'ancien undo de bibliothèque consultent encore le disque directement.
+/// hors service consulte encore le disque directement. Publier et annuler passent par agentd,
+/// qui exige le créateur de la mission et l'index exact qu'il a examiné.
 fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
     let maison = home();
     match action {
@@ -655,6 +661,22 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                 "Mission {id} : {}\nÉtat : {:?}\n",
                 inspection.task.intent, inspection.task.state
             );
+            if let Some(publication) = inspection.publication {
+                out.push_str(&format!(
+                    "Publication : {}\n",
+                    publication_lisible(publication)
+                ));
+            }
+            if inspection.can_apply {
+                out.push_str(&format!(
+                    "Pour publier ces versions dans vos documents : prophet task apply {id}\n"
+                ));
+            }
+            if inspection.can_undo {
+                out.push_str(&format!(
+                    "Pour annuler cette publication : prophet task undo {id}\n"
+                ));
+            }
             if let Some(plan) = inspection.plan {
                 out.push_str(&plan.render());
             }
@@ -674,13 +696,38 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
             }
             Ok(out)
         }
-        TaskAction::Undo { id } => {
-            let mut espace = sfs::Workspace::open(&maison, id)?;
-            let diff = espace.undo()?;
-            let (a, m, s) = diff.counts();
-            Ok(format!(
-                "tâche {id} annulée : {a} création(s) retirée(s), {m} modification(s) rétablie(s), {s} suppression(s) rétablie(s)\n"
-            ))
+        // Les deux commandes passent par agentd : lui seul connaît le créateur de la mission
+        // et l'index exact qu'il a examiné. La bibliothèque refuse un document retouché depuis.
+        TaskAction::Apply { id } | TaskAction::Undo { id } => {
+            let apply = matches!(action, TaskAction::Apply { .. });
+            let result = task_rpc(
+                &socket_agentd(),
+                if apply { "task.apply" } else { "task.undo" },
+                serde_json::json!({"id":id}),
+            )?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&result)?));
+            }
+            let key = if apply { "applied" } else { "undone" };
+            anyhow::ensure!(
+                result[key].as_str() == Some(id.as_str()),
+                "réponse pour une autre mission"
+            );
+            let changes = &result["changes"];
+            let (a, m, s) = (
+                changes["added"].as_u64().unwrap_or(0),
+                changes["modified"].as_u64().unwrap_or(0),
+                changes["deleted"].as_u64().unwrap_or(0),
+            );
+            Ok(if apply {
+                format!(
+                    "Mission {id} : versions publiées dans vos documents : {a} ajout(s), {m} modification(s), {s} suppression(s)\n"
+                )
+            } else {
+                format!(
+                    "Mission {id} : publication annulée : {a} ajout(s) retiré(s), {m} modification(s) rétablie(s), {s} suppression(s) rétablie(s)\n"
+                )
+            })
         }
         TaskAction::Cancel { id } => {
             let result = task_rpc(
@@ -990,6 +1037,20 @@ fn socket_agentd() -> std::path::PathBuf {
     )
 }
 
+/// L'état de publication SFS, dit à l'humain.
+fn publication_lisible(state: sfs::WorkspaceState) -> &'static str {
+    use sfs::WorkspaceState as W;
+    match state {
+        W::Open => "versions examinables, non appliquées",
+        W::Applying => "publication interrompue ; `prophet task apply` la reprend",
+        W::Undoing => "annulation interrompue ; `prophet task undo` la reprend",
+        W::Conflict => "interrompue sur un conflit ; les fichiers déplacés sont conservés",
+        W::Committed => "versions publiées dans vos documents",
+        W::RolledBack => "publication annulée, documents initiaux rétablis",
+        W::Abandoned => "travail abandonné sans publication",
+    }
+}
+
 fn task_rpc(
     socket: &std::path::Path,
     method: &str,
@@ -1202,6 +1263,7 @@ mod tests {
             vec!["prophet", "task", "show", "task:01"],
             vec!["prophet", "task", "diff", "task:01"],
             vec!["prophet", "task", "cancel", "task:01"],
+            vec!["prophet", "task", "apply", "task:01"],
             vec!["prophet", "task", "undo", "task:01"],
             vec!["prophet", "log", "tail"],
             vec!["prophet", "log", "replay", "task:01"],
