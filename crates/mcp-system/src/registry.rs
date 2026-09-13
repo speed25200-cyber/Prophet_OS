@@ -281,6 +281,9 @@ impl Registry {
         };
 
         let args_digest = digest(args);
+        // La cible contrôlée — un hôte, un chemin, une fenêtre — entre au journal ; jamais le
+        // contenu des arguments. C'est ce qui permet à l'humain de lire où l'agent est allé.
+        let target = tool.target(args, context);
         self.journal.record(
             Draft::new(
                 now,
@@ -288,6 +291,7 @@ impl Registry {
                 EventKind::ToolCall,
                 json!({
                     "tool": name,
+                    "target": target,
                     "args_digest": args_digest,
                     "args_size": args.to_string().len(),
                     "requires": meta.requires,

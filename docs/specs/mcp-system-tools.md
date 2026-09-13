@@ -79,6 +79,13 @@ Les limites du transport s'appliquent en plus de ces limites de contenu.
 Le contexte fiable, les racines privées, le confinement des processus et les commits/undo
 SFS concurrents restent des conditions d'intégration, détaillées dans l'[ADR 0012](../adr/0012-acces-fichiers-mcp.md).
 
+## Ce que le journal retient d'un appel
+
+Chaque `tool.call` porte le nom de l'outil, la capacité exigée, la cible contrôlée (hôte,
+chemin relatif au home ou fenêtre) et une empreinte des arguments avec leur taille ; jamais le
+contenu des arguments. Chaque `tool.result` porte l'issue et une empreinte du résultat. C'est
+ainsi que l'humain lit où l'agent est allé sans que le journal contienne ce qu'il a lu ou écrit.
+
 ## Sortie réseau et navigation actuellement implémentées
 
 `http.fetch` ne joint jamais le réseau lui-même : il écrit la requête sur le socket du proxy

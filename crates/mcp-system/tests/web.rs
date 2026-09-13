@@ -246,6 +246,12 @@ fn ouvrir_lire_et_agir_par_l_arbre_sous_le_controle_de_capd() {
         "le contenu de la page n'entre pas dans le journal"
     );
     assert!(
+        events.iter().any(|e| e.kind == EventKind::ToolCall
+            && e.payload["tool"] == "web.open"
+            && e.payload["target"] == "127.0.0.1"),
+        "le journal dit quel hôte a été ouvert : {events:?}"
+    );
+    assert!(
         events
             .iter()
             .any(|e| e.kind == EventKind::PolicyDeny || e.kind == EventKind::ToolResult),
