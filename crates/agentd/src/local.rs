@@ -36,6 +36,12 @@ pub struct Mission {
     pub endpoint: String,
     /// Services de droits et de journal.
     pub services: Services,
+    /// Socket du proxy de sortie, seule route réseau offerte aux outils.
+    pub egress: PathBuf,
+    /// Programme du navigateur piloté, si le service en configure un ; sinon aucun outil web.
+    pub browser: Option<PathBuf>,
+    /// Répertoire privé des profils de navigation, un par tâche.
+    pub browser_root: PathBuf,
     /// Signal d'annulation. Le résultat final confirme l'arrêt.
     pub stop: Arc<AtomicBool>,
 }
@@ -273,6 +279,18 @@ impl Mission {
         registry.register(Arc::new(mcp_system::tools::List));
         registry.register(Arc::new(mcp_system::tools::Stat));
         registry.register(Arc::new(mcp_system::tools::Search));
+        // La seule sortie réseau : l'outil ne joint que le proxy, qui fait trancher capd sur
+        // l'hôte réellement visé et retire le jeton avant que quoi que ce soit ne sorte.
+        registry.register(Arc::new(mcp_system::tools::Fetch::via(self.egress.clone())));
+        // La navigation n'existe que si l'administrateur a nommé un navigateur : la page est
+        // observée par son arbre, jamais par des pixels, et l'hôte ouvert passe par capd.
+        if let Some(program) = &self.browser {
+            let browsing =
+                mcp_system::tools::Browsing::new(program.clone(), self.browser_root.clone());
+            for tool in browsing.tools() {
+                registry.register(tool);
+            }
+        }
         let executor = RegistryExecutor::new(
             Arc::new(registry),
             ToolContext {

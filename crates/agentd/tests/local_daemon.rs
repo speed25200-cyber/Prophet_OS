@@ -81,6 +81,10 @@ impl Chain {
                 ("PROPHET_HOME", home.to_str().unwrap()),
                 ("PROPHET_CAPD_SOCKET", cap_socket.to_str().unwrap()),
                 ("PROPHET_LEDGER_SOCKET", ledger_socket.to_str().unwrap()),
+                (
+                    "PROPHET_EGRESS_SOCKET",
+                    dir.path().join("egress.sock").to_str().unwrap(),
+                ),
                 ("PROPHET_LOCAL_ENDPOINT", endpoint),
             ],
         );
@@ -113,6 +117,21 @@ impl Chain {
             },
             "requested":[{"res":"fs","act":"read","match":"~/docs/**"},{"res":"fs","act":"write","match":"~/docs/**"},{"res":"tool","act":"call","match":"fs.read"},{"res":"tool","act":"call","match":"fs.write"}],
             "scopes":scopes,"availability":{"local_models":[model]}
+        })).await.unwrap();
+    }
+    /// Planifie une mission autorisée à lire un hôte par le proxy de sortie.
+    async fn plan_web(&self, model: &str, intent: &str, host: &str) {
+        self.agents.call("task.spawn",json!({
+            "id":"local-test", "intent":intent, "user":"prophet",
+            "manifest": {
+                "agent":{"id":"org.prophet.local-test","version":"1.0.0","name":"Test local","publisher_key":"ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+                "model":{"preferred":[format!("local:{model}")]},
+                "sandbox":{"min_level":0},
+                "capabilities":{"max":{"fs.read":["~/docs/**"],"fs.write":["~/docs/**"],"net.egress":[host],"tool.call":["fs.read","fs.write","http.fetch"]}},
+                "budget":{"default":{"tokens":20000,"wall_time":"90s","approvals":3}}
+            },
+            "requested":[{"res":"fs","act":"read","match":"~/docs/**"},{"res":"fs","act":"write","match":"~/docs/**"},{"res":"net","act":"egress","match":host},{"res":"tool","act":"call","match":"fs.read"},{"res":"tool","act":"call","match":"fs.write"},{"res":"tool","act":"call","match":"http.fetch"}],
+            "scopes":["~/docs"],"availability":{"local_models":[model]}
         })).await.unwrap();
     }
     async fn wait_terminal(&self) -> Value {
@@ -918,4 +937,142 @@ async fn une_revocation_apres_la_mission_interdit_la_publication() {
         !events.iter().any(|e| e["kind"] == "fs.commit"),
         "aucune publication ne doit être consignée : {events:?}"
     );
+}
+
+/// Un serveur HTTP témoin : il note ce qu'il reçoit et répond une page connue.
+async fn temoin_web(recu: std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> u16 {
+    use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                return;
+            };
+            let mut reader = BufReader::new(stream);
+            let mut head = String::new();
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).await.unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+                head.push_str(&line);
+            }
+            recu.lock().unwrap().push(head);
+            let body = "<html><body><h1>Page témoin</h1><p>preuve-web</p></body></html>";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = reader.get_mut().write_all(response.as_bytes()).await;
+        }
+    });
+    port
+}
+
+#[tokio::test]
+async fn un_outil_web_sort_uniquement_par_le_proxy_et_sous_le_jeton_de_la_mission() {
+    let recu = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let port = temoin_web(recu.clone()).await;
+    let url = format!("http://127.0.0.1:{port}/page");
+    let model = controlled_reply(Some(json!({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"type":"function","id":"call_1","function":{"name":"http.fetch","arguments":json!({"url":url}).to_string()}}]}}],"usage":{"prompt_tokens":12,"completion_tokens":8}}))).await;
+    let chain = Chain::new(&model.endpoint).await;
+    let egress = Daemon::lancer_avec(
+        binaire_voisin("prophet-egress").to_str().unwrap(),
+        &chain.dir.path().join("egress.sock"),
+        &chain.dir.path().join("egress-state"),
+        &[(
+            "PROPHET_CAPD_SOCKET",
+            chain.dir.path().join("cap.sock").to_str().unwrap(),
+        )],
+    );
+    egress
+        .attendre_reponse(b"GET http://sonde.invalide/ HTTP/1.1\r\nHost: sonde.invalide\r\n\r\n")
+        .await;
+    chain
+        .plan_web("controlled", "Lis la page témoin et résume-la", "127.0.0.1")
+        .await;
+    chain
+        .agents
+        .call("task.start", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    model.received.await.unwrap();
+    model.release.send(()).unwrap();
+    let status = chain.wait_terminal().await;
+    assert_eq!(status["state"], "done", "{status}");
+
+    let requests = recu.lock().unwrap().clone();
+    assert_eq!(
+        requests.len(),
+        1,
+        "une seule requête doit atteindre le serveur : {requests:?}"
+    );
+    let head = requests[0].to_ascii_lowercase();
+    assert!(head.starts_with("get /page http/1.1"), "{head}");
+    assert!(
+        !head.contains("proxy-authorization"),
+        "le jeton de la mission ne doit jamais sortir : {head}"
+    );
+    let events = chain
+        .journal
+        .call("ledger.query", json!({"task":"local-test"}))
+        .await
+        .unwrap();
+    let events = events.as_array().unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| e["kind"] == "tool.call" && e["payload"]["tool"] == "http.fetch"),
+        "{events:?}"
+    );
+    let result = events
+        .iter()
+        .find(|e| e["kind"] == "tool.result" && e["payload"]["tool"] == "http.fetch")
+        .unwrap_or_else(|| panic!("résultat de http.fetch absent : {events:?}"));
+    assert_eq!(result["payload"]["ok"], true, "{result}");
+    assert!(
+        !events.iter().any(|e| e.to_string().contains("preuve-web")),
+        "le contenu lu n'entre pas dans le journal"
+    );
+    drop(egress);
+}
+
+#[tokio::test]
+async fn sans_proxy_de_sortie_aucune_requete_ne_part() {
+    let recu = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let port = temoin_web(recu.clone()).await;
+    let url = format!("http://127.0.0.1:{port}/page");
+    let model = controlled_reply(Some(json!({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"type":"function","id":"call_1","function":{"name":"http.fetch","arguments":json!({"url":url}).to_string()}}]}}],"usage":{"prompt_tokens":12,"completion_tokens":8}}))).await;
+    let chain = Chain::new(&model.endpoint).await;
+    chain
+        .plan_web("controlled", "Lis la page témoin", "127.0.0.1")
+        .await;
+    chain
+        .agents
+        .call("task.start", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    model.received.await.unwrap();
+    model.release.send(()).unwrap();
+    let status = chain.wait_terminal().await;
+    assert!(status["state"].as_str().is_some(), "{status}");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(
+        recu.lock().unwrap().is_empty(),
+        "sans proxy, l'outil ne doit trouver aucune route directe"
+    );
+    let events = chain
+        .journal
+        .call("ledger.query", json!({"task":"local-test"}))
+        .await
+        .unwrap();
+    let result = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "tool.result" && e["payload"]["tool"] == "http.fetch")
+        .cloned()
+        .unwrap_or_else(|| panic!("résultat de http.fetch absent : {events}"));
+    assert_eq!(result["payload"]["ok"], false, "{result}");
 }

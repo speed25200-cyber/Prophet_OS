@@ -19,8 +19,10 @@ répertoires d'état privés et de sockets accessibles aux seuls pairs de confia
 refusés. Le moteur doit déjà être lancé. Cette configuration n'est pas encore activée dans
 la session de l'image installée.
 
-Les adresses de services sont `PROPHET_CAPD_SOCKET`, `PROPHET_LEDGER_SOCKET` et, pour la CLI,
-`PROPHET_AGENTD_SOCKET`. `STATE_DIRECTORY` définit l'état de chaque daemon, séparément.
+Les adresses de services sont `PROPHET_CAPD_SOCKET`, `PROPHET_LEDGER_SOCKET`,
+`PROPHET_EGRESS_SOCKET` et, pour la CLI, `PROPHET_AGENTD_SOCKET`. `STATE_DIRECTORY` définit
+l'état de chaque daemon, séparément. `PROPHET_BROWSER` nomme un navigateur Chromium pour les
+outils `web.*` ; sans lui, une mission n'a pas de navigateur.
 
 ## Préparer depuis l'interface
 

@@ -39,6 +39,11 @@ struct Agents {
     publications: Arc<tokio::sync::Semaphore>,
     capd: std::path::PathBuf,
     ledger: std::path::PathBuf,
+    egress: std::path::PathBuf,
+    /// Navigateur piloté par les outils web, absent par défaut.
+    browser: Option<std::path::PathBuf>,
+    /// Profils de navigation, un par tâche, dans l'état privé du service.
+    browser_root: std::path::PathBuf,
     /// Où l'état est écrit entre deux démarrages.
     etat: std::path::PathBuf,
     pairs: commun::Pairs,
@@ -604,6 +609,9 @@ impl Agents {
             home,
             endpoint,
             services: mcp_system::services::Services::new(self.capd.clone(), self.ledger.clone()),
+            egress: self.egress.clone(),
+            browser: self.browser.clone(),
+            browser_root: self.browser_root.clone(),
             stop,
         };
         if let Err(error) = std::thread::Builder::new()
@@ -864,6 +872,11 @@ async fn main() -> anyhow::Result<()> {
     let maison = std::env::var("PROPHET_HOME").unwrap_or_else(|_| "/home/prophet".to_owned());
     let capd = chemin("PROPHET_CAPD_SOCKET", "capd");
     let ledger = chemin("PROPHET_LEDGER_SOCKET", "ledger");
+    let egress = chemin("PROPHET_EGRESS_SOCKET", "egress");
+    // Un navigateur n'est piloté que s'il est nommé explicitement : sa sortie réseau propre
+    // n'est pas encore relayée par egress, et ce choix appartient à l'administrateur.
+    let browser = std::env::var_os("PROPHET_BROWSER").map(std::path::PathBuf::from);
+    let browser_root = commun::etat("agentd").join("navigateurs");
     let profiles = std::env::var_os("PROPHET_MISSION_PROFILES")
         .map(|path| agentd::preparation::load(std::path::Path::new(&path)))
         .transpose()
@@ -914,6 +927,9 @@ async fn main() -> anyhow::Result<()> {
             publications: Arc::new(tokio::sync::Semaphore::new(1)),
             capd,
             ledger,
+            egress,
+            browser,
+            browser_root,
             etat: fichier_etat,
             pairs: commun::Pairs::detecter()?,
         }))
