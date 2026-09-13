@@ -36,6 +36,13 @@ temps vérifié entre les opérations. `truncated` signale un plafond atteint ; 
 que liste et recherche ne portent que sur le périmètre autorisé. Ce budget ne constitue pas
 un délai maximal pour un appel noyau bloqué. Voir les [bornes exactes](../../docs/specs/mcp-system-tools.md).
 
+`http.fetch` écrit sa requête sur le socket du proxy de sortie fourni par le lanceur, avec le
+jeton de la tâche dans l'en-tête interne que le proxy retire ; sans socket, il échoue sans rien
+émettre. Les outils `web.*` (`tools::Browsing`) lancent un navigateur par tâche, à profil
+privé, et exposent la page comme un arbre SUP ; ils exigent un programme nommé par le lanceur.
+Le test `tests/web.rs` les exerce avec un vrai Chromium et se tait s'il n'en trouve aucun
+(`PROPHET_EXIGER_NAVIGATEUR=1` transforme cette absence en échec).
+
 `native::RegistryExecutor` permet à `providers::NativeDriver` de passer par ce même registre.
 Un test explicite avec Qwen3 réel vérifie un appel contrôlé, la création dans le travail et le
 diff SFS correspondant, sans appliquer le changement au fichier utilisateur. Chaque exécuteur

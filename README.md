@@ -4,7 +4,7 @@ Un système d'exploitation PC conçu pour que des agents IA (Claude, GPT, Gemini
 
 **Objectif.** Donner aux agents une interface sémantique, des capacités limitées, des versions de fichiers réversibles, un journal d'audit et un choix de modèles, avec une supervision humaine explicite. Ces capacités sont à des stades d'intégration différents ; l'état vérifié figure ci-dessous.
 
-**Architecture.** Linux et NixOS, services natifs Rust pour les agents, les capacités, l'isolation, les fichiers et le journal, surface de supervision native et session humaine Wayland avec SwayFX.
+**Architecture.** Linux et NixOS, services natifs Rust pour les agents, les capacités, l'isolation, les fichiers et le journal, surface de supervision native et session humaine Wayland avec SwayFX. Les agents lisent le web par le proxy de sortie et naviguent par l'arbre sémantique d'un navigateur piloté ; l'humain a son navigateur et l'application X installés par défaut.
 
 📄 **[Plan complet](docs/PLAN.md)** : diagnostic, principes, architecture, spécification des composants, sécurité, feuille de route, équipe, métriques, risques, MVP.
 
@@ -36,6 +36,12 @@ de copier le texte et d'interrompre la génération. Il comprend aussi les tâch
 services. Les conversations restent en mémoire pendant la session ; le cycle de vie des moteurs
 et l'exécution agentique complète sont encore en cours d'intégration. Voir le
 [guide de l'espace natif](crates/surface/README.md).
+
+Une mission peut maintenant [lire le web et naviguer](docs/reports/navigateur-2026-09-13.md) :
+`http.fetch` passe par egress sous le jeton de la tâche, et `web.open`, `web.tree`, `web.act`
+pilotent un Chromium par son arbre sémantique, sans capture d'écran, quand le service en nomme
+un. Le bureau ouvre un navigateur à profil Prophet (Super+N) et X en fenêtre dédiée (Super+X) ;
+cette partie de l'image reste à vérifier par la CI.
 
 Le nouvel [atelier de supervision](docs/reports/atelier-2026-09-13.md) présente une galerie de
 missions et une Focale pour examiner le travail, avec recherche Ctrl+K et navigation compacte.

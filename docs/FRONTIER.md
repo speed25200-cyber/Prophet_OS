@@ -143,3 +143,10 @@ interrompue. Avant d'écrire, capd tranche sur un jeton neuf borné aux chemins 
 une révocation après la mission bloque la publication. Quatre tests réels sous un seul UID le
 vérifient. Sur l'image installée, le service n'a pas `CAP_CHOWN` : remplacer un document du
 propriétaire n'est pas livré. Le critère d'exécution locale complète reste donc ouvert.
+
+Le [navigateur et le web](reports/navigateur-2026-09-13.md) arrivent ensuite : `http.fetch`
+réel par egress, `web.open`/`web.tree`/`web.act` par l'arbre d'un Chromium piloté, X et un
+navigateur à profil Prophet dans le bureau. Les preuves sont des tests avec les vrais services
+et un vrai navigateur, sous un seul UID, sans VM. La sortie réseau propre du navigateur n'est pas
+relayée par egress et son confinement n'est pas livré ; le critère « MCP livré opérationnel »
+progresse sans être coché.

@@ -16,4 +16,10 @@ raccorder. Plusieurs outils du registre complet sont aussi des fonctions indispo
 lanceur doit n'exposer que ceux effectivement implémentés et autorisés. L'exécuteur natif
 ne constitue pas, à lui seul, un transport MCP installé ni un mécanisme de confinement.
 
-Voir l'[ADR 0012](../adr/0012-acces-fichiers-mcp.md) et l'[essai avec Qwen3 réel](../reports/mcp-fichiers-2026-09-13.md).
+`http.fetch` relaie maintenant par le socket d'egress, sous le jeton de la tâche, avec lecture
+automatique et écriture soumise à décision ; les outils `web.open`, `web.tree` et `web.act`
+pilotent un navigateur par son arbre sémantique quand le service en nomme un. Le registre
+demande à chaque outil les effets de l'appel précis avant de faire trancher capd.
+
+Voir l'[ADR 0012](../adr/0012-acces-fichiers-mcp.md), l'[ADR 0024](../adr/0024-navigateur-integre-et-applications-web.md)
+et l'[essai avec Qwen3 réel](../reports/mcp-fichiers-2026-09-13.md).

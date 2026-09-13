@@ -64,6 +64,21 @@ l'[ADR 0023](adr/0023-approbation-et-publication-par-agentd.md). Limite : les te
 sous un seul UID ; sur l'image installée, `agentd` n'a pas `CAP_CHOWN` et le remplacement d'un
 document du propriétaire n'est pas livré. Aucune case complète de FRONTIER n'est cochée.
 
+Navigateur et web du 13 septembre 2026, dans le commit portant ce rapport : `http.fetch` relaie
+par le socket d'egress sous le jeton de la tâche (lecture automatique, écriture soumise à
+décision, réponse bornée et recomposée) ; deux tests avec les vrais capd, ledger, egress et
+agentd prouvent qu'une seule requête atteint le serveur témoin, sans le jeton, et qu'aucune ne
+part sans proxy. Les outils `web.open`, `web.tree` et `web.act` s'adossent au pont CDP avec un
+profil par tâche ; un test avec un vrai Chromium vérifie le refus d'un hôte hors droits avant
+tout lancement, l'ouverture, la saisie, la relecture, le refus de `submit` sans décision, l'erreur
+nommée d'un identifiant absent et l'absence du contenu de la page au journal. Le registre demande
+désormais à chaque outil les effets de l'appel précis. Le bureau ajoute Chromium à profil Prophet
+et X en fenêtre d'application, avec `prophet-ouvrir --liste` vérifié par le test du bureau ;
+cette partie n'a pas été construite localement (pas de Nix) et attend la CI. Voir l'[ADR 0024](adr/0024-navigateur-integre-et-applications-web.md)
+et le [rapport](reports/navigateur-2026-09-13.md). La sortie réseau propre du navigateur piloté
+n'est pas relayée par egress et son confinement au niveau 2 n'est pas livré : les outils web
+restent désactivés par défaut. Aucune case complète de FRONTIER n'est cochée.
+
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 
 - `c3b0c08` — moteur local réel, CLI et gel d'un processus possédé par sandboxd.
@@ -378,7 +393,7 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 
 - [x] M7-T1 — `fs` (2026-09-12, 8091f4d) — lecture, écriture, liste, stat, recherche ; double contrôle outil puis cible
 - [x] M7-T2 — `proc` (2026-09-12, 8091f4d) — exécution et arrêt ; microVM imposée hors liste blanche
-- [x] M7-T3 — `http` (2026-09-12, 8091f4d) — sortie par le proxy uniquement
+- [x] M7-T3 — `http` (2026-09-12, 8091f4d) — sortie par le proxy uniquement ; relais réel par le socket d'egress depuis le 13 septembre (ADR 0024)
 - [x] M7-T4 — `task` (2026-09-12, 8091f4d) — état et diff de la tâche courante
 - [x] M7-T5 — `approval` (2026-09-12, 8091f4d) — demande et attente ; résumé obligatoire
 - [x] M7-T6 — `ledger` (2026-09-12, 8091f4d) — lecture limitée à la tâche courante

@@ -4,6 +4,8 @@
 - Utilisateur : `agentd`, groupe `prophet-system`
 - État : `/var/lib/prophet/agentd/taches.json`
 - Dépendances du lancement local : capd, ledger, home autorisé et moteur HTTP local configuré
+- Sortie réseau des outils : le socket d'egress (`PROPHET_EGRESS_SOCKET`, `/run/prophet/egress.sock` par défaut)
+- Navigateur piloté : absent sauf `PROPHET_BROWSER` ; profils par tâche sous l'état du service
 
 ## Méthodes
 
@@ -54,6 +56,8 @@ pas une validation des signatures d'éditeurs. Voir l'[ADR 0015](../adr/0015-int
 ## Exécution
 
 Deux missions au maximum peuvent être actives. Les plans et jetons restent côté service.
+Les outils offerts au modèle sont les accès fichiers, `http.fetch` par egress et, si un
+navigateur est nommé, `web.open`, `web.tree` et `web.act` ; voir l'[ADR 0024](../adr/0024-navigateur-integre-et-applications-web.md).
 Le moteur reçoit l'intention et le catalogue d'outils autorisés ; il ne fournit aucune racine
 de fichiers ni aucun niveau d'isolation. Les accès doivent aussi rester dans les scopes du
 plan. La capture SFS limite son parcours à 10 000 objets, 64 niveaux et 512 Mio de contenu.

@@ -25,7 +25,7 @@
 | `fs.diff_task` | task courante | non | non | |
 | `proc.exec` | proc.exec binaire | selon commande | non | niveau de sandbox forcé à 2 hors liste blanche |
 | `proc.kill` | task courante | non | non | |
-| `http.fetch` | net.egress hôte | selon méthode (POST/PUT/DELETE = irréversible) | oui | via egress |
+| `http.fetch` | net.egress hôte | selon méthode (POST/PUT/DELETE = irréversible) | selon méthode | via egress, implémenté |
 | `task.status` | task courante | non | non | |
 | `task.diff` | task courante | non | non | |
 | `task.commit_request` | task courante | oui | non | déclenche approbation si fichiers sensibles |
@@ -78,6 +78,26 @@ Les limites du transport s'appliquent en plus de ces limites de contenu.
 
 Le contexte fiable, les racines privées, le confinement des processus et les commits/undo
 SFS concurrents restent des conditions d'intégration, détaillées dans l'[ADR 0012](../adr/0012-acces-fichiers-mcp.md).
+
+## Sortie réseau et navigation actuellement implémentées
+
+`http.fetch` ne joint jamais le réseau lui-même : il écrit la requête sur le socket du proxy
+`egress` avec le jeton de la tâche dans l'en-tête interne `Proxy-Authorization: Prophet …`,
+que le proxy retire avant la sortie après avoir fait trancher capd sur l'hôte réellement joint.
+Seuls `http://` et `https://` sont relayés. `GET` et `HEAD` sont des lectures réseau
+automatiques ; toute autre méthode est irréversible et externe, donc soumise à décision humaine,
+dans le registre comme dans le proxy. La réponse est recomposée si elle est segmentée et bornée
+à `max_bytes` (256 Kio par défaut, 1 Mio au plus) ; `truncated` le signale. Un refus du proxy
+est rendu avec son code (`PolicyDenied` pour 403 et 407, `Invalid` pour 400 et 413, `NotFound`
+pour 502, `SandboxError` sinon). Sans socket configuré, l'outil échoue sans émettre de requête.
+
+Les outils `web.*` s'adossent au pont CDP (`browser-bridge`) et n'existent que si le service
+nomme un programme de navigateur. `web.open {url, detail?}` exige `net.egress` sur l'hôte et
+rend l'arbre SUP de la page ; `web.tree {detail?}` exige `ui.read browser` ; `web.act {action,
+node?, value?}` exige `ui.act browser`, avec `click`, `set_field` et `submit` ; seul `submit`
+est externe et demande une décision. Le profil du navigateur est propre à la tâche, dans l'état
+privé du service. La sortie réseau propre du navigateur (sous-ressources) n'est pas relayée par
+egress : voir l'[ADR 0024](../adr/0024-navigateur-integre-et-applications-web.md).
 
 ## Fichier de registre
 
