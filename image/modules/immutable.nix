@@ -6,14 +6,59 @@
 # 3. Les données de l'utilisateur et l'état des agents sont chiffrés au repos.
 { config, lib, pkgs, ... }:
 
+let
+  amorcage = config.prophet.boot;
+  uefi = amorcage.firmware == "uefi";
+in
 {
-  # --- Démarrage ---
-  boot.loader.systemd-boot = {
-    enable = true;
-    editor = false; # Éditer la ligne de commande au démarrage contournerait tout le reste.
-    configurationLimit = 2; # Deux générations : l'actuelle et celle vers laquelle revenir.
+  options.prophet.boot = {
+    firmware = lib.mkOption {
+      type = lib.types.enum [ "uefi" "bios" ];
+      default = "uefi";
+      description = ''
+        Comment la machine démarre. `uefi` : systemd-boot sur la partition système EFI, sans
+        éditeur. `bios` : GRUB, posé dans la partition d'amorçage BIOS que l'installeur crée sur
+        tout disque, pour un PC sans UEFI (ADR 0032). L'installeur écrit la valeur dans
+        `image/machine/amorcage.nix` d'après ce qu'il constate ; le dépôt ne présume rien.
+      '';
+    };
+    disque = lib.mkOption {
+      type = lib.types.str;
+      default = "nodev";
+      example = "/dev/disk/by-id/ata-WDC_WD10EZEX-00BN5A0_WD-WCC3F1234567";
+      description = ''
+        Disque où GRUB s'installe quand `firmware = "bios"` : un chemin stable sous
+        `/dev/disk/by-id`, écrit par l'installeur. `nodev` produirait un menu sans chargeur, donc
+        une machine qui ne démarre pas ; une assertion le refuse.
+      '';
+    };
   };
-  boot.loader.efi.canTouchEfiVariables = true;
+
+  config = {
+  # --- Démarrage ---
+  #
+  # UEFI : systemd-boot, sans éditeur de ligne de commande — l'éditer au démarrage contournerait
+  # tout le reste — et deux générations, l'actuelle et celle vers laquelle revenir. Sans UEFI :
+  # GRUB, pour les mêmes deux générations ; son menu se protège d'un mot de passe, ce qui reste
+  # à faire (ADR 0032).
+  assertions = [
+    {
+      assertion = uefi || amorcage.disque != "nodev";
+      message = "prophet.boot.firmware = \"bios\" exige prophet.boot.disque : le disque où poser GRUB.";
+    }
+  ];
+  boot.loader.systemd-boot = lib.mkIf uefi {
+    enable = true;
+    editor = false;
+    configurationLimit = 2;
+  };
+  boot.loader.efi.canTouchEfiVariables = uefi;
+  boot.loader.grub = lib.mkIf (!uefi) {
+    enable = true;
+    efiSupport = false;
+    device = amorcage.disque;
+    configurationLimit = 2;
+  };
 
   # Secure Boot avec les clés du projet, remplaçables par celles de l'utilisateur : une machine
   # dont le propriétaire ne peut pas changer les clés ne lui appartient pas vraiment.
@@ -66,7 +111,8 @@
   boot.initrd.systemd.enable = true;
 
   # La partition d'amorçage, que l'installeur étiquette. Sans elle, systemd-boot n'a nulle part
-  # où écrire ses entrées.
+  # où écrire ses entrées ; sans UEFI, GRUB y met sa configuration, et son image d'amorçage dans
+  # la petite partition BIOS que l'installeur crée aussi.
   fileSystems."/boot" = lib.mkDefault {
     device = "/dev/disk/by-label/PROPHET-EFI";
     fsType = "vfat";
@@ -133,4 +179,5 @@
   # --- Ce qui ne doit pas exister sur une machine immuable ---
   nix.settings.auto-optimise-store = true;
   system.stateVersion = "25.05";
+  };
 }

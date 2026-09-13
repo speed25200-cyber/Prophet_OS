@@ -12,8 +12,9 @@ effaçant son disque doit annoncer ses manques avant, pas après.
 ## Ce qu'il vous faut
 
 - Une clé USB d'au moins 2 Gio, dont le contenu sera effacé.
-- Un PC avec **UEFI** (tout PC livré avec Windows 10 ou 11 en a un), **80 Gio** de disque au
-  minimum, et une connexion réseau au moment de l'installation.
+- Un PC x86-64, avec **UEFI** (tout PC livré avec Windows 10 ou 11 en a un) **ou un simple
+  BIOS** (un PC de 2012 démarre aussi : l'installeur y pose GRUB au lieu de systemd-boot),
+  **80 Gio** de disque au minimum, et une connexion réseau au moment de l'installation.
 - Le fichier `prophet-os-installeur-*.iso`, produit par le travail « Support d'amorçage » de
   l'intégration continue. Il se télécharge depuis l'onglet *Actions* du dépôt, dans les artefacts
   de la dernière exécution réussie — artefact `prophet-os-iso`, environ 1,4 Gio, accompagné de son
@@ -36,13 +37,14 @@ produite et vérifiez que **tous** ses travaux sont verts, à la seule exception
 |---|---|
 | Installeur sur disque en boucle | l'installeur formate, chiffre et monte pour de vrai, et refuse ce qu'il doit refuser — mauvaise confirmation, disque trop petit, mot de passe trop court |
 | Construire l'ISO | l'image se construit, et chacun de ses fichiers est celui de la révision gravée |
-| Construire le système installé | chacun des sept services pointe vers un programme qui existe, **et** `nixos-install` pose réellement ce système sur la disposition que l'installeur crée |
-| Voir l'image démarrer | la clé USB démarre jusqu'à l'invite |
+| Construire le système installé | chacun des sept services pointe vers un programme qui existe, le matériel détecté par `nixos-generate-config` et le mode BIOS composent avec la configuration, **et** `nixos-install` pose réellement ce système sur la disposition que l'installeur crée |
+| Voir l'image démarrer | la clé USB démarre jusqu'à l'invite, en UEFI (OVMF) **et** sans UEFI (SeaBIOS) |
 | Les sept services sous systemd | les daemons tournent sous leur utilisateur, avec leur durcissement, et `sandboxd` isole vraiment |
 | **Le système installé démarre** | secours du kiosque historique, puis session du nouveau bureau : systemd-boot, paramètres du noyau, connexion PAM, supervision sous le compte humain, sept services, fenêtres des clients, fichiers, presse-papiers et reprise après verrouillage |
+| Le système installé démarre sans UEFI | la même configuration, amorcée par GRUB sous SeaBIOS : paramètres du noyau et sept services, pour les PC qui n'ont qu'un BIOS |
 | Question ouverte : la racine en lecture seule | rien — c'est une **question**, pas une garantie, et elle ne part plus qu'à la demande. Sa réponse est « non » depuis le 12 septembre 2026 : voir `image/tests/racine-en-lecture-seule.nix`. Pour la reposer, déclenchez le workflow à la main en cochant « Rejouer l'expérience de la racine en lecture seule » |
 
-Les six premiers partent à chaque poussée et doivent être verts. Le septième ne part qu'à la
+Les sept premiers partent à chaque poussée et doivent être verts. Le huitième ne part qu'à la
 demande : sa réponse est connue, et un rouge permanent dans un tableau qu'on demande de lire avant
 de graver une image n'apprend rien — il entraîne à ignorer le rouge.
 
@@ -76,7 +78,7 @@ Trois réglages :
 | Réglage | Valeur | Pourquoi |
 |---|---|---|
 | Secure Boot | **désactivé** | Prophet OS ne signe pas encore son chargeur d'amorçage. C'est une dette connue, écrite dans `image/modules/immutable.nix` : elle demande d'ajouter `lanzaboote` aux entrées du flake et d'enrôler les clés depuis l'installeur. Tant qu'elle n'est pas payée, le micrologiciel refuserait de démarrer. |
-| CSM / Legacy BIOS | **désactivé** | L'installeur exige un démarrage UEFI et refusera de continuer sinon. |
+| CSM / Legacy BIOS | **indifférent** | L'installeur pose systemd-boot si la clé a démarré en UEFI, GRUB sinon. Sur une machine qui a les deux, préférez l'UEFI : systemd-boot y est sans éditeur, et Secure Boot pourra s'y ajouter. |
 | Ordre de démarrage | la clé USB en premier | — |
 
 Si votre PC a le *Fast Startup* de Windows, désactivez-le avant, ou éteignez la machine avec
@@ -234,12 +236,16 @@ Dit franchement, parce que vous aurez effacé un disque pour l'essayer.
 - **Le niveau 2 d'isolation exige des images d'invité** qui ne sont pas dans l'image installée.
   `prophet status` dira quels niveaux sont disponibles et ce qui manque. Le niveau annoncé
   dépend des exécutables, des images et des mécanismes réellement accessibles sur la machine.
-- **La matrice matérielle reste à établir.** Les démarrages UEFI en VM ne valident pas votre
-  carte graphique, votre réseau ni votre micrologiciel. Les performances d'inférence GPU et
-  les comparaisons avec les distributions prises en charge restent également à mesurer.
+- **La matrice matérielle reste à établir.** Les démarrages en VM, UEFI comme BIOS, ne valident
+  pas votre carte graphique, votre réseau ni votre micrologiciel. Le système installé embarque
+  désormais les micrologiciels redistribuables et le matériel que l'installeur détecte, et met
+  les Radeon HD 7000/8000 sous `amdgpu` pour avoir Vulkan (ADR 0032) ; que votre carte, votre
+  Wi-Fi et votre BIOS s'en satisfassent reste à constater sur la machine. Les performances
+  d'inférence GPU et les comparaisons avec les distributions prises en charge restent aussi à
+  mesurer.
 
 Ce dernier point mérite d'être pesé. Si vous voulez réduire le risque : essayez d'abord l'ISO dans
-une machine virtuelle (VirtualBox, VMware ou Hyper-V, avec l'UEFI activé et un disque de 80 Gio),
+une machine virtuelle (VirtualBox, VMware ou Hyper-V, en UEFI ou en BIOS, avec un disque de 80 Gio),
 puis sur le vrai PC une fois que vous l'aurez vue démarrer chez vous.
 
 ## Revenir à Windows

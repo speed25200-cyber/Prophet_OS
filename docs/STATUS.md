@@ -147,6 +147,19 @@ test du daemon a montré qu'un `sleep` survivait au délai avant cela. Tests du 
 règles, refus) sans sandboxd ; exécution réelle prouvée par `sandbox.run` sur cette machine.
 Voir l'[ADR 0031](adr/0031-execution-de-programmes-sous-sandboxd.md).
 
+Matériel ordinaire, 13 septembre 2026, dans le commit portant ce rapport : le système installé
+n'avait aucun micrologiciel redistribuable (écran noir sur une Radeon une fois posé sur le
+disque), ignorait ce que `nixos-generate-config` détectait, et l'installeur refusait toute
+machine sans UEFI. Désormais `hardware.enableRedistributableFirmware`, un initrd qui connaît le
+SATA, l'USB, le NVMe et le virtio d'un PC ordinaire, les Radeon GCN 1/2 sous `amdgpu` pour
+Vulkan ; deux fichiers par machine (`image/machine/`) écrits par l'installeur et importés par le
+flake ; `prophet.boot.firmware = "bios"` avec GRUB et une sixième partition `ef02` sur tout
+disque. Trois preuves ajoutées à la CI : l'ISO sous SeaBIOS, la configuration installée sous
+SeaBIOS (`installe-bios`), l'évaluation avec les fichiers de machine générés sur le coureur.
+Voir l'[ADR 0032](adr/0032-materiel-ordinaire.md). La CI de 697f0da a donné : services,
+système installé construit et posé, ISO construite et démarrée verts ; « Le système installé
+démarre » rouge sur une cause de test (`su -` sans bus de session), corrigée par 81f3eda.
+
 Suite d'applications du 13 septembre 2026, dans le commit portant ce rapport : le bureau
 installe LibreOffice, GIMP, Inkscape, Blender, FreeCAD, Evince et mpv (`prophet.desktop.suite`,
 activée par défaut), avec leurs entrées dans le lanceur ; le contexte « bureau » nomme celles

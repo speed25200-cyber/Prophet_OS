@@ -22,6 +22,10 @@
   # connaître `dd` pour essayer un système.
   isoImage.makeUsbBootable = true;
   isoImage.makeEfiBootable = true;
+  # Et depuis un BIOS sans UEFI : l'image est hybride, la même clé démarre un PC de 2012 et un
+  # portable d'aujourd'hui. C'est le défaut sur x86 ; on l'écrit pour que ce soit une propriété
+  # tenue, vérifiée par l'intégration continue sous SeaBIOS (ADR 0032).
+  isoImage.makeBiosBootable = true;
 
   # Ce que l'installeur appelle, et de quoi se dépanner quand une machine se tient mal.
   environment.systemPackages = with pkgs; [

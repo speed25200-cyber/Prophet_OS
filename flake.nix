@@ -53,6 +53,10 @@
           ./image/modules/immutable.nix
           ./image/modules/surface.nix
           ./image/modules/desktop.nix
+          # Ce que l'installeur écrit pour la machine : son matériel détecté et son mode
+          # d'amorçage. Vides dans le dépôt (ADR 0032).
+          ./image/machine/hardware-configuration.nix
+          ./image/machine/amorcage.nix
           {
             prophet.enable = true;
             nixpkgs.config.allowUnfreePredicate = autoriserLesClients;
@@ -72,6 +76,8 @@
           ./image/modules/immutable.nix
           ./image/modules/surface.nix
           ./image/modules/desktop.nix
+          ./image/machine/hardware-configuration.nix
+          ./image/machine/amorcage.nix
           {
             prophet.enable = true;
             prophet.desktop.suite.enable = false;
@@ -154,6 +160,12 @@
           # Et une vraie machine **installée** : racine en lecture seule, chargeur d'amorçage,
           # noyau verrouillé. Le support d'amorçage a démarré ; ce qu'il installe, jamais.
           installe = import ./image/tests/installe.nix {
+            inherit pkgs;
+            module = nixosModules.prophet;
+          };
+          # La même configuration installée, démarrée sans UEFI : GRUB sous SeaBIOS, pour les PC
+          # qui n'ont que cela (ADR 0032).
+          installe-bios = import ./image/tests/installe-bios.nix {
             inherit pkgs;
             module = nixosModules.prophet;
           };

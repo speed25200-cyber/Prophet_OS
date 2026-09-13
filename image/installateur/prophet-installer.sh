@@ -13,10 +13,13 @@
 #   partition 3  racine B      24 GiB   ext4      étiquette prophet-b
 #   partition 4  état           32 GiB  LUKS2     étiquette prophet-state-luks → btrfs
 #   partition 5  données       le reste LUKS2     étiquette prophet-home-luks  → btrfs
+#   partition 6  amorçage BIOS  1 MiB   (ef02)    GRUB y met son image quand la machine n'a pas
+#                                                 d'UEFI ; inerte sinon (ADR 0032)
 #
 # Deux racines parce qu'une mise à jour écrit dans celle qui ne tourne pas : un échec laisse la
 # machine sur la précédente. Deux volumes chiffrés distincts parce que l'état des agents et les
-# données de l'utilisateur n'ont pas la même durée de vie ni la même valeur.
+# données de l'utilisateur n'ont pas la même durée de vie ni la même valeur. La partition BIOS
+# est toujours créée : un mébioctet, et la même disposition quel que soit le micrologiciel.
 
 set -euo pipefail
 
@@ -71,19 +74,16 @@ titre "Vérifications"
 
 [ "$(id -u)" = "0" ] || mourir "l'installation doit être lancée en root."
 
-# L'UEFI est nécessaire pour poser le chargeur d'amorçage, pas pour préparer un disque. Le
-# contrôle ne porte donc que sur le chemin qui installe réellement. Ce n'est pas un contournement :
-# une préparation sur une machine sans UEFI est parfaitement licite, c'est l'installation qui ne
-# l'est pas.
-if [ "$JUSQU_AU_MONTAGE" = "0" ]; then
-  if [ ! -d /sys/firmware/efi ]; then
-    rouge "cette machine n'a pas démarré en UEFI."
-    info "Prophet OS démarre par systemd-boot, qui exige l'UEFI. Sur un PC livré avec Windows,"
-    info "l'UEFI est presque toujours disponible : désactivez le « Legacy BIOS » ou le « CSM »"
-    info "dans le menu du micrologiciel, puis réamorcez ce support."
-    exit 1
-  fi
-  vert "✓ démarrage UEFI"
+# Le micrologiciel décide du chargeur : systemd-boot sur une machine démarrée en UEFI, GRUB sur
+# une machine sans UEFI. Le support d'amorçage est hybride, donc ce qu'on constate ici est ce que
+# la machine installée verra aussi (ADR 0032). Une machine qui a l'UEFI mais a démarré en mode
+# « CSM » recevra GRUB : c'est cohérent, et cela se change en réamorçant la clé en UEFI.
+if [ -d /sys/firmware/efi ]; then
+  AMORCAGE=uefi
+  vert "✓ démarrage UEFI : systemd-boot"
+else
+  AMORCAGE=bios
+  vert "✓ démarrage sans UEFI : GRUB"
 fi
 
 [ -n "$DISQUE" ] || { usage; mourir "aucun disque indiqué."; }
@@ -204,12 +204,15 @@ titre "Partitionnement"
 sgdisk --zap-all "$DISQUE" >/dev/null
 wipefs -a "$DISQUE" >/dev/null 2>&1 || true
 
+# La partition BIOS prend le dernier mébioctet : GRUB ne se soucie pas de sa place, et la mettre
+# à la fin laisse les cinq autres numérotées et alignées comme avant.
 sgdisk \
   -n 1:0:+1G     -t 1:ef00 -c 1:prophet-boot \
   -n 2:0:+24G    -t 2:8300 -c 2:prophet-a \
   -n 3:0:+24G    -t 3:8300 -c 3:prophet-b \
   -n 4:0:+32G    -t 4:8309 -c 4:prophet-state \
-  -n 5:0:0       -t 5:8309 -c 5:prophet-home \
+  -n 5:0:-1M     -t 5:8309 -c 5:prophet-home \
+  -n 6:0:0       -t 6:ef02 -c 6:prophet-bios \
   "$DISQUE" >/dev/null
 
 partprobe "$DISQUE" 2>/dev/null || true
@@ -217,12 +220,12 @@ udevadm settle
 
 # Les disques NVMe et mmc numérotent leurs partitions avec un « p » ; les disques SATA non.
 if [[ "$DISQUE" =~ (nvme|mmcblk|loop) ]]; then P="${DISQUE}p"; else P="$DISQUE"; fi
-ESP="${P}1"; RACINE_A="${P}2"; RACINE_B="${P}3"; ETAT="${P}4"; DONNEES="${P}5"
+ESP="${P}1"; RACINE_A="${P}2"; RACINE_B="${P}3"; ETAT="${P}4"; DONNEES="${P}5"; BIOS="${P}6"
 
-for partition in "$ESP" "$RACINE_A" "$RACINE_B" "$ETAT" "$DONNEES"; do
+for partition in "$ESP" "$RACINE_A" "$RACINE_B" "$ETAT" "$DONNEES" "$BIOS"; do
   [ -b "$partition" ] || mourir "la partition $partition n'est pas apparue. Le partitionnement a échoué."
 done
-vert "✓ cinq partitions créées"
+vert "✓ six partitions créées"
 
 # --- 5. Chiffrement ---
 
@@ -289,6 +292,9 @@ echo
 
 mkdir -p "$CIBLE/etc/prophet"
 cp -r "$DEPOT" "$CIBLE/etc/prophet/source"
+# Le dépôt vient du magasin Nix, en lecture seule ; la copie doit accepter les deux fichiers de la
+# machine qu'on écrit ci-dessous.
+chmod -R u+w "$CIBLE/etc/prophet/source"
 
 # Le haché, et lui seul. `install -m 0600` pose le mode à la création : l'écrire puis le corriger
 # laisserait une fenêtre où le fichier est lisible.
@@ -296,8 +302,37 @@ printf '%s\n' "$HACHE" | install -m 0600 /dev/stdin "$CIBLE/etc/prophet/motdepas
 unset HACHE
 [ -s "$CIBLE/etc/prophet/motdepasse" ] || mourir "le fichier de mot de passe est vide ; un compte sans mot de passe se connecterait sans en taper."
 
-# Le matériel de cette machine, détecté ici : c'est le seul fichier qui lui soit propre.
-nixos-generate-config --root "$CIBLE" --no-filesystems
+# Le matériel de cette machine, détecté ici, et son mode d'amorçage : les deux seuls fichiers qui
+# lui soient propres, écrits dans la copie du dépôt que le flake importe (ADR 0032). Les systèmes
+# de fichiers n'y sont pas : `immutable.nix` les désigne par leurs étiquettes.
+MACHINE="$CIBLE/etc/prophet/source/image/machine"
+nixos-generate-config --show-hardware-config --no-filesystems > "$MACHINE/hardware-configuration.nix"
+grep -q "boot.initrd.availableKernelModules" "$MACHINE/hardware-configuration.nix" \
+  || mourir "la détection du matériel n'a rien produit ; rien n'est installé."
+vert "✓ matériel détecté : $(grep -c '"' "$MACHINE/hardware-configuration.nix") lignes de modules et de réglages"
+
+if [ "$AMORCAGE" = "bios" ]; then
+  # GRUB s'installe sur le disque, désigné par un chemin qui ne change pas d'un démarrage à
+  # l'autre : les liens de /dev/disk/by-id (ata-…, nvme-…, wwn-…). Un disque en boucle n'en a
+  # pas ; on retombe alors sur son chemin direct.
+  DISQUE_STABLE="$DISQUE"
+  for lien in /dev/disk/by-id/*; do
+    [ -e "$lien" ] || continue
+    case "$lien" in *-part[0-9]*) continue ;; esac
+    if [ "$(readlink -f "$lien")" = "$(readlink -f "$DISQUE")" ]; then
+      DISQUE_STABLE="$lien"
+      case "$lien" in /dev/disk/by-id/wwn-*) break ;; esac
+    fi
+  done
+  cat > "$MACHINE/amorcage.nix" <<FIN
+# Écrit par l'installeur : cette machine a démarré sans UEFI (ADR 0032).
+{ ... }: {
+  prophet.boot.firmware = "bios";
+  prophet.boot.disque = "$DISQUE_STABLE";
+}
+FIN
+  vert "✓ GRUB sera posé sur $DISQUE_STABLE"
+fi
 
 # La racine est montée en lecture seule par `immutable.nix` une fois installée ; pendant
 # l'installation elle ne l'est pas, sinon rien ne pourrait y être écrit.
@@ -314,6 +349,11 @@ titre "Installation terminée"
 echo
 info "Retirez le support, puis redémarrez."
 echo
+if [ "$AMORCAGE" = "bios" ]; then
+  info "Cette machine démarre par GRUB, sans UEFI : laissez le disque en premier dans l'ordre"
+  info "d'amorçage du BIOS."
+  echo
+fi
 info "Au premier démarrage :"
 info "  • la phrase de passe vous sera demandée pour ouvrir les volumes chiffrés ;"
 info "  • ouvrez une session avec l'identifiant « prophet » et le mot de passe choisi ;"

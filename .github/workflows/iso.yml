@@ -274,6 +274,29 @@ jobs:
           nix build .#nixosConfigurations.prophet-ci.config.system.build.toplevel \
             --print-build-logs --out-link systeme
 
+      - name: Le matériel détecté compose-t-il avec la configuration ?
+        # L'installeur remplace `image/machine/hardware-configuration.nix` par ce que
+        # `nixos-generate-config` détecte, et `image/machine/amorcage.nix` par le mode d'amorçage
+        # (ADR 0032). Le seul endroit où cela s'exécute pour de vrai est la machine qu'on installe ;
+        # ici, on le fait sur le coureur et on évalue la configuration qui en résulte, sans la
+        # construire : une assertion, une option inconnue ou une redéfinition se voient à
+        # l'évaluation, et c'est avant de graver qu'il faut les voir.
+        run: |
+          OUTILS=$(nix build --no-link --print-out-paths nixpkgs#nixos-install-tools)
+          "$OUTILS/bin/nixos-generate-config" --show-hardware-config --no-filesystems \
+            > image/machine/hardware-configuration.nix
+          echo "--- ce que le coureur détecte ---"
+          cat image/machine/hardware-configuration.nix
+          printf '{ ... }: {\n  prophet.boot.firmware = "bios";\n  prophet.boot.disque = "/dev/disk/by-id/essai";\n}\n' \
+            > image/machine/amorcage.nix
+          echo "--- la configuration s'évalue-t-elle avec ces deux fichiers, en mode BIOS ? ---"
+          nix eval --raw .#nixosConfigurations.prophet-ci.config.system.build.toplevel.drvPath
+          echo
+          nix eval --raw .#nixosConfigurations.prophet-ci.config.boot.loader.grub.device
+          echo
+          git checkout -- image/machine
+          echo "le matériel détecté et le mode BIOS composent avec la configuration"
+
       - name: Les sept services pointent-ils vers un programme qui existe ?
         # Le contrôle que `tools/verifier-les-services.sh` fait sur les noms, refait ici sur les
         # chemins réels du magasin. C'est le seul endroit où l'on peut vraiment ouvrir le fichier
@@ -507,6 +530,25 @@ jobs:
           echo "--- 80 dernières lignes ---"
           tail -80 demarrage.log
 
+      - name: Démarrer sans UEFI, et écouter
+        # La même image, sur un PC qui n'a qu'un BIOS : SeaBIOS lit la piste d'amorçage hybride et
+        # syslinux charge le noyau. Un PC de 2012 démarre ainsi (ADR 0032).
+        run: |
+          ISO=$(ls ./*.iso | head -1)
+          qemu-system-x86_64 $ACCEL -m 3072 -smp 2 \
+            -cdrom "$ISO" -boot d \
+            -display none -serial stdio -no-reboot > demarrage-bios.log 2>&1 &
+          VM=$!
+          for _ in $(seq 1 180); do
+            grep -q "support d'installation" demarrage-bios.log && break
+            kill -0 "$VM" 2>/dev/null || { echo "la machine virtuelle s'est arrêtée seule"; break; }
+            sleep 5
+          done
+          kill "$VM" 2>/dev/null || true
+          wait "$VM" 2>/dev/null || true
+          echo "--- 80 dernières lignes ---"
+          tail -80 demarrage-bios.log
+
       - name: Est-ce que ça a démarré ?
         run: |
           manque=0
@@ -539,12 +581,29 @@ jobs:
           grep -q "Linux version" demarrage.log \
             && echo "(le noyau raconte aussi son démarrage sur la console série)"
 
+          echo "--- et sans UEFI ? ---"
+          # SeaBIOS n'écrit pas « BdsDxe » ; sa preuve de plus bas niveau est le noyau qui
+          # parle sur la console série, puis les mêmes deux bannières.
+          grep -q "Linux version" demarrage-bios.log \
+            || { echo "::error::sous SeaBIOS, le noyau n'a jamais parlé : l'image n'a pas été trouvée"; manque=1; }
+          grep -q "Welcome to NixOS" demarrage-bios.log \
+            || { echo "::error::sous SeaBIOS, aucun terminal n'a été servi"; manque=1; }
+          grep -q "support d'installation" demarrage-bios.log \
+            || { echo "::error::sous SeaBIOS, le message d'accueil n'est jamais apparu"; manque=1; }
+          if [ "$manque" != "0" ]; then
+            echo "::error::cette image ne démarre pas sans UEFI ; ne la gravez pas pour un PC à BIOS"
+            exit 1
+          fi
+          echo "La même image démarre aussi sans UEFI, sous SeaBIOS."
+
       - name: Conserver la trace du démarrage
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: demarrage-vm
-          path: demarrage.log
+          path: |
+            demarrage.log
+            demarrage-bios.log
           if-no-files-found: warn
 
   # --- Les services, sur une vraie machine ---
@@ -654,6 +713,45 @@ jobs:
           path: bureau-diagnostics/*.png
           if-no-files-found: warn
           retention-days: 14
+
+  # --- Le système installé, démarré sans UEFI ---
+  #
+  # Un PC de 2012 n'a parfois qu'un BIOS. L'installeur y pose GRUB au lieu de systemd-boot
+  # (ADR 0032) ; ce travail démarre cette configuration sous SeaBIOS et vérifie que les sept
+  # services y tournent comme sous UEFI. Sans lui, « compatible avec un PC ordinaire » ne serait
+  # qu'une phrase.
+  installe-bios:
+    name: Le système installé démarre sans UEFI
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Faire de la place
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean
+          echo "$(df -h / | awk 'NR==2{print $4}') libres"
+
+      - name: Rendre /dev/kvm ouvrable
+        run: PROPHET_AUTORISER_KVM=1 sudo -E ./tools/install-isolation.sh kvm
+
+      - name: Vérifier qu'il l'est
+        run: |
+          python3 -c "open('/dev/kvm','r+b').close()" \
+            || { echo "::error::/dev/kvm reste inouvrable : ce test a besoin de virtualisation"; exit 1; }
+          echo "/dev/kvm ouvrable"
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+            max-jobs = auto
+
+      - name: Démarrer la configuration installée sous SeaBIOS
+        run: nix build .#checks.x86_64-linux.installe-bios --print-build-logs
 
   # --- Une question ouverte, qui ne barre pas la route ---
   #
