@@ -79,6 +79,16 @@ et le [rapport](reports/navigateur-2026-09-13.md). La sortie réseau propre du n
 n'est pas relayée par egress et son confinement au niveau 2 n'est pas livré : les outils web
 restent désactivés par défaut. Aucune case complète de FRONTIER n'est cochée.
 
+Instruments de l'atelier du 13 septembre 2026, dans le commit portant ce rapport : rail éclairé
+avec emblème cerclé de la part de missions actives, bandes d'état, anneaux de budget et
+monogrammes de pilote sur les missions, trois instruments (étapes, activité, budget) dans la
+Focale et, en forme compacte, dans l'inspecteur relié aux services, une fois le travail commencé.
+Rendu et vérifié avec llvmpipe : 54 tests unitaires, 15 tests de rendu et 5 tests d'inspecteur
+avec services réels ; les captures de la documentation sont régénérées. Le premier essai cachait
+un bouton sous le défilement à 1440 × 1000 ; le test l'a relevé et la forme compacte le corrige.
+Voir le [rapport des instruments](reports/instruments-2026-09-13.md). La fluidité et la
+consommation sur une carte graphique réelle restent à mesurer.
+
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 
 - `c3b0c08` — moteur local réel, CLI et gel d'un processus possédé par sandboxd.

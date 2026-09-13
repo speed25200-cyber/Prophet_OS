@@ -54,6 +54,9 @@ expérimental ne constitue pas encore une version entièrement fonctionnelle.
 
 ![Atelier natif — scène de démonstration explicitement identifiée](docs/images/atelier-galerie-1440.png)
 
+Les [instruments de l'atelier](docs/reports/instruments-2026-09-13.md) : anneaux de budget,
+monogrammes de pilote, bandes d'état et rail éclairé, rendus et vérifiés en rendu logiciel.
+
 Captures, essais Wayland et limites : [rapport de l'espace natif](docs/reports/espace-natif-2026-09-12.md).
 
 ```

@@ -150,3 +150,9 @@ navigateur à profil Prophet dans le bureau. Les preuves sont des tests avec les
 et un vrai navigateur, sous un seul UID, sans VM. La sortie réseau propre du navigateur n'est pas
 relayée par egress et son confinement n'est pas livré ; le critère « MCP livré opérationnel »
 progresse sans être coché.
+
+Les [instruments de l'atelier](reports/instruments-2026-09-13.md) donnent ensuite à la surface
+une identité qui se lit sans mots : anneaux, monogrammes, bandes d'état, rail éclairé, sans
+animation au repos, vérifiés en rendu logiciel par les tests de propriétés et d'inspecteur.
+Les captures d'états réels sont régénérées ; les temps de rendu, la mémoire et la consommation
+sur écran physique attendus par le critère d'interface restent à mesurer.
