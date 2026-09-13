@@ -528,6 +528,8 @@ impl Supervision {
             ui.label(RichText::new(&c.intitule).size(28.0).family(egui::FontFamily::Name("Inter600".into())).line_height(Some(34.0)));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), egui::Sense::hover());
+                crate::instruments::monogramme(ui.painter(), r.center(), &c.agent, 18.0);
                 ui.label(RichText::new(&c.agent).size(13.0).color(DISCRET));
                 let (label, color) = statut_mission(c);
                 pastille(ui, label, color);
@@ -551,22 +553,15 @@ impl Supervision {
             ui.add_space(22.0);
             ui.separator();
             ui.add_space(14.0);
-            ui.columns(2, |columns| {
-                petit(&mut columns[0], "ÉTAPES OBSERVÉES");
-                columns[0].label(RichText::new(c.etapes.to_string()).size(32.0));
-                petit(&mut columns[1], "ACTIVITÉ");
-                columns[1].label(RichText::new(format!("{:.0} / min", c.debit)).size(32.0));
-            });
-            ui.add_space(16.0);
-            ui.horizontal(|ui| {
-                petit(ui, "Budget consommé");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| { petit(ui, format!("{:.0} %", c.budget_consomme.clamp(0.0, 1.0) * 100.0)); });
-            });
-            let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 4.0), egui::Sense::hover());
-            ui.painter().rect_filled(bar, 2, FOND);
-            ui.painter().rect_filled(egui::Rect::from_min_size(bar.min, vec2(bar.width() * c.budget_consomme.clamp(0.0, 1.0), 4.0)), 2, if c.reclame() { AMBRE } else { BLEU });
-            ui.add_space(24.0);
-            ui.add_space(22.0);
+            crate::instruments::tableau(
+                ui,
+                c.etapes,
+                c.debit,
+                c.budget_consomme,
+                if c.reclame() { AMBRE } else { BLEU },
+                false,
+            );
+            ui.add_space(26.0);
             petit(ui, "RÉSULTATS ET CHANGEMENTS");
             ui.label(RichText::new("Aucun livrable ni diff reçu.").size(13.0).color(DISCRET));
             ui.add_space(6.0);

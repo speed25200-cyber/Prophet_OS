@@ -144,16 +144,11 @@ pub(crate) fn chrome(root: &mut egui::Ui, atelier: &mut Atelier, scene: &Scene, 
             .exact_size(86.)
             .frame(Frame::new().fill(RAIL).inner_margin(12))
             .show(root, |ui| {
+                rail_depth(ui);
                 ui.vertical_centered(|ui| {
                     ui.add_space(7.);
                     let (r, _) = ui.allocate_exact_size(vec2(46., 46.), egui::Sense::hover());
-                    ui.painter().text(
-                        r.center(),
-                        Align2::CENTER_CENTER,
-                        "p",
-                        FontId::new(36., egui::FontFamily::Name("Inter600".into())),
-                        WHITE,
-                    );
+                    emblem(ui.painter(), r.center(), scene);
                     ui.add_space(33.);
                     nav(ui, atelier, true);
                 });
@@ -251,6 +246,52 @@ pub(crate) fn chrome(root: &mut egui::Ui, atelier: &mut Atelier, scene: &Scene, 
         });
 }
 
+/// Le rail n'est pas un aplat : une lumière descend du haut, comme sur un instrument posé.
+fn rail_depth(ui: &egui::Ui) {
+    let r = ui.max_rect().expand(12.);
+    let mut mesh = egui::Mesh::default();
+    for (p, c) in [
+        (r.left_top(), Color32::from_rgb(46, 55, 63)),
+        (r.right_top(), Color32::from_rgb(40, 48, 55)),
+        (r.right_bottom(), Color32::from_rgb(26, 31, 36)),
+        (r.left_bottom(), Color32::from_rgb(30, 36, 41)),
+    ] {
+        mesh.colored_vertex(p, c);
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    ui.painter().add(mesh);
+    ui.painter().line_segment(
+        [r.right_top(), r.right_bottom()],
+        Stroke::new(1., Color32::from_white_alpha(14)),
+    );
+}
+
+/// L'emblème : la lettre, cerclée d'un anneau qui dit combien de missions sont actives.
+///
+/// Rien n'y bouge. L'anneau se remplit avec les missions en cours, part par part, et s'éteint
+/// quand tout est fini : c'est la seule chose que le rail affirme, et il l'affirme sans texte.
+fn emblem(p: &egui::Painter, center: egui::Pos2, scene: &Scene) {
+    let total = scene.courants.len().max(1) as f32;
+    let active = scene.actives() as f32;
+    p.circle_filled(center, 23., Color32::from_white_alpha(10));
+    p.circle_stroke(center, 21., Stroke::new(2., Color32::from_white_alpha(28)));
+    crate::instruments::arc(
+        p,
+        center,
+        21.,
+        active / total,
+        Stroke::new(2., Color32::from_rgb(228, 200, 140)),
+    );
+    p.text(
+        center + vec2(0., 1.),
+        Align2::CENTER_CENTER,
+        "p",
+        FontId::new(30., egui::FontFamily::Name("Inter600".into())),
+        WHITE,
+    );
+}
+
 pub(crate) fn work_surface() -> Frame {
     Frame::new()
         .fill(WHITE)
@@ -328,31 +369,48 @@ fn tile(ui: &mut egui::Ui, c: &Courant, r: Rect, selected: bool) -> bool {
         ),
         egui::StrokeKind::Inside,
     );
-    let top = r.min + vec2(18., 18.);
+    // Une bande de couleur à gauche dit l'état avant que l'œil lise le mot.
+    p.rect_filled(
+        Rect::from_min_size(r.min + vec2(0., 22.), vec2(3., r.height() - 44.)),
+        2,
+        color,
+    );
+    let top = r.min + vec2(20., 18.);
     p.circle_filled(top + vec2(3., 7.), 3., color);
     text(
         &p,
         status,
         top + vec2(14., 0.),
-        r.width() - 54.,
+        r.width() - 96.,
         FontId::proportional(11.),
         1,
         color,
+    );
+    // L'anneau de budget, en haut à droite : combien la mission a déjà consommé.
+    crate::instruments::anneau(
+        &p,
+        pos2(r.right() - 30., r.top() + 28.),
+        11.,
+        3.,
+        c.budget_consomme,
+        color,
+        None,
     );
     text(
         &p,
         &c.intitule,
         top + vec2(0., 27.),
-        r.width() - 36.,
+        r.width() - 40.,
         FontId::new(18., egui::FontFamily::Name("Inter600".into())),
         2,
         INK,
     );
+    crate::instruments::monogramme(&p, pos2(r.left() + 29., r.bottom() - 24.), &c.agent, 18.);
     text(
         &p,
         &c.agent,
-        pos2(r.left() + 18., r.bottom() - 29.),
-        r.width() - 128.,
+        pos2(r.left() + 44., r.bottom() - 30.),
+        r.width() - 150.,
         FontId::proportional(10.),
         1,
         MUTED,

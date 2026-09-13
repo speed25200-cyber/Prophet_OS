@@ -197,6 +197,35 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
             ui.add_space(10.0);
             phases(ui, info);
         }
+        // Les instruments n'ont de sens qu'une fois le travail commencé : un plan à examiner
+        // n'a ni étapes ni débit, et sa place revient au bouton qui le lance.
+        if !reviewing && info.task.history.contains(&State::Running) {
+            ui.add_space(8.0);
+            let spent = &info.task.budget.spent;
+            let limits = &info.task.budget.limits;
+            let fraction = if limits.tokens > 0 {
+                spent.tokens as f32 / limits.tokens as f32
+            } else {
+                0.0
+            };
+            let rate = if spent.wall_time_s > 0 {
+                spent.steps as f32 * 60.0 / spent.wall_time_s as f32
+            } else {
+                0.0
+            };
+            crate::instruments::tableau(
+                ui,
+                spent.steps,
+                rate,
+                fraction,
+                if info.task.state == State::Done {
+                    GREEN
+                } else {
+                    BLUE
+                },
+                true,
+            );
+        }
         ui.add_space(10.0);
         let current = if *tab == Tab::Auto {
             if info.task.state == State::Planned {

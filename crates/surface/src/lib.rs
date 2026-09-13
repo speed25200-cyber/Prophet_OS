@@ -12,6 +12,7 @@ mod file_review;
 mod file_review_view;
 mod glyphes;
 pub mod gpu;
+mod instruments;
 mod mission_details;
 pub mod missions;
 pub mod preparation;
