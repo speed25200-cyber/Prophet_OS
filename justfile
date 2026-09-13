@@ -90,6 +90,7 @@ captures:
     $B --capture docs/images/atelier-compact-640.png --demonstration --largeur 640 --hauteur 900 --mouvement-reduit
     $B --capture docs/images/atelier-modeles-1440.png --demonstration --page modeles --largeur 1440 --hauteur 1000 --mouvement-reduit
     $B --capture docs/images/atelier-dialogue-1440.png --demonstration --page conversation --largeur 1440 --hauteur 1000 --mouvement-reduit
+    $B --capture docs/images/atelier-systeme-1440.png --demonstration --page activite --largeur 1440 --hauteur 1000 --mouvement-reduit
     PROPHET_CAPTURE_DIR=docs/images cargo test -p surface --test bureau --test missions -- --include-ignored
     mv docs/images/surface-atelier-focale-1440.png docs/images/atelier-focale-1440.png
     mv docs/images/surface-atelier-recherche-1440.png docs/images/atelier-recherche-1440.png

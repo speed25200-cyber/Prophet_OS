@@ -207,6 +207,96 @@ pub(crate) fn tableau(
     }
 }
 
+/// L'échelle d'isolation : trois niveaux, ceux que la machine offre en couleur, les autres en
+/// piste. Le manque, s'il y en a un, est écrit sous le premier niveau inatteignable.
+pub(crate) fn echelle_isolation(ui: &mut egui::Ui, niveau_max: u8, manque: Option<&str>) {
+    let width = ui.available_width();
+    let gap = 12.0;
+    let tile_width = ((width - 2.0 * gap) / 3.0).max(140.0);
+    let height = 112.0;
+    let (row, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
+    let painter = ui.painter();
+    let niveaux = [
+        (
+            "NIVEAU 0",
+            "Confiné",
+            "Espaces de noms, Landlock, seccomp. Outils système de confiance.",
+        ),
+        (
+            "NIVEAU 1",
+            "Noyau utilisateur",
+            "gVisor. Agents qui manipulent des données non fiables.",
+        ),
+        (
+            "NIVEAU 2",
+            "MicroVM",
+            "Firecracker sur KVM. Toute exécution de code arbitraire.",
+        ),
+    ];
+    let accent = Color32::from_rgb(38, 112, 92);
+    for (i, (label, name, detail)) in niveaux.iter().enumerate() {
+        let reached = i as u8 <= niveau_max;
+        let r = Rect::from_min_size(
+            row.min + vec2(i as f32 * (tile_width + gap), 0.0),
+            vec2(tile_width, height),
+        );
+        painter.rect_filled(r, 14, TUILE);
+        if reached {
+            painter.rect_filled(
+                Rect::from_min_size(r.min + vec2(0.0, 18.0), vec2(3.0, height - 36.0)),
+                2,
+                accent,
+            );
+        }
+        painter.text(
+            r.min + vec2(20.0, 16.0),
+            Align2::LEFT_TOP,
+            *label,
+            FontId::proportional(10.0),
+            DISCRET,
+        );
+        painter.text(
+            r.min + vec2(20.0, 34.0),
+            Align2::LEFT_TOP,
+            *name,
+            FontId::new(18.0, egui::FontFamily::Name("Inter600".into())),
+            if reached { ENCRE } else { DISCRET },
+        );
+        anneau(
+            painter,
+            pos2(r.right() - 30.0, r.top() + 30.0),
+            12.0,
+            3.0,
+            if reached { 1.0 } else { 0.0 },
+            accent,
+            None,
+        );
+        if reached {
+            painter.text(
+                pos2(r.right() - 30.0, r.top() + 30.0),
+                Align2::CENTER_CENTER,
+                "✓",
+                FontId::proportional(12.0),
+                accent,
+            );
+        }
+        let text = if !reached && i as u8 == niveau_max + 1 {
+            manque.unwrap_or(detail)
+        } else {
+            detail
+        };
+        let mut job = egui::text::LayoutJob::simple(
+            text.to_owned(),
+            FontId::proportional(11.0),
+            DISCRET,
+            tile_width - 40.0,
+        );
+        job.wrap.max_rows = 3;
+        let galley = painter.layout_job(job);
+        painter.galley(r.min + vec2(20.0, 62.0), galley, DISCRET);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -18,6 +18,12 @@ chiffres ; il dit maintenant l'essentiel par des formes, sans rien animer au rep
   restent visibles sans défiler.
 - Le module `instruments` fournit l'arc, l'anneau, le monogramme et la ligne d'instruments ;
   ses tests vérifient les monogrammes et la géométrie des arcs.
+- **Le Système montre l'échelle d'isolation** : trois niveaux, ceux que la machine offre en
+  couleur et cochés, le premier inatteignable avec ce qui lui manque, et les missions reçues
+  avec le monogramme de leur pilote.
+
+  ![Système — échelle d'isolation](../images/atelier-systeme-1440.png)
+
 - **Le Parcours dit où l'agent est allé.** L'onglet relit le journal de la mission et liste
   chaque appel d'outil avec sa cible contrôlée — hôte, chemin, fenêtre — et son issue :
   réussi, en erreur avec son code, ou refusé avec son motif ; puis la publication et

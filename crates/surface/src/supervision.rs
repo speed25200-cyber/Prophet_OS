@@ -861,12 +861,12 @@ fn systeme(ui: &mut egui::Ui, scene: &Scene) {
             surface().show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 petit(ui, "ISOLATION DISPONIBLE");
-                ui.label(
-                    RichText::new(format!("Niveau {}", scene.isolation.niveau_max)).size(34.0),
+                ui.add_space(10.0);
+                crate::instruments::echelle_isolation(
+                    ui,
+                    scene.isolation.niveau_max,
+                    scene.isolation.manque.as_deref(),
                 );
-                if let Some(manque) = &scene.isolation.manque {
-                    ui.label(RichText::new(manque).color(DISCRET));
-                }
                 ui.add_space(12.0);
                 petit(
                     ui,
@@ -882,6 +882,8 @@ fn systeme(ui: &mut egui::Ui, scene: &Scene) {
                 }
                 for c in &scene.courants {
                     ui.horizontal_wrapped(|ui| {
+                        let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), egui::Sense::hover());
+                        crate::instruments::monogramme(ui.painter(), r.center(), &c.agent, 16.0);
                         ui.label(RichText::new(&c.intitule).size(14.0));
                         let (label, color) = statut_mission(c);
                         pastille(ui, label, color);
