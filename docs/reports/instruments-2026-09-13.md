@@ -18,6 +18,11 @@ chiffres ; il dit maintenant l'essentiel par des formes, sans rien animer au rep
   restent visibles sans défiler.
 - Le module `instruments` fournit l'arc, l'anneau, le monogramme et la ligne d'instruments ;
   ses tests vérifient les monogrammes et la géométrie des arcs.
+- **Le Parcours dit où l'agent est allé.** L'onglet relit le journal de la mission et liste
+  chaque appel d'outil avec sa cible contrôlée — hôte, chemin, fenêtre — et son issue :
+  réussi, en erreur avec son code, ou refusé avec son motif ; puis la publication et
+  l'annulation. Le contenu lu ou écrit n'y figure jamais : le journal ne le contient pas.
+  Le test d'inspecteur vérifie que l'appel `fs.write` sur `docs/note.txt` y apparaît réussi.
 
 ## Vérifications
 

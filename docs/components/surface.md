@@ -27,7 +27,7 @@ explicite hors de la boucle de rendu, affichent son acquittement ou son erreur e
 L'onglet Fichiers lit les deux versions par `task.change`, les compare en arrière-plan et propose
 une copie exacte du texte final. Un travail altéré fait échouer l'actualisation ; les textes trop
 grands et les binaires sont explicites. L'accès dépend du créateur Unix constaté par agentd.
-L'application approuvée et le journal détaillé restent à intégrer. Voir l'[ADR 0018](../adr/0018-examen-des-versions.md).
+L'application approuvée passe par `task.apply` et `task.undo` (ADR 0023). L'onglet Parcours relit le journal (`ledger.query` sur la mission) et montre chaque appel d'outil avec sa cible contrôlée et son issue, jamais le contenu lu ou écrit. Voir l'[ADR 0018](../adr/0018-examen-des-versions.md).
 
 La préparation d'une mission possède maintenant son propre écran : objectif humain, contexte
 configuré dans le service, modèle disponible et limites. `task.prepare` conserve le plan, qui

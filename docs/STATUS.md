@@ -86,7 +86,10 @@ Focale et, en forme compacte, dans l'inspecteur relié aux services, une fois le
 Rendu et vérifié avec llvmpipe : 54 tests unitaires, 15 tests de rendu et 5 tests d'inspecteur
 avec services réels ; les captures de la documentation sont régénérées. Le premier essai cachait
 un bouton sous le défilement à 1440 × 1000 ; le test l'a relevé et la forme compacte le corrige.
-Voir le [rapport des instruments](reports/instruments-2026-09-13.md). La fluidité et la
+Le journal porte désormais la cible contrôlée de chaque appel d'outil, et l'onglet Parcours
+de l'inspecteur la relit : l'humain voit quel hôte, quel chemin ou quelle fenêtre l'agent a
+touchés et avec quelle issue, sans jamais voir le contenu. Voir le
+[rapport des instruments](reports/instruments-2026-09-13.md). La fluidité et la
 consommation sur une carte graphique réelle restent à mesurer.
 
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
