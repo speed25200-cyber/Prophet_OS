@@ -236,6 +236,18 @@
           };
           chatgpt-linux = pkgs.callPackage ./image/packages/chatgpt-linux.nix { };
           iso = self.nixosConfigurations.prophet-iso.config.system.build.isoImage;
+          # La chaîne vocale hors image, en un seul chemin : Whisper, Piper, espeak-ng, le modèle
+          # de parole et la voix française. C'est ce que les essais marqués `needs_voice_stack`
+          # attendent (ADR 0036) ; `nix build .#chaine-vocale -o chaine-vocale` puis les
+          # variables `PROPHET_*` du README de `voice`. L'intégration continue le fait.
+          chaine-vocale = pkgs.runCommand "prophet-chaine-vocale" { } ''
+            mkdir -p $out/bin $out/share/prophet
+            ln -s ${pkgs.whisper-cpp}/bin/whisper-cli $out/bin/whisper-cli
+            ln -s ${pkgs.piper-tts}/bin/piper $out/bin/piper
+            ln -s ${pkgs.espeak-ng}/bin/espeak-ng $out/bin/espeak-ng
+            ln -s ${pkgs.fetchurl modeleParole} $out/share/prophet/ggml-base.bin
+            ln -s ${voixFrancaise pkgs} $out/share/prophet/voix
+          '';
         };
       });
 }

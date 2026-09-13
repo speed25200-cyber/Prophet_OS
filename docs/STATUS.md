@@ -331,8 +331,13 @@ d'activation existe : `prophet voice --listen` écoute par tranches et n'agit qu
 … », comparé avec tolérance à ce que Whisper entend ; un test avec un faux enregistreur prouve
 qu'une tranche sans le mot est ignorée et que la suivante devient une mission avec réponse
 parlée. L'atelier a le même geste, « Écouter « Prophète » » ; son test de contrôleur avec le vrai
-Whisper est écrit mais n'a pas pu être exercé (la machine WSL de la session tombe à la
-compilation du binaire de test de la surface ; clippy passe). Ni voix humaine mesurée, ni lecture
+Whisper est écrit mais n'a pas pu être exercé sur la machine de la session (WSL tombe à la
+compilation du binaire de test de la surface ; clippy passe). La CI de `40c6e3d` l'a lancé sans
+chaîne vocale (le travail « Surface d'observation » exerce tous les essais ignorés) et il a
+échoué sur le modèle absent, pas sur l'écoute : un travail « Parole (Whisper et Piper réels) »
+apporte désormais les programmes, le modèle et la voix par `nix build .#chaine-vocale` — les
+mêmes que dans l'image — et exerce les essais `needs_voice_stack` du crate `voice`, de la CLI
+et de l'atelier ; la surface les laisse à ce travail. Ni voix humaine mesurée, ni lecture
 vérifiée sur une vraie sortie audio : voir
 l'[ADR 0036](adr/0036-la-parole-de-l-humain.md) et le [rapport](reports/parole-2026-09-13.md).
 

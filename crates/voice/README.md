@@ -36,9 +36,16 @@ action ; le reste de la phrase est l'intention. Chaque tranche est effacée apr�
 
 ```sh
 nix develop --command cargo test -p voice
-PROPHET_WHISPER_MODEL=… PROPHET_WHISPER=… PROPHET_TEST_ESPEAK=… \
+nix build .#chaine-vocale -o chaine-vocale   # Whisper, Piper, espeak-ng, le modèle et la voix
+PROPHET_WHISPER=$PWD/chaine-vocale/bin/whisper-cli PROPHET_PIPER=$PWD/chaine-vocale/bin/piper \
+PROPHET_TEST_ESPEAK=$PWD/chaine-vocale/bin/espeak-ng \
+PROPHET_WHISPER_MODEL=$PWD/chaine-vocale/share/prophet/ggml-base.bin \
+PROPHET_PIPER_VOICE=$PWD/chaine-vocale/share/prophet/voix/fr_FR-siwis-medium.onnx \
   nix develop --command cargo test -p voice -- --include-ignored --nocapture
 ```
 
-Le second essai synthétise une phrase française avec espeak-ng et la transcrit avec le vrai
-modèle ; il exige les trois programmes et n'est pas lancé par `just check`.
+Les essais ignorés synthétisent une phrase française (espeak-ng, ou la voix de Piper) et la
+transcrivent avec le vrai modèle ; ils exigent les programmes et les poids, et `just check` ne
+les lance pas. Le travail « Parole (Whisper et Piper réels) » de l'intégration continue les
+exerce à chaque poussée, ainsi que ceux de la CLI (`prophet voice --prepare`, `--listen`) et
+de l'atelier (écoute permanente).

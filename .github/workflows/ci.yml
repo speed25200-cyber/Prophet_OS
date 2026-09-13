@@ -184,10 +184,12 @@ jobs:
       - name: Construire les services du parcours de supervision
         run: cargo build --release -p agentd -p capd -p ledger --bins
 
+      # Tous les essais ignorés de la surface, sauf celui de l'écoute permanente : il lui faut
+      # Whisper, Piper et un modèle de parole, que le travail « Parole » apporte et exerce.
       - name: Exercer la surface
         env:
           PROPHET_CAPTURE_DIR: ${{ github.workspace }}
-        run: cargo test -p surface --release -- --ignored --test-threads=1 --nocapture
+        run: cargo test -p surface --release -- --ignored --test-threads=1 --nocapture --skip l_ecoute_permanente
 
       # Le champ est allégé de lui-même sur un rastériseur logiciel ; les captures le montrent
       # complet, tel qu'une carte graphique le trace, pour qu'on juge ce que l'utilisateur verra.
@@ -244,6 +246,43 @@ jobs:
   # Les tests matériels tournent ici et nulle part ailleurs : le conteneur de développement n'a ni
   # gVisor ni KVM, et les coureurs GitHub ont les deux une fois gVisor installé. C'est donc la
   # seule machine où les niveaux 1 et 2 sont réellement exercés.
+  # La parole, avec les vrais programmes : Whisper (whisper.cpp) écoute, Piper parle. Les essais
+  # marqués needs_voice_stack sont ignorés partout ailleurs — ils exigent un modèle de 148 Mo et
+  # une voix — ; ici ils tournent, et le vert veut dire que l'humain peut dicter une mission,
+  # dire « Prophète, … » sans bouton, et entendre la réponse de l'OS, sans réseau (ADR 0036).
+  # Les programmes, le modèle et la voix viennent du flake, les mêmes que dans l'image.
+  voice:
+    name: Parole (Whisper et Piper réels)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Chaîne d'outils du dépôt
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+      - name: Les programmes, le modèle et la voix
+        run: |
+          nix build .#chaine-vocale --print-build-logs -o chaine-vocale
+          ls -lL chaine-vocale/bin chaine-vocale/share/prophet chaine-vocale/share/prophet/voix
+          {
+            echo "PROPHET_WHISPER=$PWD/chaine-vocale/bin/whisper-cli"
+            echo "PROPHET_PIPER=$PWD/chaine-vocale/bin/piper"
+            echo "PROPHET_TEST_ESPEAK=$PWD/chaine-vocale/bin/espeak-ng"
+            echo "PROPHET_WHISPER_MODEL=$PWD/chaine-vocale/share/prophet/ggml-base.bin"
+            echo "PROPHET_PIPER_VOICE=$PWD/chaine-vocale/share/prophet/voix/fr_FR-siwis-medium.onnx"
+          } >> "$GITHUB_ENV"
+      - name: L'OS écoute une phrase, parle, et se réécoute
+        run: cargo test -p voice --test dictee -- --ignored --nocapture
+      - name: Une phrase dite devient une mission ; « Prophète, … » la déclenche
+        run: cargo test -p prophet-cli --test task_service -- --ignored --nocapture
+      - name: L'atelier écoute « Prophète » sans bouton
+        run: cargo test -p surface --lib -- --ignored --nocapture
+
   isolation:
     name: Niveaux d'isolation (matériel réel)
     runs-on: ubuntu-latest
