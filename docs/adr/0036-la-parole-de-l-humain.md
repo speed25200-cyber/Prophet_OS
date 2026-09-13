@@ -65,6 +65,10 @@ distant ; et la parole ne donne aucun droit, elle produit un texte que l'humain 
 - Le résultat d'une mission se dit sur demande : `prophet task result <id> --say` en fait une
   phrase courte (état, début du texte ou raison, changements à examiner, sans mise en forme,
   coupée à la phrase avant 360 caractères) que Piper lit ; le dit est aussi écrit.
+- En écoute continue, deux ordres brefs après le mot d'activation portent sur la dernière
+  mission préparée dans cette écoute : « lance la mission » la lance (l'approbation de
+  l'humain, dite) et « résultat » fait dire son résultat ; toute autre phrase est une intention
+  à préparer, y compris une phrase longue qui commence par « lance ».
 - Ce qui n'est pas livré : la voix humaine (le test parle avec une voix de synthèse ; la
   qualité sur un vrai micro reste à mesurer), la lecture réelle sur une sortie audio (vérifiée
   par ses refus seulement), et la lecture des résultats d'elle-même à la fin d'une mission ou

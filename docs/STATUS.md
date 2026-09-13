@@ -347,7 +347,12 @@ mêmes que dans l'image — et exerce les essais `needs_voice_stack` du crate `v
 et de l'atelier ; la surface les laisse à ce travail. Le résultat d'une mission se dit sur
 demande, `prophet task result <id> --say` : état, début du texte ou raison, changements à
 examiner, sans mise en forme, coupé à la phrase ; Whisper réécoute la voix de Piper et y trouve
-les mots attendus ; sans chaîne vocale, la commande le dit au lieu de se taire. Ni voix humaine
+les mots attendus ; sans chaîne vocale, la commande le dit au lieu de se taire. En écoute
+continue, « Prophète, lance la mission » lance la dernière mission préparée (l'approbation,
+dite) et « Prophète, résultat » fait dire son résultat : un test joue les trois ordres à la
+suite sur un service simulé, `task.prepare`, `task.start`, `task.result` sur la même mission,
+dernière réponse réécoutée « mission terminée. la note de réunion est écrite dans vos
+documents. un changement est à examiner. » Ni voix humaine
 mesurée, ni lecture vérifiée sur une vraie sortie audio : voir
 l'[ADR 0036](adr/0036-la-parole-de-l-humain.md) et le [rapport](reports/parole-2026-09-13.md).
 

@@ -20,6 +20,17 @@ fn invoke_with(args: &[&str], method: &str, result: Value) -> (Output, Value) {
 
 /// Comme [`invoke_with`], avec des variables d'environnement pour la commande.
 fn invoke_env(args: &[&str], env: &[(&str, &str)], method: &str, result: Value) -> (Output, Value) {
+    let (output, mut requests) = invoke_seq(args, env, &[(method, result)]);
+    (output, requests.remove(0))
+}
+
+/// Comme [`invoke_env`], mais le service simulé répond à une suite de requêtes, une par
+/// connexion, chacune devant porter la méthode attendue ; rend les requêtes reçues dans l'ordre.
+fn invoke_seq(
+    args: &[&str],
+    env: &[(&str, &str)],
+    responses: &[(&str, Value)],
+) -> (Output, Vec<Value>) {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");
     std::fs::create_dir_all(home.join(".prophet")).unwrap();
@@ -29,31 +40,45 @@ fn invoke_env(args: &[&str], env: &[(&str, &str)], method: &str, result: Value) 
     let socket = temp.path().join("agentd.sock");
     let listener = UnixListener::bind(&socket).unwrap();
     listener.set_nonblocking(true).unwrap();
+    let responses: Vec<(String, Value)> = responses
+        .iter()
+        .map(|(m, r)| ((*m).to_owned(), r.clone()))
+        .collect();
     let server = std::thread::spawn(move || {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        let (mut stream, _) = loop {
-            match listener.accept() {
-                Ok(connection) => break connection,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    assert!(std::time::Instant::now() < deadline, "aucun appel à agentd");
-                    std::thread::sleep(std::time::Duration::from_millis(10));
+        let mut requests = Vec::new();
+        for (method, result) in responses {
+            // Chaque tranche d'écoute peut coûter plusieurs secondes de synthèse et de
+            // transcription avant l'appel suivant.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+            let (mut stream, _) = loop {
+                match listener.accept() {
+                    Ok(connection) => break connection,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "aucun appel {method} à agentd"
+                        );
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(e) => panic!("{e}"),
                 }
-                Err(e) => panic!("{e}"),
-            }
-        };
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            };
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                .unwrap();
+            let mut line = String::new();
+            BufReader::new(&stream).read_line(&mut line).unwrap();
+            let request: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(request["method"], method, "{request}");
+            writeln!(
+                stream,
+                "{}",
+                json!({"jsonrpc":"2.0", "id":request["id"], "result":result})
+            )
             .unwrap();
-        let mut line = String::new();
-        BufReader::new(&stream).read_line(&mut line).unwrap();
-        let request: Value = serde_json::from_str(&line).unwrap();
-        writeln!(
-            stream,
-            "{}",
-            json!({"jsonrpc":"2.0", "id":request["id"], "result":result})
-        )
-        .unwrap();
-        request
+            requests.push(request);
+        }
+        requests
     });
     let output = Command::new(env!("CARGO_BIN_EXE_prophet"))
         .args(args)
@@ -62,13 +87,12 @@ fn invoke_env(args: &[&str], env: &[(&str, &str)], method: &str, result: Value) 
         .envs(env.iter().copied())
         .output()
         .unwrap();
-    let request = server.join().unwrap();
-    assert_eq!(request["method"], method);
+    let requests = server.join().unwrap();
     assert_eq!(
         std::fs::read_to_string(home.join(".prophet/tasks")).unwrap(),
         "capture privée du service"
     );
-    (output, request)
+    (output, requests)
 }
 
 /// Parler à l'OS, de bout en bout : une phrase française de synthèse, transcrite en local,
@@ -135,6 +159,112 @@ fn une_phrase_dite_devient_une_mission_et_l_os_repond() {
     let heard = heard.text.to_lowercase();
     assert!(heard.contains("prépar"), "{heard}");
     assert!(heard.contains("compris"), "{heard}");
+}
+
+/// Trois ordres à la suite, par la voix : « Prophète, écris une note… » prépare une mission,
+/// « Prophète, lance la mission » la lance (c'est l'approbation de l'humain, dite), « Prophète,
+/// résultat » fait dire son résultat. Le service simulé reçoit les trois appels, sur la même
+/// mission ; la dernière réponse de l'OS est réécoutée par Whisper.
+#[test]
+#[ignore = "needs_voice_stack: PROPHET_WHISPER_MODEL, PROPHET_WHISPER, PROPHET_PIPER, PROPHET_PIPER_VOICE"]
+fn la_voix_prepare_lance_puis_fait_dire_le_resultat() {
+    let tools = voice::Tools::from_env().unwrap();
+    assert!(tools.can_speak(), "{tools:?}");
+    let temp = tempfile::tempdir().unwrap();
+    let synth = |nom: &str, phrase: &str| {
+        let wav = temp.path().join(nom);
+        tools.speak(phrase, &wav).unwrap();
+        wav
+    };
+    let tranches = [
+        synth(
+            "un.wav",
+            "Prophète, écris une note de réunion dans mes documents.",
+        ),
+        synth("deux.wav", "Prophète, lance la mission."),
+        synth("trois.wav", "Prophète, résultat."),
+    ];
+    let compteur = temp.path().join("appels");
+    let script = temp.path().join("faux-pw-record.sh");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nset -e\nn=0; [ -f {c} ] && n=$(cat {c}); n=$((n+1)); echo $n > {c}\n\
+             for last; do :; done\n\
+             case \"$n\" in 1) cp {a} \"$last\";; 2) cp {b} \"$last\";; *) cp {d} \"$last\";; esac\n",
+            c = compteur.display(),
+            a = tranches[0].display(),
+            b = tranches[1].display(),
+            d = tranches[2].display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let reponse = temp.path().join("reponse.wav");
+    let plan = json!({
+        "task": "mission-x", "intent": "…",
+        "choice": {"reference": "local:m", "reason": "essai"},
+        "sandbox_level": 0, "grants": [], "limits": agentd::Limits::default(),
+        "scopes": ["~/docs"]
+    });
+    let (output, requests) = invoke_seq(
+        &[
+            "voice",
+            "--listen",
+            "--wake",
+            "prophète",
+            "--seconds",
+            "1",
+            "--rounds",
+            "3",
+            "--language",
+            "fr",
+            "--prepare",
+            "docs",
+            "--model",
+            "m",
+            "--reply",
+            "--out",
+            reponse.to_str().unwrap(),
+        ],
+        &[("PROPHET_RECORDER", script.to_str().unwrap())],
+        &[
+            ("task.prepare", plan),
+            ("task.start", json!({"state": "running"})),
+            (
+                "task.result",
+                json!({
+                    "state": "done",
+                    "text": "La note de réunion est écrite dans vos documents.",
+                    "diff": {"changes": [{"path": "docs/note.md", "kind": "added"}]}
+                }),
+            ),
+        ],
+    );
+    let out = success(output);
+    assert_eq!(std::fs::read_to_string(&compteur).unwrap().trim(), "3");
+    let id = requests[0]["params"]["id"].as_str().unwrap().to_owned();
+    assert!(id.starts_with("mission-"), "{id}");
+    assert_eq!(requests[1]["params"]["id"], id, "{}", requests[1]);
+    assert_eq!(requests[2]["params"]["id"], id, "{}", requests[2]);
+    assert!(out.contains("lancée par la voix"), "{out}");
+    assert!(out.contains("Mission terminée."), "{out}");
+    let heard = voice::Tools::from_env()
+        .unwrap()
+        .transcribe(&reponse, Some("fr"))
+        .unwrap()
+        .text
+        .to_lowercase();
+    eprintln!("dernière réponse de l'OS : « {heard} »");
+    assert!(heard.contains("termin"), "{heard}");
+    assert!(
+        heard.contains("note") && heard.contains("documents"),
+        "{heard}"
+    );
 }
 
 /// Le résultat d'une mission, dit par l'OS : `task result --say --out` demande le résultat au

@@ -483,7 +483,7 @@ fn voice(
         }
         anyhow::bail!("rien n'a été compris ; rien n'est préparé");
     }
-    agir(&tools, &transcript, prepare, model, reply, as_json)
+    agir(&tools, &transcript, prepare, model, None, reply, as_json)
 }
 
 /// Écoute en continu, par tranches, et n'agit que sur une phrase qui commence par le mot
@@ -514,6 +514,9 @@ fn listen(
     );
     let mut out = String::new();
     let mut round = 0u32;
+    // La dernière mission préparée dans cette écoute : « lance la mission » et « résultat »
+    // parlent d'elle.
+    let mut derniere: Option<String> = None;
     while rounds == 0 || round < rounds {
         round += 1;
         let wav = chemin_temporaire("prophet-ecoute");
@@ -538,7 +541,27 @@ fn listen(
             text: intent,
             ..transcript
         };
-        match agir(&tools, &transcript, prepare, model.clone(), reply, as_json) {
+        let resultat = match ordre_vocal(&transcript.text) {
+            Ordre::Preparer => {
+                let id = prepare.map(|_| format!("mission-{}", ulid::Ulid::new()));
+                let fait = agir(
+                    &tools,
+                    &transcript,
+                    prepare,
+                    model.clone(),
+                    id.clone(),
+                    reply,
+                    as_json,
+                );
+                if fait.is_ok() && id.is_some() {
+                    derniere = id;
+                }
+                fait
+            }
+            Ordre::Lancer => lancer_par_la_voix(&tools, derniere.as_deref(), reply, as_json),
+            Ordre::Resultat => dire_le_resultat(&tools, derniere.as_deref(), reply, as_json),
+        };
+        match resultat {
             Ok(text) => out.push_str(&text),
             Err(e) => {
                 eprintln!("prophet : {e}");
@@ -549,13 +572,190 @@ fn listen(
     Ok(out)
 }
 
+/// Ce que l'humain demande après le mot d'activation : préparer une mission avec ce qu'il dit
+/// (le cas ordinaire), lancer la dernière mission préparée, ou entendre son résultat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ordre {
+    Preparer,
+    Lancer,
+    Resultat,
+}
+
+/// Reconnaît un ordre bref en tête de phrase, tel que Whisper l'écrit (casse, accents et
+/// ponctuation finale indifférents) ; tout le reste est une intention à préparer.
+fn ordre_vocal(intent: &str) -> Ordre {
+    let texte: String = intent
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'à' | 'â' => 'a',
+            'ù' | 'û' => 'u',
+            'ô' => 'o',
+            'î' | 'ï' => 'i',
+            'ç' => 'c',
+            '-' | '\'' | '’' => ' ',
+            c => c,
+        })
+        .collect();
+    let texte = texte
+        .trim_end_matches(['.', '!', '?', ' '])
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    const LANCER: [&str; 8] = [
+        "lance", "demarre", "execute", "vas y", "go", "commence", "lancer", "lance la",
+    ];
+    const RESULTAT: [&str; 7] = [
+        "resultat",
+        "le resultat",
+        "lis le resultat",
+        "dis le resultat",
+        "ou en est",
+        "c est fini",
+        "qu est ce que ca donne",
+    ];
+    // Un ordre est court : au plus quatre mots, sinon c'est une intention qui commence par
+    // un verbe ordinaire (« lance une recherche sur… » prépare une mission).
+    let mots = texte.split(' ').count();
+    if mots <= 4
+        && LANCER
+            .iter()
+            .any(|p| texte == *p || texte.starts_with(&format!("{p} ")))
+    {
+        Ordre::Lancer
+    } else if mots <= 5
+        && RESULTAT
+            .iter()
+            .any(|p| texte == *p || texte.starts_with(&format!("{p} ")))
+    {
+        Ordre::Resultat
+    } else {
+        Ordre::Preparer
+    }
+}
+
+/// Dit `texte` si une réponse parlée est demandée.
+fn dire_si_demande(
+    tools: &voice::Tools,
+    reply: Option<Option<&std::path::Path>>,
+    texte: &str,
+) -> anyhow::Result<Option<voice::Speech>> {
+    match reply {
+        None => Ok(None),
+        Some(out) => reply_aloud(tools, texte, out).map(Some),
+    }
+}
+
+/// « Prophète, lance la mission » : la dernière mission préparée dans cette écoute est lancée ;
+/// c'est la décision de l'humain, dite, qui vaut approbation du plan.
+fn lancer_par_la_voix(
+    tools: &voice::Tools,
+    derniere: Option<&str>,
+    reply: Option<Option<&std::path::Path>>,
+    as_json: bool,
+) -> anyhow::Result<String> {
+    let Some(id) = derniere else {
+        dire_si_demande(
+            tools,
+            reply,
+            "Aucune mission n'est préparée dans cette écoute.",
+        )?;
+        anyhow::bail!("aucune mission préparée dans cette écoute : rien à lancer");
+    };
+    let lancement = task_rpc(
+        &socket_agentd(),
+        "task.start",
+        serde_json::json!({"id": id}),
+    );
+    match lancement {
+        Ok(result) => {
+            let spoken = dire_si_demande(
+                tools,
+                reply,
+                "Mission lancée. Dites « résultat » quand vous voudrez l'entendre.",
+            )?;
+            if as_json {
+                return Ok(format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "order": "start", "task": id, "result": result, "reply": spoken
+                    }))?
+                ));
+            }
+            Ok(format!(
+                "Mission {id} lancée par la voix.{}\n",
+                spoken.map_or(String::new(), |s| format!(
+                    " Réponse dite ({} ms).",
+                    s.duration_ms
+                ))
+            ))
+        }
+        Err(error) => {
+            dire_si_demande(tools, reply, "Je n'ai pas pu lancer la mission.")?;
+            Err(error)
+        }
+    }
+}
+
+/// « Prophète, résultat » : le résultat de la dernière mission préparée, dit comme
+/// `task result --say`.
+fn dire_le_resultat(
+    tools: &voice::Tools,
+    derniere: Option<&str>,
+    reply: Option<Option<&std::path::Path>>,
+    as_json: bool,
+) -> anyhow::Result<String> {
+    let Some(id) = derniere else {
+        dire_si_demande(
+            tools,
+            reply,
+            "Aucune mission n'est préparée dans cette écoute.",
+        )?;
+        anyhow::bail!("aucune mission préparée dans cette écoute : rien à lire");
+    };
+    match task_rpc(
+        &socket_agentd(),
+        "task.result",
+        serde_json::json!({"id": id}),
+    ) {
+        Ok(result) => {
+            let phrase = phrase_du_resultat(&result);
+            let spoken = dire_si_demande(tools, reply, &phrase)?;
+            if as_json {
+                return Ok(format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "order": "result", "task": id, "result": result,
+                        "text": phrase, "reply": spoken
+                    }))?
+                ));
+            }
+            Ok(format!(
+                "Mission {id} : « {phrase} »{}\n",
+                spoken.map_or(String::new(), |s| format!(
+                    " Réponse dite ({} ms).",
+                    s.duration_ms
+                ))
+            ))
+        }
+        Err(error) => {
+            dire_si_demande(tools, reply, "Le résultat n'est pas encore disponible.")?;
+            Err(error)
+        }
+    }
+}
+
 /// Ce qu'on fait d'une phrase comprise : rien de plus que la rendre, ou préparer une mission
 /// avec elle pour objectif, et répondre à voix haute si on l'a demandé.
+#[allow(clippy::too_many_arguments)]
 fn agir(
     tools: &voice::Tools,
     transcript: &voice::Transcript,
     prepare: Option<&str>,
     model: Option<String>,
+    id: Option<String>,
     reply: Option<Option<&std::path::Path>>,
     as_json: bool,
 ) -> anyhow::Result<String> {
@@ -567,7 +767,7 @@ fn agir(
     };
     let (plan, spoken) = match prepare {
         Some(profile) => {
-            let id = format!("mission-{}", ulid::Ulid::new());
+            let id = id.unwrap_or_else(|| format!("mission-{}", ulid::Ulid::new()));
             let prepared = task(
                 &TaskAction::Prepare {
                     profile: profile.to_owned(),
@@ -2036,6 +2236,34 @@ mod tests {
     #[test]
     fn la_ligne_de_commande_est_coherente() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn un_ordre_bref_est_reconnu_et_une_intention_est_preparee() {
+        for lancer in [
+            "Lance la mission.",
+            "lance-la !",
+            "Démarre.",
+            "Vas-y",
+            "Exécute la mission",
+        ] {
+            assert_eq!(ordre_vocal(lancer), Ordre::Lancer, "{lancer}");
+        }
+        for resultat in [
+            "Résultat.",
+            "Le résultat ?",
+            "Où en est la mission ?",
+            "C'est fini ?",
+        ] {
+            assert_eq!(ordre_vocal(resultat), Ordre::Resultat, "{resultat}");
+        }
+        for intention in [
+            "Écris une note de réunion dans mes documents.",
+            "Lance une recherche sur les tarifs de l'électricité en 2026 et résume-la.",
+            "Résume le résultat de la réunion dans une note.",
+        ] {
+            assert_eq!(ordre_vocal(intention), Ordre::Preparer, "{intention}");
+        }
     }
 
     #[test]
