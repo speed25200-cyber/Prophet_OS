@@ -27,3 +27,10 @@ n'importe aucun identifiant et ne lance aucune génération.
 Voir [le guide des pilotes](../../docs/components/providers.md),
 [l'essai d'inférence](../../docs/reports/local-inference-2026-09-12.md) et
 [les exigences de livraison](../../docs/FRONTIER.md).
+
+Le paquet du moteur se construit avec `nix build .#llama-cpp`. Le contrat de grammaire
+se vérifie avec `just test-local-engine` dans le shell Nix, sans poids ni inférence.
+L'[ADR 0016](../../docs/adr/0016-grammaire-du-moteur-local.md) décrit le correctif qui
+préserve la cardinalité demandée et interdit les répétitions vides d'appels.
+Le [rapport](../../docs/reports/grammaire-locale-2026-09-13.md) distingue cette preuve
+de la qualité des générations et du parcours réel agentd.

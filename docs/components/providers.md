@@ -84,3 +84,28 @@ de performance de ces clients dans Prophet OS installé n'est revendiquée ici.
 
 Le [rapport du paquet ChatGPT Linux](../reports/chatgpt-linux-2026-09-12.md) décrit la source
 épinglée, le runtime de compatibilité et la vérification graphique dédiée.
+
+## Paquet du moteur local et essai agentd
+
+`nix build .#llama-cpp` construit le moteur du nixpkgs épinglé avec un correctif du
+générateur de grammaire. `nix build .#checks.x86_64-linux.llama-tool-grammar` vérifie
+le parseur et la grammaire sans charger de poids. La CI possède un travail distinct
+« Moteur local (protocole) » ; sa réussite ne prouve pas une inférence réelle.
+
+Pour exercer plusieurs missions avec les mêmes vrais poids, après construction des
+binaires du workspace et dans `nix develop` :
+
+```sh
+python3 tools/verifier-moteur-local.py \
+  --llama-server /chemin/du/paquet/bin/llama-server \
+  --weights /chemin/Qwen3-0.6B-Q8_0.gguf --model qwen3-0.6b \
+  --output /chemin/rapport-nouveau --repetitions 3
+```
+
+Le dossier de sortie doit être nouveau. Le script calcule l'empreinte des poids, lance
+le serveur local qu'il possède, attend sa disponibilité, puis exerce le test agentd
+avec capd, ledger, fichier exact et résultat relu après redémarrage. Il conserve les
+échecs et arrête le serveur à la fin. Ses réglages de génération correspondent à
+l'essai Qwen3 décrit dans le [rapport](../reports/grammaire-locale-2026-09-13.md) ;
+ils ne constituent pas des réglages optimaux pour toutes les familles de modèles.
+Le moteur et les poids ne sont pas encore provisionnés dans la session humaine installée.

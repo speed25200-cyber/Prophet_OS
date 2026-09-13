@@ -97,6 +97,7 @@
             gitleaks
             sqlite
             pkg-config
+            python3
           ];
           env = {
             PROPHET_BROWSER = "${pkgs.chromium}/bin/chromium";
@@ -109,6 +110,10 @@
 
         # Ce que `nix flake check` exerce : une vraie machine, avec de vrais services.
         checks = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          llama-tool-grammar = import ./image/tests/llama-tool-grammar.nix {
+            inherit pkgs;
+            engine = self.packages.${system}.llama-cpp;
+          };
           services = import ./image/tests/services.nix {
             inherit pkgs;
             module = nixosModules.prophet;
@@ -133,6 +138,7 @@
         };
 
         packages = {
+          llama-cpp = pkgs.callPackage ./image/packages/llama-cpp.nix { };
           # Même paquet et mêmes bibliothèques graphiques dans l'atelier et dans l'image.
           default = pkgs.callPackage ./image/packages/prophet-os.nix { };
         }

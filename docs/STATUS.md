@@ -157,6 +157,28 @@ session humaine installée restent à intégrer ; aucune session authentifiée C
 n'est validée. L'examen et la validation du contenu, les checkpoints, l'undo robuste et les
 processus isolés restent à réaliser. Aucun critère complet de FRONTIER.md n'est coché.
 
+Jalon du moteur local du 13 septembre 2026, après `a16472a`, dans le commit portant ce rapport :
+la cause d'une répétition après appel est isolée dans la grammaire de llama.cpp. Un patch
+du paquet Nix respecte le mode séquentiel et supprime la répétition d'appels optionnels.
+Huit assertions échouent sur le moteur original ; le paquet corrigé passe **60 vérifications**
+sur les templates Qwen3 et Qwen2.5. Le pilote, les tests Rust et les contrôles d'exécution
+restent inchangés. **`just check` réussi : 622 tests, aucun échec, 25 ignorés**.
+
+Avec le paquet final, **Qwen3-1.7B-Q8_0 réussit trois missions réelles sur trois**, en
+12,42 / 12,96 / 13,02 secondes pour le test complet. Fichier exact, diff SFS, vrais capd/ledger
+et résultat relu après redémarrage sont vérifiés. Qwen3-0.6B ne réussit qu'un essai sur trois ;
+les deux autres terminent mais produisent un contenu erroné. Les trois anciennes générations
+tronquées restent dans le rapport historique. Cette nouvelle preuve porte sur une seule
+tâche d'écriture répétée, sans modifier ses assertions ; elle ne démontre pas une fiabilité
+générale, une validation des objectifs par agentd ou l'utilisation depuis l'image installée.
+
+Voir le [diagnostic, les mesures et les limites](reports/grammaire-locale-2026-09-13.md)
+et l'[ADR 0016](adr/0016-grammaire-du-moteur-local.md). La CI de `a16472a` a réussi composants,
+isolation et surface ; ChatGPT reste en échec (run `34733626591`). Le moteur et ses poids
+ne sont pas encore provisionnés dans la session installée. GPU, autres familles, résultats
+vérifiés, graphisme et sessions authentifiées restent ouverts. Aucun critère complet de
+FRONTIER.md n'est coché.
+
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 
 Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'environnement de construction** ; le détail est dans `docs/reports/phase0.md` section 5.

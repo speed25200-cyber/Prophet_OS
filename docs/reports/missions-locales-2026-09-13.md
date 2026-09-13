@@ -2,6 +2,10 @@
 
 ## Verdict
 
+Ce rapport conserve les essais du jalon initial. Le [diagnostic ultérieur du moteur](grammaire-locale-2026-09-13.md)
+isole un défaut de grammaire et ajoute les résultats obtenus avec son correctif :
+Qwen3-1.7B réussit trois missions sur trois, Qwen3-0.6B une sur trois.
+
 Le service possède maintenant un lancement local réel, un arrêt pendant l'inférence et des
 résultats persistants. **Le parcours avec Qwen3-0.6B n'est pas validé : trois essais échouent.**
 Ce jalon ne rend pas Prophet OS entièrement fonctionnel et ne démontre aucune supériorité

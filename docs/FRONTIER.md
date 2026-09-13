@@ -79,6 +79,13 @@ lancement distinct. La récupération d'une réponse perdue utilise une lecture 
 conservée. Ce raccordement nécessite encore l'installation des profils et du moteur ; il ne
 valide pas la planification par un modèle réel ni la chaîne installée entière. Voir l'[ADR 0015](adr/0015-intention-et-profils-de-mission.md).
 Aucune exigence complète ci-dessus n'est cochée pour ces jalons.
+Le [correctif du moteur local](reports/grammaire-locale-2026-09-13.md) élimine ensuite une
+répétition d'espaces dans sa grammaire et respecte la cardinalité des appels. Le paquet Nix
+réussit 60 vérifications de protocole. Avec ce paquet, Qwen3-1.7B réussit trois missions
+d'écriture exacte avec les vrais services et persistance après redémarrage ; Qwen3-0.6B
+n'en réussit qu'une sur trois, les deux autres altérant le contenu. Cette preuve réelle
+sur une tâche ne couvre ni les objectifs variés, ni les autres familles, ni l'image installée,
+ni la validation sémantique par agentd. Les critères complets restent ouverts.
 Codex et Claude Code sont maintenant obligatoires dans la configuration de l'image ; leurs vrais
 binaires répondent aux sondes de version et d'authentification en profils vierges. Le diagnostic
 ne confond plus fichiers présents, connexion et pilote agentique disponible. Le paquet expérimental

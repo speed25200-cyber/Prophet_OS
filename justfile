@@ -65,6 +65,10 @@ iso:
 test-vm:
     nix build .#checks.x86_64-linux.services --print-build-logs
 
+# Contrat du parseur et de la grammaire du paquet moteur local, sans télécharger de poids.
+test-local-engine:
+    nix build .#checks.x86_64-linux.llama-tool-grammar --print-build-logs
+
 # Démarre l'image dans QEMU.
 vm:
     @echo "pas encore disponible (M9)" && exit 2
