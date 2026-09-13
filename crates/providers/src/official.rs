@@ -222,6 +222,8 @@ pub struct OfficialDriver {
     profile: ClientProfile,
     config_root: PathBuf,
     user: String,
+    /// Où chercher l'exécutable du client ; le PATH du processus par défaut.
+    search_path: Option<std::ffi::OsString>,
 }
 
 impl OfficialDriver {
@@ -236,7 +238,25 @@ impl OfficialDriver {
             profile,
             config_root: config_root.into(),
             user: user.into(),
+            search_path: None,
         }
+    }
+
+    /// Cherche le client dans ces répertoires plutôt que dans le PATH du processus. Les tests
+    /// s'en servent pour rester hermétiques : un client réellement installé et connecté sur la
+    /// machine de développement ne doit pas changer ce qu'ils vérifient.
+    #[must_use]
+    pub fn with_search_path(mut self, path: impl Into<std::ffi::OsString>) -> Self {
+        self.search_path = Some(path.into());
+        self
+    }
+
+    fn locate(&self) -> Option<PathBuf> {
+        let path = match &self.search_path {
+            Some(path) => path.clone(),
+            None => std::env::var_os("PATH")?,
+        };
+        which(&self.profile.program, &path)
     }
 
     /// Profil piloté.
@@ -261,7 +281,7 @@ impl OfficialDriver {
     /// n'est capturée ni publiée.
     #[must_use]
     pub fn connection_state(&self) -> ConnectionState {
-        let Some(program) = which(&self.profile.program) else {
+        let Some(program) = self.locate() else {
             return ConnectionState::ClientMissing;
         };
         let Some(args) = self.profile.status_args() else {
@@ -280,7 +300,7 @@ impl OfficialDriver {
     /// Version et connexion réellement sondées, en distinguant le client du pilote agentique.
     #[must_use]
     pub fn diagnostic(&self) -> ClientDiagnostic {
-        let executable = which(&self.profile.program);
+        let executable = self.locate();
         let version = executable
             .as_ref()
             .and_then(|program| {
@@ -375,7 +395,7 @@ impl OfficialDriver {
     /// Vrai si l'exécutable du client est présent.
     #[must_use]
     pub fn client_available(&self) -> bool {
-        which(&self.profile.program).is_some()
+        self.locate().is_some()
     }
 
     /// Variables d'environnement transmises au client. Rien d'autre ne passe.
@@ -420,10 +440,9 @@ impl OfficialDriver {
     }
 }
 
-fn which(program: &str) -> Option<PathBuf> {
+fn which(program: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt as _;
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
+    std::env::split_paths(path)
         .map(|dir| dir.join(program))
         .find(|candidate| {
             candidate
@@ -553,10 +572,30 @@ mod tests {
         assert!(noms.contains(&"CLAUDE_CONFIG_DIR"));
     }
 
+    /// Un faux client sur un chemin de recherche privé : le test ne dépend pas de ce qui est
+    /// installé, ni connecté, sur la machine où il tourne.
+    fn faux_client(dir: &std::path::Path, code: i32) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt as _;
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let client = bin.join(ClientProfile::claude_code().program);
+        std::fs::write(&client, format!("#!/bin/sh\nexit {code}\n")).unwrap();
+        std::fs::set_permissions(&client, std::fs::Permissions::from_mode(0o755)).unwrap();
+        bin
+    }
+
     #[test]
     fn un_fichier_de_configuration_ne_prouve_pas_une_connexion() {
         let dir = tempfile::tempdir().unwrap();
-        let driver = OfficialDriver::new(ClientProfile::claude_code(), dir.path(), "u");
+        // Sans client sur le chemin : il manque, quoi que contienne le répertoire.
+        let absent = OfficialDriver::new(ClientProfile::claude_code(), dir.path(), "u")
+            .with_search_path(dir.path().join("nulle-part"));
+        assert_eq!(absent.connection_state(), ConnectionState::ClientMissing);
+
+        // Un client qui répond « pas de session » : rien dans le répertoire n'y change rien.
+        let bin = faux_client(dir.path(), 1);
+        let driver = OfficialDriver::new(ClientProfile::claude_code(), dir.path(), "u")
+            .with_search_path(&bin);
         assert!(!driver.logged_in());
 
         let config = driver.config_dir();
@@ -571,6 +610,13 @@ mod tests {
             !driver.logged_in(),
             "un fichier ne prouve pas une session active"
         );
+        assert_eq!(driver.connection_state(), ConnectionState::LoginRequired);
+
+        // Seule la réponse du client fait foi.
+        let bin = faux_client(dir.path(), 0);
+        let connecte = OfficialDriver::new(ClientProfile::claude_code(), dir.path(), "u")
+            .with_search_path(&bin);
+        assert!(connecte.logged_in());
     }
 
     #[test]
