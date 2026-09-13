@@ -161,5 +161,9 @@ La [direction Réacteur](reports/interface-reacteur-2026-09-13.md) remplace ensu
 présentation de l'atelier : nuit, plaques de verre à crochets, jauges graduées, cinq accents de
 couleur au choix conservés dans la configuration, et un champ GPU où chaque mission reçue est
 un ruban qui avance au rythme réel de ses étapes. Les parcours graphiques existants passent
-inchangés et deux tests de propriétés s'y ajoutent ; les temps de rendu, la mémoire et la
-consommation sur écran physique attendus par le critère d'interface restent à mesurer.
+inchangés et deux tests de propriétés s'y ajoutent. `prophet-surface --mesure` mesure les
+temps par image et la mémoire résidente, GPU attendu ; en build release sur llvmpipe, cinq
+missions à 1920 × 1080 coûtent 24,44 ms en médiane (champ allégé pour rastériseur logiciel),
+51,22 ms avec le champ complet, 8,06 ms sans mission, pour 150 à 160 Mio résidents ; un écran
+inchangé n'est plus redessiné. Les mêmes mesures sur un écran physique avec carte graphique,
+et la consommation au repos, restent à établir pour cocher le critère d'interface.

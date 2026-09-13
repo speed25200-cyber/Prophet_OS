@@ -164,6 +164,40 @@ impl Scene {
             .filter(|c| c.etat == Etat::Court)
             .count()
     }
+
+    /// Une empreinte de tout ce qui se voit : deux scènes de même empreinte donnent la même
+    /// image. La fenêtre s'en sert pour ne pas redessiner un écran qui n'a pas changé.
+    #[must_use]
+    pub fn empreinte(&self) -> u64 {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.heure.hash(&mut h);
+        self.date.hash(&mut h);
+        self.courants.len().hash(&mut h);
+        for c in &self.courants {
+            c.tache.hash(&mut h);
+            c.intitule.hash(&mut h);
+            c.agent.hash(&mut h);
+            (c.etat as u8).hash(&mut h);
+            c.debit.to_bits().hash(&mut h);
+            c.budget_consomme.to_bits().hash(&mut h);
+            c.etapes.hash(&mut h);
+            c.task_state.map(|s| s as u8).hash(&mut h);
+            c.task_revision.hash(&mut h);
+        }
+        if let Some(d) = &self.decision {
+            d.question.hash(&mut h);
+            d.consequence.hash(&mut h);
+            d.tache.hash(&mut h);
+            d.depuis_secondes.hash(&mut h);
+            d.irreversible.hash(&mut h);
+        } else {
+            0u8.hash(&mut h);
+        }
+        self.isolation.niveau_max.hash(&mut h);
+        self.isolation.manque.hash(&mut h);
+        h.finish()
+    }
 }
 
 #[cfg(test)]
@@ -275,6 +309,44 @@ mod tests {
         assert!(
             attenue > 0.0,
             "ce qui tourne continue de tourner et doit rester visible"
+        );
+    }
+
+    #[test]
+    fn l_empreinte_ne_change_qu_avec_ce_qui_se_voit() {
+        let faire = || Scene {
+            heure: "14:37".to_owned(),
+            date: "jeudi".to_owned(),
+            courants: vec![courant("t1", Etat::Court, 20.0, 0.1)],
+            decision: None,
+            isolation: Isolation {
+                niveau_max: 1,
+                manque: None,
+            },
+        };
+        assert_eq!(faire().empreinte(), faire().empreinte());
+        let mut avancee = faire();
+        avancee.courants[0].etapes += 1;
+        assert_ne!(
+            faire().empreinte(),
+            avancee.empreinte(),
+            "une étape se voit"
+        );
+        let mut heure = faire();
+        heure.heure = "14:38".to_owned();
+        assert_ne!(faire().empreinte(), heure.empreinte(), "l'heure se voit");
+        let mut decision = faire();
+        decision.decision = Some(Decision {
+            question: "?".to_owned(),
+            consequence: "!".to_owned(),
+            tache: "t1".to_owned(),
+            depuis_secondes: 1,
+            irreversible: false,
+        });
+        assert_ne!(
+            faire().empreinte(),
+            decision.empreinte(),
+            "une décision se voit"
         );
     }
 

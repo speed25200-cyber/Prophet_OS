@@ -34,7 +34,8 @@ rastériseur logiciel (llvmpipe, Vulkan), sans carte graphique.
 
 ## Captures
 
-Toutes proviennent du binaire natif, en rendu logiciel. Les scènes de démonstration portent la
+Toutes proviennent du binaire natif en build release, en rendu logiciel avec `--champ-complet`
+pour montrer le champ tel qu'une carte graphique le trace. Les scènes de démonstration portent la
 mention « DÉMONSTRATION » et leur relevé de modèles est un tiret : elles ne prouvent aucune
 session réelle de Claude, Codex ou Gemini.
 
@@ -91,10 +92,41 @@ Le test de mille missions mesure **82,042 ms en médiane et 89,156 ms en p95** p
 rastériseur logiciel : au plus 3 000 grains, 2 800 points de grille et 60 000 particules par
 image, dont les halos coûtent le plus. Cette mesure ne dit rien d'une carte graphique.
 
+## Mesures
+
+`prophet-surface --mesure N` rend N images hors écran, attend le GPU à chaque image et imprime
+la médiane, le p95, le maximum et la mémoire résidente. C'est l'instrument du critère
+d'interface de FRONTIER, à exécuter sur la machine à qualifier. Ici, build release, llvmpipe
+(LLVM 20.1.2, Vulkan), quatre cœurs, 120 images après cinq de mise en route :
+
+| Scène | Champ | Particules | Médiane | p95 | Maximum | Mémoire résidente |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 5 missions de démonstration, 1920 × 1080 | complet (`--champ-complet`) | 35 800 | 51,22 ms | 59,06 ms | 76,87 ms | 158,5 Mio |
+| 5 missions de démonstration, 1920 × 1080 | allégé (défaut sur rastériseur logiciel) | 12 000 | 24,44 ms | 27,62 ms | 32,50 ms | 154,1 Mio |
+| 5 missions de démonstration, 1440 × 1000 | allégé | 12 000 | 22,48 ms | 26,12 ms | 28,35 ms | 151,6 Mio |
+| 5 missions, mouvement réduit, 1920 × 1080 | allégé, immobile | 12 000 | 23,93 ms | 29,46 ms | 31,64 ms | 154,2 Mio |
+| Aucune mission, services absents, 1920 × 1080 | allégé, immobile | 4 000 | 8,06 ms | 9,58 ms | 10,58 ms | 148,5 Mio |
+
+Deux optimisations en découlent. **Le champ s'allège de lui-même sur un rastériseur logiciel**,
+que wgpu déclare comme périphérique de type processeur : 1 600 particules par ruban et 1 200
+grains au lieu de 6 000 et 3 000, et une cadence de redessin de 30 images par seconde au lieu
+de 60 tant qu'un ruban avance. Une machine virtuelle sans carte — la CI, le test installé —
+tient ainsi le rythme au lieu de le subir ; `--champ-complet` rétablit le champ entier pour
+des captures et des mesures comparables à celles d'une carte graphique. **La fenêtre ne
+redessine plus un écran inchangé** : elle relit les services quatre fois par seconde, compare
+l'empreinte de la scène à celle de la dernière image, et ne soumet rien au GPU si rien de
+visible n'a changé et si l'interface n'a rien demandé. Au repos, la consommation du rendu est
+donc nulle ; elle ne se mesure pas ici, faute d'écran et de compteur d'énergie.
+
+Ces chiffres mesurent un processeur qui rastérise, pas une carte graphique : 35 800 particules
+et une interface egui sont, pour n'importe quelle carte de la dernière décennie, une fraction
+de milliseconde. La fluidité sur écran physique reste à établir avec la même commande.
+
 ## Limites
 
-Le rendu logiciel ne mesure ni la fluidité ni la consommation sur un écran physique ; ces
-mesures restent dues au critère d'interface de FRONTIER. La qualité visuelle sur un vrai écran
+Le rendu logiciel mesure un processeur, pas une carte graphique, et aucun écran physique ni
+compteur d'énergie n'est disponible ici : les mesures de fluidité et de consommation sur la
+machine cible restent dues au critère d'interface de FRONTIER, avec la commande ci-dessus. La qualité visuelle sur un vrai écran
 reste à apprécier par l'utilisateur. La conservation de l'accent suppose un répertoire de
 configuration inscriptible ; sur l'image installée, le compte `surface` n'en a pas encore un
 de vérifié, et l'interface le dit quand l'écriture échoue. Les captures pèsent environ un

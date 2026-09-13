@@ -68,6 +68,14 @@ struct Args {
     /// puis le choix conservé dans la configuration.
     #[arg(long)]
     accent: Option<String>,
+    /// Mesure le rendu hors écran sur ce nombre d'images, GPU attendu à chaque image, et
+    /// imprime les temps, la mémoire résidente et l'adaptateur. Sans fenêtre ni capture.
+    #[arg(long, conflicts_with_all = ["capture", "fenetree"], value_parser = clap::value_parser!(u32).range(10..=100_000))]
+    mesure: Option<u32>,
+    /// Champ complet même sur un rastériseur logiciel, qui le reçoit allégé par défaut :
+    /// pour des captures et des mesures comparables à celles d'une carte graphique.
+    #[arg(long)]
+    champ_complet: bool,
 }
 
 fn main() -> ExitCode {
@@ -113,6 +121,7 @@ fn executer(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             Vue::Activite => Page::Activite,
         },
         accent,
+        champ_complet: args.champ_complet,
     };
     let mut source: Box<dyn Source> = if args.demonstration {
         Box::new(Demonstration {
@@ -123,6 +132,15 @@ fn executer(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             surface::reel::Sockets::default(),
         ))
     };
+    if let Some(images) = args.mesure {
+        return mesurer(
+            source.as_mut(),
+            &options,
+            images,
+            args.largeur,
+            args.hauteur,
+        );
+    }
     let Some(path) = &args.capture else {
         return surface::fenetre::tenir_avec(source, options).map_err(Into::into);
     };
@@ -137,6 +155,9 @@ fn executer(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         let mut bureau = Bureau::nouveau(&context, options.endpoint, args.demonstration);
         if let Some(accent) = options.accent {
             bureau.choisir_accent(accent);
+        }
+        if options.champ_complet {
+            bureau.forcer_champ_complet(&context);
         }
         bureau.brancher_missions(surface::reel::Sockets::default().agentd);
         bureau.brancher_journal(surface::reel::socket_du_journal());
@@ -238,6 +259,117 @@ fn executer(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         args.largeur, args.hauteur, context.adaptateur
     );
     Ok(())
+}
+
+/// Mesure ce que coûte une image : composition, soumission et travail du GPU, attendu.
+///
+/// C'est l'instrument du critère d'interface de FRONTIER : le même binaire, la même scène,
+/// sur n'importe quelle machine, donne des temps par image et une mémoire résidente
+/// comparables. Sur un rastériseur logiciel, il mesure le processeur ; sur une carte
+/// graphique, il mesure la carte. Il le dit en nommant l'adaptateur.
+fn mesurer(
+    source: &mut dyn Source,
+    options: &Options,
+    images: u32,
+    largeur: u32,
+    hauteur: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let context = Contexte::hors_ecran()?;
+    let target = Cible::nouvelle(&context, largeur, hauteur);
+    let mut bureau = Bureau::nouveau(&context, options.endpoint.clone(), options.demonstration);
+    if let Some(accent) = options.accent {
+        bureau.choisir_accent(accent);
+    }
+    if options.champ_complet {
+        bureau.forcer_champ_complet(&context);
+    }
+    bureau.brancher_missions(surface::reel::Sockets::default().agentd);
+    bureau.atelier.mouvement_reduit = options.mouvement_reduit;
+    bureau.atelier.page = options.page;
+    let avant = memoire_residente_kio();
+    let mut durees = Vec::with_capacity(images as usize);
+    // Cinq images de mise en route : chargement des glyphes, premières allocations.
+    for i in 0..images + 5 {
+        let mut scene = source.scene();
+        scene.ordonner();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(largeur as f32, hauteur as f32),
+            )),
+            time: Some(f64::from(i) / 60.0),
+            ..Default::default()
+        };
+        let depart = Instant::now();
+        let (mut output, _) = bureau.composer(input, &scene);
+        bureau.rendre(&context, &target, &mut output);
+        context
+            .device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .map_err(|e| format!("attente du GPU : {e}"))?;
+        if i >= 5 {
+            durees.push(depart.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
+    let apres = memoire_residente_kio();
+    durees.sort_by(f64::total_cmp);
+    let centile = |p: f64| durees[((durees.len() - 1) as f64 * p).round() as usize];
+    let scene = source.scene();
+    println!(
+        "adaptateur : {}{}",
+        context.adaptateur,
+        if context.logiciel && !options.champ_complet {
+            " — rastériseur logiciel, champ allégé"
+        } else if context.logiciel {
+            " — rastériseur logiciel, champ complet imposé"
+        } else {
+            ""
+        }
+    );
+    println!(
+        "scène : {} mission{} ({} active{}), {}×{}, champ {}",
+        scene.courants.len(),
+        if scene.courants.len() == 1 { "" } else { "s" },
+        scene.actives(),
+        if scene.actives() == 1 { "" } else { "s" },
+        largeur,
+        hauteur,
+        if bureau.champ_vivant() {
+            "vivant"
+        } else {
+            "immobile"
+        }
+    );
+    println!("particules par image : {}", bureau.particules_du_champ());
+    println!(
+        "{} images : médiane {:.2} ms, p95 {:.2} ms, maximum {:.2} ms (composition + soumission + GPU attendu)",
+        durees.len(),
+        centile(0.5),
+        centile(0.95),
+        durees[durees.len() - 1]
+    );
+    match (avant, apres) {
+        (Some(a), Some(b)) => println!(
+            "mémoire résidente : {:.1} Mio avant, {:.1} Mio après",
+            a as f64 / 1024.0,
+            b as f64 / 1024.0
+        ),
+        _ => println!("mémoire résidente : indisponible sur ce système"),
+    }
+    Ok(())
+}
+
+/// La mémoire résidente du processus, en Kio, lue dans `/proc` ; absente ailleurs.
+fn memoire_residente_kio() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    status
+        .lines()
+        .find(|l| l.starts_with("VmRSS:"))
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|v| v.parse().ok())
 }
 
 fn attendre(

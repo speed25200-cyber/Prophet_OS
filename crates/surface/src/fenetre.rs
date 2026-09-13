@@ -46,6 +46,8 @@ pub struct Options {
     pub page: Page,
     /// Accent imposé pour cette session, sinon celui configuré.
     pub accent: Option<crate::theme::Accent>,
+    /// Champ complet même sur un rastériseur logiciel.
+    pub champ_complet: bool,
 }
 
 impl Default for Options {
@@ -58,6 +60,7 @@ impl Default for Options {
             mouvement_reduit: false,
             page: Page::Accueil,
             accent: None,
+            champ_complet: false,
         }
     }
 }
@@ -83,6 +86,8 @@ pub fn tenir_avec(source: Box<dyn Source>, options: Options) -> Result<(), Erreu
         options,
         etat: None,
         prochain: Instant::now(),
+        repeindre: true,
+        empreinte: None,
         erreur: None,
         proxy: boucle.create_proxy(),
     };
@@ -118,6 +123,10 @@ struct Application {
     options: Options,
     etat: Option<Etat>,
     prochain: Instant,
+    /// Un redessin a été demandé par l'interface elle-même (champ vivant, transition, saisie).
+    repeindre: bool,
+    /// L'empreinte de la dernière scène dessinée : un écran inchangé n'est pas redessiné.
+    empreinte: Option<u64>,
     erreur: Option<ErreurFenetre>,
     proxy: EventLoopProxy<Evenement>,
 }
@@ -151,6 +160,7 @@ impl ApplicationHandler<Evenement> for Application {
         let event = match event {
             Evenement::Repeindre(instant) => {
                 self.prochain = self.prochain.min(instant);
+                self.repeindre = true;
                 return;
             }
             Evenement::Accessibilite(event) => event,
@@ -193,6 +203,8 @@ impl ApplicationHandler<Evenement> for Application {
             WindowEvent::RedrawRequested if !etat.cachee => {
                 let mut scene = self.source.scene();
                 scene.ordonner();
+                self.empreinte = Some(scene.empreinte());
+                self.repeindre = false;
                 if let Some(reponse) = dessiner(etat, &scene) {
                     self.source.repond(reponse);
                 }
@@ -207,7 +219,10 @@ impl ApplicationHandler<Evenement> for Application {
             if maintenant >= self.prochain {
                 self.prochain =
                     maintenant + Duration::from_millis(if etat.cachee { 1000 } else { 250 });
-                if !etat.cachee {
+                // Un écran au repos n'est pas redessiné : on relit les services, et si rien
+                // de visible n'a changé et que l'interface ne demande rien, le GPU dort.
+                let change = self.empreinte != Some(self.source.scene().empreinte());
+                if !etat.cachee && (self.repeindre || change) {
                     etat.fenetre.request_redraw();
                 }
             }
@@ -247,6 +262,9 @@ fn installer(
     bureau.atelier.page = options.page;
     if let Some(accent) = options.accent {
         bureau.choisir_accent(accent);
+    }
+    if options.champ_complet {
+        bureau.forcer_champ_complet(&contexte);
     }
     let mut entrees = egui_winit::State::new(
         bureau.ctx.clone(),

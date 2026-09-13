@@ -50,6 +50,9 @@ pub struct Contexte {
     pub queue: Arc<wgpu::Queue>,
     /// Nom de l'adaptateur retenu, pour le journal et le diagnostic.
     pub adaptateur: String,
+    /// Vrai si l'adaptateur est un rastériseur logiciel (llvmpipe, lavapipe, SwiftShader) :
+    /// le processeur dessine, et le champ se fait plus léger pour lui.
+    pub logiciel: bool,
     /// Configuration choisie parmi les capacités de la fenêtre, si elle existe.
     pub configuration_surface: Option<wgpu::SurfaceConfiguration>,
 }
@@ -120,6 +123,7 @@ impl Contexte {
 
         let info = adapter.get_info();
         let adaptateur = format!("{} ({:?})", info.name, info.backend);
+        let logiciel = info.device_type == wgpu::DeviceType::Cpu;
         let configuration_surface = if let Some(surface) = surface {
             let mut configuration = surface
                 .get_default_config(&adapter, 1, 1)
@@ -154,6 +158,7 @@ impl Contexte {
             device: Arc::new(device),
             queue: Arc::new(queue),
             adaptateur,
+            logiciel,
             configuration_surface,
         })
     }

@@ -23,6 +23,12 @@ attendu, immobile dès que la mission s'arrête. Rien n'y bouge au repos, et le 
 le fige. La barre du système ne relève que des comptes reçus ; le rail porte l'anneau des
 missions actives ; le cadran d'une mission grave une graduation par étape franchie.
 
+La fenêtre relit les services quatre fois par seconde mais ne redessine que si l'empreinte de
+la scène a changé ou si l'interface l'a demandé ; au repos, aucune image n'est soumise.
+`prophet-surface --mesure N` rend N images hors écran, GPU attendu, et imprime les temps par
+image et la mémoire résidente : c'est l'instrument des mesures attendues par FRONTIER, à
+exécuter sur la machine à qualifier.
+
 L'atelier présente plusieurs missions dans une galerie horizontale et permet de les rechercher
 par titre, référence ou pilote avec Ctrl+K. Les objets hors de la vue ne sont pas composés.
 La Focale agrandit l'inspecteur ; une mission seule reçoit directement cet espace. Le plan
