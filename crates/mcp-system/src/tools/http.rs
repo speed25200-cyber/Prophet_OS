@@ -352,7 +352,7 @@ mod tests {
 
     #[test]
     fn un_refus_du_proxy_devient_une_erreur_nommee() {
-        let raw = b"HTTP/1.1 403 Prophet\r\nContent-Type: application/json\r\nContent-Length: 40\r\n\r\n{\"code\":\"NoGrant\",\"detail\":\"hors des droits\"}";
+        let raw = b"HTTP/1.1 403 Prophet\r\nContent-Type: application/json\r\nContent-Length: 45\r\n\r\n{\"code\":\"NoGrant\",\"detail\":\"hors des droits\"}";
         let response = parse_response(raw, false).unwrap();
         let result = response.into_result(1024);
         assert!(result.is_error, "{result:?}");
@@ -369,7 +369,11 @@ mod tests {
         let tool = Fetch::default();
         let context = crate::registry::ToolContext {
             token: prophet_types::cap::TokenBuilder::new("capd", "task:x", "agent.x", "u")
-                .grants(vec![])
+                .grants(vec![prophet_types::cap::Grant::new(
+                    prophet_types::cap::Res::Net,
+                    prophet_types::cap::Act::Egress,
+                    "exemple.fr",
+                )])
                 .ttl_seconds(60)
                 .build(
                     &ed25519_dalek::SigningKey::from_bytes(&[1u8; 32]),
