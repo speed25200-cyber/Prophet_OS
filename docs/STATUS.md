@@ -134,7 +134,9 @@ pont prouvent la séance de bout en bout : outils limités au jeton, écriture d
 non dans le home, refus hors périmètre sans fuite du contenu, retrait qui scelle les versions,
 examen puis publication par le créateur ; annulation pendant la séance ; mission inconnue
 refusée. Voir l'[ADR 0026](adr/0026-seance-d-outils-mcp-pour-les-clients-de-l-humain.md).
-Le client n'est pas confiné par la séance ; le bureau ne l'ouvre pas encore de lui-même.
+Le lanceur du bureau offre « Claude Code · mission » (mission préparée sans moteur local,
+configuration MCP écrite dans la session, client lancé avec) ; cette entrée attend la CI.
+Le client n'est pas confiné par la séance.
 
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 

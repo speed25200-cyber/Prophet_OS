@@ -257,7 +257,7 @@ pkgs.testers.runNixOSTest {
 
         with subtest("le lanceur connaît le navigateur partagé et l'application X"):
             entries = machine.succeed("su - pilot -c 'prophet-ouvrir --liste'").split("\n")
-            for entry in ["Navigateur", "X", "ChatGPT", "Claude Code", "Codex", "Supervision"]:
+            for entry in ["Navigateur", "X", "ChatGPT", "Claude Code", "Claude Code · mission", "Codex", "Supervision"]:
                 assert entry in entries, entries
             machine.succeed("test -x ${pkgs.chromium}/bin/chromium")
 

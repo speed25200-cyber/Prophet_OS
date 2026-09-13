@@ -55,5 +55,8 @@ des outils contrôlés, elle ne confine pas le client. C'est le pilote de l'ADR 
 `agentd` dans une sandbox avec la même séance, qui apportera le confinement ; cette décision
 en pose la moitié service. Une séance vit avec le service : un redémarrage la perd et la
 mission passe en échec, comme une mission native. La capacité de travail (deux missions
-actives) est partagée entre séances et missions natives. Le bureau ne configure pas encore
-ses lanceurs pour ouvrir une séance ; `prophet task mcp-config` est la porte d'entrée.
+actives) est partagée entre séances et missions natives. Le lanceur du bureau offre « Claude
+Code · mission » : il prépare une mission dans le contexte « documents » pour ce compte, écrit
+la configuration MCP dans le répertoire d'exécution de la session et lance le client avec ;
+`prophet task mcp-config` reste la porte d'entrée au terminal. Codex n'a pas encore d'entrée
+équivalente.

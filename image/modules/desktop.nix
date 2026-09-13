@@ -19,6 +19,7 @@ let
       entrees='Supervision
 ChatGPT
 Claude Code
+Claude Code · mission
 Codex
 Navigateur
 X
@@ -40,6 +41,7 @@ Déconnexion'
         case "$selection" in
           Supervision) app=supervision ;; ChatGPT) app=chatgpt ;;
           'Claude Code') app=claude-code ;; Codex) app=codex ;;
+          'Claude Code · mission') app=claude-code-mission ;;
           Fichiers) app=fichiers ;; Terminal) app=terminal ;;
           Navigateur) app=navigateur ;; X) app=x ;;
           Verrouiller) app=verrouiller ;; Déconnexion) app=deconnexion ;;
@@ -81,6 +83,27 @@ Déconnexion'
           install -d -m 0700 -- "$profile"
           launch foot --hold --working-directory="$HOME/Documents/Prophet" --app-id=org.prophet.ClaudeCode --title='Claude Code' \
             env CLAUDE_CONFIG_DIR="$profile" ${pkgs.claude-code}/bin/claude
+          ;;
+        claude-code-mission)
+          # Claude Code dans une mission Prophet : le service prépare la mission pour ce compte
+          # (jeton capd, travail SFS, journal) sans exiger le moteur local, et le client reçoit
+          # ses outils par le pont prophet-mcp ; à la fermeture du client, la mission passe à
+          # l'examen dans la supervision, puis à la publication (ADR 0026). Le client garde ses
+          # propres outils : la mission ajoute les outils contrôlés, elle ne le confine pas.
+          swaymsg 'workspace "2: Atelier"' >/dev/null
+          swaymsg 'layout tabbed' >/dev/null
+          profile="$HOME/.local/state/prophet/providers/claude-code/$human"
+          install -d -m 0700 -- "$profile"
+          missions="''${XDG_RUNTIME_DIR:-/tmp}/prophet-missions"
+          install -d -m 0700 -- "$missions"
+          if ! mission=$(${prophet}/bin/prophet --json task prepare --client --profile documents \
+              "Session Claude Code du $(date +%F)" | jq -r .task) || [ -z "$mission" ] || [ "$mission" = null ]; then
+            echo "Aucune mission préparée : agentd ne répond pas ou n'a pas de contexte « documents »." >&2
+            exit 1
+          fi
+          ${prophet}/bin/prophet task mcp-config "$mission" > "$missions/$mission.json"
+          launch foot --hold --working-directory="$HOME/Documents/Prophet" --app-id=org.prophet.ClaudeCode --title="Claude Code · $mission" \
+            env CLAUDE_CONFIG_DIR="$profile" ${pkgs.claude-code}/bin/claude --mcp-config="$missions/$mission.json"
           ;;
         codex)
           swaymsg 'workspace "2: Atelier"' >/dev/null
