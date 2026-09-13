@@ -137,7 +137,9 @@ in pkgs.testers.runNixOSTest {
         machine.execute("(cd /tmp/temoin && python3 -m http.server 8099 --bind 127.0.0.1 > /tmp/temoin.log 2>&1 &)")
         machine.wait_for_open_port(8099)
         try:
-            proof = json.loads(machine.succeed("runuser -u pilot -- python3 /etc/test-mission.py web", timeout=420))
+            # `timeout` côté invité, sous runuser : la limite du pilote de test n'atteint pas un
+            # python lancé par runuser, et le test a attendu 90 minutes un navigateur mort.
+            proof = json.loads(machine.succeed("runuser -u pilot -- timeout -k 5 400 python3 /etc/test-mission.py web", timeout=420))
         except Exception:
             print(machine.succeed("journalctl -u prophet-agentd -u prophet-egress -u prophet-local-engine --no-pager -n 150"))
             print(machine.succeed("cat /tmp/temoin.log || true"))

@@ -344,6 +344,15 @@ in
             # lecture seule, capacités vides.
             MemoryDenyWriteExecute = lib.mkForce false;
             SystemCallErrorNumber = "EPERM";
+            # Et `capset`. Même sans bac à sable (`--no-sandbox`), le zygote de Chromium engendre
+            # chaque processus de rendu par `ForkAndDropCapabilitiesInChild`, qui retire ses
+            # capacités à l'enfant par `capset` et **exige** que l'appel réussisse (PCHECK). Sous
+            # `~@privileged`, `capset` répond EPERM : le zygote meurt (SIGABRT,
+            # `credentials.cc`), la sonde dit pourtant « prêt » — le processus principal vit —,
+            # et la première page ne s'ouvre jamais : le test du moteur local attendait jusqu'à
+            # sa limite de 90 minutes (vu en CI le 13 septembre 2026). `CapabilityBoundingSet`
+            # est vide : `capset` ne peut ici que retirer, jamais accorder.
+            SystemCallFilter = lib.mkForce [ "@system-service" "~@privileged" "~@resources" "capset" ];
           };
         };
       };

@@ -1337,6 +1337,19 @@ inatteint : le run `34703605599` y a tourné, et le secret `VPS_PASSWORD` est po
 
 ## Blocages
 
+Le travail « Mission locale sous NixOS (modèle réel) » n'a jamais rendu de verdict depuis
+`b2f694e` (13 septembre) : sur cette branche comme sur `claude/prophet-os-audit-dev-cbu28z`,
+il est annulé à sa limite de 90 minutes. Lu dans son journal le 14 septembre : la mission réelle
+réussit (Qwen3-1.7B en routeur, 23 s), puis le sous-test du contexte web ne rend rien. Cause :
+même sans bac à sable, le zygote de Chromium engendre chaque rendu par
+`ForkAndDropCapabilitiesInChild`, dont le `capset` doit réussir ; sous le filtre `~@privileged`
+d'agentd avec `SystemCallErrorNumber=EPERM`, il répond EPERM et le zygote meurt (SIGABRT,
+`credentials.cc:365`) pendant que le processus principal, lui, répond « prêt » à la sonde ; la
+page ne s'ouvre jamais, et la limite du pilote de test n'atteignait pas un python lancé par
+`runuser`. Correctif dans le commit portant ce paragraphe : `capset` admis pour le service
+d'agentd quand il porte le navigateur (le `CapabilityBoundingSet` vide fait qu'il ne peut que
+retirer), et un `timeout` côté invité dans le sous-test. À confirmer par la CI.
+
 Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le
 dernier mot : le job `isolation` de l'intégration continue installe gVisor, Firecracker et les
 images d'invité sur un coureur Ubuntu muni de KVM, et y exerce les quatre tests matériels. C'est
