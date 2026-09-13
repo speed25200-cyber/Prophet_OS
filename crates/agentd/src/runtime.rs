@@ -152,6 +152,12 @@ pub struct EtatPersistant {
     pub taches: Vec<Task>,
     /// Leurs jetons, indexés par tâche.
     pub jetons: BTreeMap<String, Token>,
+    /// Plans retenus, y compris les périmètres nécessaires au lancement.
+    #[serde(default)]
+    pub plans: BTreeMap<String, TaskPlan>,
+    /// Résultats de missions relisibles après redémarrage.
+    #[serde(default)]
+    pub results: BTreeMap<String, serde_json::Value>,
 }
 
 /// Le runtime.
@@ -167,6 +173,8 @@ pub struct Runtime {
     tokens: BTreeMap<String, Token>,
     journal: Vec<Draft>,
     quota_policy: QuotaPolicy,
+    plans: BTreeMap<String, TaskPlan>,
+    results: BTreeMap<String, serde_json::Value>,
 }
 
 impl std::fmt::Debug for Runtime {
@@ -189,6 +197,8 @@ impl Runtime {
             tokens: BTreeMap::new(),
             journal: Vec::new(),
             quota_policy: QuotaPolicy::default(),
+            plans: BTreeMap::new(),
+            results: BTreeMap::new(),
         }
     }
 
@@ -206,6 +216,8 @@ impl Runtime {
             tokens: BTreeMap::new(),
             journal: Vec::new(),
             quota_policy: QuotaPolicy::default(),
+            plans: BTreeMap::new(),
+            results: BTreeMap::new(),
         }
     }
 
@@ -225,6 +237,8 @@ impl Runtime {
         EtatPersistant {
             taches: self.tasks.values().cloned().collect(),
             jetons: self.tokens.clone(),
+            plans: self.plans.clone(),
+            results: self.results.clone(),
         }
     }
 
@@ -238,6 +252,8 @@ impl Runtime {
             self.tasks.insert(tache.id.clone(), tache);
         }
         self.tokens.extend(etat.jetons);
+        self.plans.extend(etat.plans);
+        self.results.extend(etat.results);
     }
 
     /// Événements journalisés.
@@ -265,6 +281,73 @@ impl Runtime {
     #[must_use]
     pub fn task(&self, id: &str) -> Option<&Task> {
         self.tasks.get(id)
+    }
+
+    /// Résultat durable d'une mission terminée.
+    #[must_use]
+    pub fn result(&self, id: &str) -> Option<&serde_json::Value> {
+        self.results.get(id)
+    }
+
+    /// Annule une tâche qui n'a pas de travailleur lancé.
+    ///
+    /// # Errors
+    /// Tâche inconnue, déjà lancée ou terminée.
+    pub fn cancel_unstarted(&mut self, id: &str, now: OffsetDateTime) -> Result<(), RuntimeError> {
+        let task = self
+            .tasks
+            .get_mut(id)
+            .ok_or_else(|| RuntimeError::Unknown(id.into()))?;
+        if !matches!(task.state, State::Pending | State::Planned) {
+            return Err(TaskError::BadTransition {
+                from: task.state,
+                to: State::Cancelled,
+            }
+            .into());
+        }
+        task.transition(State::Cancelled, Some("annulée par l'utilisateur".into()))?;
+        self.record(
+            id,
+            EventKind::TaskCancelled,
+            Actor::user(),
+            json!({"reason":"annulée par l'utilisateur"}),
+            now,
+        );
+        Ok(())
+    }
+
+    /// Réserve le lancement local sans laisser deux travailleurs prendre la même mission.
+    ///
+    /// # Errors
+    /// Tâche non planifiée, plan absent, client officiel ou isolation non raccordée.
+    pub fn begin_local(
+        &mut self,
+        id: &str,
+    ) -> Result<(Task, Token, TaskPlan, PathBuf), RuntimeError> {
+        let task = self
+            .tasks
+            .get_mut(id)
+            .ok_or_else(|| RuntimeError::Unknown(id.into()))?;
+        let plan = self
+            .plans
+            .get(id)
+            .ok_or_else(|| RuntimeError::Workspace("plan absent : recréer la mission".into()))?;
+        if !plan.choice.reference.starts_with("local:") || plan.sandbox_level != 0 {
+            return Err(RuntimeError::NoDriver("le lanceur local d'outils ne lance aucun processus non fiable ; les pilotes isolés restent à raccorder".into()));
+        }
+        let token = self.tokens.get(id).filter(|t| t.sub == id).ok_or_else(|| {
+            RuntimeError::Capability("jeton de tâche absent ou incohérent".into())
+        })?;
+        task.transition(State::Running, None)?;
+        Ok((task.clone(), token.clone(), plan.clone(), self.home.clone()))
+    }
+
+    /// Publie un état de travailleur et, à la fin, le résultat à conserver.
+    pub fn publish_local(&mut self, task: Task, result: Option<serde_json::Value>) {
+        if let Some(result) = result {
+            self.results.insert(task.id.clone(), result);
+        }
+        self.tasks.insert(task.id.clone(), task);
     }
 
     fn record(
@@ -323,6 +406,22 @@ impl Runtime {
             scopes,
             availability,
         } = *request;
+        let path = std::path::Path::new(id);
+        if !id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
+            || self.tasks.contains_key(id)
+            || id.len() > 160
+            || path.components().count() != 1
+            || !matches!(
+                path.components().next(),
+                Some(std::path::Component::Normal(_))
+            )
+        {
+            return Err(RuntimeError::Capability(
+                "identifiant de tâche invalide ou déjà utilisé".into(),
+            ));
+        }
         let limits = Limits {
             tokens: manifest.budget.default.tokens,
             wall_time_s: manifest.wall_time_seconds().unwrap_or(1200),
@@ -416,7 +515,7 @@ impl Runtime {
         self.tasks.insert(id.to_owned(), task);
         self.tokens.insert(id.to_owned(), token);
 
-        Ok(TaskPlan {
+        let plan = TaskPlan {
             task: id.to_owned(),
             intent: intent.to_owned(),
             choice,
@@ -424,7 +523,9 @@ impl Runtime {
             grants,
             limits,
             scopes: scopes.iter().map(|s| (*s).to_owned()).collect(),
-        })
+        };
+        self.plans.insert(id.to_owned(), plan.clone());
+        Ok(plan)
     }
 
     /// Annule une tâche en cours.

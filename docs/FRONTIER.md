@@ -62,6 +62,13 @@ Linux, les liens refusés et les descendants recontrôlés. Un [essai Qwen3 rée
 produit un fichier de travail et un diff SFS. Le binaire reste à raccorder aux services, avec
 des contextes de tâche fiables, des racines privées et un journal durable ; les commits SFS
 concurrents et le lancement depuis l'interface restent à sécuriser et à intégrer.
+Le raccordement suivant ajoute les [missions locales par agentd](reports/missions-locales-2026-09-13.md) :
+plan conservé, lancement en arrière-plan, capd et ledger réels, scopes contrôlés, budget avant
+action, annulation de l'inférence et résultats persistants. Le lanceur accepte uniquement les
+outils natifs de confiance au niveau 0 ; les processus isolés restent à raccorder. Trois essais
+avec Qwen3-0.6B échouent sur une génération incomplète. La réussite de la chaîne de service avec
+un modèle réel reste donc à établir ; le lancement, les diffs et l'arrêt depuis l'interface
+ne sont pas encore livrés. Aucune exigence complète ci-dessus n'est cochée pour ce jalon.
 Codex et Claude Code sont maintenant obligatoires dans la configuration de l'image ; leurs vrais
 binaires répondent aux sondes de version et d'authentification en profils vierges. Le diagnostic
 ne confond plus fichiers présents, connexion et pilote agentique disponible. Le paquet expérimental

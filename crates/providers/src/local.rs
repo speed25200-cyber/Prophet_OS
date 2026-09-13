@@ -262,14 +262,7 @@ fn parse_turn(body: &Value, tools: &[LocalTool]) -> Result<(ModelTurn, Usage), D
         .filter(|c| c.len() == 1)
         .and_then(|c| c.first())
         .ok_or_else(|| invalid("une réponse unique du modèle est requise"))?;
-    let usage = Usage {
-        tokens_in: body["usage"]["prompt_tokens"]
-            .as_u64()
-            .ok_or_else(|| invalid("compteur de tokens d'entrée absent"))?,
-        tokens_out: body["usage"]["completion_tokens"]
-            .as_u64()
-            .ok_or_else(|| invalid("compteur de tokens de sortie absent"))?,
-    };
+    let usage = response_usage(body)?;
     match choice["finish_reason"].as_str() {
         Some("stop" | "tool_calls") => {}
         Some("length") => return Err(invalid("génération interrompue par la limite de tokens")),
@@ -323,6 +316,123 @@ fn parse_turn(body: &Value, tools: &[LocalTool]) -> Result<(ModelTurn, Usage), D
         },
         usage,
     ))
+}
+
+/// Même contrat que `LocalModel`, avec une requête annulable par abandon du futur.
+#[derive(Debug)]
+pub struct AsyncLocalModel {
+    client: reqwest::Client,
+    endpoint: Url,
+    model: String,
+    tools: Vec<LocalTool>,
+    max_tokens: u32,
+}
+
+/// Réponse dont les compteurs restent exploitables même si le tour est invalide.
+#[derive(Debug)]
+pub struct LocalReply {
+    /// Tour validé, ou erreur de protocole/génération.
+    pub turn: Result<ModelTurn, DriverError>,
+    /// Consommation attestée par la réponse du moteur.
+    pub usage: Usage,
+}
+
+fn response_usage(body: &Value) -> Result<Usage, DriverError> {
+    Ok(Usage {
+        tokens_in: body["usage"]["prompt_tokens"]
+            .as_u64()
+            .ok_or_else(|| invalid("compteur de tokens d'entrée absent"))?,
+        tokens_out: body["usage"]["completion_tokens"]
+            .as_u64()
+            .ok_or_else(|| invalid("compteur de tokens de sortie absent"))?,
+    })
+}
+
+impl AsyncLocalModel {
+    /// Prépare un transport local sans proxy ni redirection.
+    ///
+    /// # Errors
+    /// Adresse, délai, modèle ou schéma invalide.
+    pub fn new(
+        endpoint: &str,
+        model: &str,
+        tools: Vec<LocalTool>,
+        timeout: Duration,
+        max_tokens: u32,
+    ) -> Result<Self, DriverError> {
+        let endpoint = local_endpoint(endpoint)?;
+        if model.trim().is_empty() || timeout.is_zero() || max_tokens == 0 {
+            return Err(invalid("modèle et plafonds positifs requis"));
+        }
+        let mut names = std::collections::HashSet::new();
+        if tools.iter().any(|t| {
+            t.name.trim().is_empty() || !t.parameters.is_object() || !names.insert(&t.name)
+        }) {
+            return Err(invalid("définition d'outil invalide ou dupliquée"));
+        }
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(3).min(timeout))
+            .timeout(timeout)
+            .build()
+            .map_err(transport)?;
+        Ok(Self {
+            client,
+            endpoint,
+            model: model.into(),
+            tools,
+            max_tokens,
+        })
+    }
+
+    /// Produit un tour ; son futur peut être abandonné pour interrompre l'inférence HTTP.
+    ///
+    /// # Errors
+    /// Moteur indisponible, réponse trop grande, incohérente ou incomplète.
+    pub async fn next_turn(&self, history: &[Value]) -> Result<LocalReply, DriverError> {
+        let mut body = json!({"model":self.model,"messages":messages(history)?,"stream":false,"max_tokens":self.max_tokens});
+        if !self.tools.is_empty() {
+            body["tools"] = json!(
+                self.tools
+                    .iter()
+                    .map(|t| json!({"type":"function","function":t}))
+                    .collect::<Vec<_>>()
+            );
+            body["tool_choice"] = json!("auto");
+            body["parallel_tool_calls"] = json!(false);
+        }
+        let url = self
+            .endpoint
+            .join("chat/completions")
+            .map_err(|_| invalid("chemin d'API invalide"))?;
+        let mut response = self
+            .client
+            .post(url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(transport)?;
+        if !response.status().is_success() {
+            return Err(DriverError::Io(format!(
+                "le moteur local répond HTTP {}",
+                response.status()
+            )));
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(transport)? {
+            if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES as usize {
+                return Err(invalid("réponse du moteur trop volumineuse"));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let body = serde_json::from_slice(&bytes)
+            .map_err(|_| invalid("le moteur n'a pas rendu de JSON valide"))?;
+        Ok(LocalReply {
+            usage: response_usage(&body)?,
+            turn: parse_turn(&body, &self.tools).map(|(turn, _)| turn),
+        })
+    }
 }
 
 fn invalid(message: &str) -> DriverError {

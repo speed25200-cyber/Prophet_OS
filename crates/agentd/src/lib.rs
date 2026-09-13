@@ -11,6 +11,7 @@
 #![warn(missing_docs)]
 
 pub mod budget;
+pub mod local;
 pub mod runtime;
 pub mod task;
 

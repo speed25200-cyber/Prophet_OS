@@ -61,6 +61,22 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum TaskAction {
+    /// Planifie une mission depuis une requête JSON, sans la démarrer.
+    #[command(alias = "plan")]
+    New {
+        /// Fichier contenant intent, manifest, requested, scopes et availability.
+        request: std::path::PathBuf,
+    },
+    /// Lance une mission déjà planifiée par agentd.
+    Start {
+        /// Identifiant de la mission.
+        id: String,
+    },
+    /// Relit le résultat conservé par agentd et les changements à examiner.
+    Result {
+        /// Identifiant de la mission.
+        id: String,
+    },
     /// Liste les tâches.
     Ls,
     /// Détaille une tâche.
@@ -227,7 +243,7 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
         Command::Provider { action } => provider(action, cli.json),
         Command::Memory { action } => memory(action),
         Command::Log { action } => log(action),
-        Command::Task { action } => task(action),
+        Command::Task { action } => task(action, cli.json),
         // Les approbations vivent dans un daemon en service : sans lui, la commande le dit au
         // lieu de faire semblant.
         Command::Cap { .. } => anyhow::bail!(
@@ -476,10 +492,80 @@ fn rendre_verification(rapport: &ledger::VerifyReport) -> anyhow::Result<String>
 
 /// Tâches. Leur espace de travail vit sur le disque : diff et annulation fonctionnent donc sans
 /// daemon, ce qui compte, car c'est précisément quand quelque chose a mal tourné qu'on en a besoin.
-fn task(action: &TaskAction) -> anyhow::Result<String> {
+fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
     let maison = home();
     match action {
+        TaskAction::New { request } => {
+            use std::io::Read as _;
+            let mut bytes = Vec::new();
+            std::fs::File::open(request)?
+                .take(1024 * 1024 + 1)
+                .read_to_end(&mut bytes)?;
+            anyhow::ensure!(
+                bytes.len() <= 1024 * 1024,
+                "requête de mission limitée à 1 Mio"
+            );
+            let params = serde_json::from_slice(&bytes)?;
+            let result = task_rpc(&socket_agentd(), "task.spawn", params)?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&result)?));
+            }
+            let plan: agentd::TaskPlan = serde_json::from_value(result)?;
+            Ok(format!(
+                "{}\nDémarrer : prophet task start {}\n",
+                plan.render(),
+                plan.task
+            ))
+        }
+        TaskAction::Start { id } => {
+            let result = task_rpc(&socket_agentd(), "task.start", serde_json::json!({"id":id}))?;
+            if as_json {
+                Ok(format!("{}\n", serde_json::to_string_pretty(&result)?))
+            } else {
+                Ok(format!(
+                    "Mission {id} lancée. Suivi : prophet task ls ; résultat : prophet task result {id}\n"
+                ))
+            }
+        }
+        TaskAction::Result { id } => {
+            let result = task_rpc(
+                &socket_agentd(),
+                "task.result",
+                serde_json::json!({"id":id}),
+            )?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&result)?));
+            }
+            let mut out = format!(
+                "Mission {id} · {}\n",
+                result["state"].as_str().unwrap_or("inconnu")
+            );
+            if let Some(text) = result["text"].as_str() {
+                out.push_str(text);
+                out.push('\n');
+            }
+            if let Some(reason) = result["reason"].as_str() {
+                out.push_str(reason);
+                out.push('\n');
+            }
+            if let Some(diff) = result.get("diff") {
+                let diff: sfs::Diff = serde_json::from_value(diff.clone())?;
+                out.push_str(&diff.render());
+                out.push_str("Changements conservés dans le travail ; validation non appliquée.\n");
+            }
+            Ok(out)
+        }
         TaskAction::Ls => {
+            if as_json {
+                return Ok(format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&task_rpc(
+                        &socket_agentd(),
+                        "task.list",
+                        serde_json::json!({})
+                    )?)?
+                ));
+            }
             // Deux questions différentes, et il vaut mieux les poser toutes les deux. `agentd` sait
             // ce qui *tourne* ; les espaces de travail savent ce qui a *changé des fichiers*. Une
             // tâche fraîchement planifiée n'a encore touché à rien, et n'apparaissait donc nulle
@@ -555,10 +641,27 @@ fn task(action: &TaskAction) -> anyhow::Result<String> {
                 "tâche {id} annulée : {a} création(s) retirée(s), {m} modification(s) rétablie(s), {s} suppression(s) rétablie(s)\n"
             ))
         }
-        TaskAction::Cancel { .. } => anyhow::bail!(
-            "annuler une tâche en cours exige agentd en service ; \
-             pour défaire une tâche déjà validée, utilisez `prophet task undo`"
-        ),
+        TaskAction::Cancel { id } => {
+            let result = task_rpc(
+                &socket_agentd(),
+                "task.cancel",
+                serde_json::json!({"id":id}),
+            )
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "{e} ; pour défaire une tâche déjà validée, utilisez `prophet task undo`"
+                )
+            })?;
+            if as_json {
+                Ok(format!("{}\n", serde_json::to_string_pretty(&result)?))
+            } else if result.get("cancel_requested").is_some() {
+                Ok(format!(
+                    "Annulation demandée pour {id}. L'état final confirmera l'arrêt.\n"
+                ))
+            } else {
+                Ok(format!("Mission {id} annulée.\n"))
+            }
+        }
     }
 }
 
@@ -844,6 +947,20 @@ fn socket_agentd() -> std::path::PathBuf {
         |_| prophet_ipc::socket_path("agentd"),
         std::path::PathBuf::from,
     )
+}
+
+fn task_rpc(
+    socket: &std::path::Path,
+    method: &str,
+    params: serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    sous_delai(async {
+        let client = prophet_ipc::Client::connect(socket)
+            .await
+            .map_err(|e| format!("agentd indisponible : {e}"))?;
+        client.call(method, params).await.map_err(|e| e.message)
+    })
+    .map_err(anyhow::Error::msg)
 }
 
 /// Les tâches que `agentd` tient en ce moment.

@@ -100,7 +100,9 @@ jobs:
       - name: Lints
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Tests
-        run: cargo test --workspace
+        run: |
+          cargo build --workspace --bins
+          cargo test --workspace
         env:
           # Sans navigateur, les tests du pont CDP passent sans rien essayer. Ici, le vert doit
           # vouloir dire qu'ils ont tourné.

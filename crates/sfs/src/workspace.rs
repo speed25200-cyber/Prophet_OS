@@ -88,6 +88,49 @@ const META: &str = "meta.json";
 const TX: &str = "tx";
 
 impl Workspace {
+    /// Capture de service : droits vérifiés par descendant et ouvertures Linux sans liens.
+    ///
+    /// # Errors
+    /// Identifiant existant, périmètre refusé, source instable ou plafond de capture atteint.
+    pub fn begin_authorized(
+        home: &Path,
+        task: &str,
+        scopes: &[String],
+        now: OffsetDateTime,
+        permits: &dyn Fn(&Path) -> bool,
+    ) -> Result<Self, SfsError> {
+        let mut resolved = Vec::new();
+        for scope in scopes {
+            let absolute = scope_path(home, scope)?;
+            let relative = absolute
+                .strip_prefix(home)
+                .map_err(|_| SfsError::ScopeOutsideHome(scope.clone()))?
+                .to_path_buf();
+            if resolved
+                .iter()
+                .any(|p: &PathBuf| relative.starts_with(p) || p.starts_with(&relative))
+            {
+                return Err(SfsError::ScopeOutsideHome("périmètres chevauchants".into()));
+            }
+            resolved.push(relative);
+        }
+        let base = crate::snapshot::capture(home, task, &resolved, permits)?;
+        let workspace = Self {
+            root: Self::root_for(home).join(task),
+            home: home.into(),
+            meta: Meta {
+                task: task.into(),
+                scopes: resolved,
+                state: WorkspaceState::Open,
+                opened: now,
+                committed: None,
+                base,
+            },
+            backend: detect_backend(home),
+        };
+        workspace.save()?;
+        Ok(workspace)
+    }
     /// Racine des espaces de travail d'un utilisateur.
     #[must_use]
     pub fn root_for(home: &Path) -> PathBuf {
@@ -462,6 +505,12 @@ impl Transaction {
 }
 
 fn resolve_scope(home: &Path, scope: &str) -> Result<PathBuf, SfsError> {
+    let candidate = scope_path(home, scope)?;
+    std::fs::create_dir_all(&candidate)?;
+    Ok(candidate)
+}
+
+fn scope_path(home: &Path, scope: &str) -> Result<PathBuf, SfsError> {
     let candidate = if let Some(rest) = scope.strip_prefix("~/") {
         home.join(rest)
     } else if scope.starts_with('/') {
@@ -478,7 +527,6 @@ fn resolve_scope(home: &Path, scope: &str) -> Result<PathBuf, SfsError> {
     if !candidate.starts_with(home) {
         return Err(SfsError::ScopeOutsideHome(scope.to_owned()));
     }
-    std::fs::create_dir_all(&candidate)?;
     Ok(candidate)
 }
 

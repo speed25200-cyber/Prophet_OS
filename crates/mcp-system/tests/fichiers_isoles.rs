@@ -11,6 +11,46 @@ use prophet_types::manifest::Manifest;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 
+struct FailingResultJournal;
+impl mcp_system::registry::Journal for FailingResultJournal {
+    fn record(&self, draft: prophet_types::ledger::Draft) -> Result<(), String> {
+        if draft.kind == prophet_types::ledger::EventKind::ToolResult {
+            Err("confirmation indisponible".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[test]
+fn une_panne_apres_ecriture_interdit_toute_repetition_automatique() {
+    let m = monde(&["~/docs/**"]);
+    let mut registry = Registry::new(m.broker, Arc::new(FailingResultJournal));
+    registry.register(Arc::new(mcp_system::tools::Write));
+    let first = registry.call(
+        "fs.write",
+        &json!({"path":"~/docs/note.txt","content":"première action"}),
+        &m.context,
+        OffsetDateTime::now_utc(),
+    );
+    assert!(first.is_error);
+    assert_eq!(
+        std::fs::read_to_string(m.work.join("docs/note.txt")).unwrap(),
+        "première action"
+    );
+    let second = registry.call(
+        "fs.write",
+        &json!({"path":"~/docs/note.txt","content":"répétition interdite"}),
+        &m.context,
+        OffsetDateTime::now_utc(),
+    );
+    assert!(second.is_error);
+    assert_eq!(
+        std::fs::read_to_string(m.work.join("docs/note.txt")).unwrap(),
+        "première action"
+    );
+}
+
 struct Monde {
     _dir: tempfile::TempDir,
     home: PathBuf,

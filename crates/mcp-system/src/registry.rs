@@ -6,6 +6,7 @@
 //! ne reçoit la main qu'après.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use capd::{Broker, CheckRequest};
@@ -64,6 +65,21 @@ pub trait ResourceAccess {
     fn permits(&self, act: Act, path: &str) -> bool;
 }
 
+/// Autorité de capacités, locale aux tests ou reliée au service capd.
+pub trait Authority: Send + Sync {
+    /// Vérifie la demande complète ; une panne doit produire un refus.
+    fn check(&self, token: &Token, request: &CheckRequest, now: OffsetDateTime) -> Decision;
+}
+
+impl Authority for Mutex<Broker> {
+    fn check(&self, token: &Token, request: &CheckRequest, now: OffsetDateTime) -> Decision {
+        self.lock()
+            .ok()
+            .and_then(|b| b.check(token, request, now).ok())
+            .unwrap_or_else(|| Decision::deny(DenyReason::PolicyDenied))
+    }
+}
+
 struct FileAccess<'a> {
     registry: &'a Registry,
     context: &'a ToolContext,
@@ -74,9 +90,6 @@ struct FileAccess<'a> {
 
 impl ResourceAccess for FileAccess<'_> {
     fn permits(&self, act: Act, path: &str) -> bool {
-        let Ok(broker) = self.registry.broker.lock() else {
-            return false;
-        };
         let now = self.now.saturating_add(
             time::Duration::try_from(self.started.elapsed()).unwrap_or(time::Duration::MAX),
         );
@@ -88,21 +101,22 @@ impl ResourceAccess for FileAccess<'_> {
         ]
         .into_iter()
         .all(|r| {
-            broker
+            self.registry
+                .authority
                 .check(
                     &self.context.token,
                     &r.sandbox_level(self.context.sandbox_level),
                     now,
                 )
-                .is_ok_and(|d| d.is_allow())
+                .is_allow()
         })
     }
 }
 
 /// Journalisation des appels.
 pub trait Journal: Send + Sync {
-    /// Enregistre un événement.
-    fn record(&self, draft: Draft);
+    /// Enregistre un événement ; une erreur interdit de poursuivre les outils de la tâche.
+    fn record(&self, draft: Draft) -> Result<(), String>;
 }
 
 /// Journal en mémoire, utile aux tests et au mode dégradé.
@@ -132,18 +146,21 @@ impl MemoryJournal {
 }
 
 impl Journal for MemoryJournal {
-    fn record(&self, draft: Draft) {
-        if let Ok(mut events) = self.events.lock() {
-            events.push(draft);
-        }
+    fn record(&self, draft: Draft) -> Result<(), String> {
+        self.events
+            .lock()
+            .map_err(|_| "journal verrouillé".to_owned())?
+            .push(draft);
+        Ok(())
     }
 }
 
 /// Registre d'outils.
 pub struct Registry {
     tools: BTreeMap<String, Arc<dyn Tool>>,
-    broker: Arc<Mutex<Broker>>,
+    authority: Arc<dyn Authority>,
     journal: Arc<dyn Journal>,
+    journal_failed: AtomicBool,
 }
 
 impl std::fmt::Debug for Registry {
@@ -158,10 +175,17 @@ impl Registry {
     /// Registre vide.
     #[must_use]
     pub fn new(broker: Arc<Mutex<Broker>>, journal: Arc<dyn Journal>) -> Self {
+        Self::with_authority(broker, journal)
+    }
+
+    /// Registre dont les contrôles peuvent être réalisés par le vrai service capd.
+    #[must_use]
+    pub fn with_authority(authority: Arc<dyn Authority>, journal: Arc<dyn Journal>) -> Self {
         Self {
             tools: BTreeMap::new(),
-            broker,
+            authority,
             journal,
+            journal_failed: AtomicBool::new(false),
         }
     }
 
@@ -216,15 +240,37 @@ impl Registry {
         context: &ToolContext,
         now: OffsetDateTime,
     ) -> CallResult {
+        if self.journal_failed.load(Ordering::Acquire) {
+            return journal_error();
+        }
+        match self.call_recorded(name, args, context, now) {
+            Ok(result) => result,
+            Err(_) => {
+                self.journal_failed.store(true, Ordering::Release);
+                journal_error()
+            }
+        }
+    }
+
+    fn call_recorded(
+        &self,
+        name: &str,
+        args: &Value,
+        context: &ToolContext,
+        now: OffsetDateTime,
+    ) -> Result<CallResult, String> {
         let Some(tool) = self.tools.get(name) else {
-            return CallResult::error(ErrorCode::NotFound, format!("outil inconnu : {name}"));
+            return Ok(CallResult::error(
+                ErrorCode::NotFound,
+                format!("outil inconnu : {name}"),
+            ));
         };
         let spec = tool.spec();
         let Some(meta) = spec.meta.clone() else {
-            return CallResult::error(
+            return Ok(CallResult::error(
                 ErrorCode::Internal,
                 format!("l'outil {name} ne déclare pas ses exigences"),
-            );
+            ));
         };
 
         let args_digest = digest(args);
@@ -242,7 +288,7 @@ impl Registry {
             )
             .task(&context.task)
             .step(context.step),
-        );
+        )?;
 
         let decision = self.authorize(name, &meta, args, context, now);
         if let Decision::Deny { reason, rule } = &decision {
@@ -261,7 +307,7 @@ impl Registry {
                 )
                 .task(&context.task)
                 .step(context.step),
-            );
+            )?;
             let code = if *reason == DenyReason::ApprovalRequired {
                 ErrorCode::ApprovalRequired
             } else {
@@ -274,8 +320,8 @@ impl Registry {
                     rule.as_ref().map(|r| format!(" ({r})")).unwrap_or_default()
                 ),
             );
-            self.record_result(name, &result, context, now);
-            return result;
+            self.record_result(name, &result, context, now)?;
+            return Ok(result);
         }
 
         let access = FileAccess {
@@ -286,8 +332,8 @@ impl Registry {
             started: std::time::Instant::now(),
         };
         let result = tool.call_checked(args, context, &access);
-        self.record_result(name, &result, context, now);
-        result
+        self.record_result(name, &result, context, now)?;
+        Ok(result)
     }
 
     fn authorize(
@@ -312,9 +358,6 @@ impl Registry {
         {
             return Decision::deny(DenyReason::PolicyDenied);
         }
-        let Ok(broker) = self.broker.lock() else {
-            return Decision::deny(DenyReason::PolicyDenied);
-        };
 
         // Premier contrôle : le droit d'appeler cet outil.
         let mut call_request =
@@ -325,10 +368,7 @@ impl Registry {
         if meta.external {
             call_request = call_request.external();
         }
-        let decision = match broker.check(&context.token, &call_request, now) {
-            Ok(decision) => decision,
-            Err(_) => return Decision::deny(DenyReason::PolicyDenied),
-        };
+        let decision = self.authority.check(&context.token, &call_request, now);
         if !decision.is_allow() {
             return decision;
         }
@@ -354,9 +394,7 @@ impl Registry {
         if meta.external {
             request = request.external();
         }
-        broker
-            .check(&context.token, &request, now)
-            .unwrap_or_else(|_| Decision::deny(DenyReason::PolicyDenied))
+        self.authority.check(&context.token, &request, now)
     }
 
     fn record_result(
@@ -365,7 +403,7 @@ impl Registry {
         result: &CallResult,
         context: &ToolContext,
         now: OffsetDateTime,
-    ) {
+    ) -> Result<(), String> {
         let code = result
             .structured
             .as_ref()
@@ -386,8 +424,15 @@ impl Registry {
             )
             .task(&context.task)
             .step(context.step),
-        );
+        )
     }
+}
+
+fn journal_error() -> CallResult {
+    CallResult::error(
+        ErrorCode::Internal,
+        "journal non confirmé : l'action peut avoir eu lieu ; tâche suspendue, ne pas réessayer automatiquement",
+    )
 }
 
 /// Empreinte d'une valeur, pour le journal. Le contenu n'y figure jamais.

@@ -2850,6 +2850,7 @@ dependencies = [
  "egress",
  "ledger",
  "memoryd",
+ "prophet-ipc",
  "prophet-types",
  "providers",
  "rand 0.8.8",
@@ -4445,6 +4446,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "prophet-types",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "tempfile",

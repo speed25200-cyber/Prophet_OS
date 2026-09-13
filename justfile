@@ -10,6 +10,8 @@ default:
 check:
     cargo fmt --all --check
     cargo clippy --all-targets --all-features -- -D warnings
+    # Les tests interservices lancent aussi les binaires voisins, dont la CLI sans test d'intégration propre.
+    cargo build --workspace --bins
     cargo test --workspace
     ./tools/verifier-les-services.sh
     ./tools/verifier-le-durcissement.sh

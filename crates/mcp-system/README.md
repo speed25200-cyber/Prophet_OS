@@ -42,6 +42,13 @@ diff SFS correspondant, sans appliquer le changement au fichier utilisateur. Cha
 doit être créé pour une seule tâche par un lanceur de confiance : le modèle ne fournit jamais
 son jeton, ses racines ou son niveau d'isolation.
 
+`services::Services` fournit maintenant l'autorité distante et un journal confirmé par les
+daemons capd et ledger. `agentd::local::Mission` l'utilise sur un thread dédié : le registre
+ne fabrique plus de Broker local pour ce parcours. Un échec de journal interdit de poursuivre ;
+si le résultat d'une écriture n'est pas confirmé, celle-ci peut déjà avoir eu lieu et ne doit
+pas être répétée automatiquement. Voir le [contrat agentd](../../docs/components/agentd.md).
+Cette intégration de bibliothèque n'active pas le binaire MCP autonome.
+
 ```sh
 PROPHET_TEST_ENDPOINT=http://127.0.0.1:18080/v1 PROPHET_TEST_MODEL=qwen3-0.6b \
   nix develop --command cargo test -p mcp-system --test fichiers_isoles \
@@ -52,9 +59,10 @@ Ces garanties supposent des racines fournies et protégées par le lanceur de co
 ne remplacent pas une identité de service authentifiée, des espaces de noms privés, ni le
 durcissement des commits/undo SFS face aux modifications concurrentes. Un descripteur reste
 attaché à son répertoire même si un acteur privilégié déplace celui-ci. Le contrôleur et le
-journal de cet essai sont en processus ; le journal n'est pas durable. Raccorder les vrais
-services, les contextes de tâche et la reprise reste nécessaire avant d'activer `prophet-mcp`
-et le lancement depuis l'interface. Voir l'[ADR 0012](../../docs/adr/0012-acces-fichiers-mcp.md)
+journal de cet essai MCP isolé sont en processus ; son journal n'est pas durable. Le nouveau
+parcours agentd utilise les vrais services ; leur autorisation fine et la reprise durable
+restent à réaliser avant d'activer `prophet-mcp` et le lancement depuis l'interface.
+Voir l'[ADR 0012](../../docs/adr/0012-acces-fichiers-mcp.md)
 et le [rapport de vérification](../../docs/reports/mcp-fichiers-2026-09-13.md).
 
 La négociation suit le [cycle de vie MCP 2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle).

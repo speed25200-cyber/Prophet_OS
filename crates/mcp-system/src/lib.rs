@@ -13,6 +13,7 @@ pub mod native;
 pub mod protocol;
 pub mod registry;
 pub mod server;
+pub mod services;
 pub mod tools;
 
 pub use protocol::{CallResult, Content, ErrorCode, ToolMeta, ToolSpec};

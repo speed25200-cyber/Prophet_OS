@@ -12,6 +12,7 @@ path = "src/bin/prophet-mcp.rs"
 
 [dependencies]
 prophet-types = { workspace = true }
+prophet-ipc = { workspace = true }
 capd = { workspace = true }
 sfs = { workspace = true }
 egress = { workspace = true }

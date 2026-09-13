@@ -89,6 +89,27 @@ Le workflow d'image réussit les services, l'installeur, les constructions et le
 sans que sa cause soit établie. Le rapport MCP référence ces exécutions. Ces observations ne
 valident pas encore le nouveau correctif MCP en CI.
 
+Jalon de service du 13 septembre 2026, après `d7b5c90` : `task.start` lance une mission locale
+en arrière-plan avec les vrais capd et ledger ; `task.result` conserve le résultat. La CLI
+planifie, lance, suit et demande l'annulation. La capture SFS et les outils contrôlent les
+périmètres, les générations tronquées restent comptées avant toute action et les erreurs de
+journal interdisent la répétition automatique. Les tâches interrompues par redémarrage ont
+un échec explicite et l'état corrompu est préservé pour réparation. Le lanceur n'exécute que
+des outils natifs de confiance de niveau 0, sans lancer de programme non fiable.
+
+**Les trois essais Qwen3-0.6B du parcours agentd échouent** : le serveur déclare une génération
+incomplète au plafond de 2 048 tokens ; le dernier protocole observé contient aussi un texte
+altéré. Le refus est maintenu, sans exécuter l'appel incomplet. **`just check` réussi : 604 tests,
+aucun échec, 22 ignorés**, format, clippy, construction des programmes et contrôles du dépôt.
+Les neuf scénarios ordinaires du parcours agentd, avec moteur HTTP contrôlé et vrais services,
+passent ; les essais de modèle réel restent distincts et en échec.
+Voir le [rapport de missions](reports/missions-locales-2026-09-13.md),
+l'[ADR 0013](adr/0013-missions-locales-agentd.md) et l'[exemple CLI](../crates/agentd/README.md).
+La reprise par checkpoints, les résultats vérifiés, le lancement depuis l'interface, les
+processus sous sandboxd et l'intégration à l'image restent ouverts. Aucun critère complet
+de FRONTIER.md n'est coché pour ce jalon. La CI de `d7b5c90` a réussi composants, isolation
+et surface ; le test ChatGPT reste en échec (run `34726143307`).
+
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 
 Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'environnement de construction** ; le détail est dans `docs/reports/phase0.md` section 5.

@@ -12,6 +12,8 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod snapshot;
+
 mod backend;
 mod diff;
 mod provenance;
