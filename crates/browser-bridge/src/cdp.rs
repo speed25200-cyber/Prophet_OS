@@ -56,6 +56,11 @@ impl Browser {
         port: u16,
     ) -> Result<Self, CdpError> {
         std::fs::create_dir_all(profile_dir).map_err(|e| CdpError::Launch(e.to_string()))?;
+        // Un port 0 laisse le navigateur choisir lui-même un port libre et l'écrire dans
+        // `DevToolsActivePort` ; un fichier laissé par un lancement précédent dirait un port
+        // qui n'est plus le sien, on le retire avant de lancer.
+        let active_port = profile_dir.join("DevToolsActivePort");
+        let _ = std::fs::remove_file(&active_port);
         let child = Command::new(program)
             .args([
                 "--headless=new",
@@ -91,9 +96,39 @@ impl Browser {
             .spawn()
             .map_err(|e| CdpError::Launch(format!("{program} : {e}")))?;
 
-        let browser = Self { child, port };
+        let mut browser = Self { child, port };
+        if port == 0 {
+            browser.port = browser.published_port(&active_port).await?;
+        }
         browser.wait_ready().await?;
         Ok(browser)
+    }
+
+    /// Lit le port que le navigateur annonce dans son profil, une fois qu'il l'a écrit.
+    ///
+    /// C'est le navigateur qui a choisi ce port, en le liant : aucune autre tâche ne peut se
+    /// glisser entre le choix et la prise, ce qu'une réservation faite d'ici ne garantit pas.
+    async fn published_port(&mut self, active_port: &std::path::Path) -> Result<u16, CdpError> {
+        for _ in 0..200 {
+            if let Ok(text) = std::fs::read_to_string(active_port)
+                && let Some(port) = text
+                    .lines()
+                    .next()
+                    .and_then(|l| l.trim().parse::<u16>().ok())
+                && port != 0
+            {
+                return Ok(port);
+            }
+            if let Ok(Some(status)) = self.child.try_wait() {
+                return Err(CdpError::Launch(format!(
+                    "le navigateur s'est arrêté avant d'annoncer son port ({status})"
+                )));
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        Err(CdpError::Launch(
+            "le navigateur n'a pas annoncé son port de débogage".to_owned(),
+        ))
     }
 
     async fn wait_ready(&self) -> Result<(), CdpError> {
@@ -179,9 +214,17 @@ impl Browser {
         profile_dir: &std::path::Path,
     ) -> Result<Self, CdpError> {
         let mut derniere = None;
-        for _ in 0..TENTATIVES_DE_LANCEMENT {
-            let Some(port) = port_probablement_libre() else {
-                continue;
+        for tentative in 0..TENTATIVES_DE_LANCEMENT {
+            // Le navigateur choisit et lie lui-même son port (port 0) : plus de course. Les
+            // tentatives suivantes gardent l'ancienne réservation, au cas où un navigateur
+            // n'écrirait pas le fichier d'annonce.
+            let port = if tentative == 0 {
+                0
+            } else {
+                let Some(port) = port_probablement_libre() else {
+                    continue;
+                };
+                port
             };
             match Self::launch(program, profile_dir, port).await {
                 Ok(navigateur) => return Ok(navigateur),
