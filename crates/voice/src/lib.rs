@@ -79,6 +79,10 @@ pub struct Tools {
     /// n'entend pas toujours pareil une phrase courte ; les essais préfèrent le même son.
     /// `PROPHET_PIPER_DETERMINISTIC=1` dans l'environnement, ou le champ, l'active.
     pub deterministic: bool,
+    /// Langue de transcription par défaut (`fr`…) quand l'appel n'en donne pas ; sinon Whisper
+    /// la détecte, et se trompe parfois sur une phrase courte. `PROPHET_VOICE_LANGUAGE` la pose ;
+    /// l'image de référence dit `fr`.
+    pub language: Option<String>,
 }
 
 /// Ce que la synthèse a produit.
@@ -135,6 +139,9 @@ impl Tools {
                 .or_else(|| which("pw-play"))
                 .or_else(|| which("aplay")),
             deterministic: std::env::var("PROPHET_PIPER_DETERMINISTIC").as_deref() == Ok("1"),
+            language: std::env::var("PROPHET_VOICE_LANGUAGE")
+                .ok()
+                .filter(|l| !l.is_empty()),
         })
     }
 
@@ -304,7 +311,7 @@ impl Tools {
                 audio.display()
             )));
         }
-        let language = language.unwrap_or("auto");
+        let language = language.or(self.language.as_deref()).unwrap_or("auto");
         if !language.chars().all(|c| c.is_ascii_lowercase()) || language.len() > 4 {
             return Err(Error::Invalid(
                 "langue : code à deux lettres attendu".into(),
@@ -800,6 +807,7 @@ mod tests {
             speaker: None,
             player: None,
             deterministic: false,
+            language: None,
         };
         assert!(matches!(
             tools.record(0, Path::new("/tmp/x.wav")),

@@ -37,6 +37,9 @@ in {
       PROPHET_RECORDER = "${pkgs.pipewire}/bin/pw-record";
       PROPHET_PLAYER = "${pkgs.pipewire}/bin/pw-play";
       PROPHET_PIPER = "${pkgs.piper-tts}/bin/piper";
+      # La langue de l'humain : dite à Whisper plutôt que détectée, qui se trompe sur une
+      # phrase courte. Une autre langue se règle ici.
+      PROPHET_VOICE_LANGUAGE = "fr";
     } // lib.optionalAttrs (cfg.model != null) {
       PROPHET_WHISPER_MODEL = toString cfg.model;
     } // lib.optionalAttrs (cfg.speaker != null) {

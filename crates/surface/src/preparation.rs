@@ -601,6 +601,9 @@ mod tests {
     fn l_ecoute_permanente_ne_retient_que_la_phrase_qui_commence_par_le_mot() {
         let mut tools = voice::Tools::from_env().unwrap();
         tools.deterministic = true;
+        // La langue est dite : la détection automatique de Whisper se trompe sur une phrase
+        // courte de synthèse, et l'objectif restait vide (vu en CI le 14 septembre 2026).
+        tools.language = Some("fr".into());
         assert!(tools.can_speak(), "{tools:?}");
         let temp = tempfile::tempdir().unwrap();
         let bruit = temp.path().join("bruit.wav");
@@ -650,7 +653,8 @@ mod tests {
         let intent = preparation.intent.to_lowercase();
         assert!(
             intent.contains("note") && intent.contains("documents"),
-            "{intent}"
+            "objectif « {intent} », erreur : {:?}",
+            preparation.error()
         );
         assert!(!intent.contains("beau"), "{intent}");
         assert!(!intent.contains("proph"), "{intent}");

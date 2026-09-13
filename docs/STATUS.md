@@ -356,7 +356,10 @@ documents. un changement est à examiner. » L'atelier dit de lui-même la fin d
 qu'on regarde courir (même résumé, dans le crate `voice` ; bouton « Voix : lue / muette ») et
 obéit aux mêmes ordres que la CLI (« Prophète, prépare », « lance la mission », « résultat »,
 `voice::ordre_vocal` partagé) ; ces tests de contrôleur sont écrits et joués par la CI, pas sur
-cette machine. Ni voix humaine
+cette machine. Premier verdict du travail « Parole » (`27b55a9`) : `voice` et la CLI verts avec
+la vraie chaîne sur le coureur — les trois ordres à la suite compris — ; l'écoute de l'atelier
+laissait l'objectif vide, faute de dire la langue à Whisper (détection automatique fautive sur
+une phrase courte) : `PROPHET_VOICE_LANGUAGE`, `fr` dans l'image, donne la langue par défaut. Ni voix humaine
 mesurée, ni lecture vérifiée sur une vraie sortie audio : voir
 l'[ADR 0036](adr/0036-la-parole-de-l-humain.md) et le [rapport](reports/parole-2026-09-13.md).
 

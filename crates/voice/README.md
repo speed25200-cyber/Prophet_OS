@@ -14,6 +14,7 @@ machine.
 | `PROPHET_RECORDER` | `pw-record` ou `arecord` ; sinon cherché sur le chemin |
 | `PROPHET_PIPER` | `piper`, la synthèse vocale ; sinon cherché sur le chemin |
 | `PROPHET_PIPER_VOICE` | Voix de Piper (`*.onnx`, `.onnx.json` à côté) ; sans elle, l'OS ne parle pas |
+| `PROPHET_VOICE_LANGUAGE` | Langue de transcription par défaut (`fr`) ; sinon détection automatique |
 | `PROPHET_PLAYER` | `pw-play` ou `aplay` ; sinon cherché sur le chemin |
 
 ## Usage
