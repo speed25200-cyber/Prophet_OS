@@ -398,7 +398,41 @@ fn le_catalogue_refuse_les_profils_hors_perimetre_et_accepte_une_ecriture_plus_e
     std::fs::write(&path, json!([fetch_only]).to_string()).unwrap();
     let loaded = agentd::preparation::load(&path).unwrap();
     assert!(!loaded[0].uses_browser() && !loaded[0].view(&[]).web);
+    // Une application de bureau nommée est admise pour `ui.read` / `ui.act`, avec les outils
+    // d'interface ; ni joker, ni outil d'interface sans application.
+    let mut bureau = profile.clone();
+    bureau["manifest"]["capabilities"]["max"]["ui.read"] = json!(["mousepad"]);
+    bureau["manifest"]["capabilities"]["max"]["ui.act"] = json!(["mousepad"]);
+    bureau["manifest"]["capabilities"]["max"]["tool.call"] =
+        json!(["fs.read", "fs.write", "ui.apps", "ui.tree", "ui.act"]);
+    std::fs::write(&path, json!([bureau]).to_string()).unwrap();
+    let loaded = agentd::preparation::load(&path).unwrap();
+    assert!(!loaded[0].uses_browser() && !loaded[0].view(&[]).web);
+    assert!(
+        loaded[0]
+            .view(&[])
+            .grants
+            .iter()
+            .any(|g| g == "ui.act sur mousepad"),
+        "{:?}",
+        loaded[0].view(&[]).grants
+    );
     for bad in [
+        {
+            let mut p = bureau.clone();
+            p["manifest"]["capabilities"]["max"]["ui.read"] = json!(["*"]);
+            p
+        },
+        {
+            let mut p = bureau.clone();
+            p["manifest"]["capabilities"]["max"]["ui.act"] = json!(["Mousepad Pro/../x"]);
+            p
+        },
+        {
+            let mut p = profile.clone();
+            p["manifest"]["capabilities"]["max"]["tool.call"] = json!(["fs.read", "ui.tree"]);
+            p
+        },
         {
             let mut p = profile.clone();
             p["scopes"] = json!(["~/Documents/../secrets"]);
@@ -440,7 +474,7 @@ fn le_catalogue_refuse_les_profils_hors_perimetre_et_accepte_une_ecriture_plus_e
         },
     ] {
         std::fs::write(&path, json!([bad]).to_string()).unwrap();
-        assert!(agentd::preparation::load(&path).is_err());
+        assert!(agentd::preparation::load(&path).is_err(), "{bad}");
     }
     std::fs::write(&path, json!([profile, profile]).to_string()).unwrap();
     assert!(agentd::preparation::load(&path).is_err());

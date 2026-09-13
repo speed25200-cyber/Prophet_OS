@@ -4,7 +4,9 @@ La fin des captures d'écran : une application expose ce qu'elle est (un arbre d
 rôles, des noms, des valeurs) et ce qu'on peut lui faire (des actions typées, avec `irreversible`,
 `external`, `requires`). L'observation pèse des kilooctets au lieu de mégaoctets, et une action
 est nommée au lieu d'être un clic en (x, y). Le pont navigateur et l'éditeur de référence
-publient cet arbre ; les outils `web.*` le consomment, `ui.tree` et `ui.act` sont spécifiés.
+publient cet arbre ; les outils `web.*` le consomment, et `ui.tree` / `ui.act` le lisent depuis
+l'accessibilité des applications de la session par l'adaptateur `supd` (`sup::session` fixe le
+vocabulaire de ce socket, `sup::adapter` la traduction AT-SPI → SUP et sa confiance).
 
 ```sh
 cargo test -p sup

@@ -1,0 +1,30 @@
+[package]
+name = "supd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Adaptateur d'accessibilité de la session humaine : les applications GTK et Qt, lues et pilotées par leur arbre AT-SPI, rendues en SUP au service."
+
+[[bin]]
+name = "prophet-supd"
+path = "src/bin/prophet-supd.rs"
+
+[dependencies]
+sup = { workspace = true }
+prophet-ipc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+atspi-proxies = { version = "0.13", default-features = false }
+atspi-common = { version = "0.13", default-features = false }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

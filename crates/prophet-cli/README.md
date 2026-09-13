@@ -29,6 +29,10 @@ navigateur piloté ; `prophet task prepare --profile <contexte> --model <modèle
 prépare une mission sans manifeste ni droits fournis par la CLI, comme « Nouvel objectif » ;
 `--client` la destine à un client MCP, sans exiger le moteur local (le modèle du contexte
 suffit, `--model` devient facultatif).
+`prophet task attach <mission>` ouvre une séance d'outils depuis le terminal, `prophet task
+call <mission> <outil> '<json>'` y appelle un outil (`ui.tree`, `ui.act`, `fs.write`…) et
+`prophet task detach <mission>` la ferme, la mission passant à l'examen : c'est ainsi que le
+test du bureau fait écrire un agent dans l'éditeur par son arbre d'accessibilité.
 `prophet task mcp-config <mission>` rend, pour une mission préparée et non lancée par le même
 utilisateur, la configuration qui donne à Claude Code (`claude --mcp-config <fichier>`) ou à
 Codex (`mcp_servers` de sa configuration) les outils de cette mission par le pont `prophet-mcp`.

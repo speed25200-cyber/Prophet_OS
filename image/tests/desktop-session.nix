@@ -257,9 +257,75 @@ pkgs.testers.runNixOSTest {
 
         with subtest("le lanceur connaît le navigateur partagé et l'application X"):
             entries = machine.succeed("su - pilot -c 'prophet-ouvrir --liste'").split("\n")
-            for entry in ["Navigateur", "X", "ChatGPT", "Claude Code", "Claude Code · mission", "Codex", "Supervision"]:
+            for entry in ["Navigateur", "X", "Éditeur", "ChatGPT", "Claude Code", "Claude Code · mission", "Codex", "Supervision"]:
                 assert entry in entries, entries
             machine.succeed("test -x ${pkgs.chromium}/bin/chromium")
+
+        with subtest("un agent écrit dans l'éditeur du bureau par son arbre d'accessibilité"):
+            # L'adaptateur de la session répond, sur un socket que seul agentd peut appeler.
+            machine.wait_until_succeeds("su - pilot -c 'systemctl --user is-active prophet-supd.service'", timeout=60)
+            machine.wait_until_succeeds("test -S /run/prophet/sup.sock", timeout=30)
+            assert machine.succeed("stat -c %G /run/prophet/sup.sock").strip() == "prophet-system"
+            machine.fail("su - pilot -c 'prophet task call inexistante ui.apps'")
+            # Un document nommé, ouvert dans l'éditeur ; l'agent écrit, enregistre, et le fichier le dit.
+            machine.succeed("install -d -m 0700 -o pilot -g users /home/pilot/Documents/Prophet")
+            machine.succeed("install -m 0600 -o pilot -g users /dev/null /home/pilot/Documents/Prophet/bonjour.txt")
+            machine.succeed("su - pilot -c " + q("swaymsg exec " + q("prophet-ouvrir editeur /home/pilot/Documents/Prophet/bonjour.txt")))
+            window("mousepad")
+            prophet = "su - pilot -c " + q("prophet --json task ")
+            def appel(outil, args):
+                return json.loads(machine.succeed(prophet[:-1] + "call essai-bureau " + outil + " " + json.dumps(args) + "'"))
+            machine.succeed("su - pilot -c " + q("prophet task prepare --client --profile bureau --id essai-bureau 'Écrire bonjour dans le document'"))
+            machine.succeed("su - pilot -c " + q("prophet task attach essai-bureau --client test"))
+            apps = None
+            for _ in range(30):
+                apps = appel("ui.apps", {})
+                if any(a["app"] == "mousepad" for a in apps["structured"]["apps"]):
+                    break
+                machine.sleep(1)
+            assert apps and any(a["app"] == "mousepad" for a in apps["structured"]["apps"]), apps
+            champ = None
+            for _ in range(30):
+                arbre = appel("ui.tree", {"app": "mousepad"})
+                assert arbre["structured"]["provenance"] == "accessibility", arbre
+                def chercher(n):
+                    if n.get("role") == "field" and n.get("actionable"):
+                        return n
+                    for c in n.get("children", []):
+                        trouve = chercher(c)
+                        if trouve:
+                            return trouve
+                    return None
+                champ = chercher(arbre["structured"]["tree"]["root"])
+                if champ:
+                    break
+                machine.sleep(1)
+            assert champ, arbre
+            ecrit = appel("ui.act", {"app": "mousepad", "action": "set_field", "node": champ["id"], "value": "bonjour"})
+            assert not ecrit["isError"], ecrit
+            arbre = appel("ui.tree", {"app": "mousepad"})
+            relu = chercher(arbre["structured"]["tree"]["root"])
+            assert relu and relu.get("value") == "bonjour", relu
+            def menu(n, nom):
+                if n.get("role") == "item" and n.get("name", "").strip().lower() == nom:
+                    return n
+                for c in n.get("children", []):
+                    trouve = menu(c, nom)
+                    if trouve:
+                        return trouve
+                return None
+            save = menu(arbre["structured"]["tree"]["root"], "save")
+            assert save, arbre
+            clic = appel("ui.act", {"app": "mousepad", "action": "click", "node": save["id"]})
+            assert not clic["isError"], clic
+            machine.wait_until_succeeds("grep -qx bonjour /home/pilot/Documents/Prophet/bonjour.txt", timeout=30)
+            # Hors du droit : une autre application, même existante, est refusée par capd.
+            refus = appel("ui.tree", {"app": "thunar"})
+            assert refus["isError"], refus
+            machine.succeed("su - pilot -c " + q("prophet task detach essai-bureau --text 'bonjour écrit'"))
+            etat = json.loads(machine.succeed("su - pilot -c " + q("prophet --json task show essai-bureau")))
+            assert etat["task"]["state"] == "done", etat
+            machine.screenshot("bureau-editeur-agent")
 
         with subtest("le lanceur clavier et la déconnexion demandent une action explicite"):
             machine.send_key("meta_l-spc")

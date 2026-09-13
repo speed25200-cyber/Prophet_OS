@@ -8,6 +8,9 @@ let
   # Le navigateur de la session humaine et des applications web installées par défaut (X).
   chromium = pkgs.chromium;
   compositor = config.programs.sway.package;
+  # Le socket de l'adaptateur d'accessibilité : dans le répertoire d'exécution des services,
+  # que le groupe système de Prophet peut écrire (l'humain en est membre) et joindre (agentd).
+  supSocket = "/run/prophet/sup.sock";
   launcher = pkgs.writeShellApplication {
     name = "prophet-ouvrir";
     runtimeInputs = [ pkgs.coreutils pkgs.jq pkgs.fuzzel pkgs.foot compositor ];
@@ -23,6 +26,7 @@ Claude Code · mission
 Codex
 Navigateur
 X
+Éditeur
 Fichiers
 Terminal
 Verrouiller
@@ -43,7 +47,7 @@ Déconnexion'
           'Claude Code') app=claude-code ;; Codex) app=codex ;;
           'Claude Code · mission') app=claude-code-mission ;;
           Fichiers) app=fichiers ;; Terminal) app=terminal ;;
-          Navigateur) app=navigateur ;; X) app=x ;;
+          Navigateur) app=navigateur ;; X) app=x ;; Éditeur) app=editeur ;;
           Verrouiller) app=verrouiller ;; Déconnexion) app=deconnexion ;;
           *) exit 0 ;;
         esac
@@ -74,6 +78,14 @@ Déconnexion'
         fichiers)
           swaymsg 'workspace "2: Atelier"' >/dev/null
           launch ${pkgs.thunar}/bin/thunar "$HOME/Documents/Prophet"
+          ;;
+        editeur)
+          # L'éditeur de texte du bureau : une application GTK que l'agent peut lire et
+          # piloter par son arbre d'accessibilité (contexte « bureau », ADR 0027). Un chemin
+          # en second argument ouvre ce fichier ; sinon un document vide dans l'espace Prophet.
+          swaymsg 'workspace "2: Atelier"' >/dev/null
+          install -d -m 0700 -- "$HOME/Documents/Prophet"
+          launch ${pkgs.mousepad}/bin/mousepad "''${2:-}"
           ;;
         claude-code)
           swaymsg 'workspace "2: Atelier"' >/dev/null
@@ -237,7 +249,7 @@ in {
     xdg.portal = { enable = true; wlr.enable = true; extraPortals = [ pkgs.xdg-desktop-portal-gtk ]; };
     security.pam.services.swaylock = { };
     environment.systemPackages = [
-      launcher session chatgpt chromium pkgs.foot pkgs.thunar pkgs.wl-clipboard
+      launcher session chatgpt chromium pkgs.foot pkgs.thunar pkgs.mousepad pkgs.wl-clipboard
       pkgs.fuzzel pkgs.waybar pkgs.swaylock pkgs.adwaita-icon-theme
     ];
     environment.sessionVariables = {
@@ -294,6 +306,30 @@ in {
       include /etc/sway/config.d/*
       exec ${pkgs.waybar}/bin/waybar --config /etc/prophet/waybar.json --style /etc/prophet/waybar.css
     '';
+    # Le bus d'accessibilité de la session : c'est par lui que les applications GTK et Qt
+    # publient leur arbre, et par lui que l'adaptateur les lit et les pilote (ADR 0027).
+    services.gnome.at-spi2-core.enable = true;
+    # L'adaptateur d'accessibilité, dans la session : il joint le bus de la session, écoute sur
+    # un socket du répertoire des services (groupe système de Prophet) et n'admet qu'agentd.
+    systemd.user.services.prophet-supd = {
+      description = "Prophet OS — adaptateur d'accessibilité de la session";
+      wantedBy = [ "sway-session.target" ];
+      partOf = [ "sway-session.target" ];
+      after = [ "graphical-session-pre.target" ];
+      environment = {
+        PROPHET_SUP_SOCKET = supSocket;
+        PROPHET_SUP_CLIENT = "agentd";
+        PROPHET_SUP_GROUP = "prophet-system";
+      };
+      unitConfig = { StartLimitIntervalSec = 60; StartLimitBurst = 3; ConditionUser = human; };
+      serviceConfig = {
+        ExecStart = "${prophet}/bin/prophet-supd";
+        Restart = "on-failure";
+        RestartSec = "3s";
+        UMask = "0007";
+      };
+    };
+    systemd.services.prophet-agentd.environment.PROPHET_SUP_SOCKET = supSocket;
     systemd.user.services.prophet-supervision = {
       description = "Prophet OS — supervision humaine";
       wantedBy = [ "sway-session.target" ];

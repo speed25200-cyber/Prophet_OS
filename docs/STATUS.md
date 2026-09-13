@@ -130,8 +130,29 @@ Le parcours du système installé passe enfin le relevé de Claude Code et le la
 après la déconnexion : la cible `sway-session.target` restait active, la supervision mourait
 trois fois sans compositeur et atteignait sa limite de redémarrages, et la session suivante
 s'ouvrait sans elle. La session arrête maintenant la cible à sa sortie et remet le compteur à
-zéro à son entrée. Ces deux correctifs attendent la CI.
+zéro à son entrée. La CI de `043788d` confirme les deux correctifs : les sept services sous
+systemd, sonde du navigateur comprise, et le parcours complet du système installé (Claude
+Code, lanceur, navigateur, X, verrouillage, déconnexion puis reconnexion) réussissent, avec
+l'ISO, son démarrage et l'installeur ; seul ChatGPT reste en échec sur Fontconfig.
 Aucune case complète de FRONTIER n'est cochée.
+
+Pilotage des applications du 13 septembre 2026, dans le commit portant ce rapport : les
+applications GTK et Qt de la session sont lues et pilotées par leur arbre d'accessibilité. Le
+crate `supd` (service utilisateur `prophet-supd`, dans la session) joint le bus AT-SPI, rend
+l'arbre d'une fenêtre en SUP par `sup::adapter` (provenance « accessibilité », confiance
+annoncée, lecture bornée qui dit ce qu'elle laisse), et exécute `click`, `set_field` et
+`toggle` par ce que l'application déclare, sans touche ni clic simulés. Son socket
+(`/run/prophet/sup.sock`, groupe système) n'admet qu'agentd, qui fait trancher capd :
+`ui.read` et `ui.act` désignent une application par son nom, jamais l'écran, et les outils
+`ui.apps`, `ui.tree`, `ui.act` s'ajoutent aux missions natives et aux séances MCP.
+`prophet task attach / call / detach` pilotent une séance depuis le terminal. Le test local
+(`tools/bureau-local.sh`, vrai bus, vrai Mousepad) prouve M10-T4 : l'agent lit l'arbre, écrit
+« bonjour », active « Enregistrer » par le menu, et le fichier le contient. L'image installe
+Mousepad, le bus d'accessibilité, l'adaptateur et le contexte « bureau » ; le test du bureau
+rejoue le scénario par la CLI. Limite connue : une action qui ouvre un dialogue modal dans une
+application GTK 3 bloque son pont jusqu'à la fermeture (libdbus non réentrant) ; GTK 4 n'a pas
+cette limite. Cette partie de l'image attend la CI. Voir
+l'[ADR 0027](adr/0027-pilotage-des-applications-par-l-accessibilite.md).
 
 Séance d'outils MCP du 13 septembre 2026, dans le commit portant ce rapport : un client MCP de
 l'humain (Claude Code, Codex…) travaille dans une mission préparée, tenue par `agentd` avec le
@@ -545,7 +566,7 @@ du filtre de chemins et restent libres.
 - [x] M10-T1 — Spécification SUP v0 (2026-09-12, 24b8338) — arbre, actions typées, niveaux de détail
 - [x] M10-T2 — Registre SUP (2026-09-12, 24b8338) — registre cloisonné, différentiels
 - [x] M10-T3 — Pont navigateur (2026-09-12, 24b8338) — réservation sans capture d'écran, 1 929 octets
-- [x] M10-T4 — Adaptateur AT-SPI (2026-09-12, 8091f4d) — correspondance des rôles, confiance annoncée, actions réellement offertes seulement
+- [x] M10-T4 — Adaptateur AT-SPI (2026-09-12, 8091f4d, puis 2026-09-13) — correspondance des rôles, confiance annoncée, actions réellement offertes seulement ; le 13 septembre, lecture et pilotage réels par l'adaptateur de session `supd` et les outils `ui.*` : l'éditeur GTK est écrit et enregistré sans pixel (ADR 0027)
 - [x] M10-T5 — Application native de référence (2026-09-12, 8091f4d) — éditeur publiant SUP nativement, `send` irréversible et externe
 - [x] M10-T6 — Repli vision (2026-09-12, 24b8338) — capture d'écran réservée, hors défaut
 

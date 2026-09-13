@@ -20,6 +20,7 @@
 pub mod adapter;
 pub mod diff;
 pub mod registry;
+pub mod session;
 pub mod tree;
 
 pub use adapter::{AccessibleNode, Provenance, convert_tree};

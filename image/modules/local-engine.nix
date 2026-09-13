@@ -61,6 +61,32 @@ let
         budget.default = { tokens = 30000; wall_time = "180s"; approvals = 3; };
       };
     }
+    # Le bureau, par l'accessibilité : l'éditeur de texte de la session est lu et piloté par
+    # son arbre AT-SPI, sans capture d'écran ; l'application est nommée, jamais l'écran.
+    {
+      id = "bureau";
+      name = "Éditeur du bureau";
+      description = "Écrire dans l'éditeur de texte ouvert sur le bureau (Mousepad) et déposer des fichiers dans ~/Documents/Prophet. L'agent lit et manipule l'application par son arbre d'accessibilité ; chaque action figure au journal.";
+      scopes = [ "~/Documents/Prophet" ];
+      manifest = {
+        agent = {
+          id = "org.prophet.bureau";
+          version = "1.0.0";
+          name = "Éditeur du bureau";
+          publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        };
+        model.preferred = [ "local:${cfg.model}" ];
+        sandbox.min_level = 0;
+        capabilities.max = {
+          "fs.read" = [ "~/Documents/Prophet/**" ];
+          "fs.write" = [ "~/Documents/Prophet/**" ];
+          "ui.read" = [ "mousepad" ];
+          "ui.act" = [ "mousepad" ];
+          "tool.call" = [ "fs.read" "fs.write" "ui.apps" "ui.tree" "ui.act" ];
+        };
+        budget.default = { tokens = 30000; wall_time = "180s"; approvals = 3; };
+      };
+    }
   ]);
 in {
   options.prophet.localEngine = {

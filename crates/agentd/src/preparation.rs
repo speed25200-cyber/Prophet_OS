@@ -15,6 +15,24 @@ const BROWSER_TOOLS: &[&str] = &["web.open", "web.tree", "web.act"];
 /// Outils qui sortent sur le réseau, tous par egress. Chacun exige un hôte dans le profil.
 const WEB_TOOLS: &[&str] = &["http.fetch", "web.open", "web.tree", "web.act"];
 
+/// Les outils d'interface des applications de bureau (ADR 0027).
+const UI_TOOLS: &[&str] = &["ui.apps", "ui.tree", "ui.act"];
+
+/// Un nom d'application tel que l'adaptateur de session l'identifie : minuscules, chiffres,
+/// point, tiret, soulignement ; ni joker ni chemin, pour qu'un droit désigne une application.
+fn is_app_name(pattern: &str) -> bool {
+    // L'écran, le bureau ou la session entière ne sont pas des applications : un droit sur
+    // « tout ce qui s'affiche » n'existe pas.
+    !matches!(
+        pattern,
+        "screen" | "desktop" | "display" | "session" | "all" | "any" | "root"
+    ) && !pattern.is_empty()
+        && pattern.len() <= 64
+        && pattern
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '-' | '_'))
+}
+
 /// Profil installé par l'administrateur du service. Il définit le plafond et le contexte.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -257,6 +275,10 @@ impl Profile {
         let hosts = grants
             .iter()
             .any(|g| g.res == Res::Net && g.act == Act::Egress);
+        // Un outil d'interface sans application nommée ne ferait, lui aussi, que des refus.
+        let apps = grants
+            .iter()
+            .any(|g| g.res == Res::Ui && g.pattern != "browser" && is_app_name(&g.pattern));
         for grant in grants {
             match (grant.res, grant.act) {
                 (Res::Fs, Act::Read | Act::Write | Act::List)
@@ -270,18 +292,20 @@ impl Profile {
                 // Les hôtes sont validés par le manifeste ; capd tranche à l'émission, egress à
                 // chaque requête, et les méthodes qui modifient attendent l'accord humain.
                 (Res::Net, Act::Egress) => {}
-                // L'interface observée ou manipulée est le navigateur piloté, rien d'autre :
-                // ni écran, ni fenêtre d'une autre application.
-                (Res::Ui, Act::Read | Act::Act) if grant.pattern == "browser" => {}
+                // L'interface observée ou manipulée est le navigateur piloté, ou une application
+                // de bureau nommée : jamais l'écran, jamais « toutes les applications ».
+                (Res::Ui, Act::Read | Act::Act)
+                    if grant.pattern == "browser" || is_app_name(&grant.pattern) => {}
                 (Res::Tool, Act::Call)
                     if matches!(
                         grant.pattern.as_str(),
                         "fs.read" | "fs.write" | "fs.list" | "fs.search" | "fs.stat"
                     ) => {}
                 (Res::Tool, Act::Call) if hosts && WEB_TOOLS.contains(&grant.pattern.as_str()) => {}
+                (Res::Tool, Act::Call) if apps && UI_TOOLS.contains(&grant.pattern.as_str()) => {}
                 _ => {
                     return Err(
-                        "Le profil dépasse les outils fichiers natifs, le web relayé par egress et ses périmètres."
+                        "Le profil dépasse les outils fichiers natifs, le web relayé par egress, les applications nommées et ses périmètres."
                             .into(),
                     );
                 }

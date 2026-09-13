@@ -50,6 +50,8 @@ struct Agents {
     browser_state: Arc<std::sync::RwLock<Option<agentd::preparation::BrowserState>>>,
     /// Profils de navigation, un par tâche, dans l'état privé du service.
     browser_root: std::path::PathBuf,
+    /// Socket de l'adaptateur d'accessibilité de la session humaine, s'il est configuré.
+    sup_socket: Option<std::path::PathBuf>,
     /// Séances d'outils ouvertes pour des clients MCP, une par mission attachée.
     seances: Seances,
     /// Où l'état est écrit entre deux démarrages.
@@ -640,6 +642,7 @@ impl Agents {
             egress: self.egress.clone(),
             browser: self.browser.clone(),
             browser_root: self.browser_root.clone(),
+            sup_socket: self.sup_socket.clone(),
             stop,
         };
         let opened =
@@ -900,6 +903,7 @@ impl Agents {
             egress: self.egress.clone(),
             browser: self.browser.clone(),
             browser_root: self.browser_root.clone(),
+            sup_socket: self.sup_socket.clone(),
             stop,
         };
         if let Err(error) = std::thread::Builder::new()
@@ -1166,6 +1170,9 @@ async fn main() -> anyhow::Result<()> {
     // au niveau 2 (ADR 0024).
     let browser = std::env::var_os("PROPHET_BROWSER").map(std::path::PathBuf::from);
     let browser_root = commun::etat("agentd").join("navigateurs");
+    // Les applications du bureau ne sont pilotées que si l'administrateur nomme le socket de
+    // l'adaptateur de session ; sans lui, les outils `ui.*` n'existent pas.
+    let sup_socket = std::env::var_os("PROPHET_SUP_SOCKET").map(std::path::PathBuf::from);
     // La sonde tourne sous les contraintes réelles du service, une fois, sans retarder le socket :
     // `task.options` répond « sonde en cours » jusqu'à son verdict.
     let browser_state = Arc::new(std::sync::RwLock::new(
@@ -1250,6 +1257,7 @@ async fn main() -> anyhow::Result<()> {
             browser,
             browser_state,
             browser_root,
+            sup_socket,
             seances: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
             etat: fichier_etat,
             pairs: commun::Pairs::detecter()?,

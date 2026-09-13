@@ -4784,6 +4784,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "supd"
+version = "0.1.0"
+dependencies = [
+ "atspi-common",
+ "atspi-proxies",
+ "prophet-ipc",
+ "serde",
+ "serde_json",
+ "sup",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "zbus",
+]
+
+[[package]]
 name = "surface"
 version = "0.1.0"
 dependencies = [
@@ -5038,6 +5056,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
+ "tracing",
  "windows-sys 0.61.2",
 ]
 
@@ -6346,6 +6365,7 @@ dependencies = [
  "rustix 1.1.4",
  "serde",
  "serde_repr",
+ "tokio",
  "tracing",
  "uds_windows",
  "uuid",

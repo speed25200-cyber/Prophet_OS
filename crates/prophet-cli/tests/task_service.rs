@@ -67,6 +67,15 @@ fn success(output: Output) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
+fn failure(output: Output) -> String {
+    assert!(
+        !output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    String::from_utf8(output.stderr).unwrap()
+}
+
 fn mission() -> agentd::Task {
     agentd::Task::new(
         "task:service",
@@ -247,4 +256,55 @@ fn la_configuration_mcp_ne_vise_qu_une_mission_preparee() {
     );
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("seule une mission préparée"));
+}
+
+#[test]
+fn une_seance_se_pilote_a_la_main_depuis_le_terminal() {
+    // Ouvrir, appeler un outil, fermer : trois appels que la CLI transmet tels quels au
+    // créateur de la mission, sans jeton ni fichier.
+    let rendu = success(invoke(
+        &["task", "attach", "essai", "--client", "essai"],
+        "task.attach",
+        json!({"id":"essai","client":"essai"}),
+        json!({"task":"essai","tools":[{"name":"ui.tree"},{"name":"ui.act"}]}),
+    ));
+    assert!(rendu.contains("ui.tree, ui.act"), "{rendu}");
+    let rendu = success(invoke(
+        &[
+            "--json",
+            "task",
+            "call",
+            "essai",
+            "ui.tree",
+            r#"{"app":"mousepad"}"#,
+        ],
+        "task.call",
+        json!({"id":"essai","name":"ui.tree","arguments":{"app":"mousepad"}}),
+        json!({"content":[{"type":"text","text":"{\"nodes\":3}"}],"isError":false,"structured":{"nodes":3}}),
+    ));
+    assert_eq!(
+        serde_json::from_str::<Value>(&rendu).unwrap()["structured"]["nodes"],
+        3
+    );
+    // Un outil qui échoue est une erreur de la commande, avec le texte de l'outil.
+    let erreur = failure(invoke(
+        &[
+            "task",
+            "call",
+            "essai",
+            "ui.act",
+            r#"{"app":"mousepad","action":"click","node":"9"}"#,
+        ],
+        "task.call",
+        json!({"id":"essai","name":"ui.act","arguments":{"app":"mousepad","action":"click","node":"9"}}),
+        json!({"content":[{"type":"text","text":"élément introuvable : 9"}],"isError":true}),
+    ));
+    assert!(erreur.contains("élément introuvable"), "{erreur}");
+    let rendu = success(invoke(
+        &["task", "detach", "essai", "--text", "fini"],
+        "task.detach",
+        json!({"id":"essai","text":"fini"}),
+        json!({"task":"essai","state":"done"}),
+    ));
+    assert!(rendu.contains("done"), "{rendu}");
 }

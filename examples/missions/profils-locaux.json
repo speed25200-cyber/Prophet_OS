@@ -3,7 +3,9 @@
     "id": "documents",
     "name": "Documents de travail",
     "description": "Rédiger et préparer des documents dans votre espace Prophet.",
-    "scopes": ["~/Documents/Prophet"],
+    "scopes": [
+      "~/Documents/Prophet"
+    ],
     "manifest": {
       "agent": {
         "id": "org.prophet.documents-locaux",
@@ -12,20 +14,40 @@
         "publisher_key": "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
       },
       "model": {
-        "preferred": ["local:qwen3-0.6b"],
+        "preferred": [
+          "local:qwen3-0.6b"
+        ],
         "privacy": "local-only"
       },
-      "sandbox": { "min_level": 0 },
+      "sandbox": {
+        "min_level": 0
+      },
       "capabilities": {
         "max": {
-          "fs.read": ["~/Documents/Prophet/**"],
-          "fs.list": ["~/Documents/Prophet/**"],
-          "fs.write": ["~/Documents/Prophet/**"],
-          "tool.call": ["fs.read", "fs.list", "fs.stat", "fs.search", "fs.write"]
+          "fs.read": [
+            "~/Documents/Prophet/**"
+          ],
+          "fs.list": [
+            "~/Documents/Prophet/**"
+          ],
+          "fs.write": [
+            "~/Documents/Prophet/**"
+          ],
+          "tool.call": [
+            "fs.read",
+            "fs.list",
+            "fs.stat",
+            "fs.search",
+            "fs.write"
+          ]
         }
       },
       "budget": {
-        "default": { "tokens": 20000, "wall_time": "120s", "approvals": 3 }
+        "default": {
+          "tokens": 20000,
+          "wall_time": "120s",
+          "approvals": 3
+        }
       }
     }
   },
@@ -33,7 +55,9 @@
     "id": "web",
     "name": "Recherche sur le web",
     "description": "Consulter le web par le navigateur de Prophet et déposer des notes dans votre espace. Chaque sortie passe par egress et figure au journal ; un envoi de formulaire attend votre accord.",
-    "scopes": ["~/Documents/Prophet"],
+    "scopes": [
+      "~/Documents/Prophet"
+    ],
     "manifest": {
       "agent": {
         "id": "org.prophet.web-local",
@@ -42,23 +66,114 @@
         "publisher_key": "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
       },
       "model": {
-        "preferred": ["local:qwen3-0.6b"],
+        "preferred": [
+          "local:qwen3-0.6b"
+        ],
         "privacy": "local-only"
       },
-      "sandbox": { "min_level": 0 },
+      "sandbox": {
+        "min_level": 0
+      },
       "capabilities": {
         "max": {
-          "fs.read": ["~/Documents/Prophet/**"],
-          "fs.list": ["~/Documents/Prophet/**"],
-          "fs.write": ["~/Documents/Prophet/**"],
-          "net.egress": ["*"],
-          "ui.read": ["browser"],
-          "ui.act": ["browser"],
-          "tool.call": ["fs.read", "fs.list", "fs.stat", "fs.search", "fs.write", "http.fetch", "web.open", "web.tree", "web.act"]
+          "fs.read": [
+            "~/Documents/Prophet/**"
+          ],
+          "fs.list": [
+            "~/Documents/Prophet/**"
+          ],
+          "fs.write": [
+            "~/Documents/Prophet/**"
+          ],
+          "net.egress": [
+            "*"
+          ],
+          "ui.read": [
+            "browser"
+          ],
+          "ui.act": [
+            "browser"
+          ],
+          "tool.call": [
+            "fs.read",
+            "fs.list",
+            "fs.stat",
+            "fs.search",
+            "fs.write",
+            "http.fetch",
+            "web.open",
+            "web.tree",
+            "web.act"
+          ]
         }
       },
       "budget": {
-        "default": { "tokens": 30000, "wall_time": "180s", "approvals": 3 }
+        "default": {
+          "tokens": 30000,
+          "wall_time": "180s",
+          "approvals": 3
+        }
+      }
+    }
+  },
+  {
+    "id": "bureau",
+    "name": "Éditeur du bureau",
+    "description": "Écrire dans l'éditeur de texte ouvert sur le bureau (Mousepad) et déposer des fichiers dans votre espace. L'agent lit et manipule l'application par son arbre d'accessibilité, sans capture d'écran ; chaque action figure au journal.",
+    "scopes": [
+      "~/Documents/Prophet"
+    ],
+    "manifest": {
+      "agent": {
+        "id": "org.prophet.bureau-local",
+        "version": "1.0.0",
+        "name": "Éditeur du bureau",
+        "publisher_key": "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      },
+      "model": {
+        "preferred": [
+          "local:qwen3-0.6b"
+        ],
+        "privacy": "local-only"
+      },
+      "sandbox": {
+        "min_level": 0
+      },
+      "capabilities": {
+        "max": {
+          "fs.read": [
+            "~/Documents/Prophet/**"
+          ],
+          "fs.list": [
+            "~/Documents/Prophet/**"
+          ],
+          "fs.write": [
+            "~/Documents/Prophet/**"
+          ],
+          "ui.read": [
+            "mousepad"
+          ],
+          "ui.act": [
+            "mousepad"
+          ],
+          "tool.call": [
+            "fs.read",
+            "fs.list",
+            "fs.stat",
+            "fs.search",
+            "fs.write",
+            "ui.apps",
+            "ui.tree",
+            "ui.act"
+          ]
+        }
+      },
+      "budget": {
+        "default": {
+          "tokens": 30000,
+          "wall_time": "180s",
+          "approvals": 3
+        }
       }
     }
   }

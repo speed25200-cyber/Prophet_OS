@@ -6,6 +6,7 @@
 - Dépendances du lancement local : capd, ledger, home autorisé et moteur HTTP local configuré
 - Sortie réseau des outils : le socket d'egress (`PROPHET_EGRESS_SOCKET`, `/run/prophet/egress.sock` par défaut)
 - Navigateur piloté : absent sauf `PROPHET_BROWSER` ; profils par tâche sous l'état du service ;
+`PROPHET_SUP_SOCKET` nomme le socket de l'adaptateur d'accessibilité de la session (ADR 0027) ; sans lui, aucun outil `ui.*`.
   sondé une fois au démarrage, verdict rendu par `task.options` (`browser`)
 
 ## Méthodes

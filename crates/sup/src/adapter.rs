@@ -94,20 +94,26 @@ pub struct AccessibleNode {
 pub fn map_role(atspi: &str) -> Option<Role> {
     Some(match atspi {
         "push button" | "button" | "toggle button" => Role::Button,
-        "check box" | "radio button" | "switch" => Role::Toggle,
-        "entry" | "text" | "password text" | "spin button" => Role::Field,
+        "check box" | "radio button" | "switch" | "check menu item" | "radio menu item" => {
+            Role::Toggle
+        }
+        "entry" | "text" | "password text" | "spin button" | "slider" => Role::Field,
         "combo box" | "list box" => Role::Select,
         "link" => Role::Link,
-        "label" | "static" | "heading" | "paragraph" => Role::Text,
-        "list" | "menu" => Role::List,
-        "list item" | "menu item" => Role::Item,
-        "table" => Role::Table,
+        "label" | "static" | "heading" | "paragraph" | "caption" | "tooltip" => Role::Text,
+        "list" | "menu" | "menu bar" | "tree" | "page tab list" => Role::List,
+        "list item" | "menu item" | "tree item" | "page tab" => Role::Item,
+        "table" | "tree table" => Role::Table,
         "table row" => Role::Row,
-        "table cell" => Role::Cell,
+        "table cell" | "table column header" | "table row header" => Role::Cell,
         "image" | "icon" => Role::Image,
-        "document text" | "document frame" => Role::RichText,
-        "status bar" | "notification" | "alert" => Role::Status,
-        "panel" | "filler" | "frame" | "window" | "application" | "scroll pane" => Role::Group,
+        "document text" | "document frame" | "document web" => Role::RichText,
+        "status bar" | "notification" | "alert" | "progress bar" => Role::Status,
+        "panel" | "filler" | "frame" | "window" | "application" | "scroll pane" | "dialog"
+        | "file chooser" | "color chooser" | "font chooser" | "tool bar" | "viewport"
+        | "split pane" | "layered pane" | "root pane" | "glass pane" | "section" | "form"
+        | "header" | "footer" | "landmark" | "html container" | "desktop frame" | "embedded"
+        | "canvas" | "grouping" => Role::Group,
         _ => return None,
     })
 }

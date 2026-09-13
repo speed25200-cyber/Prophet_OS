@@ -10,6 +10,7 @@ mod fs;
 mod http;
 mod system;
 mod task;
+mod ui;
 mod web;
 mod web_relay;
 
@@ -21,6 +22,7 @@ pub use system::{
     UseSecret, WaitApproval, is_safe_binary, required_level_for,
 };
 pub use task::{Diff as TaskDiff, Status as TaskStatus};
+pub use ui::{Act as UiAct, Apps as UiApps, Desktop, Observe as UiTree};
 pub use web::{Act as WebAct, Browsing, Observe as WebTree, Open as WebOpen};
 
 use std::sync::Arc;

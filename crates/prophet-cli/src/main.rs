@@ -115,6 +115,33 @@ enum TaskAction {
         /// Identifiant de la mission préparée.
         id: String,
     },
+    /// Ouvre une séance d'outils sur une mission préparée, pour la piloter à la main depuis le
+    /// terminal : la mission passe en cours, ses outils répondent à `task call`.
+    Attach {
+        /// Identifiant de la mission préparée.
+        id: String,
+        /// Nom du client, inscrit au journal.
+        #[arg(long, default_value = "terminal")]
+        client: String,
+    },
+    /// Appelle un outil dans une séance ouverte ; les arguments sont un objet JSON.
+    Call {
+        /// Identifiant de la mission.
+        id: String,
+        /// Nom de l'outil (`ui.tree`, `fs.write`…).
+        tool: String,
+        /// Arguments, en JSON.
+        #[arg(default_value = "{}")]
+        args: String,
+    },
+    /// Ferme la séance : les versions sont scellées et la mission passe à l'examen.
+    Detach {
+        /// Identifiant de la mission.
+        id: String,
+        /// Un mot de conclusion, inscrit au résultat.
+        #[arg(long)]
+        text: Option<String>,
+    },
     /// Annule une tâche en cours.
     Cancel {
         /// Identifiant.
@@ -887,6 +914,76 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                 }
             });
             Ok(format!("{}\n", serde_json::to_string_pretty(&config)?))
+        }
+        TaskAction::Attach { id, client } => {
+            let result = task_rpc(
+                &socket_agentd(),
+                "task.attach",
+                serde_json::json!({"id":id, "client":client}),
+            )?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&result)?));
+            }
+            let outils: Vec<String> = result["tools"]
+                .as_array()
+                .map(|t| {
+                    t.iter()
+                        .filter_map(|o| o["name"].as_str().or_else(|| o.as_str()))
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(format!(
+                "Séance ouverte sur {id} pour « {client} ». Outils : {}.\n",
+                if outils.is_empty() {
+                    "voir `prophet task call`".to_owned()
+                } else {
+                    outils.join(", ")
+                }
+            ))
+        }
+        TaskAction::Call { id, tool, args } => {
+            let arguments: serde_json::Value = serde_json::from_str(args)
+                .map_err(|e| anyhow::anyhow!("arguments : JSON attendu ({e})"))?;
+            if !arguments.is_object() {
+                anyhow::bail!("arguments : objet JSON attendu");
+            }
+            let result = task_rpc(
+                &socket_agentd(),
+                "task.call",
+                serde_json::json!({"id":id, "name":tool, "arguments":arguments}),
+            )?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&result)?));
+            }
+            let erreur = result["isError"].as_bool().unwrap_or(false);
+            let texte = result["content"]
+                .as_array()
+                .map(|c| {
+                    c.iter()
+                        .filter_map(|m| m["text"].as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default();
+            if erreur {
+                anyhow::bail!("{tool} : {texte}");
+            }
+            Ok(format!("{texte}\n"))
+        }
+        TaskAction::Detach { id, text } => {
+            let mut params = serde_json::json!({"id":id});
+            if let Some(text) = text {
+                params["text"] = serde_json::json!(text);
+            }
+            let result = task_rpc(&socket_agentd(), "task.detach", params)?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&result)?));
+            }
+            Ok(format!(
+                "Séance fermée : la mission {id} est {}.\n",
+                result["state"].as_str().unwrap_or("à l'examen")
+            ))
         }
         TaskAction::Cancel { id } => {
             let result = task_rpc(

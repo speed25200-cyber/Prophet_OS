@@ -42,7 +42,8 @@
 | `secrets.use` | tool.call secrets.use | non | non | rend un handle |
 | `clock.now` | aucune | non | non | horloge de tâche (rejouable) |
 | `notify.human` | tool.call notify.human | non | non | hors bande |
-| `ui.tree` | ui.read app | non | non | SUP |
+| `ui.apps` | tool.call ui.apps | non | non | applications et nombre de fenêtres, sans titre |
+| `ui.tree` | ui.read app | non | non | SUP, provenance accessibilité |
 | `ui.act` | ui.act app + `requires` de l'action | selon action | selon action | SUP |
 | `ui.screenshot` | ui.vision | non | non | confiance basse, hors défaut |
 | `model.list` | aucune | non | non | |
@@ -107,6 +108,19 @@ privé du service, où les outils déposent aussi l'observation courante (adress
 de nœuds) que `task.inspect` rend à la supervision. Dans le service, tout le trafic du
 navigateur passe par un relais local vers le socket d'egress, sous le jeton de la tâche ;
 sans egress, le navigateur n'a aucune route. Voir l'[ADR 0024](../adr/0024-navigateur-integre-et-applications-web.md).
+
+## Applications de bureau actuellement implémentées
+
+Les outils `ui.*` s'adossent à l'adaptateur d'accessibilité de la session (`prophet-supd`,
+ADR 0027) et n'existent que si le service connaît son socket (`PROPHET_SUP_SOCKET`). `ui.apps`
+liste les applications qui exposent une interface et leur nombre de fenêtres, sans titre ;
+`ui.tree {app, window?, detail?}` exige `ui.read` sur le nom de l'application et rend l'arbre
+SUP de sa fenêtre active (ou désignée), avec `provenance: accessibility`, une confiance
+inférieure à 1 et une réserve à l'intention du modèle, plus `truncated` si la lecture a été
+bornée ; `ui.act {app, action, node, value?, window?, detail?}` exige `ui.act` sur
+l'application, avec `click`, `set_field` et `toggle`, et rend `message` puis `observation`.
+L'application est désignée par le nom qu'elle se donne sur le bus (`mousepad`) ; ni joker, ni
+écran. Aucune capture d'écran : `ui.screenshot` n'est pas implémenté.
 
 ## Fichier de registre
 

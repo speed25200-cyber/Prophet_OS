@@ -43,6 +43,9 @@ pub struct Mission {
     pub browser: Option<PathBuf>,
     /// Répertoire privé des profils de navigation, un par tâche.
     pub browser_root: PathBuf,
+    /// Socket de l'adaptateur d'accessibilité de la session humaine, si le service en connaît
+    /// un ; sinon aucun outil `ui.*`.
+    pub sup_socket: Option<PathBuf>,
     /// Signal d'annulation. Le résultat final confirme l'arrêt.
     pub stop: Arc<AtomicBool>,
 }
@@ -346,6 +349,14 @@ impl Mission {
                 self.egress.clone(),
             );
             for tool in browsing.tools() {
+                registry.register(tool);
+            }
+        }
+        // Les applications de la session humaine, par leur arbre d'accessibilité : lire exige
+        // `ui.read` sur le nom de l'application, agir `ui.act` ; l'adaptateur tourne dans la
+        // session et n'admet que ce service (ADR 0027).
+        if let Some(socket) = &self.sup_socket {
+            for tool in mcp_system::tools::Desktop::at(socket.clone()).tools() {
                 registry.register(tool);
             }
         }
