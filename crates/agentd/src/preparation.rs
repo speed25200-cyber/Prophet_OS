@@ -9,6 +9,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::Limits;
 
+/// Outils qui pilotent le navigateur ; ils n'existent que si le service en configure un.
+const BROWSER_TOOLS: &[&str] = &["web.open", "web.tree", "web.act"];
+
+/// Outils qui sortent sur le réseau, tous par egress. Chacun exige un hôte dans le profil.
+const WEB_TOOLS: &[&str] = &["http.fetch", "web.open", "web.tree", "web.act"];
+
 /// Profil installé par l'administrateur du service. Il définit le plafond et le contexte.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,6 +48,33 @@ pub struct ProfileView {
     pub grants: Vec<String>,
     /// Plafonds prévus.
     pub limits: Limits,
+    /// Le profil consulte le web par le navigateur piloté (`web.*`) ; il exige donc que le
+    /// service en ait un qui répond.
+    #[serde(default)]
+    pub web: bool,
+}
+
+/// État du navigateur piloté, sondé par le service au démarrage et non à chaque appel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserState {
+    /// Programme nommé par l'administrateur (`PROPHET_BROWSER`).
+    pub program: String,
+    /// Le navigateur a démarré sous les contraintes du service et a répondu au pilotage.
+    pub ready: bool,
+    /// Version rendue par le navigateur, ou raison de l'échec, ou « sonde en cours ».
+    pub detail: String,
+}
+
+impl BrowserState {
+    /// État initial : configuré, pas encore sondé.
+    #[must_use]
+    pub fn pending(program: &Path) -> Self {
+        Self {
+            program: program.display().to_string(),
+            ready: false,
+            detail: "sonde en cours".into(),
+        }
+    }
 }
 
 /// Catalogue de préparation et erreur éventuelle de découverte du moteur.
@@ -51,6 +84,9 @@ pub struct Options {
     pub profiles: Vec<ProfileView>,
     /// Une panne ne doit pas être présentée comme un catalogue vide réussi.
     pub model_error: Option<String>,
+    /// Navigateur piloté : `None` si le service n'en configure aucun.
+    #[serde(default)]
+    pub browser: Option<BrowserState>,
 }
 
 /// Intention explicite : le client ne fournit ni manifeste, ni identité, ni droits.
@@ -133,7 +169,18 @@ impl Profile {
                 approvals: self.manifest.budget.default.approvals,
                 cost_eur: self.manifest.budget.default.cost_eur,
             },
+            web: self.uses_browser(),
         }
+    }
+
+    /// Le profil demande au moins un outil du navigateur piloté.
+    ///
+    /// `http.fetch` n'en fait pas partie : il passe par egress sans navigateur.
+    #[must_use]
+    pub fn uses_browser(&self) -> bool {
+        self.grants().unwrap_or_default().iter().any(|g| {
+            g.res == Res::Tool && g.act == Act::Call && BROWSER_TOOLS.contains(&g.pattern.as_str())
+        })
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -191,6 +238,10 @@ impl Profile {
                 );
             }
         }
+        // Un outil web sans hôte de sortie ne ferait que des refus : le profil le dit d'avance.
+        let hosts = grants
+            .iter()
+            .any(|g| g.res == Res::Net && g.act == Act::Egress);
         for grant in grants {
             match (grant.res, grant.act) {
                 (Res::Fs, Act::Read | Act::Write | Act::List)
@@ -201,14 +252,22 @@ impl Profile {
                             &grant.pattern,
                         )
                     }) => {}
+                // Les hôtes sont validés par le manifeste ; capd tranche à l'émission, egress à
+                // chaque requête, et les méthodes qui modifient attendent l'accord humain.
+                (Res::Net, Act::Egress) => {}
+                // L'interface observée ou manipulée est le navigateur piloté, rien d'autre :
+                // ni écran, ni fenêtre d'une autre application.
+                (Res::Ui, Act::Read | Act::Act) if grant.pattern == "browser" => {}
                 (Res::Tool, Act::Call)
                     if matches!(
                         grant.pattern.as_str(),
                         "fs.read" | "fs.write" | "fs.list" | "fs.search" | "fs.stat"
                     ) => {}
+                (Res::Tool, Act::Call) if hosts && WEB_TOOLS.contains(&grant.pattern.as_str()) => {}
                 _ => {
                     return Err(
-                        "Le profil dépasse les outils fichiers natifs et ses périmètres.".into(),
+                        "Le profil dépasse les outils fichiers natifs, le web relayé par egress et ses périmètres."
+                            .into(),
                     );
                 }
             }

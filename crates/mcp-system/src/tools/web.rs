@@ -5,7 +5,7 @@
 //! capture d'écran n'intervient. L'hôte ouvert est contrôlé par capd comme une sortie réseau ;
 //! lire l'arbre et agir dessus sont contrôlés comme des accès d'interface.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use browser_bridge::cdp::Session;
@@ -152,6 +152,56 @@ impl Browsing {
         if std::fs::write(&tmp, value.to_string()).is_ok() {
             let _ = std::fs::rename(&tmp, &path);
         }
+    }
+
+    /// Sonde le navigateur : le lance sur une page vierge dans un profil jetable sous `root`
+    /// et rend la version qu'il annonce.
+    ///
+    /// C'est ce que le service fait au démarrage, sous ses propres contraintes, pour dire
+    /// d'avance si le programme configuré tourne, plutôt que de le découvrir au premier outil
+    /// d'une mission déjà lancée. Aucune sortie réseau : la page vierge n'en demande pas.
+    ///
+    /// # Errors
+    /// Lancement, point d'écoute ou protocole en échec ; le message dit lequel.
+    pub fn probe(program: &Path, root: &Path) -> Result<String, String> {
+        let profile = root.join("sonde");
+        std::fs::create_dir_all(&profile).map_err(|e| format!("profil de sonde : {e}"))?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?;
+        let program = program.display().to_string();
+        let version = runtime.block_on(async {
+            let browser = Browser::launch_auto(&program, &profile)
+                .await
+                .map_err(|e| format!("lancement : {e}"))?;
+            let endpoint = browser
+                .page_endpoint()
+                .await
+                .map_err(|e| format!("point d'écoute : {e}"))?;
+            let mut session = Session::connect(&endpoint)
+                .await
+                .map_err(|e| format!("session : {e}"))?;
+            let version = session
+                .call("Browser.getVersion", json!({}))
+                .await
+                .map_err(|e| format!("protocole : {e}"))?;
+            Ok::<_, String>(
+                version["product"]
+                    .as_str()
+                    .unwrap_or("version non annoncée")
+                    .to_owned(),
+            )
+        });
+        // Le navigateur est tué à la sortie du bloc, mais ses processus auxiliaires finissent
+        // d'écrire dans le profil quelques instants encore : on insiste brièvement.
+        for _ in 0..40 {
+            if std::fs::remove_dir_all(&profile).is_ok() || !profile.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        version
     }
 
     fn launch(&self, task: &str) -> Result<Live, String> {

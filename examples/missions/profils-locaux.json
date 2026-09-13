@@ -28,5 +28,38 @@
         "default": { "tokens": 20000, "wall_time": "120s", "approvals": 3 }
       }
     }
+  },
+  {
+    "id": "web",
+    "name": "Recherche sur le web",
+    "description": "Consulter le web par le navigateur de Prophet et déposer des notes dans votre espace. Chaque sortie passe par egress et figure au journal ; un envoi de formulaire attend votre accord.",
+    "scopes": ["~/Documents/Prophet"],
+    "manifest": {
+      "agent": {
+        "id": "org.prophet.web-local",
+        "version": "1.0.0",
+        "name": "Recherche web locale",
+        "publisher_key": "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      },
+      "model": {
+        "preferred": ["local:qwen3-0.6b"],
+        "privacy": "local-only"
+      },
+      "sandbox": { "min_level": 0 },
+      "capabilities": {
+        "max": {
+          "fs.read": ["~/Documents/Prophet/**"],
+          "fs.list": ["~/Documents/Prophet/**"],
+          "fs.write": ["~/Documents/Prophet/**"],
+          "net.egress": ["*"],
+          "ui.read": ["browser"],
+          "ui.act": ["browser"],
+          "tool.call": ["fs.read", "fs.list", "fs.stat", "fs.search", "fs.write", "http.fetch", "web.open", "web.tree", "web.act"]
+        }
+      },
+      "budget": {
+        "default": { "tokens": 30000, "wall_time": "180s", "approvals": 3 }
+      }
+    }
   }
 ]

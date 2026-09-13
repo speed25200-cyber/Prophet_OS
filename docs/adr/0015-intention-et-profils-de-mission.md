@@ -14,7 +14,8 @@ propres droits introduirait un autre problème : le contexte généré deviendra
 Le service charge un catalogue explicite de profils depuis `PROPHET_MISSION_PROFILES`. Chaque
 profil fixe un manifeste, les périmètres fichiers et les modèles admis. Le catalogue est limité
 à 1 Mio et 32 profils ; il est validé entièrement au démarrage. Pour ce lanceur, seuls les
-modèles locaux et outils fichiers natifs de niveau 0 sont admissibles. Chaque périmètre de
+modèles locaux et outils fichiers natifs de niveau 0 sont admissibles (l'ADR 0025 y ajoute le
+web relayé par egress : hôtes, navigateur piloté et outils réseau nommés). Chaque périmètre de
 capture exige un droit de lecture ; les droits d'écriture peuvent être plus étroits. Les
 chemins parents, globaux et l'état interne `.prophet` sont refusés comme périmètres.
 

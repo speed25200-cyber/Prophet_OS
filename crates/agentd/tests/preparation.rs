@@ -26,6 +26,10 @@ impl Drop for Chain {
 
 impl Chain {
     async fn new() -> Self {
+        Self::with_env(&[]).await
+    }
+
+    async fn with_env(extra: &[(&str, &str)]) -> Self {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
@@ -62,7 +66,22 @@ impl Chain {
         example["manifest"]["capabilities"]["max"]["fs.read"] = json!(["~/docs/**"]);
         example["manifest"]["capabilities"]["max"]["fs.write"] = json!(["~/docs/**"]);
         let profiles = dir.path().join("profiles.json");
-        std::fs::write(&profiles, json!([{"id":"documents", "name":"Documents de travail", "description":"Préparer des fichiers dans docs", "manifest":example["manifest"], "scopes":["~/docs"]}]).to_string()).unwrap();
+        let mut web = example["manifest"].clone();
+        web["capabilities"]["max"]["net.egress"] = json!(["127.0.0.1"]);
+        web["capabilities"]["max"]["ui.read"] = json!(["browser"]);
+        web["capabilities"]["max"]["ui.act"] = json!(["browser"]);
+        web["capabilities"]["max"]["tool.call"] = json!([
+            "fs.read",
+            "fs.write",
+            "http.fetch",
+            "web.open",
+            "web.tree",
+            "web.act"
+        ]);
+        std::fs::write(&profiles, json!([
+            {"id":"documents", "name":"Documents de travail", "description":"Préparer des fichiers dans docs", "manifest":example["manifest"], "scopes":["~/docs"]},
+            {"id":"web", "name":"Recherche sur le web", "description":"Consulter le web", "manifest":web, "scopes":["~/docs"]}
+        ]).to_string()).unwrap();
         let caps = dir.path().join("cap.sock");
         let logs = dir.path().join("ledger.sock");
         let capd = Daemon::lancer_avec(
@@ -88,7 +107,11 @@ impl Chain {
                 ("PROPHET_LEDGER_SOCKET", logs.to_str().unwrap()),
                 ("PROPHET_LOCAL_ENDPOINT", &endpoint),
                 ("PROPHET_MISSION_PROFILES", profiles.to_str().unwrap()),
-            ],
+            ]
+            .iter()
+            .chain(extra)
+            .copied()
+            .collect::<Vec<_>>(),
         );
         let client = agentd.joindre().await;
         Self {
@@ -195,6 +218,105 @@ async fn les_parametres_absents_invalides_ou_les_elargissements_ne_creent_pas_de
     );
 }
 
+#[tokio::test]
+async fn un_contexte_web_annonce_son_navigateur_et_n_est_pas_prepare_sans_lui() {
+    let chain = Chain::new().await;
+    let options = chain.client.call("task.options", json!({})).await.unwrap();
+    assert_eq!(options["profiles"][0]["web"], json!(false));
+    assert_eq!(options["profiles"][1]["id"], "web");
+    assert_eq!(options["profiles"][1]["web"], json!(true));
+    let grants = options["profiles"][1]["grants"].to_string();
+    assert!(
+        grants.contains("net.egress sur 127.0.0.1") && grants.contains("ui.act sur browser"),
+        "{grants}"
+    );
+    // Aucun PROPHET_BROWSER pour ce service : l'état est absent, pas « en panne ».
+    assert!(options["browser"].is_null(), "{options}");
+    let error = chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"sur-le-web", "intent":"Lire une page", "profile":"web", "model":"modele-controle"}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::PolicyDenied);
+    assert!(error.message.contains("navigateur"), "{error:?}");
+    assert!(
+        chain
+            .client
+            .call("task.list", json!({}))
+            .await
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// Le navigateur des essais, comme dans `local_daemon.rs` ; sans lui le test se tait, sauf si
+/// `PROPHET_EXIGER_NAVIGATEUR=1` transforme cette absence en échec.
+fn navigateur_des_essais() -> Option<String> {
+    for candidat in [
+        "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/google-chrome",
+    ] {
+        if std::path::Path::new(candidat).is_file() {
+            return Some(candidat.to_owned());
+        }
+    }
+    let depuis_environnement = std::env::var("PROPHET_BROWSER").ok();
+    assert!(
+        !(depuis_environnement.is_none()
+            && std::env::var("PROPHET_EXIGER_NAVIGATEUR").as_deref() == Ok("1")),
+        "aucun navigateur trouvé alors que PROPHET_EXIGER_NAVIGATEUR=1"
+    );
+    depuis_environnement
+}
+
+#[tokio::test]
+async fn avec_un_navigateur_qui_repond_un_contexte_web_est_prepare_sans_execution() {
+    let Some(navigateur) = navigateur_des_essais() else {
+        return;
+    };
+    let chain = Chain::with_env(&[("PROPHET_BROWSER", &navigateur)]).await;
+    // La sonde tourne après l'ouverture du socket : le catalogue répond tout de suite, avec
+    // « sonde en cours », puis avec le verdict.
+    let mut browser = Value::Null;
+    for _ in 0..300 {
+        let options = chain.client.call("task.options", json!({})).await.unwrap();
+        browser = options["browser"].clone();
+        assert_eq!(browser["program"], navigateur, "{browser}");
+        if browser["detail"] != "sonde en cours" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(browser["ready"], json!(true), "{browser}");
+    assert!(
+        browser["detail"].as_str().unwrap().contains("Chrome"),
+        "{browser}"
+    );
+    let plan = chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"sur-le-web", "intent":"Lire une page", "profile":"web", "model":"modele-controle"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(plan["task"], "sur-le-web");
+    let info = chain
+        .client
+        .call("task.inspect", json!({"id":"sur-le-web"}))
+        .await
+        .unwrap();
+    assert_eq!(info["task"]["state"], "planned");
+    assert!(info["result"].is_null());
+}
+
 #[test]
 fn le_catalogue_refuse_les_profils_hors_perimetre_et_accepte_une_ecriture_plus_etroite() {
     let dir = tempfile::tempdir().unwrap();
@@ -205,6 +327,30 @@ fn le_catalogue_refuse_les_profils_hors_perimetre_et_accepte_une_ecriture_plus_e
     profile["manifest"]["capabilities"]["max"]["fs.write"] = json!(["~/Documents/Prophet/out/**"]);
     std::fs::write(&path, json!([profile]).to_string()).unwrap();
     assert!(agentd::preparation::load(&path).is_ok());
+    // Le web relayé par egress est admis : hôtes, navigateur piloté et outils réseau nommés.
+    let mut web = profile.clone();
+    web["manifest"]["capabilities"]["max"]["net.egress"] = json!(["*.exemple.fr", "*"]);
+    web["manifest"]["capabilities"]["max"]["ui.read"] = json!(["browser"]);
+    web["manifest"]["capabilities"]["max"]["ui.act"] = json!(["browser"]);
+    web["manifest"]["capabilities"]["max"]["tool.call"] = json!([
+        "fs.read",
+        "fs.write",
+        "http.fetch",
+        "web.open",
+        "web.tree",
+        "web.act"
+    ]);
+    std::fs::write(&path, json!([web]).to_string()).unwrap();
+    let loaded = agentd::preparation::load(&path).unwrap();
+    assert!(loaded[0].uses_browser());
+    assert!(loaded[0].view(&[]).web);
+    let mut fetch_only = profile.clone();
+    fetch_only["manifest"]["capabilities"]["max"]["net.egress"] = json!(["exemple.fr"]);
+    fetch_only["manifest"]["capabilities"]["max"]["tool.call"] =
+        json!(["fs.read", "fs.write", "http.fetch"]);
+    std::fs::write(&path, json!([fetch_only]).to_string()).unwrap();
+    let loaded = agentd::preparation::load(&path).unwrap();
+    assert!(!loaded[0].uses_browser() && !loaded[0].view(&[]).web);
     for bad in [
         {
             let mut p = profile.clone();
@@ -217,8 +363,22 @@ fn le_catalogue_refuse_les_profils_hors_perimetre_et_accepte_une_ecriture_plus_e
             p
         },
         {
+            // Un outil réseau sans aucun hôte ne ferait que des refus.
             let mut p = profile.clone();
-            p["manifest"]["capabilities"]["max"]["net.egress"] = json!(["example.org"]);
+            p["manifest"]["capabilities"]["max"]["tool.call"] = json!(["fs.read", "http.fetch"]);
+            p
+        },
+        {
+            let mut p = profile.clone();
+            p["manifest"]["capabilities"]["max"]["net.egress"] = json!(["exemple.fr"]);
+            p["manifest"]["capabilities"]["max"]["tool.call"] = json!(["fs.read", "web.open"]);
+            p["manifest"]["capabilities"]["max"]["ui.read"] = json!(["screen"]);
+            p
+        },
+        {
+            let mut p = profile.clone();
+            p["manifest"]["capabilities"]["max"]["net.egress"] = json!(["exemple.fr"]);
+            p["manifest"]["capabilities"]["max"]["tool.call"] = json!(["fs.read", "proc.exec"]);
             p
         },
         {

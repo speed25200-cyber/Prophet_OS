@@ -22,7 +22,9 @@ la session de l'image installée.
 Les adresses de services sont `PROPHET_CAPD_SOCKET`, `PROPHET_LEDGER_SOCKET`,
 `PROPHET_EGRESS_SOCKET` et, pour la CLI, `PROPHET_AGENTD_SOCKET`. `STATE_DIRECTORY` définit
 l'état de chaque daemon, séparément. `PROPHET_BROWSER` nomme un navigateur Chromium pour les
-outils `web.*` ; sans lui, une mission n'a pas de navigateur.
+outils `web.*` ; sans lui, une mission n'a pas de navigateur. Le service le sonde une fois au
+démarrage, sous ses propres contraintes, et `task.options` rend le verdict (`browser`) ; un
+profil qui demande `web.*` (`web: true`) n'est pas préparé tant que le navigateur ne répond pas.
 
 ## Préparer depuis l'interface
 

@@ -5,15 +5,16 @@
 - État : `/var/lib/prophet/agentd/taches.json`
 - Dépendances du lancement local : capd, ledger, home autorisé et moteur HTTP local configuré
 - Sortie réseau des outils : le socket d'egress (`PROPHET_EGRESS_SOCKET`, `/run/prophet/egress.sock` par défaut)
-- Navigateur piloté : absent sauf `PROPHET_BROWSER` ; profils par tâche sous l'état du service
+- Navigateur piloté : absent sauf `PROPHET_BROWSER` ; profils par tâche sous l'état du service ;
+  sondé une fois au démarrage, verdict rendu par `task.options` (`browser`)
 
 ## Méthodes
 
 | Méthode | Comportement |
 |---|---|
 | `task.spawn` | Planifie, demande le jeton à capd, persiste et rend le plan |
-| `task.options` | Rend les profils configurés et leurs modèles réellement disponibles |
-| `task.prepare` | Prépare une intention avec un profil du service, sans génération ni exécution |
+| `task.options` | Rend les profils configurés (`web` s'ils exigent le navigateur), leurs modèles réellement disponibles et l'état du navigateur piloté |
+| `task.prepare` | Prépare une intention avec un profil du service, sans génération ni exécution ; refuse un contexte web sans navigateur qui répond |
 | `task.start` | Lance en arrière-plan une mission locale native de niveau 0 |
 | `task.list` | Rend les tâches et leurs budgets observés |
 | `task.status` | Rend une tâche par identifiant |

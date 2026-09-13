@@ -6,28 +6,62 @@ let
   owner = config.prophet.user;
   engine = pkgs.callPackage ../packages/llama-cpp.nix { };
   endpoint = "http://127.0.0.1:${toString cfg.port}/v1";
-  profiles = pkgs.writeText "prophet-mission-profiles.json" (builtins.toJSON [{
-    id = "documents";
-    name = "Documents Prophet";
-    description = "Préparer des fichiers dans ~/Documents/Prophet. Les originaux restent à examiner avant application.";
-    scopes = [ "~/Documents/Prophet" ];
-    manifest = {
-      agent = {
-        id = "org.prophet.documents";
-        version = "1.0.0";
-        name = "Documents Prophet";
-        publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  navigateur = config.prophet.navigateur != null;
+  profiles = pkgs.writeText "prophet-mission-profiles.json" (builtins.toJSON [
+    {
+      id = "documents";
+      name = "Documents Prophet";
+      description = "Préparer des fichiers dans ~/Documents/Prophet. Les originaux restent à examiner avant application.";
+      scopes = [ "~/Documents/Prophet" ];
+      manifest = {
+        agent = {
+          id = "org.prophet.documents";
+          version = "1.0.0";
+          name = "Documents Prophet";
+          publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        };
+        model.preferred = [ "local:${cfg.model}" ];
+        sandbox.min_level = 0;
+        capabilities.max = {
+          "fs.read" = [ "~/Documents/Prophet/**" ];
+          "fs.write" = [ "~/Documents/Prophet/**" ];
+          "tool.call" = [ "fs.read" "fs.write" ];
+        };
+        budget.default = { tokens = 20000; wall_time = "90s"; approvals = 3; };
       };
-      model.preferred = [ "local:${cfg.model}" ];
-      sandbox.min_level = 0;
-      capabilities.max = {
-        "fs.read" = [ "~/Documents/Prophet/**" ];
-        "fs.write" = [ "~/Documents/Prophet/**" ];
-        "tool.call" = [ "fs.read" "fs.write" ];
+    }
+    # Le web, par egress : chaque hôte ouvert est tranché par capd et inscrit au journal, les
+    # lectures sont automatiques, un envoi de formulaire attend l'accord humain. Le navigateur
+    # piloté n'apparaît que si le système en configure un (`prophet.navigateur`) ; sinon le
+    # contexte se limite à `http.fetch`.
+    {
+      id = "web";
+      name = "Recherche sur le web";
+      description = "Consulter le web et déposer des notes dans ~/Documents/Prophet. Chaque sortie passe par egress et figure au journal ; un envoi de formulaire attend votre accord.";
+      scopes = [ "~/Documents/Prophet" ];
+      manifest = {
+        agent = {
+          id = "org.prophet.web";
+          version = "1.0.0";
+          name = "Recherche web Prophet";
+          publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        };
+        model.preferred = [ "local:${cfg.model}" ];
+        sandbox.min_level = 0;
+        capabilities.max = {
+          "fs.read" = [ "~/Documents/Prophet/**" ];
+          "fs.write" = [ "~/Documents/Prophet/**" ];
+          "net.egress" = [ "*" ];
+          "tool.call" = [ "fs.read" "fs.write" "http.fetch" ]
+            ++ lib.optionals navigateur [ "web.open" "web.tree" "web.act" ];
+        } // lib.optionalAttrs navigateur {
+          "ui.read" = [ "browser" ];
+          "ui.act" = [ "browser" ];
+        };
+        budget.default = { tokens = 30000; wall_time = "180s"; approvals = 3; };
       };
-      budget.default = { tokens = 20000; wall_time = "90s"; approvals = 3; };
-    };
-  }]);
+    }
+  ]);
 in {
   options.prophet.localEngine = {
     enable = lib.mkEnableOption "le moteur local et le contexte Documents Prophet" // { default = true; };

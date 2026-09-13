@@ -150,6 +150,10 @@ navigateur à profil Prophet dans le bureau. Les preuves sont des tests avec les
 et un vrai navigateur, sous un seul UID, sans VM. Tout le trafic du navigateur piloté passe
 ensuite par egress via un relais local, prouvé par deux tests réels ; son confinement au niveau 2
 n'est pas livré, et le critère « MCP livré opérationnel » progresse sans être coché.
+L'[ADR 0025](adr/0025-profils-de-mission-web-et-sonde-du-navigateur.md) ouvre ensuite le
+catalogue de « Nouvel objectif » au web relayé : un contexte « Recherche sur le web » dans
+l'exemple et dans l'image, le navigateur piloté nommé pour `agentd` et sondé au démarrage sous
+ses contraintes réelles, le verdict rendu par `task.options` et vérifié par le test des services.
 
 Les [instruments de l'atelier](reports/instruments-2026-09-13.md) donnent ensuite à la surface
 une identité qui se lit sans mots : anneaux, monogrammes, bandes d'état, rail éclairé, sans

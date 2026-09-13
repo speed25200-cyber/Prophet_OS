@@ -99,6 +99,23 @@ qui supprime une course qui faisait échouer la moitié de ses tests en parallè
 [rapport des instruments](reports/instruments-2026-09-13.md). La fluidité et la
 consommation sur une carte graphique réelle restent à mesurer.
 
+Contextes web du 13 septembre 2026, dans le commit portant ce rapport : le catalogue de
+profils admet les hôtes de sortie, l'interface du navigateur piloté (`ui.read` / `ui.act` sur
+`browser`, rien d'autre) et les outils `http.fetch`, `web.open`, `web.tree`, `web.act`, un
+outil réseau sans hôte étant refusé au chargement. Le catalogue d'exemple et celui de l'image
+livrent « Recherche sur le web » sur `*` : chaque hôte reste tranché par capd, inscrit au
+journal, et un envoi de formulaire attend l'accord humain. `agentd` sonde son navigateur au
+démarrage, sous ses propres contraintes, et `task.options` rend le verdict ; un contexte web
+n'est pas préparé sans navigateur qui répond, et la surface le dit dans le cadre de la mission.
+L'image nomme Chromium pour `agentd` (`prophet.navigateur`) et lève pour lui seul deux
+entraves qui tuent un navigateur en silence (`MemoryDenyWriteExecute`, `SIGSYS` sur
+`setrlimit`) ; le test des services vérifie que la sonde répond « prêt » sous l'unité réelle.
+Cette partie de l'image n'a pas été construite localement (pas de Nix) et attend la CI. Voir
+l'[ADR 0025](adr/0025-profils-de-mission-web-et-sonde-du-navigateur.md). La CI de `7d19592`
+réussit les sept services sous systemd, l'ISO, son démarrage et l'installeur ; le parcours du
+système installé avec le bureau (Chromium, X) était encore en cours à l'écriture de ces lignes.
+Aucune case complète de FRONTIER n'est cochée.
+
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 
 - `c3b0c08` — moteur local réel, CLI et gel d'un processus possédé par sandboxd.

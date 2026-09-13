@@ -81,6 +81,18 @@ in
       description = "Utilisateur humain pour le compte duquel les agents travaillent.";
     };
 
+    navigateur = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      default = pkgs.chromium;
+      defaultText = lib.literalExpression "pkgs.chromium";
+      description = ''
+        Navigateur Chromium que `agentd` pilote pour les outils `web.*` des missions. Il tourne
+        sous l'utilisateur et les contraintes du service, avec un profil jetable par mission, et
+        ne sort que par egress. `null` retire les outils web ; les contextes de mission qui les
+        demandaient sont alors refusés à la préparation, pas au premier outil.
+      '';
+    };
+
     motDePasseHache = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = "/etc/prophet/motdepasse";
@@ -289,7 +301,11 @@ in
         description = "Prophet OS — runtime d'agents";
         extra = {
           after = [ "prophet-capd.service" "prophet-ledger.service" "prophet-sandboxd.service" ];
-          environment.PROPHET_HOME = config.users.users.${cfg.user}.home;
+          environment = {
+            PROPHET_HOME = config.users.users.${cfg.user}.home;
+          } // lib.optionalAttrs (cfg.navigateur != null) {
+            PROPHET_BROWSER = lib.getExe cfg.navigateur;
+          };
           requires = [ "prophet-capd.service" "prophet-ledger.service" ];
           serviceConfig = {
             # RestrictSUIDSGID bloque openat2 avec ENOSYS, même sans création de fichier.
@@ -310,6 +326,16 @@ in
             # demeure en lecture seule pour ce service. Seuls les deux chemins ci-dessus sont
             # inscriptibles, et c'est ce que la déclaration prétendait déjà.
             ProtectHome = lib.mkForce false;
+          } // lib.optionalAttrs (cfg.navigateur != null) {
+            # Le navigateur piloté tourne dans ce service. Son moteur JavaScript rend du code
+            # exécutable à la volée : `MemoryDenyWriteExecute` le tuerait au premier script. Et
+            # il règle ses limites et priorités au démarrage (`setrlimit`, `setpriority`) : sous
+            # le filtre commun, ces appels de `@resources` valent un SIGSYS, donc une mort
+            # silencieuse ; en EPERM, le navigateur les note et continue. Tout le reste du
+            # durcissement tient : pas de nouveaux privilèges, pas d'espace de noms, racine en
+            # lecture seule, capacités vides.
+            MemoryDenyWriteExecute = lib.mkForce false;
+            SystemCallErrorNumber = "EPERM";
           };
         };
       };

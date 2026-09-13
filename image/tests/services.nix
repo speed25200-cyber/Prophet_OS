@@ -65,6 +65,10 @@ let
         print(json.dumps(lancee, ensure_ascii=False))
         raise SystemExit(0)
 
+    if len(sys.argv) > 1 and sys.argv[1] == "options":
+        print(json.dumps(appeler("/run/prophet/agentd.sock", "task.options", {}), ensure_ascii=False))
+        raise SystemExit(0)
+
     plan = appeler("/run/prophet/agentd.sock", "task.spawn", {
         "id": "task:essai-vm",
         "intent": "vérifier que la chaîne tourne sous systemd",
@@ -274,6 +278,31 @@ pkgs.testers.runNixOSTest {
         assert "task:essai-vm" in detail and "local:qwen3-8b" in detail, detail
         # Une tâche seulement planifiée n'a aucun diff à présenter : pas de faux diff vide.
         machine.fail("su - prophet -c 'prophet task diff task:essai-vm'")
+
+    with subtest("le navigateur piloté répond sous le durcissement réel d'agentd"):
+        # `agentd` sonde son navigateur au démarrage, sous ses propres contraintes systemd, et
+        # `task.options` en rend le verdict. C'est ce qui sépare « un Chromium est dans l'image »
+        # de « une mission peut ouvrir une page » : le durcissement commun tue un navigateur de
+        # deux façons silencieuses (W^X, SIGSYS sur `setrlimit`), et seule une exécution sous la
+        # vraie unité le voit.
+        import time
+        options = None
+        for _ in range(60):
+            options = json.loads(machine.succeed("prophet-essai-tache options"))
+            if options.get("browser") and options["browser"]["detail"] != "sonde en cours":
+                break
+            time.sleep(2)
+        print(json.dumps(options, ensure_ascii=False, indent=2))
+        assert options and options.get("browser"), "agentd ne configure aucun navigateur piloté"
+        navigateur = options["browser"]
+        assert navigateur["ready"], f"navigateur piloté indisponible : {navigateur['detail']}"
+        assert "Chrome" in navigateur["detail"], navigateur
+        contextes = {p["id"]: p for p in options["profiles"]}
+        assert "web" in contextes, list(contextes)
+        assert contextes["web"]["web"] is True, contextes["web"]
+        droits = " ".join(contextes["web"]["grants"])
+        assert "net.egress sur *" in droits and "ui.act sur browser" in droits, droits
+        assert contextes["documents"]["web"] is False, contextes["documents"]
 
     with subtest("sandboxd peut réellement isoler, et pas seulement le dire"):
         # Le module donne à `sandboxd` les capacités CAP_SETUID et CAP_SYS_ADMIN, puis lui laisse

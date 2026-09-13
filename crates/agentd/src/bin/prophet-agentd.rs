@@ -42,6 +42,8 @@ struct Agents {
     egress: std::path::PathBuf,
     /// Navigateur piloté par les outils web, absent par défaut.
     browser: Option<std::path::PathBuf>,
+    /// Ce que la sonde de démarrage a dit du navigateur ; `None` si aucun n'est configuré.
+    browser_state: Arc<std::sync::RwLock<Option<agentd::preparation::BrowserState>>>,
     /// Profils de navigation, un par tâche, dans l'état privé du service.
     browser_root: std::path::PathBuf,
     /// Où l'état est écrit entre deux démarrages.
@@ -73,6 +75,7 @@ impl Handler for Agents {
                 commun::repondre(&agentd::preparation::Options {
                     profiles: self.profiles.iter().map(|p| p.view(&models)).collect(),
                     model_error,
+                    browser: self.browser_state(),
                 })
             }
 
@@ -95,6 +98,28 @@ impl Handler for Agents {
                         ErrorCode::PolicyDenied,
                         "Modèle non admis par ce profil.",
                     ));
+                }
+                // Un contexte web sans navigateur qui répond serait un plan qui échoue au
+                // premier outil, une fois la mission lancée : on le dit avant d'émettre un jeton.
+                if profile.uses_browser() {
+                    match self.browser_state() {
+                        Some(state) if state.ready => {}
+                        Some(state) => {
+                            return Err(Error::new(
+                                ErrorCode::Conflict,
+                                format!(
+                                    "Ce contexte consulte le web par le navigateur piloté, qui ne répond pas : {}.",
+                                    state.detail
+                                ),
+                            ));
+                        }
+                        None => {
+                            return Err(Error::new(
+                                ErrorCode::PolicyDenied,
+                                "Ce contexte consulte le web par le navigateur piloté ; le service n'en configure aucun.",
+                            ));
+                        }
+                    }
                 }
                 // Sérialise les préparations pour refuser une seconde émission pour le même id.
                 let _preparing = self.preparing.lock().await;
@@ -385,6 +410,11 @@ impl Handler for Agents {
 }
 
 impl Agents {
+    /// Dernier état connu du navigateur piloté, sans bloquer sur une sonde en cours.
+    fn browser_state(&self) -> Option<agentd::preparation::BrowserState> {
+        self.browser_state.read().ok().and_then(|s| s.clone())
+    }
+
     async fn local_models(&self) -> Result<Vec<String>, Error> {
         let endpoint = self.local_endpoint.as_deref().ok_or_else(|| {
             Error::new(
@@ -879,10 +909,41 @@ async fn main() -> anyhow::Result<()> {
     let capd = chemin("PROPHET_CAPD_SOCKET", "capd");
     let ledger = chemin("PROPHET_LEDGER_SOCKET", "ledger");
     let egress = chemin("PROPHET_EGRESS_SOCKET", "egress");
-    // Un navigateur n'est piloté que s'il est nommé explicitement : sa sortie réseau propre
-    // n'est pas encore relayée par egress, et ce choix appartient à l'administrateur.
+    // Un navigateur n'est piloté que s'il est nommé explicitement : ce choix appartient à
+    // l'administrateur. Sa sortie réseau est relayée vers egress ; il n'est pas encore confiné
+    // au niveau 2 (ADR 0024).
     let browser = std::env::var_os("PROPHET_BROWSER").map(std::path::PathBuf::from);
     let browser_root = commun::etat("agentd").join("navigateurs");
+    // La sonde tourne sous les contraintes réelles du service, une fois, sans retarder le socket :
+    // `task.options` répond « sonde en cours » jusqu'à son verdict.
+    let browser_state = Arc::new(std::sync::RwLock::new(
+        browser
+            .as_deref()
+            .map(agentd::preparation::BrowserState::pending),
+    ));
+    if let Some(program) = browser.clone() {
+        let root = browser_root.clone();
+        let state = browser_state.clone();
+        tokio::task::spawn_blocking(move || {
+            let (ready, detail) = match mcp_system::tools::Browsing::probe(&program, &root) {
+                Ok(version) => {
+                    tracing::info!(programme = %program.display(), version, "navigateur piloté prêt");
+                    (true, version)
+                }
+                Err(raison) => {
+                    tracing::warn!(programme = %program.display(), raison, "navigateur piloté indisponible");
+                    (false, raison)
+                }
+            };
+            if let Ok(mut etat) = state.write() {
+                *etat = Some(agentd::preparation::BrowserState {
+                    program: program.display().to_string(),
+                    ready,
+                    detail,
+                });
+            }
+        });
+    }
     let profiles = std::env::var_os("PROPHET_MISSION_PROFILES")
         .map(|path| agentd::preparation::load(std::path::Path::new(&path)))
         .transpose()
@@ -935,6 +996,7 @@ async fn main() -> anyhow::Result<()> {
             ledger,
             egress,
             browser,
+            browser_state,
             browser_root,
             etat: fichier_etat,
             pairs: commun::Pairs::detecter()?,

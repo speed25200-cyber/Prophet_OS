@@ -166,6 +166,13 @@ fn form(ui: &mut egui::Ui, preparation: &mut Preparation, compact: bool) {
                 ui.label(title("Le cadre de la mission",13.0).color(BLUE));
                 ui.label(RichText::new(format!("{} tokens · {} s au maximum",profile.limits.tokens,profile.limits.wall_time_s)).size(12.0).color(INK));
                 caption(ui,"Les accès détaillés seront présentés dans le plan.");
+                if profile.web {
+                    match preparation.options().and_then(|o|o.browser.as_ref()) {
+                        Some(state) if state.ready => caption(ui,&format!("Consulte le web par le navigateur piloté · {}",state.detail)),
+                        Some(state) => {ui.label(RichText::new(format!("Navigateur piloté indisponible : {}",state.detail)).size(12.0).color(Color32::from_rgb(159,70,48)));}
+                        None => {ui.label(RichText::new("Ce contexte consulte le web, mais le service ne configure aucun navigateur piloté.").size(12.0).color(Color32::from_rgb(159,70,48)));}
+                    }
+                }
             });
         }
         if let Some(error)=preparation.options().and_then(|o|o.model_error.as_ref()) {
@@ -184,7 +191,8 @@ fn form(ui: &mut egui::Ui, preparation: &mut Preparation, compact: bool) {
                 });
             }
         } else {
-            let enabled=!locked && !preparation.loading() && !preparation.intent.trim().is_empty() && preparation.selected().is_some_and(|p|p.models.contains(&preparation.model));
+            let browser_ready=preparation.options().and_then(|o|o.browser.as_ref()).is_some_and(|b|b.ready);
+        let enabled=!locked && !preparation.loading() && !preparation.intent.trim().is_empty() && preparation.selected().is_some_and(|p|p.models.contains(&preparation.model) && (!p.web || browser_ready));
             ui.add_enabled_ui(enabled,|ui| {
                 if bouton(ui,"mission-prepare-submit","Préparer le plan →",true).clicked()
                     && let Err(error)=preparation.submit(&ctx){preparation.report_error(error);}

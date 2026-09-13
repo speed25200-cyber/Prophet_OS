@@ -342,8 +342,10 @@ mod tests {
                     scopes: vec![],
                     grants: vec![],
                     limits: Default::default(),
+                    web: false,
                 }],
                 model_error: None,
+                browser: None,
             }),
             ..Default::default()
         };

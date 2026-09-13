@@ -159,6 +159,24 @@ fn trouver<'a>(node: &'a Value, role: &str, name: &str) -> Option<&'a Value> {
 }
 
 #[test]
+fn la_sonde_rend_la_version_du_navigateur_ou_nomme_l_echec() {
+    let Some(program) = chemin_du_navigateur() else {
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let version = Browsing::probe(std::path::Path::new(&program), dir.path()).unwrap();
+    assert!(version.contains("Chrome"), "{version}");
+    // Le profil jetable ne survit pas à la sonde.
+    assert!(!dir.path().join("sonde").exists());
+    let raison = Browsing::probe(
+        std::path::Path::new("/nulle-part/navigateur-absent"),
+        dir.path(),
+    )
+    .unwrap_err();
+    assert!(raison.starts_with("lancement"), "{raison}");
+}
+
+#[test]
 fn ouvrir_lire_et_agir_par_l_arbre_sous_le_controle_de_capd() {
     let Some(program) = chemin_du_navigateur() else {
         eprintln!("aucun navigateur : test sans effet");
