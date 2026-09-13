@@ -301,6 +301,14 @@ in
         description = "Prophet OS — runtime d'agents";
         extra = {
           after = [ "prophet-capd.service" "prophet-ledger.service" "prophet-sandboxd.service" ];
+          # Ce que `doc.read` emploie pour lire les formats : poppler pour les PDF, ffprobe pour
+          # les médias, tesseract pour le texte des images. Absents, l'outil le dirait ; ils sont
+          # là pour que l'agent lise ce que l'humain lui confie.
+          path = [
+            pkgs.poppler_utils
+            pkgs.ffmpeg-headless
+            (pkgs.tesseract.override { enableLanguages = [ "eng" "fra" ]; })
+          ];
           environment = {
             PROPHET_HOME = config.users.users.${cfg.user}.home;
           } // lib.optionalAttrs (cfg.navigateur != null) {

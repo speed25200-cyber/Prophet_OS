@@ -299,7 +299,7 @@ impl Profile {
                 (Res::Tool, Act::Call)
                     if matches!(
                         grant.pattern.as_str(),
-                        "fs.read" | "fs.write" | "fs.list" | "fs.search" | "fs.stat"
+                        "fs.read" | "fs.write" | "fs.list" | "fs.search" | "fs.stat" | "doc.read"
                     ) => {}
                 (Res::Tool, Act::Call) if hosts && WEB_TOOLS.contains(&grant.pattern.as_str()) => {}
                 (Res::Tool, Act::Call) if apps && UI_TOOLS.contains(&grant.pattern.as_str()) => {}

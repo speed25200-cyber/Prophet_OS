@@ -28,6 +28,9 @@ blake3 = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 ed25519-dalek = { workspace = true }
+# Lecture des formats (doc.read) : bureautique par l'archive et son XML, images par leurs en-têtes.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
 rand = { workspace = true }
 rustix = { workspace = true }
 base64 = { workspace = true }

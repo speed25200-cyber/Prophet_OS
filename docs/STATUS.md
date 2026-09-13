@@ -136,6 +136,15 @@ Code, lanceur, navigateur, X, verrouillage, déconnexion puis reconnexion) réus
 l'ISO, son démarrage et l'installeur ; seul ChatGPT reste en échec sur Fontconfig.
 Aucune case complète de FRONTIER n'est cochée.
 
+Lecture des formats du 13 septembre 2026, dans le commit portant ce rapport : `doc.read` lit un
+fichier du périmètre de `fs.read` quel que soit son format, reconnu aux octets : PDF par poppler
+(texte, pages), bureautique (`docx`, `xlsx`, `pptx`, `odt`, `ods`, `odp`) par archive et XML
+en Rust pur, images par leurs en-têtes et tesseract, médias par ffprobe, HTML dépouillé,
+archives listées, texte brut sinon ; tout est borné et un programme absent ou trop long est
+dit. L'image met poppler, ffmpeg et tesseract (fra, eng) sur le chemin d'agentd ; les
+catalogues offrent l'outil avec `fs.read`. Tests sur des fichiers fabriqués (PDF écrit à la
+main, docx, png, wav, zip, html). Voir l'[ADR 0028](adr/0028-lecture-des-formats-par-un-outil-natif.md).
+
 Pilotage des applications du 13 septembre 2026, dans le commit portant ce rapport : les
 applications GTK et Qt de la session sont lues et pilotées par leur arbre d'accessibilité. Le
 crate `supd` (service utilisateur `prophet-supd`, dans la session) joint le bus AT-SPI, rend

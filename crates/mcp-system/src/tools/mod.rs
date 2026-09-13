@@ -6,6 +6,7 @@
 
 mod clock;
 mod confined;
+mod doc;
 mod fs;
 mod http;
 mod system;
@@ -15,6 +16,7 @@ mod web;
 mod web_relay;
 
 pub use clock::Now;
+pub use doc::Read as DocRead;
 pub use fs::{List, Read, Search, Stat, Write};
 pub use http::Fetch;
 pub use system::{
@@ -32,6 +34,7 @@ use crate::registry::{Registry, Tool};
 /// Enregistre l'ensemble des outils système v0.
 pub fn register_all(registry: &mut Registry) {
     let tools: Vec<Arc<dyn Tool>> = vec![
+        Arc::new(doc::Read),
         Arc::new(Read),
         Arc::new(Write),
         Arc::new(List),

@@ -42,6 +42,7 @@
 | `secrets.use` | tool.call secrets.use | non | non | rend un handle |
 | `clock.now` | aucune | non | non | horloge de tâche (rejouable) |
 | `notify.human` | tool.call notify.human | non | non | hors bande |
+| `doc.read` | fs.read chemin | non | non | texte et métadonnées d'un PDF, document bureautique, image, média, page, archive ; format reconnu aux octets |
 | `ui.apps` | tool.call ui.apps | non | non | applications et nombre de fenêtres, sans titre |
 | `ui.tree` | ui.read app | non | non | SUP, provenance accessibilité |
 | `ui.act` | ui.act app + `requires` de l'action | selon action | selon action | SUP |
@@ -86,6 +87,20 @@ Chaque `tool.call` porte le nom de l'outil, la capacité exigée, la cible contr
 chemin absolu ou fenêtre) et une empreinte des arguments avec leur taille ; jamais le
 contenu des arguments. Chaque `tool.result` porte l'issue et une empreinte du résultat. C'est
 ainsi que l'humain lit où l'agent est allé sans que le journal contienne ce qu'il a lu ou écrit.
+
+## Lecture des formats actuellement implémentée
+
+`doc.read {path, max_chars?, ocr?}` lit un fichier sous les règles et le droit de `fs.read`
+(jusqu'à 64 Mio) et rend `kind`, `text` (au plus 256 Kio, `truncated` sinon), `meta` et
+`notes`. Le format vient des premiers octets, jamais du nom : PDF par `pdftotext` et `pdfinfo`
+(pages, titre) ; `docx`, `xlsx`, `pptx`, `odt`, `ods`, `odp` par leur archive et leur XML, en
+Rust pur ; images par leurs en-têtes (format, largeur, hauteur) et leur texte reconnu par
+`tesseract` (`fra+eng`) quand il est là et que `ocr` n'est pas faux ; vidéos et sons par
+`ffprobe` (durée, conteneur, flux, étiquettes) ; HTML dépouillé de ses balises, scripts et
+styles ; archives zip et tar listées ; texte brut sinon, avec `json`, `csv`, `markdown` et
+`xml` distingués. Un programme absent ou trop long (30 s) est dit dans `notes`, jamais
+attendu indéfiniment ; les octets passent par un fichier temporaire privé, effacé après. Aucun
+réseau, aucun programme choisi par l'agent. Voir l'[ADR 0028](../adr/0028-lecture-des-formats-par-un-outil-natif.md).
 
 ## Sortie réseau et navigation actuellement implémentées
 

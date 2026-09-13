@@ -337,6 +337,8 @@ impl Mission {
         registry.register(Arc::new(mcp_system::tools::List));
         registry.register(Arc::new(mcp_system::tools::Stat));
         registry.register(Arc::new(mcp_system::tools::Search));
+        // Tout format se lit sous le droit `fs.read` : PDF, bureautique, images, médias.
+        registry.register(Arc::new(mcp_system::tools::DocRead));
         // La seule sortie réseau : l'outil ne joint que le proxy, qui fait trancher capd sur
         // l'hôte réellement visé et retire le jeton avant que quoi que ce soit ne sorte.
         registry.register(Arc::new(mcp_system::tools::Fetch::via(self.egress.clone())));

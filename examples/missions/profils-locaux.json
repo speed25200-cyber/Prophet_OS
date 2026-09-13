@@ -35,6 +35,7 @@
           ],
           "tool.call": [
             "fs.read",
+            "doc.read",
             "fs.list",
             "fs.stat",
             "fs.search",
@@ -96,6 +97,7 @@
           ],
           "tool.call": [
             "fs.read",
+            "doc.read",
             "fs.list",
             "fs.stat",
             "fs.search",
@@ -158,6 +160,7 @@
           ],
           "tool.call": [
             "fs.read",
+            "doc.read",
             "fs.list",
             "fs.stat",
             "fs.search",

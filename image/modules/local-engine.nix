@@ -25,7 +25,7 @@ let
         capabilities.max = {
           "fs.read" = [ "~/Documents/Prophet/**" ];
           "fs.write" = [ "~/Documents/Prophet/**" ];
-          "tool.call" = [ "fs.read" "fs.write" ];
+          "tool.call" = [ "fs.read" "doc.read" "fs.write" ];
         };
         budget.default = { tokens = 20000; wall_time = "90s"; approvals = 3; };
       };
@@ -52,7 +52,7 @@ let
           "fs.read" = [ "~/Documents/Prophet/**" ];
           "fs.write" = [ "~/Documents/Prophet/**" ];
           "net.egress" = [ "*" ];
-          "tool.call" = [ "fs.read" "fs.write" "http.fetch" ]
+          "tool.call" = [ "fs.read" "doc.read" "fs.write" "http.fetch" ]
             ++ lib.optionals navigateur [ "web.open" "web.tree" "web.act" ];
         } // lib.optionalAttrs navigateur {
           "ui.read" = [ "browser" ];
@@ -82,7 +82,7 @@ let
           "fs.write" = [ "~/Documents/Prophet/**" ];
           "ui.read" = [ "mousepad" ];
           "ui.act" = [ "mousepad" ];
-          "tool.call" = [ "fs.read" "fs.write" "ui.apps" "ui.tree" "ui.act" ];
+          "tool.call" = [ "fs.read" "doc.read" "fs.write" "ui.apps" "ui.tree" "ui.act" ];
         };
         budget.default = { tokens = 30000; wall_time = "180s"; approvals = 3; };
       };

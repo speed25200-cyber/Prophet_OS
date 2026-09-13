@@ -364,6 +364,53 @@ pub(super) enum Operation {
     Search,
 }
 
+/// Les octets d'un fichier du périmètre, lus sous les mêmes règles que `fs.read` : ni lien
+/// symbolique, ni lien physique multiple, ni fichier spécial, et une borne dite plutôt que tue.
+pub(super) struct Reading {
+    /// Chemin logique, tel que l'agent le désigne.
+    pub logical: PathBuf,
+    /// Les octets lus, au plus `max`.
+    pub bytes: Vec<u8>,
+    /// Taille totale du fichier.
+    pub total: u64,
+    /// Le fichier dépassait la borne.
+    pub truncated: bool,
+}
+
+/// Lit les octets d'un fichier autorisé, pour les outils qui interprètent un format (documents,
+/// images, médias) sans rien exposer de plus que `fs.read`.
+pub(super) fn read_bytes(
+    raw: &str,
+    context: &ToolContext,
+    access: &dyn ResourceAccess,
+    max: usize,
+) -> std::result::Result<Reading, (ErrorCode, String)> {
+    let go = || -> Result<Reading> {
+        let relative = relative(raw, context).ok_or_else(denied)?;
+        let view = View::new(context, access)?;
+        let logical = view.logical.join(&relative);
+        if !view.permits(Act::Read, &relative) {
+            return Err(denied());
+        }
+        let file = view.selected(&relative, OFlags::RDONLY)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.nlink() != 1 {
+            return Err(denied());
+        }
+        let mut bytes = Vec::with_capacity(max.min(metadata.len() as usize).saturating_add(1));
+        file.take(max as u64 + 1).read_to_end(&mut bytes)?;
+        let truncated = bytes.len() > max;
+        bytes.truncate(max);
+        Ok(Reading {
+            logical,
+            total: metadata.len().max(bytes.len() as u64),
+            bytes,
+            truncated,
+        })
+    };
+    go().map_err(|Failure(code, detail)| (code, detail))
+}
+
 pub(super) fn execute(
     op: Operation,
     args: &Value,
