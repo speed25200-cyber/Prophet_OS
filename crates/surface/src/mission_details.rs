@@ -612,6 +612,30 @@ fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::Trail
             ui.label(RichText::new(&entry.tool).size(13.0).monospace());
             if let Some(target) = &entry.target {
                 ui.label(RichText::new(limited(target, 120)).size(13.0).color(MUTED));
+                // Un hôte visité par l'agent s'ouvre dans le navigateur de l'humain, par la
+                // commande que la session lui a donnée ; jamais par une adresse venue du modèle
+                // au-delà de l'hôte contrôlé par capd.
+                if matches!(entry.tool.as_str(), "web.open" | "http.fetch")
+                    && let Some(browser) = std::env::var_os("BROWSER")
+                    && bouton(ui, &format!("trail-open-{}", entry.seq), "Ouvrir", false).clicked()
+                {
+                    let url = format!("https://{target}/");
+                    let mut parts = browser
+                        .to_string_lossy()
+                        .split_whitespace()
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>();
+                    if !parts.is_empty() {
+                        let program = parts.remove(0);
+                        let _ = std::process::Command::new(program)
+                            .args(parts)
+                            .arg(url)
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null())
+                            .spawn();
+                    }
+                }
             }
             if !note.is_empty() {
                 ui.label(RichText::new(note).size(12.0).color(RED));
