@@ -38,8 +38,11 @@ bibliothèque SFS relit l'index et les originaux avant la première mutation et 
 document retouché ; le service n'ajoute que l'identité, la sérialisation (une publication à la
 fois) et le journal : `fs.commit`, ou `fs.undo` puis `task.rolled_back`, sous l'acteur `user`.
 Une intention interrompue (`applying`, `undoing`) se reprend par la même commande. `task.inspect`
-rend l'état SFS dans `publication`, et `can_apply` / `can_undo` au seul créateur. La publication
-s'exécute sous l'identité du service ; voir les limites de l'[ADR 0023](../adr/0023-approbation-et-publication-par-agentd.md).
+rend l'état SFS dans `publication`, et `can_apply` / `can_undo` au seul créateur. Avant de
+publier, le service conserve le manifeste de la mission, demande à capd un jeton de deux minutes
+borné aux chemins de l'index exact et soumet chaque chemin à `cap.check` ; un refus est
+journalisé (`policy.deny`, étape `publish`) sans rien écrire. La publication s'exécute ensuite
+sous l'identité du service ; voir les limites de l'[ADR 0023](../adr/0023-approbation-et-publication-par-agentd.md).
 
 `task.prepare` prend uniquement `{id, intent, profile, model}`. Son utilisateur provient du pair
 Unix. `PROPHET_MISSION_PROFILES` fixe les manifestes et périmètres au démarrage ; les modèles sont
@@ -75,7 +78,7 @@ de bout en bout n'est donc pas livrée.
 
 ## Persistance et reprise
 
-Plans, tâches, jetons et résultats sont enregistrés sous le verrou du runtime, dans un fichier
+Plans, manifestes, tâches, jetons et résultats sont enregistrés sous le verrou du runtime, dans un fichier
 temporaire créé en 0600 avant toute donnée, synchronisé et renommé. Le répertoire parent est
 ensuite synchronisé. Un état illisible bloque le démarrage et reste intact pour réparation.
 Une mission active lors de l'arrêt du service devient `failed` à la reprise ; son résultat

@@ -55,7 +55,11 @@ de l'atelier offre « Appliquer à mes documents » et « Annuler la publication
 d'une intention interrompue. Le journal reçoit `fs.commit`, `fs.undo` et `task.rolled_back`
 sous l'acteur `user`. Trois tests d'intégration avec les vrais capd, ledger, agentd et la CLI
 vérifient la publication réelle, le refus après retouche humaine et la relecture après
-redémarrage. Voir le [rapport d'approbation](reports/approbation-2026-09-13.md) et
+redémarrage. Le même jour, la publication est liée à capd : le manifeste est conservé avec le
+plan, un jeton neuf borné aux chemins de l'index exact est demandé au moment de publier, et
+chaque chemin passe par `cap.check` ; un quatrième test prouve qu'une révocation après la
+mission fait refuser la publication sans rien écrire, avec `policy.deny` au journal.
+Voir le [rapport d'approbation](reports/approbation-2026-09-13.md) et
 l'[ADR 0023](adr/0023-approbation-et-publication-par-agentd.md). Limite : les tests tournent
 sous un seul UID ; sur l'image installée, `agentd` n'a pas `CAP_CHOWN` et le remplacement d'un
 document du propriétaire n'est pas livré. Aucune case complète de FRONTIER n'est cochée.

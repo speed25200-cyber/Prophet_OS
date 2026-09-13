@@ -1,6 +1,6 @@
 # 0023 — Publier et annuler depuis agentd, sous l'identité du créateur
 
-- **Statut** : accepté ; écrivain sous l'identité humaine ouvert
+- **Statut** : accepté ; droits capd liés à l'index livrés ; écrivain sous l'identité humaine ouvert
 - **Date** : 2026-09-13
 - **Tâches liées** : M4-T2, M8-T10, M12-T4
 
@@ -27,6 +27,15 @@ l'annulation fait passer la tâche à `rolled_back`. Une seule publication à la
 `can_apply` et `can_undo`, offertes au seul créateur. La CLI et l'atelier n'ont plus d'accès
 direct au disque pour ces deux gestes.
 
+Avant la première mutation, `task.apply` fait trancher capd sur l'index exact : agentd conserve
+le manifeste de la mission et demande un jeton neuf de deux minutes dont les seuls grants sont
+les chemins de l'index (`fs.write ~/<chemin>`), puis soumet chaque chemin à `cap.check`. Le
+plafond du manifeste, la politique Cedar (dont les chemins sensibles) et la révocation de la
+mission s'appliquent donc au moment où l'humain publie, sans dépendre de l'expiration du jeton
+de la mission, qui a pu tomber pendant l'examen. Un refus est consigné (`policy.deny`, étape
+`publish`) et rien n'est écrit. L'annulation ne demande pas de jeton : rendre ses documents
+au propriétaire n'est pas un droit d'agent.
+
 ## Alternatives écartées
 
 - **Publier depuis la CLI sous l'UID humain**, en lisant l'index dans le résultat d'agentd :
@@ -44,7 +53,7 @@ La publication s'exécute sous l'identité du service. Les tests tournent sous u
 sur l'image installée, `agentd` n'a pas `CAP_CHOWN`, et la conservation du propriétaire d'un
 document remplacé échouera avant toute mutation. Remplacer un fichier appartenant au
 propriétaire n'est donc **pas** livré sur l'image ; il faut un écrivain sous l'identité humaine
-ou un droit borné, à décider avant de cocher un critère de FRONTIER. Les droits capd liés
-à l'index exact restent aussi à ajouter : aujourd'hui, la vérification est l'identité du créateur
-et l'égalité de l'index, pas un jeton. Un conflit laisse SFS en `conflict` avec ses fichiers
-déplacés ; l'atelier le montre mais n'offre pas encore de résolution.
+ou un droit borné, à décider avant de cocher un critère de FRONTIER. Une mission planifiée
+avant la conservation du manifeste ne peut plus être publiée : il faut la replanifier. Un
+conflit laisse SFS en `conflict` avec ses fichiers déplacés ; l'atelier le montre mais n'offre
+pas encore de résolution.

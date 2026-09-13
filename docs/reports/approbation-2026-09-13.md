@@ -17,14 +17,18 @@ est maintenant commandé par agentd, sous l'identité du créateur, depuis la CL
   interrompue. Les acquittements sont vérifiés comme pour le lancement et l'arrêt.
 - Le journal reçoit `fs.commit`, ou `fs.undo` puis `task.rolled_back`, sous l'acteur `user`,
   sans le contenu des fichiers.
+- Avant la première mutation, `task.apply` demande à capd un jeton neuf borné aux chemins de
+  l'index exact et soumet chaque chemin à `cap.check` : plafond du manifeste, politique Cedar
+  et révocation de la mission s'appliquent au moment de publier. Le manifeste est conservé
+  avec le plan à cet effet. Un refus est journalisé (`policy.deny`, étape `publish`).
 
 ## Vérifications
 
 | Contrôle | Résultat local |
 | --- | --- |
-| `cargo test -p agentd --test local_daemon` | 13 réussis, 0 échec, 1 ignoré (modèle réel) |
+| `cargo test -p agentd --test local_daemon` | 14 réussis, 0 échec, 1 ignoré (modèle réel) |
 | `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings` | réussis |
-| `cargo test --workspace --no-fail-fast` | 665 réussis, 1 échec, 29 ignorés ; l'échec est propre à l'environnement (ci-dessous) |
+| `cargo test --workspace --no-fail-fast` | 666 réussis, 1 échec, 29 ignorés ; l'échec est propre à l'environnement (ci-dessous) |
 | `tools/verifier-les-services.sh`, `verifier-le-durcissement.sh`, `verifier-la-doc-des-travaux.sh` | réussis |
 
 Trois nouveaux tests d'intégration lancent les vrais `prophet-capd`, `prophet-ledger`,
@@ -37,6 +41,9 @@ Trois nouveaux tests d'intégration lancent les vrais `prophet-capd`, `prophet-l
 2. Une retouche humaine après publication fait refuser `undo`, laisse le document intact,
    conserve `committed` et n'inscrit aucun `fs.undo`.
 3. La CLI publie et annule par le service, et `task show` nomme la commande suivante.
+4. Une révocation par `cap.revoke` après la fin de la mission fait refuser `apply` par capd :
+   aucun fichier n'est écrit, SFS reste `open`, le journal porte `policy.deny` avec le chemin
+   et aucun `fs.commit`.
 
 Les commandes Rust utilisent la chaîne épinglée `1.97.1`, hors `nix develop` : le conteneur
 de cette session n'a pas Nix. Aucune VM n'a été lancée. L'unique échec,
@@ -51,7 +58,8 @@ Les tests tournent sous un seul UID : le service, le créateur et le propriétai
 sont la même identité. Sur l'image installée, `agentd` n'a pas `CAP_CHOWN` ; la conservation
 du propriétaire d'un document remplacé échouera avant toute mutation, et le remplacement d'un
 fichier du propriétaire n'est donc pas livré. L'ajout d'un fichier neuf y appartiendra au
-service. Un écrivain sous l'identité humaine reste le prochain jalon, avec les droits capd
-liés à l'index. Le conflit tardif laisse SFS en `conflict` ; l'atelier le montre, sans le
-résoudre. Les boutons de l'atelier sont vérifiés par les tests du contrôleur, pas par une
+service. Un écrivain sous l'identité humaine reste le prochain jalon. La révocation est
+prouvée ; le refus d'un chemin sensible par la politique n'est vérifié que par les tests
+de capd, pas par une mission entière. Le conflit tardif laisse SFS en `conflict` ; l'atelier
+le montre, sans le résoudre. Les boutons de l'atelier sont vérifiés par les tests du contrôleur, pas par une
 capture ni par une session Wayland. Aucun critère de FRONTIER n'est coché.

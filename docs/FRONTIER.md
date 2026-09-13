@@ -139,6 +139,7 @@ des conflits restent ouvertes. Cette preuve partielle ne coche pas le critère d
 L'[approbation depuis le service](reports/approbation-2026-09-13.md) relie ensuite cet index
 au créateur constaté : `task.apply` et `task.undo` dans agentd, `prophet task apply` / `undo`
 et les boutons de l'atelier, avec journal sous l'acteur `user` et reprise d'une intention
-interrompue. Trois tests réels sous un seul UID le vérifient. Sur l'image installée, le service
-n'a pas `CAP_CHOWN` : remplacer un document du propriétaire n'est pas livré, et les droits capd
-liés à l'index restent absents. Le critère d'exécution locale complète reste donc ouvert.
+interrompue. Avant d'écrire, capd tranche sur un jeton neuf borné aux chemins de l'index exact ;
+une révocation après la mission bloque la publication. Quatre tests réels sous un seul UID le
+vérifient. Sur l'image installée, le service n'a pas `CAP_CHOWN` : remplacer un document du
+propriétaire n'est pas livré. Le critère d'exécution locale complète reste donc ouvert.
