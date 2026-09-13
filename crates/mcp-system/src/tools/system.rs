@@ -146,7 +146,7 @@ impl Tool for Exec {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "proc.exec".into(),
-            description: "Exécute un programme dans une sandbox, avec ses arguments, dans l'espace de travail de la tâche, et rend sa sortie (bornée) et son code de retour. Les utilitaires qui ne modifient rien (cat, ls, wc, head, tail, sort, uniq, grep, rg, cut, tr, diff, file) tournent confinés sur place ; tout autre programme exige une microVM et une décision humaine. Le home n'est lisible que selon vos droits et n'est jamais modifié : écrivez dans l'espace de travail.".into(),
+            description: "Exécute un programme dans une sandbox, avec ses arguments, dans l'espace de travail de la tâche, et rend sa sortie (bornée) et son code de retour. Les utilitaires qui ne modifient rien (cat, ls, wc, head, tail, sort, uniq, grep, cut, tr, diff, file) tournent confinés sur place ; tout autre programme exige une microVM et une décision humaine. Le home n'est lisible que selon vos droits et n'est jamais modifié : écrivez dans l'espace de travail.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {

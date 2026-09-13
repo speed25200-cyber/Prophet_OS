@@ -19,7 +19,7 @@ la sortie d'un convertisseur n'avait rien.
    home et l'espace de travail comme seul lieu d'écriture : ce qu'une commande produit s'examine
    et s'applique comme toute écriture d'agent.
 3. **Deux niveaux.** Une courte liste d'utilitaires qui ne modifient rien (`cat`, `ls`, `wc`,
-   `head`, `tail`, `sort`, `uniq`, `grep`, `rg`, `cut`, `tr`, `diff`, `file`), désignés par leur
+   `head`, `tail`, `sort`, `uniq`, `grep`, `cut`, `tr`, `diff`, `file`), désignés par leur
    nom, tourne confinée sur place (niveau 0 : espaces de noms, Landlock, seccomp) et sans
    décision humaine ; tout autre programme exige la microVM (niveau 2) et est tenu pour
    irréversible, donc soumis à décision. Un niveau demandé ne s'abaisse jamais.
@@ -37,6 +37,12 @@ la sortie d'un convertisseur n'avait rien.
    ne quitte pas son groupe.
 
 ## Conséquences
+
+Correction après audit local du 13 septembre : `rg` n'est pas un simple lecteur, car
+`rg --pre /bin/sh fichier` exécute le contenu du fichier. Il exige désormais le niveau 2
+et une décision humaine. Les commandes `sandbox.run` sont suivies pendant leur attente :
+liste, gel global, dégel et arrêt utilisent la même poignée que l'exécution. Une seconde
+commande sur la même tâche est refusée. Le test réel vérifie aussi l'état arrêté dans `/proc`.
 
 - Les agents lisent, comptent, comparent et convertissent avec les outils du système, sous
   contrôle, et le journal garde chaque commande.

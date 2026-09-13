@@ -21,6 +21,89 @@ fn namespaces_disponibles() -> bool {
 }
 
 #[tokio::test]
+#[ignore = "needs_userns: gel et arrêt d'une commande synchrone réellement confinée"]
+async fn une_commande_run_est_visible_gelable_et_arretable() {
+    assert!(namespaces_disponibles(), "espaces de noms et helper requis");
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("sandboxd.sock");
+    let daemon = Daemon::lancer_avec(
+        env!("CARGO_BIN_EXE_prophet-sandboxd"),
+        &socket,
+        &dir.path().join("state"),
+        &[("PROPHET_SANDBOX_HELPER", helper().to_str().unwrap())],
+    );
+    let command_client = daemon.joindre().await;
+    let control = daemon.joindre().await;
+    let run =
+        tokio::spawn(async move {
+            command_client.call("sandbox.run", json!({
+            "task": "commande", "spec": SandboxSpec::new(0, "/bin/sleep", "/").args(["20"]),
+            "timeout_s": 4
+        })).await
+        });
+    let mut pid = None;
+    for _ in 0..100 {
+        let list = control.call("sandbox.list", json!({})).await.unwrap();
+        pid = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["task"] == "commande")
+            .and_then(|item| item["pid"].as_u64());
+        if pid.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let Some(pid) = pid else {
+        let _ = run.await;
+        panic!("sandbox.run doit figurer parmi les commandes contrôlables");
+    };
+    let conflict = control
+        .call(
+            "sandbox.start",
+            json!({
+                "task": "commande", "spec": SandboxSpec::new(0, "/bin/true", "/")
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(conflict.code, prophet_ipc::ErrorCode::Conflict);
+    let frozen = control.call("sandbox.freeze_all", json!({})).await.unwrap();
+    assert_eq!(frozen, json!({"frozen":["commande"],"errors":[]}));
+    let mut stopped = false;
+    for _ in 0..50 {
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap_or_default();
+        stopped = status
+            .lines()
+            .any(|line| line.starts_with("State:") && line.contains("T (stopped)"));
+        if stopped {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    control
+        .call("sandbox.thaw", json!({"task":"commande"}))
+        .await
+        .unwrap();
+    control
+        .call("sandbox.kill", json!({"task":"commande"}))
+        .await
+        .unwrap();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(3), run)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(stopped, "le noyau doit confirmer le gel de la commande");
+    assert_eq!(result["timed_out"], false);
+    assert_eq!(
+        control.call("sandbox.list", json!({})).await.unwrap(),
+        json!([])
+    );
+}
+
+#[tokio::test]
 async fn une_commande_confinee_rend_sa_sortie_et_son_code_et_le_delai_la_tue() {
     if !namespaces_disponibles() {
         eprintln!("espaces de noms indisponibles : test passé sans rien vérifier");

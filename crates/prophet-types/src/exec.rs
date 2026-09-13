@@ -8,7 +8,7 @@
 
 /// Les programmes de la liste, par leur nom.
 pub const SAFE_UTILITIES: &[&str] = &[
-    "cat", "ls", "wc", "head", "tail", "sort", "uniq", "rg", "grep", "cut", "tr", "diff", "file",
+    "cat", "ls", "wc", "head", "tail", "sort", "uniq", "grep", "cut", "tr", "diff", "file",
 ];
 
 /// Vrai si le programme, désigné par son nom seul, est un utilitaire de la liste.
@@ -23,6 +23,11 @@ pub fn is_safe_utility(program: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ripgrep_peut_executer_un_preprocesseur_et_exige_la_microvm() {
+        assert!(!is_safe_utility("rg"), "rg --pre peut exécuter du code");
+    }
 
     #[test]
     fn seul_le_nom_nu_designe_un_utilitaire_confine() {

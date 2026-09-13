@@ -87,6 +87,8 @@ fn la_liste_blanche_tourne_sur_place_et_le_reste_en_microvm() {
     assert_eq!(required_level_for("cat", Some(1)), 1);
     assert_eq!(required_level_for("sh", None), 2);
     assert_eq!(required_level_for("sh", Some(0)), 2);
+    assert!(!is_safe_binary("rg"));
+    assert_eq!(required_level_for("rg", Some(0)), 2);
 }
 
 #[test]

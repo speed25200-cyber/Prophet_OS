@@ -24,7 +24,7 @@ use tokio::sync::Mutex;
 struct Isolation {
     manager: Manager,
     /// Les sandboxes vivantes, par identifiant de tâche.
-    vivantes: Mutex<std::collections::HashMap<String, SandboxHandle>>,
+    vivantes: Mutex<std::collections::HashMap<String, Arc<Mutex<SandboxHandle>>>>,
     pairs: commun::Pairs,
 }
 
@@ -99,7 +99,7 @@ impl Handler for Isolation {
                 let niveau = spec.level;
                 let poignee = self.manager.run(&tache, &spec).map_err(sandbox)?;
                 let pid = poignee.pid;
-                vivantes.insert(tache.clone(), poignee);
+                vivantes.insert(tache.clone(), Arc::new(Mutex::new(poignee)));
                 tracing::info!(%tache, niveau, pid, "sandbox démarrée");
                 Ok(json!({ "task": tache, "pid": pid, "level": niveau }))
             }
@@ -131,12 +131,27 @@ impl Handler for Isolation {
                 )
                 .unwrap_or(256 * 1024);
                 let niveau = spec.level;
+                // La commande reste contrôlable pendant l'attente. Seul l'accès bref à
+                // sa poignée est verrouillé, jamais l'attente ni la lecture des sorties.
+                let poignee = {
+                    let mut vivantes = self.vivantes.lock().await;
+                    if vivantes.contains_key(&tache) {
+                        return Err(Error::new(
+                            ErrorCode::Conflict,
+                            format!("la tâche {tache} a déjà une sandbox vivante"),
+                        ));
+                    }
+                    let handle = Arc::new(Mutex::new(
+                        self.manager.run(&tache, &spec).map_err(sandbox)?,
+                    ));
+                    vivantes.insert(tache.clone(), handle.clone());
+                    handle
+                };
                 let rendu = tokio::task::block_in_place(|| {
-                    let mut poignee = self.manager.run(&tache, &spec).map_err(sandbox)?;
-                    let pid = poignee.pid;
+                    let pid = poignee.blocking_lock().pid;
                     let sortie = executer_bornee(
                         &self.manager,
-                        &mut poignee,
+                        &poignee,
                         std::time::Duration::from_secs(delai),
                         borne,
                     );
@@ -151,6 +166,15 @@ impl Handler for Isolation {
                         "truncated": sortie.truncated,
                     }))
                 })?;
+                let mut vivantes = self.vivantes.lock().await;
+                // Un kill peut avoir retiré la commande puis une autre peut avoir repris
+                // cet identifiant. Sa fin ne doit pas retirer la nouvelle commande.
+                if vivantes
+                    .get(&tache)
+                    .is_some_and(|h| Arc::ptr_eq(h, &poignee))
+                {
+                    vivantes.remove(&tache);
+                }
                 tracing::info!(niveau, "commande exécutée sous sandbox");
                 Ok(rendu)
             }
@@ -162,7 +186,7 @@ impl Handler for Isolation {
                 let mut frozen = Vec::new();
                 let mut errors = Vec::new();
                 for (task, handle) in vivantes.iter_mut() {
-                    match self.manager.freeze(handle) {
+                    match self.manager.freeze(&mut *handle.lock().await) {
                         Ok(()) => frozen.push(task.clone()),
                         Err(error) => errors.push(json!({"task":task, "error":error.to_string()})),
                     }
@@ -177,10 +201,11 @@ impl Handler for Isolation {
                 let poignee = vivantes
                     .get_mut(&tache)
                     .ok_or_else(|| introuvable(&tache))?;
+                let mut poignee = poignee.lock().await;
                 if methode == "sandbox.freeze" {
-                    self.manager.freeze(poignee).map_err(sandbox)?;
+                    self.manager.freeze(&mut poignee).map_err(sandbox)?;
                 } else {
-                    self.manager.thaw(poignee).map_err(sandbox)?;
+                    self.manager.thaw(&mut poignee).map_err(sandbox)?;
                 }
                 tracing::info!(%tache, %methode, "état de sandbox changé");
                 commun::repondre(&poignee.state())
@@ -189,7 +214,8 @@ impl Handler for Isolation {
             "sandbox.kill" => {
                 let tache = commun::texte(&params, "task")?;
                 let mut vivantes = self.vivantes.lock().await;
-                let mut poignee = vivantes.remove(&tache).ok_or_else(|| introuvable(&tache))?;
+                let handle = vivantes.remove(&tache).ok_or_else(|| introuvable(&tache))?;
+                let mut poignee = handle.lock().await;
                 self.manager.kill(&mut poignee).map_err(sandbox)?;
                 tracing::info!(%tache, "sandbox tuée");
                 commun::repondre(&poignee.state())
@@ -199,6 +225,7 @@ impl Handler for Isolation {
                 let tache = commun::texte(&params, "task")?;
                 let vivantes = self.vivantes.lock().await;
                 let poignee = vivantes.get(&tache).ok_or_else(|| introuvable(&tache))?;
+                let poignee = poignee.lock().await;
                 Ok(json!({
                     "task": tache,
                     "pid": poignee.pid,
@@ -209,10 +236,10 @@ impl Handler for Isolation {
 
             "sandbox.list" => {
                 let vivantes = self.vivantes.lock().await;
-                let liste: Vec<_> = vivantes
-                    .iter()
-                    .map(|(tache, poignee)| json!({ "task": tache, "pid": poignee.pid }))
-                    .collect();
+                let mut liste = Vec::new();
+                for (tache, poignee) in vivantes.iter() {
+                    liste.push(json!({ "task": tache, "pid": poignee.lock().await.pid }));
+                }
                 Ok(json!(liste))
             }
 
@@ -232,12 +259,12 @@ struct Sortie {
 /// Lit la sortie d'une commande jusqu'à une borne, l'attend jusqu'à un délai, et la tue au-delà.
 fn executer_bornee(
     manager: &Manager,
-    poignee: &mut SandboxHandle,
+    poignee: &Mutex<SandboxHandle>,
     delai: std::time::Duration,
     borne: usize,
 ) -> Sortie {
     use std::io::Read as _;
-    let (stdout, stderr) = match poignee.child_mut() {
+    let (stdout, stderr) = match poignee.blocking_lock().child_mut() {
         Some(child) => (child.stdout.take(), child.stderr.take()),
         None => (None, None),
     };
@@ -264,7 +291,10 @@ fn executer_bornee(
     let debut = std::time::Instant::now();
     let mut timed_out = false;
     let code = loop {
-        let statut = poignee.child_mut().and_then(|c| c.try_wait().ok());
+        let statut = poignee
+            .blocking_lock()
+            .child_mut()
+            .and_then(|c| c.try_wait().ok());
         match statut {
             Some(Some(status)) => break status.code(),
             Some(None) if debut.elapsed() < delai => {
@@ -272,14 +302,15 @@ fn executer_bornee(
             }
             Some(None) => {
                 timed_out = true;
-                let _ = manager.kill(poignee);
+                let mut poignee = poignee.blocking_lock();
+                let _ = manager.kill(&mut poignee);
                 let _ = poignee.wait();
                 break None;
             }
             None => break None,
         }
     };
-    let _ = poignee.wait();
+    let _ = poignee.blocking_lock().wait();
     let mut stdout = lecteur_out.join().unwrap_or_default();
     let stderr = lecteur_err.join().unwrap_or_default();
     let truncated = stdout.len() > borne;
