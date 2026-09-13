@@ -16,9 +16,13 @@ use wgpu::util::DeviceExt as _;
 
 /// Grains de la voûte. Fixes : ils donnent la profondeur, pas le mouvement.
 const POUSSIERE: u32 = 3000;
-/// Particules par ruban. Assez pour un ruban continu sur un écran large, assez peu pour qu'un
-/// rastériseur logiciel tienne le rythme dans les tests.
+/// Particules par ruban, sur une carte graphique : assez pour un ruban continu sur un écran
+/// large. Une carte les trace en une fraction de milliseconde.
 const PAR_COURANT: u32 = 6000;
+/// Ce qu'un rastériseur logiciel reçoit : les rubans sont plus clairsemés et la voûte plus
+/// rare, pour qu'une machine virtuelle sans carte tienne le rythme au lieu de le subir.
+const POUSSIERE_LOGICIEL: u32 = 1200;
+const PAR_COURANT_LOGICIEL: u32 = 1600;
 /// Rubans dessinés au plus. Au-delà, l'écran serait une nappe indistincte ; les missions qui
 /// réclament l'humain et les plus vives passent devant, comme dans la scène.
 pub(crate) const RUBANS_MAX: usize = 10;
@@ -65,11 +69,18 @@ pub(crate) struct Champ {
     temps: f32,
     attenuation: f32,
     accent: [f32; 3],
+    poussiere: u32,
+    par_courant: u32,
 }
 
 impl Champ {
-    /// Construit le pipeline pour le format de la cible où l'interface se dessine.
-    pub(crate) fn nouveau(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+    /// Construit le pipeline pour le format de la cible où l'interface se dessine. Sur un
+    /// rastériseur logiciel, le champ est plus léger ; il le dit à qui mesure.
+    pub(crate) fn nouveau(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        logiciel: bool,
+    ) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("champ"),
             source: wgpu::ShaderSource::Wgsl(include_str!("champ.wgsl").into()),
@@ -178,7 +189,22 @@ impl Champ {
             temps: 0.0,
             attenuation: 1.0,
             accent: Accent::defaut().champ,
+            poussiere: if logiciel {
+                POUSSIERE_LOGICIEL
+            } else {
+                POUSSIERE
+            },
+            par_courant: if logiciel {
+                PAR_COURANT_LOGICIEL
+            } else {
+                PAR_COURANT
+            },
         }
+    }
+
+    /// Le nombre de particules d'une image : ce que le GPU trace réellement.
+    pub(crate) fn particules(&self) -> u32 {
+        self.poussiere + self.rubans.len() as u32 * self.par_courant + GRILLE
     }
 
     /// Prépare le champ pour une image : quelles missions deviennent des rubans, à quel instant.
@@ -221,8 +247,8 @@ impl Champ {
             resolution: [largeur as f32, hauteur as f32],
             temps: self.temps,
             attenuation: self.attenuation,
-            poussiere: POUSSIERE,
-            par_courant: PAR_COURANT,
+            poussiere: self.poussiere,
+            par_courant: self.par_courant,
             grille: GRILLE,
             rubans: self.rubans.len() as u32,
             accent: self.accent,
@@ -240,10 +266,7 @@ impl Champ {
         queue.write_buffer(&self.stockage, 0, bytemuck::cast_slice(&rubans));
         passe.set_pipeline(&self.pipeline);
         passe.set_bind_group(0, &self.groupe, &[]);
-        passe.draw(
-            0..6,
-            0..(POUSSIERE + self.rubans.len() as u32 * PAR_COURANT + GRILLE),
-        );
+        passe.draw(0..6, 0..self.particules());
     }
 }
 

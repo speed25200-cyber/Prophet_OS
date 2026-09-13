@@ -60,9 +60,14 @@ identifiants et leur logique : les parcours existants les vérifient inchangés.
 
 Le champ ajoute au plus 3 000 grains, 2 800 points de grille et 60 000 particules par image,
 tracés en un seul appel instancié ; le tampon des rubans a une taille fixe et le groupe de
-liaison n'est jamais reconstruit. Le rendu logiciel de la CI et de cette session ne mesure ni la
-fluidité ni la consommation sur une carte graphique réelle : ces mesures restent dues au critère
-d'interface.
+liaison n'est jamais reconstruit. Sur un rastériseur logiciel, que wgpu déclare comme
+périphérique de type processeur, le champ s'allège de lui-même (1 600 particules par ruban,
+1 200 grains, 30 images par seconde) ; `--champ-complet` rétablit le champ entier. La fenêtre
+ne redessine un écran que si l'empreinte de la scène a changé ou si l'interface l'a demandé.
+`prophet-surface --mesure N` donne, sur n'importe quelle machine, les temps par image et la
+mémoire résidente attendus par le critère d'interface ; les chiffres de cette session, en
+rendu logiciel, sont dans le rapport. La fluidité et la consommation sur une carte graphique
+réelle restent à mesurer avec cette commande.
 
 Rien n'est affiché qui ne vienne d'un service. Les captures de démonstration portent la mention
 « DÉMONSTRATION » et leur relevé de modèles est un tiret. L'anneau du rail, les relevés, le

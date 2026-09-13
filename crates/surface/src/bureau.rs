@@ -18,6 +18,7 @@ pub struct Bureau {
     pub atelier: Atelier,
     rendu: egui_wgpu::Renderer,
     champ: Champ,
+    logiciel: bool,
     supervision: Supervision,
 }
 
@@ -39,7 +40,8 @@ impl Bureau {
             ctx,
             atelier: Atelier::nouveau(endpoint, demonstration),
             supervision: Supervision::default(),
-            champ: Champ::nouveau(&contexte.device, format),
+            champ: Champ::nouveau(&contexte.device, format, contexte.logiciel),
+            logiciel: contexte.logiciel,
             rendu: egui_wgpu::Renderer::new(&contexte.device, format, Default::default()),
         }
     }
@@ -95,6 +97,24 @@ impl Bureau {
         self.champ.vivant(self.atelier.mouvement_reduit)
     }
 
+    /// Impose le champ complet, même sur un rastériseur logiciel : pour des captures et des
+    /// mesures comparables à celles d'une carte graphique.
+    pub fn forcer_champ_complet(&mut self, contexte: &Contexte) {
+        let format = contexte
+            .configuration_surface
+            .as_ref()
+            .map_or(FORMAT, |config| config.format)
+            .remove_srgb_suffix();
+        self.champ = Champ::nouveau(&contexte.device, format, false);
+        self.logiciel = false;
+    }
+
+    /// Le nombre de particules que le champ trace par image, pour les mesures.
+    #[must_use]
+    pub fn particules_du_champ(&self) -> u32 {
+        self.champ.particules()
+    }
+
     /// Prépare les widgets et retourne une éventuelle décision humaine.
     pub fn composer(
         &mut self,
@@ -122,7 +142,10 @@ impl Bureau {
         if self.champ.vivant(atelier.mouvement_reduit) {
             // Le champ avance à la cadence de l'écran tant qu'une mission progresse ; au repos,
             // la surveillance des services garde son propre rythme et rien ne se redessine.
-            self.ctx.request_repaint_after(Duration::from_millis(16));
+            // Un rastériseur logiciel reçoit la moitié de cette cadence : le processeur
+            // dessine, et il a d'autres choses à faire pour les missions.
+            self.ctx
+                .request_repaint_after(Duration::from_millis(if self.logiciel { 33 } else { 16 }));
         }
         (output, decision)
     }

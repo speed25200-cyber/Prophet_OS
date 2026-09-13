@@ -44,6 +44,17 @@ prophet-surface --capture conversation.png --endpoint http://127.0.0.1:8080/v1 \
 ```
 
 `--demonstration` est explicite et inscrit dans l'image. Une capture ordinaire lit l'état réel.
+
+Mesure du rendu, sans fenêtre ni capture, GPU attendu à chaque image :
+
+```sh
+prophet-surface --demonstration --mesure 120 --largeur 1920 --hauteur 1080
+```
+
+Elle imprime l'adaptateur, la scène, la médiane, le p95 et le maximum par image, et la
+mémoire résidente. Sur un rastériseur logiciel elle mesure le processeur ; sur une carte
+graphique, la carte. La fenêtre ne redessine un écran que si la scène a changé ou si
+l'interface l'a demandé (champ vivant, saisie, transition) : au repos, le GPU dort.
 Les tests de l'ancien champ de courants restent disponibles sous `--observation`.
 
 Le raccordement de l'inspecteur utilise `PROPHET_AGENTD_SOCKET` (sinon `/run/prophet/agentd.sock`).
