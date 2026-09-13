@@ -269,7 +269,9 @@ jobs:
 
       - name: Construire
         run: |
-          nix build .#nixosConfigurations.prophet.config.system.build.toplevel \
+          # Sans la suite d'applications de l'humain : elle pèse des gigaoctets que ce test
+          # n'ouvre jamais, et `prophet` reste ce que l'installeur pose.
+          nix build .#nixosConfigurations.prophet-ci.config.system.build.toplevel \
             --print-build-logs --out-link systeme
 
       - name: Les sept services pointent-ils vers un programme qui existe ?

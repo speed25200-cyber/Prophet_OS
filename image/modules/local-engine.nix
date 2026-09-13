@@ -69,7 +69,7 @@ let
     {
       id = "bureau";
       name = "Éditeur du bureau";
-      description = "Écrire dans l'éditeur de texte ouvert sur le bureau (Mousepad) et déposer des fichiers dans ~/Documents/Prophet. L'agent lit et manipule l'application par son arbre d'accessibilité ; chaque action figure au journal.";
+      description = "Travailler dans les applications ouvertes sur le bureau (éditeur, LibreOffice, GIMP, Inkscape, FreeCAD, lecteur PDF) et déposer des fichiers dans ~/Documents/Prophet. L'agent lit et manipule l'application par son arbre d'accessibilité, sans capture d'écran ; chaque action figure au journal.";
       scopes = [ "~/Documents/Prophet" ];
       manifest = {
         agent = {
@@ -83,8 +83,10 @@ let
         capabilities.max = {
           "fs.read" = [ "~/Documents/Prophet/**" ];
           "fs.write" = [ "~/Documents/Prophet/**" ];
-          "ui.read" = [ "mousepad" ];
-          "ui.act" = [ "mousepad" ];
+          # L'éditeur, et la suite de l'humain quand elle publie une accessibilité : LibreOffice
+          # (« soffice » sur le bus), GIMP, Inkscape, FreeCAD, le lecteur PDF ; jamais l'écran.
+          "ui.read" = [ "mousepad" "soffice" "gimp" "inkscape" "freecad" "evince" ];
+          "ui.act" = [ "mousepad" "soffice" "gimp" "inkscape" "freecad" "evince" ];
           "tool.call" = [ "fs.read" "doc.read" "fs.write" "ui.apps" "ui.tree" "ui.act" ];
         };
         budget.default = { tokens = 30000; wall_time = "180s"; approvals = 3; };

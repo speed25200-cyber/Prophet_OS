@@ -136,6 +136,13 @@ Code, lanceur, navigateur, X, verrouillage, déconnexion puis reconnexion) réus
 l'ISO, son démarrage et l'installeur ; seul ChatGPT reste en échec sur Fontconfig.
 Aucune case complète de FRONTIER n'est cochée.
 
+Suite d'applications du 13 septembre 2026, dans le commit portant ce rapport : le bureau
+installe LibreOffice, GIMP, Inkscape, Blender, FreeCAD, Evince et mpv (`prophet.desktop.suite`,
+activée par défaut), avec leurs entrées dans le lanceur ; le contexte « bureau » nomme celles
+qui publient une accessibilité, et la session la demande aux applications Qt. L'intégration
+continue construit `prophet-ci`, la même configuration sans la suite. Voir
+l'[ADR 0030](adr/0030-suite-d-applications-de-l-humain.md).
+
 Délégation entre agents du 13 septembre 2026, dans le commit portant ce rapport : un agent en
 fait travailler un autre par `task.delegate {intent, profile, model?}`. La sous-mission reçoit
 un contexte du catalogue et, au choix, un autre modèle local ; son jeton est délégué par capd

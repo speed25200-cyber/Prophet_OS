@@ -27,7 +27,15 @@ Codex
 Navigateur
 X
 Éditeur
-Fichiers
+${lib.optionalString cfg.suite.enable ''
+LibreOffice
+GIMP
+Inkscape
+Blender
+FreeCAD
+Lecteur PDF
+Vidéo
+''}Fichiers
 Terminal
 Verrouiller
 Déconnexion'
@@ -48,6 +56,8 @@ Déconnexion'
           'Claude Code · mission') app=claude-code-mission ;;
           Fichiers) app=fichiers ;; Terminal) app=terminal ;;
           Navigateur) app=navigateur ;; X) app=x ;; Éditeur) app=editeur ;;
+          LibreOffice) app=libreoffice ;; GIMP) app=gimp ;; Inkscape) app=inkscape ;;
+          Blender) app=blender ;; FreeCAD) app=freecad ;; 'Lecteur PDF') app=pdf ;; Vidéo) app=video ;;
           Verrouiller) app=verrouiller ;; Déconnexion) app=deconnexion ;;
           *) exit 0 ;;
         esac
@@ -79,7 +89,25 @@ Déconnexion'
           swaymsg 'workspace "2: Atelier"' >/dev/null
           launch ${pkgs.thunar}/bin/thunar "$HOME/Documents/Prophet"
           ;;
-        editeur)
+${lib.optionalString cfg.suite.enable ''
+        libreoffice|gimp|inkscape|blender|freecad|pdf|video)
+          # La suite de l'humain, dans l'espace Atelier ; un chemin en second argument ouvre
+          # ce fichier. LibreOffice et les applications GTK publient leur accessibilité, et
+          # l'agent les lit et les pilote par elle (contexte « bureau ») ; Blender, non.
+          swaymsg 'workspace "2: Atelier"' >/dev/null
+          # Par le PATH de la session, où la suite est installée : les paquets nomment leurs
+          # programmes à leur façon (FreeCAD en capitales selon la version).
+          case "$app" in
+            libreoffice) launch libreoffice "''${2:-}" ;;
+            gimp) launch gimp "''${2:-}" ;;
+            inkscape) launch inkscape "''${2:-}" ;;
+            blender) launch blender "''${2:-}" ;;
+            freecad) launch "$(command -v freecad || command -v FreeCAD)" "''${2:-}" ;;
+            pdf) launch evince "''${2:-}" ;;
+            video) launch mpv "''${2:-}" ;;
+          esac
+          ;;
+''}        editeur)
           # L'éditeur de texte du bureau : une application GTK que l'agent peut lire et
           # piloter par son arbre d'accessibilité (contexte « bureau », ADR 0027). Un chemin
           # en second argument ouvre ce fichier ; sinon un document vide dans l'espace Prophet.
@@ -201,6 +229,11 @@ Déconnexion'
   '';
 in {
   options.prophet.desktop.enable = lib.mkEnableOption "la session humaine de Prophet OS" // { default = true; };
+  # La suite d'applications de l'humain : bureautique, image, dessin vectoriel, 3D, CAO, PDF,
+  # vidéo. Ce sont les logiciels libres qui tiennent les rôles de Word, Photoshop, Illustrator,
+  # Blender et AutoCAD ; ceux qui publient une accessibilité (GTK, Qt) se pilotent par l'agent
+  # (ADR 0027). Désactivée dans les tests, qui n'en ont pas l'usage et paient chaque octet.
+  options.prophet.desktop.suite.enable = lib.mkEnableOption "la suite d'applications du bureau" // { default = true; };
 
   config = lib.mkIf cfg.enable {
     assertions = [{
@@ -250,6 +283,8 @@ in {
     security.pam.services.swaylock = { };
     environment.systemPackages = [
       launcher session chatgpt chromium pkgs.foot pkgs.thunar pkgs.mousepad pkgs.wl-clipboard
+    ] ++ lib.optionals cfg.suite.enable [
+      pkgs.libreoffice pkgs.gimp pkgs.inkscape pkgs.blender pkgs.freecad pkgs.evince pkgs.mpv
       pkgs.fuzzel pkgs.waybar pkgs.swaylock pkgs.adwaita-icon-theme
     ];
     environment.sessionVariables = {
@@ -309,6 +344,9 @@ in {
     # Le bus d'accessibilité de la session : c'est par lui que les applications GTK et Qt
     # publient leur arbre, et par lui que l'adaptateur les lit et les pilote (ADR 0027).
     services.gnome.at-spi2-core.enable = true;
+    # Les applications Qt (FreeCAD) ne publient leur accessibilité que si on le leur demande ;
+    # GTK le fait dès que le bus est là.
+    environment.sessionVariables.QT_LINUX_ACCESSIBILITY_ALWAYS_ON = "1";
     # L'adaptateur d'accessibilité, dans la session : il joint le bus de la session, écoute sur
     # un socket du répertoire des services (groupe système de Prophet) et n'admet qu'agentd.
     systemd.user.services.prophet-supd = {

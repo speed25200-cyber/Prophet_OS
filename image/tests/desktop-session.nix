@@ -11,6 +11,7 @@ pkgs.testers.runNixOSTest {
     imports = [ module ../modules/surface.nix ../modules/desktop.nix ]
       ++ lib.optionals installed [ ../modules/hardware.nix ../modules/immutable.nix ];
     prophet.enable = true;
+    prophet.desktop.suite.enable = false;
     prophet.user = "pilot";
     prophet.motDePasseHache = null;
     users.users.pilot = { uid = 1000; password = "essai-bureau"; };

@@ -60,6 +60,26 @@
         ];
       };
 
+      # La même configuration sans la suite d'applications de l'humain (LibreOffice, GIMP,
+      # Blender, FreeCAD…) : ce que l'intégration continue construit et démarre, parce qu'elle
+      # paie chaque gigaoctet et n'ouvre aucune application ; ce que l'installeur pose reste
+      # `prophet`, suite comprise.
+      nixosConfigurations.prophet-ci = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [
+          nixosModules.prophet
+          ./image/modules/hardware.nix
+          ./image/modules/immutable.nix
+          ./image/modules/surface.nix
+          ./image/modules/desktop.nix
+          {
+            prophet.enable = true;
+            prophet.desktop.suite.enable = false;
+            nixpkgs.config.allowUnfreePredicate = autoriserLesClients;
+          }
+        ];
+      };
+
       # Le support d'amorçage. Il porte sa propre source : ce qu'on installe est ce qu'on a
       # gravé, et non ce qui se trouvera sur GitHub au moment de l'installation.
       nixosConfigurations.prophet-iso = nixpkgs.lib.nixosSystem {
