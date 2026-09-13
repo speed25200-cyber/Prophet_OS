@@ -314,8 +314,9 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
         Command::Status => {
             let taches = taches_en_cours(&socket_agentd()).unwrap_or_default();
             let refs: Vec<&agentd::Task> = taches.iter().collect();
-            let navigateur = navigateur_pilote(&socket_agentd());
-            Ok(shell::status_complet(
+            let options = options_du_service(&socket_agentd());
+            let navigateur = options.as_ref().map(|o| o.browser.clone());
+            let mut out = shell::status_complet(
                 &sandboxd::Capabilities::probe(),
                 &sfs::detect_backend(&home()),
                 &refs,
@@ -327,7 +328,9 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
                         etat.as_ref()
                             .map_or(shell::Navigateur::Aucun, shell::Navigateur::Sonde)
                     }),
-            ))
+            );
+            out.push_str(&status_parole_et_pilotes(options.as_ref()));
+            Ok(out)
         }
         Command::Freeze => {
             let socket = std::env::var("PROPHET_SANDBOXD_SOCKET").map_or_else(
@@ -1576,9 +1579,8 @@ fn task_rpc(
 /// parce qu'ils lisent des fichiers.
 /// Le verdict de la sonde du navigateur piloté ; `None` si agentd ne répond pas, `Some(None)`
 /// s'il n'en configure aucun.
-fn navigateur_pilote(
-    socket: &std::path::Path,
-) -> Option<Option<agentd::preparation::BrowserState>> {
+/// Le catalogue du service, avec l'état du navigateur piloté et des pilotes de session.
+fn options_du_service(socket: &std::path::Path) -> Option<agentd::preparation::Options> {
     sous_delai(async {
         let client = prophet_ipc::Client::connect(socket)
             .await
@@ -1587,11 +1589,60 @@ fn navigateur_pilote(
             .call("task.options", serde_json::json!({}))
             .await
             .map_err(|e| e.message.clone())?;
-        let options: agentd::preparation::Options =
-            serde_json::from_value(options).map_err(|e| e.to_string())?;
-        Ok(options.browser)
+        serde_json::from_value::<agentd::preparation::Options>(options).map_err(|e| e.to_string())
     })
     .ok()
+}
+
+/// Les lignes de `prophet status` sur ce que l'humain peut dire et entendre, et sur les clients
+/// officiels que le lanceur de session sait lancer (ADR 0035, 0036). Rien n'est inventé : un
+/// service muet donne « inconnu », une chaîne absente le dit.
+fn status_parole_et_pilotes(options: Option<&agentd::preparation::Options>) -> String {
+    let mut out = String::from("\n  Parole\n");
+    match voice::Tools::from_env() {
+        Ok(tools) => {
+            out.push_str(&format!(
+                "    ✓ écoute — {} ; {}\n",
+                tools.model.display(),
+                match &tools.recorder {
+                    Some(_) => "micro par la session",
+                    None => "aucun enregistreur (fichiers seulement)",
+                }
+            ));
+            out.push_str(&if tools.can_speak() {
+                "    ✓ parle — voix locale\n".to_owned()
+            } else {
+                "    ✗ parle — aucune voix (PROPHET_PIPER_VOICE)\n".to_owned()
+            });
+        }
+        Err(e) => out.push_str(&format!("    ✗ {e}\n")),
+    }
+    out.push_str("\n  Pilotes de session\n");
+    match options.and_then(|o| o.pilot.as_ref()) {
+        None if options.is_none() => out.push_str("    ? agentd ne répond pas\n"),
+        None => out.push_str("    — aucun lanceur de pilotes dans la session\n"),
+        Some(status) => {
+            for d in &status.drivers {
+                let signe = if d.ready() { "✓" } else { "✗" };
+                out.push_str(&format!(
+                    "    {signe} {} — {}{}\n",
+                    d.driver,
+                    match d.connection.as_str() {
+                        "connected" => "connecté".to_owned(),
+                        "simulated" => "simulé (essai)".to_owned(),
+                        "login_required" => "installé, connexion requise".to_owned(),
+                        "missing" => "absent de cette machine".to_owned(),
+                        other => other.to_owned(),
+                    },
+                    d.version
+                        .as_deref()
+                        .map(|v| format!(" ({v})"))
+                        .unwrap_or_default()
+                ));
+            }
+        }
+    }
+    out
 }
 
 fn taches_en_cours(socket: &std::path::Path) -> Result<Vec<agentd::Task>, String> {
