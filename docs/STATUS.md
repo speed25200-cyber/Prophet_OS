@@ -279,6 +279,13 @@ Ni Claude Code ni Codex ne sont installés sur la machine de construction et leu
 appartient à l'humain : leur exécution réelle reste un essai `needs_claude_login` /
 `needs_chatgpt_login`. Voir l'[ADR 0035](adr/0035-clients-officiels-comme-roles-par-le-lanceur-de-session.md)
 et le [composant](components/pilotd.md). Aucune case complète de FRONTIER n'est cochée.
+Le 14 septembre : un quatrième rôle, `review` (complément de l'ADR 0034), juge un travail rendu
+sans le refaire ni le modifier ; la consigne de la réflexion invite à faire relire tout code ou
+document important, et le profil « Atelier des agents » le confie à Claude Code après le code
+de Codex : un autre fournisseur que l'auteur relit, au prix d'une lecture. Manifeste, outil
+`task.delegate` et consignes testés en unitaire ; l'image porte le rôle. Et `pilot.status` est
+servi d'un cache rafraîchi en arrière-plan (toutes les 60 s, après chaque lancement) : le
+catalogue n'attend plus les sondes des clients.
 
 La CI de `ddf6e89` (relais et lanceur de pilotes) réussit `check`, l'isolation, le protocole du
 moteur, la surface, les sept services sous systemd, l'installeur, l'ISO et son démarrage, la

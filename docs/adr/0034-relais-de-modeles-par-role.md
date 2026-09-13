@@ -20,7 +20,8 @@ compte par modèle, et une réduction de ce qui est renvoyé au modèle à chaqu
 ## Décision
 
 1. **Des rôles dans le manifeste.** `model.roles` associe à chacun des rôles `reflect`,
-   `execute` et `code` une liste ordonnée de références de modèles, toutes ⊆ `model.preferred`.
+   `execute`, `code` et `review` une liste ordonnée de références de modèles, toutes
+   ⊆ `model.preferred`.
    Le manifeste vérifie le nom des rôles et la forme des références ; le catalogue de missions
    d'agentd vérifie l'inclusion dans le plafond. Un rôle ne donne aucun droit et n'élargit rien :
    il choisit parmi ce que le profil admet déjà.
@@ -47,6 +48,17 @@ compte par modèle, et une réduction de ce qui est renvoyé au modèle à chaqu
    (`ok`, taille, empreinte blake3, 160 premiers caractères, et la mention qu'un nouvel appel
    rend le détail). L'historique de la boucle, ses points de reprise et son rejeu ne changent
    pas ; la condensation est déterministe et se mesure.
+
+## Complément du 14 septembre 2026 : la relecture
+
+Un quatrième rôle, `review`, juge un travail rendu sans le refaire : sa consigne est de lire ce
+qui a changé, de chercher ce qui est faux, manquant, dangereux ou non vérifié, et de rendre un
+verdict court et argumenté, sans rien modifier ; celle de la réflexion l'invite à faire relire
+tout code ou document important. Le sens est la collaboration entre fournisseurs : dans le
+profil « Atelier des agents », Codex code et Claude Code relit (puis Codex, puis le modèle
+local), pour qu'un autre regard que celui de l'auteur passe sur ce qui compte, au prix d'une
+lecture et non d'une seconde production. Le rôle n'ajoute aucun droit : la relecture reçoit
+les outils du contexte comme toute sous-mission, et capd tranche chaque appel.
 
 ## Conséquences
 

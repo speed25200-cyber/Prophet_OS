@@ -62,7 +62,7 @@ pub enum ManifestError {
     BadDuration(String),
     /// Rôle de modèle inconnu, mal nommé ou sans modèle.
     #[error(
-        "rôle de modèle invalide : {0} (attendu : reflect, execute ou code, avec au moins un modèle)"
+        "rôle de modèle invalide : {0} (attendu : reflect, execute, code ou review, avec au moins un modèle)"
     )]
     BadRole(String),
 }
@@ -71,9 +71,11 @@ pub enum ManifestError {
 ///
 /// Un rôle dit *pourquoi* un modèle est appelé, pas *lequel* : la réflexion profonde qui
 /// découpe et vérifie, l'exécution économe qui applique une étape simple, le code qui exige
-/// un modèle entraîné pour cela. Un profil associe à chaque rôle ses modèles admis, par ordre
-/// de préférence ; tous doivent figurer dans `model.preferred`, le plafond du manifeste.
-pub const MODEL_ROLES: [&str; 3] = ["reflect", "execute", "code"];
+/// un modèle entraîné pour cela, la relecture qui juge un travail rendu avec un autre regard
+/// — de préférence un autre fournisseur que celui qui l'a produit. Un profil associe à chaque
+/// rôle ses modèles admis, par ordre de préférence ; tous doivent figurer dans
+/// `model.preferred`, le plafond du manifeste.
+pub const MODEL_ROLES: [&str; 4] = ["reflect", "execute", "code", "review"];
 
 /// Politique de confidentialité du choix de fournisseur.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -597,11 +599,12 @@ spaces = ["work"]
 
         let avec = invalide(&[(
             r#"privacy = "local-preferred""#,
-            "privacy = \"local-preferred\"\n[model.roles]\nreflect = [\"driver:claude-code\"]\nexecute = [\"local:qwen3-14b\"]\ncode = [\"driver:claude-code\", \"local:qwen3-14b\"]",
+            "privacy = \"local-preferred\"\n[model.roles]\nreflect = [\"driver:claude-code\"]\nexecute = [\"local:qwen3-14b\"]\ncode = [\"driver:claude-code\", \"local:qwen3-14b\"]\nreview = [\"driver:codex\"]",
         )])
         .unwrap();
         assert_eq!(avec.model.role_of("driver:claude-code"), Some("reflect"));
         assert_eq!(avec.model.role_of("local:qwen3-14b"), Some("execute"));
+        assert_eq!(avec.model.role_of("driver:codex"), Some("review"));
         assert_eq!(avec.model.role_of("local:autre"), None);
 
         let err = invalide(&[(

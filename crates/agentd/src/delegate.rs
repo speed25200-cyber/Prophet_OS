@@ -35,13 +35,13 @@ impl SystemTool for Tool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "task.delegate".into(),
-            description: "Confie un objectif précis à une sous-mission menée par un autre agent, dans un contexte du catalogue (profile) et, au choix, pour un rôle (role : reflect, execute ou code, le service choisit alors le modèle que ce contexte admet pour ce rôle) ou avec un modèle local nommé (model). La sous-mission n'a jamais plus de droits que vous, travaille dans son propre espace, et son résultat vous est rendu ici quand elle a fini. Formulez l'objectif complet : elle ne voit pas votre conversation.".into(),
+            description: "Confie un objectif précis à une sous-mission menée par un autre agent, dans un contexte du catalogue (profile) et, au choix, pour un rôle (role : reflect, execute, code ou review, le service choisit alors le modèle que ce contexte admet pour ce rôle) ou avec un modèle local nommé (model). La sous-mission n'a jamais plus de droits que vous, travaille dans son propre espace, et son résultat vous est rendu ici quand elle a fini. Formulez l'objectif complet : elle ne voit pas votre conversation.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "intent": {"type": "string", "description": "Objectif complet et autonome de la sous-mission"},
                     "profile": {"type": "string", "description": "Contexte du catalogue, parmi ceux que votre mission peut confier"},
-                    "role": {"type": "string", "enum": ["reflect", "execute", "code"], "description": "Rôle voulu : le modèle le moins coûteux que le contexte admet pour ce rôle est choisi"},
+                    "role": {"type": "string", "enum": ["reflect", "execute", "code", "review"], "description": "Rôle voulu : le modèle le moins coûteux que le contexte admet pour ce rôle est choisi ; review fait juger un travail rendu par un autre regard, sans le refaire"},
                     "model": {"type": "string", "description": "Modèle local demandé explicitement ; sinon celui du rôle, sinon le vôtre"}
                 },
                 "required": ["intent", "profile"],

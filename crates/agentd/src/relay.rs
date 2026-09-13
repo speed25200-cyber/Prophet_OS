@@ -85,13 +85,16 @@ pub fn briefing(role: Option<&str>, contexts: &[Context]) -> Option<String> {
     );
     match role {
         Some("reflect") => text.push_str(
-            "Votre rôle est la réflexion : vous êtes le modèle le plus capable et le plus coûteux de la mission. Réfléchissez, découpez l'objectif en étapes précises et autonomes, puis confiez chaque étape d'exécution par l'outil task.delegate en nommant son rôle (role) plutôt que son modèle ; relisez le résultat rendu et concluez. Gardez vos propres tours rares et courts : lire, décider, déléguer, vérifier.",
+            "Votre rôle est la réflexion : vous êtes le modèle le plus capable et le plus coûteux de la mission. Réfléchissez, découpez l'objectif en étapes précises et autonomes, puis confiez chaque étape d'exécution par l'outil task.delegate en nommant son rôle (role) plutôt que son modèle ; faites relire tout code ou document important par le rôle review, qui porte un autre regard que celui qui l'a produit ; relisez le résultat rendu et concluez. Gardez vos propres tours rares et courts : lire, décider, déléguer, vérifier.",
         ),
         Some("execute") => text.push_str(
             "Votre rôle est l'exécution : accomplissez exactement l'objectif confié, sans digression ni reformulation, avec le moins de tours et d'appels d'outils possible, puis rendez un résultat bref et vérifiable.",
         ),
         Some("code") => text.push_str(
             "Votre rôle est le code : écrivez ou modifiez précisément ce que l'objectif demande, vérifiez ce que vous produisez avec les outils disponibles, et rendez un résultat qui dit ce qui a changé.",
+        ),
+        Some("review") => text.push_str(
+            "Votre rôle est la relecture : vous jugez un travail qu'un autre modèle a rendu, sans le refaire. Lisez ce qui a changé avec les outils disponibles, cherchez ce qui est faux, manquant, dangereux ou non vérifié, et rendez un verdict court et argumenté : accepté tel quel, ou la liste précise de ce qu'il faut corriger, chaque point cité. Ne modifiez rien.",
         ),
         _ => text.push_str("Votre mission n'a pas de rôle assigné ; elle peut en confier."),
     }
@@ -234,6 +237,11 @@ mod tests {
         assert!(texte.contains("task.delegate"), "{texte}");
         let exec = briefing(Some("execute"), &[]).unwrap();
         assert!(exec.contains("exécution") && !exec.contains("task.delegate"));
+        // La réflexion est invitée à faire relire ; la relecture juge sans refaire ni modifier.
+        assert!(texte.contains("rôle review"), "{texte}");
+        let relecture = briefing(Some("review"), &[]).unwrap();
+        assert!(relecture.contains("relecture") && relecture.contains("Ne modifiez rien"));
+        assert!(!relecture.contains("task.delegate"));
     }
 
     #[test]

@@ -103,14 +103,15 @@ let
       };
     }
     # L'atelier : les clients officiels de l'humain comme rôles du relais (ADR 0034, 0035).
-    # Claude Code réfléchit, Codex code, le modèle local exécute ; chacun n'est proposé que si
+    # Claude Code réfléchit, Codex code, Claude Code relit ce que Codex a produit (un autre
+    # regard que l'auteur), le modèle local exécute ; chacun n'est proposé que si
     # le lanceur de la session le dit connecté, sinon le rôle retombe sur le modèle local. Les
     # clients rejoignent leur sous-mission par une séance d'outils, sous un jeton délégué par
     # capd ; l'OS ne touche jamais à leurs identifiants.
     {
       id = "atelier";
       name = "Atelier des agents";
-      description = "Faire avancer Claude Code, Codex et le modèle local ensemble sur un objectif dans ~/Documents/Prophet : la réflexion à Claude Code, le code à Codex, les étapes simples au modèle local, chacun dans sa propre mission contrôlée. Les clients doivent être connectés dans leur profil Prophet.";
+      description = "Faire avancer Claude Code, Codex et le modèle local ensemble sur un objectif dans ~/Documents/Prophet : la réflexion à Claude Code, le code à Codex, la relecture du code à Claude Code, les étapes simples au modèle local, chacun dans sa propre mission contrôlée. Les clients doivent être connectés dans leur profil Prophet.";
       scopes = [ "~/Documents/Prophet" ];
       manifest = {
         agent = {
@@ -125,6 +126,7 @@ let
           roles = {
             reflect = [ "driver:claude-code" "local:${cfg.model}" ];
             code = [ "driver:codex" "driver:claude-code" "local:${cfg.model}" ];
+            review = [ "driver:claude-code" "driver:codex" "local:${cfg.model}" ];
             execute = lib.optional relais "local:${cfg.executeModel}" ++ [ "local:${cfg.model}" ];
           };
         };
