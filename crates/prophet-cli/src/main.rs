@@ -490,8 +490,8 @@ fn rendre_verification(rapport: &ledger::VerifyReport) -> anyhow::Result<String>
     }
 }
 
-/// Tâches. Leur espace de travail vit sur le disque : diff et annulation fonctionnent donc sans
-/// daemon, ce qui compte, car c'est précisément quand quelque chose a mal tourné qu'on en a besoin.
+/// Missions du service. Les captures d'agentd restent privées ; seule la liste historique
+/// hors service et l'ancien undo de bibliothèque consultent encore le disque directement.
 fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
     let maison = home();
     match action {
@@ -566,14 +566,12 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                     )?)?
                 ));
             }
-            // Deux questions différentes, et il vaut mieux les poser toutes les deux. `agentd` sait
-            // ce qui *tourne* ; les espaces de travail savent ce qui a *changé des fichiers*. Une
-            // tâche fraîchement planifiée n'a encore touché à rien, et n'apparaissait donc nulle
-            // part — ce qui donnait « aucune tâche » à quelqu'un qui venait d'en lancer une.
+            // Le service conserve aussi les missions terminées. Ne pas tenter ensuite de lire
+            // ses captures privées : leur refus d'accès annulait une liste pourtant reçue.
             let mut out = String::new();
             match taches_en_cours(&socket_agentd()) {
                 Ok(taches) if taches.is_empty() => {
-                    out.push_str("aucune tâche en cours\n\n");
+                    return Ok("aucune tâche connue du service\n".into());
                 }
                 Ok(taches) => {
                     out.push_str(&format!(
@@ -589,7 +587,7 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                             tache.intent,
                         ));
                     }
-                    out.push('\n');
+                    return Ok(out);
                 }
                 Err(raison) => {
                     // Le dire, plutôt que d'afficher les seuls espaces de travail comme si c'était
@@ -625,13 +623,56 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
             Ok(out)
         }
         TaskAction::Show { id } | TaskAction::Diff { id } => {
-            let espace = sfs::Workspace::open(&maison, id)?;
-            Ok(format!(
-                "Tâche {id}\n  espace de travail : {:?}\n  dorsale : {}\n\n{}",
-                espace.state(),
-                espace.backend().reason,
-                espace.diff()?.render()
-            ))
+            let inspection: agentd::Inspection = serde_json::from_value(task_rpc(
+                &socket_agentd(),
+                "task.inspect",
+                serde_json::json!({"id":id}),
+            )?)?;
+            anyhow::ensure!(inspection.task.id == *id, "réponse pour une autre mission");
+            if matches!(action, TaskAction::Show { .. }) && as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&inspection)?));
+            }
+            let diff = inspection
+                .result
+                .as_ref()
+                .and_then(|result| result.get("diff"))
+                .cloned()
+                .map(serde_json::from_value::<sfs::Diff>)
+                .transpose()?;
+            if matches!(action, TaskAction::Diff { .. }) {
+                let diff = diff.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Changements non disponibles pour {id}. Consultez `prophet task show {id}`."
+                    )
+                })?;
+                return if as_json {
+                    Ok(format!("{}\n", serde_json::to_string_pretty(&diff)?))
+                } else {
+                    Ok(format!("{}Changements non appliqués.\n", diff.render()))
+                };
+            }
+            let mut out = format!(
+                "Mission {id} : {}\nÉtat : {:?}\n",
+                inspection.task.intent, inspection.task.state
+            );
+            if let Some(plan) = inspection.plan {
+                out.push_str(&plan.render());
+            }
+            if let Some(reason) = inspection.task.reason {
+                out.push_str(&format!("{reason}\n"));
+            }
+            if let Some(result) = inspection.result
+                && let Some(text) = result["text"].as_str()
+            {
+                out.push_str(&format!("{text}\n"));
+            }
+            if let Some(diff) = diff {
+                out.push_str(&diff.render());
+                out.push_str("Changements non appliqués.\n");
+            } else {
+                out.push_str("Changements non disponibles.\n");
+            }
+            Ok(out)
         }
         TaskAction::Undo { id } => {
             let mut espace = sfs::Workspace::open(&maison, id)?;

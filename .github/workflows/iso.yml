@@ -633,7 +633,9 @@ jobs:
             max-jobs = auto
 
       - name: Démarrer la configuration installée
-        run: nix build .#checks.x86_64-linux.installe --print-build-logs
+        run: |
+          nix build .#checks.x86_64-linux.surface-rescue --print-build-logs
+          nix build .#checks.x86_64-linux.installe --print-build-logs
 
   # --- Une question ouverte, qui ne barre pas la route ---
   #

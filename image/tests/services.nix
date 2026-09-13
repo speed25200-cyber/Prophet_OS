@@ -266,6 +266,14 @@ pkgs.testers.runNixOSTest {
         taches = machine.succeed("timeout 30 prophet task ls")
         print(taches)
         assert "task:essai-vm" in taches, taches
+        # Les captures demeurent privées même lorsque le propriétaire consulte ses missions.
+        machine.fail("su - prophet -c 'ls /home/prophet/.prophet/tasks'")
+        taches = machine.succeed("su - prophet -c 'prophet task ls'")
+        assert "task:essai-vm" in taches, taches
+        detail = machine.succeed("su - prophet -c 'prophet task show task:essai-vm'")
+        assert "task:essai-vm" in detail and "local:qwen3-8b" in detail, detail
+        # Une tâche seulement planifiée n'a aucun diff à présenter : pas de faux diff vide.
+        machine.fail("su - prophet -c 'prophet task diff task:essai-vm'")
 
     with subtest("sandboxd peut réellement isoler, et pas seulement le dire"):
         # Le module donne à `sandboxd` les capacités CAP_SETUID et CAP_SYS_ADMIN, puis lui laisse

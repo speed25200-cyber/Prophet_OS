@@ -143,45 +143,28 @@ in
       };
     };
 
-    # Quand la surface ne peut pas démarrer, quelque chose doit apparaître.
-    #
-    # Sans cela, une machine sans pilote graphique montre un écran noir et rien d'autre : le
-    # diagnostic part au journal, que personne ne peut lire puisqu'il n'y a pas d'écran. C'est le
-    # pire résultat possible pour un système conçu pour qu'on ait à s'en occuper le moins possible.
-    #
-    # Ce service ne se déclenche que sur l'échec du premier, et écrit sur le terminal lui-même.
+    # Getty compose le diagnostic ET l'invite. Une écriture concurrente sur tty1 faisait
+    # défiler « login: » hors écran ; son service restait actif sans invite visible.
     systemd.services.prophet-surface-repli = {
       description = "Prophet OS — dire pourquoi l'écran est resté noir";
       after = [ "prophet-surface.service" ];
-      # Sur `tty1`, et non sur le terminal de la surface. La surface a déménagé sur tty7 ; ce
-      # message-ci doit rester là où un humain regarde, c'est-à-dire devant l'invite de connexion.
-      # L'écrire sur tty7 reviendrait à expliquer un écran noir sur cet écran noir.
-      unitConfig.ConditionPathExists = "/dev/tty1";
       serviceConfig = {
         Type = "oneshot";
-        StandardOutput = "tty";
-        TTYPath = "/dev/tty1";
-        # Un heredoc cité : le texte passe tel quel, sans qu'une apostrophe française ne devienne
-        # un problème de guillemets.
         ExecStart = pkgs.writeShellScript "prophet-surface-repli" ''
-          cat <<'MESSAGE'
+          set -eu
+          install -d -m 0755 /run/issue.d
+          cat > /run/issue.d/prophet-surface.tmp <<'MESSAGE'
 
-  Prophet OS — la surface graphique n'a pas pu démarrer.
-
-  Le système fonctionne. C'est l'affichage qui manque, pas le reste.
-
-  Pour savoir pourquoi :
-      journalctl -u prophet-surface -n 40
-
-  Les deux causes les plus fréquentes :
-      aucun pilote Vulkan utilisable    vulkaninfo --summary
-      aucune police installée           fc-list | head
-
-  En attendant, tout se fait en ligne de commande :
-      prophet status      les services, l'isolation, les limites de la machine
-      prophet task ls     ce qui travaille en ce moment
+  Prophet OS : une tentative de lancement graphique a échoué.
+  Diagnostic : journalctl -u prophet-surface -n 40
+  Après connexion : prophet status ; prophet task ls
 
 MESSAGE
+          chmod 0644 /run/issue.d/prophet-surface.tmp
+          mv -f /run/issue.d/prophet-surface.tmp /run/issue.d/prophet-surface.issue
+          # --reload ne rafraîchit que les invites où la saisie n'a pas commencé.
+          # Aucun signal envoyé à login, aucun terminal ouvert ni session redémarrée.
+          ${pkgs.util-linux}/bin/agetty --reload
         '';
       };
     };

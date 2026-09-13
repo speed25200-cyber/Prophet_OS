@@ -226,9 +226,18 @@ pkgs.testers.runNixOSTest {
         # ne touche pas ce terminal-ci. C'était la condition pour que ce sous-test cesse d'être
         # une course dont l'issue dépendait de l'instant.
         machine.wait_for_unit("getty@tty1.service")
-        machine.wait_until_tty_matches("1", "login:")
+        # Reproduit aussi le secours tardif, après l'affichage de l'invite : écrire directement
+        # vingt lignes sur tty1 la faisait défiler hors écran sans qu'agetty la réaffiche.
+        machine.succeed("systemctl start prophet-surface-repli.service")
+        machine.wait_until_tty_matches("1", "login:", timeout=30)
+        machine.wait_until_tty_matches("1", "journalctl -u prophet-surface", timeout=30)
+        getty_pid = machine.succeed("systemctl show -p MainPID --value getty@tty1.service").strip()
         machine.send_chars("prophet\n")
         machine.wait_until_tty_matches("1", "[Pp]assword:")
+        # Un second avis pendant la saisie du mot de passe ne doit ni écrire sur le terminal,
+        # ni relancer getty, ni interrompre login.
+        machine.succeed("systemctl start prophet-surface-repli.service")
+        assert machine.succeed("systemctl show -p MainPID --value getty@tty1.service").strip() == getty_pid
         machine.send_chars("essai-prophet\n")
         machine.wait_until_tty_matches("1", r"\$|prophet@")
 

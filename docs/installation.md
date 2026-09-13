@@ -34,7 +34,7 @@ produite et vérifiez que **tous** ses travaux sont verts, à la seule exception
 | Construire le système installé | chacun des sept services pointe vers un programme qui existe, **et** `nixos-install` pose réellement ce système sur la disposition que l'installeur crée |
 | Voir l'image démarrer | la clé USB démarre jusqu'à l'invite |
 | Les sept services sous systemd | les daemons tournent sous leur utilisateur, avec leur durcissement, et `sandboxd` isole vraiment |
-| **Le système installé démarre** | ce que la clé installe démarre aussi : chargeur d'amorçage, paramètres du noyau, compte ouvrable, session sur `tty1`, et les sept services vus par le propriétaire depuis sa session |
+| **Le système installé démarre** | secours graphique sans interruption de la connexion, puis démarrage du système : chargeur d'amorçage, paramètres du noyau, compte ouvrable, session sur `tty1`, et les sept services vus par le propriétaire depuis sa session |
 | Question ouverte : la racine en lecture seule | rien — c'est une **question**, pas une garantie, et elle ne part plus qu'à la demande. Sa réponse est « non » depuis le 12 septembre 2026 : voir `image/tests/racine-en-lecture-seule.nix`. Pour la reposer, déclenchez le workflow à la main en cochant « Rejouer l'expérience de la racine en lecture seule » |
 
 Les six premiers partent à chaque poussée et doivent être verts. Le septième ne part qu'à la

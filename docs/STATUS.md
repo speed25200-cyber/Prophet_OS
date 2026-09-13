@@ -8,6 +8,18 @@
 > complet restent à établir. Voir le [dernier rapport de l'atelier](reports/atelier-2026-09-13.md)
 > et les exigences ouvertes, notamment la qualité graphique attendue et les sessions authentifiées.
 
+Correctifs d'accès humain du 13 septembre, après `a6b831c` : la CLI consulte la liste,
+le détail et le diff d'agentd sans ouvrir ses captures privées. Deux régressions échouent
+avant correction puis réussissent. Le secours graphique laisse getty afficher son avis et
+l'invite ; une VM KVM dédiée réussit la connexion malgré les avis de panne avant et pendant
+le mot de passe, puis dans la session ouverte (34,98 s). Le test installé complet est renforcé,
+mais son résultat sur cette nouvelle révision reste à établir. Les échecs de services et de
+connexion de `d20ef74` ne sont donc plus attribués à une cause inconnue. Voir le
+[rapport d'accès humain](reports/acces-humain-2026-09-13.md) et l'[ADR 0020](adr/0020-consultation-et-secours-humains.md).
+Le bureau avec plusieurs applications et le défaut Fontconfig de ChatGPT restent ouverts.
+`just check` réussit dans Nix : 633 tests, aucun échec, 29 ignorés, format, clippy,
+construction des binaires et contrôles du dépôt réussis.
+
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 
 - `c3b0c08` — moteur local réel, CLI et gel d'un processus possédé par sandboxd.

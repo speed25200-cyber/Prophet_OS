@@ -42,8 +42,9 @@ prophet status          # ce que la machine sait faire, et ce qu'elle ne sait pa
 prophet provider ls     # pilotes disponibles et sessions d'abonnement
 prophet provider models # modèles du moteur local (port 8080 par défaut)
 prophet provider chat --model qwen3-0.6b "Bonjour /no_think"
-prophet task ls         # tâches, même sans daemon en service
-prophet task undo <id>  # défaire une tâche déjà validée
+prophet task ls         # missions connues du service, y compris terminées
+prophet task show <id>  # plan, état et résultat conservés par agentd
+prophet task diff <id>  # changements proposés, non appliqués
 prophet log verify      # vérifier l'intégrité du journal
 ```
 

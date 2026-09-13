@@ -114,3 +114,8 @@ compte distinct, la lecture des versions et le redémarrage d'agentd. Le test Ch
 la Focale, la recherche clavier et corrige le mélange des transparences. La qualité visuelle
 attendue, la fluidité matérielle et la session humaine complète restent à valider ; aucun
 critère complet n'est coché.
+
+Le [correctif d'accès humain](reports/acces-humain-2026-09-13.md) permet ensuite à la CLI de
+consulter agentd malgré les captures privées. Une VM KVM vérifie que le secours graphique
+ne masque plus l'invite et n'interrompt pas la connexion. Cette preuve de secours ne livre
+pas le bureau humain ; le test installé complet de la nouvelle révision reste à vérifier.
