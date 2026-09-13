@@ -148,6 +148,14 @@ impl Page {
         Ok((result, tree))
     }
 
+    /// Adresse effective de la page, après redirections et navigations déclenchées.
+    ///
+    /// # Errors
+    /// Si le document refuse l'évaluation.
+    pub async fn current_url(&mut self) -> Result<String, CdpError> {
+        self.evaluate("String(location.href)").await
+    }
+
     /// Dernier arbre observé, sans nouvelle extraction.
     #[must_use]
     pub const fn last_tree(&self) -> Option<&Tree> {
