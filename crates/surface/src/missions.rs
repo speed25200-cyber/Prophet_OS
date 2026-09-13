@@ -13,6 +13,10 @@ pub enum Action {
     Start,
     /// Demander l'arrêt ; seule l'observation finale le confirme.
     Cancel,
+    /// Publier dans les documents l'index exact examiné.
+    Apply,
+    /// Annuler une publication dont les documents n'ont pas changé depuis.
+    Undo,
 }
 
 enum Reply {
@@ -135,6 +139,12 @@ impl Missions {
                         }
                         Action::Cancel if v["cancelled"].as_str() == Some(&id) => {
                             Ok("Le service a confirmé l'annulation du plan.")
+                        }
+                        Action::Apply if v["applied"].as_str() == Some(&id) => {
+                            Ok("Versions publiées dans vos documents.")
+                        }
+                        Action::Undo if v["undone"].as_str() == Some(&id) => {
+                            Ok("Publication annulée : vos documents ont retrouvé leurs versions initiales.")
                         }
                         _ => Err(
                             "Accusé de réception incohérent ; vérifiez l'état de la mission."
@@ -294,6 +304,8 @@ impl Missions {
         if !(match action {
             Action::Start => info.can_start,
             Action::Cancel => info.can_cancel,
+            Action::Apply => info.can_apply,
+            Action::Undo => info.can_undo,
         }) {
             return Err("Cette commande n'est pas disponible dans l'état reçu.".into());
         }
@@ -306,6 +318,8 @@ impl Missions {
             let method = match action {
                 Action::Start => "task.start",
                 Action::Cancel => "task.cancel",
+                Action::Apply => "task.apply",
+                Action::Undo => "task.undo",
             };
             let result = rpc(socket, method, json!({"id":id}));
             let _ = tx.send(Reply::Action(id, action, result));
@@ -352,6 +366,9 @@ mod tests {
             can_start: state == State::Planned,
             can_cancel: !state.is_terminal(),
             start_reason: None,
+            publication: None,
+            can_apply: false,
+            can_undo: false,
         }
     }
 

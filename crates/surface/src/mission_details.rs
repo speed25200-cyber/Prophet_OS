@@ -2,7 +2,7 @@
 use crate::missions::{Action, Missions};
 use crate::scene::Courant;
 use crate::supervision::bouton;
-use agentd::{Inspection, State};
+use agentd::{Inspection, State, WorkspaceState};
 use egui::{Color32, Frame, RichText, Stroke};
 
 const INK: Color32 = Color32::from_rgb(28, 35, 44);
@@ -33,6 +33,27 @@ pub(crate) fn status(state: State) -> (&'static str, Color32) {
         State::Failed => ("Échec", RED),
         State::Cancelled => ("Annulée", MUTED),
         State::RolledBack => ("Changements annulés", MUTED),
+    }
+}
+
+/// L'état de publication SFS, tel que l'humain doit le lire avant de commander.
+pub(crate) fn publication(state: WorkspaceState) -> &'static str {
+    match state {
+        WorkspaceState::Open => "Versions examinables. Vos documents n'ont pas été modifiés.",
+        WorkspaceState::Applying => {
+            "Publication interrompue : reprenez-la pour terminer l'intention enregistrée."
+        }
+        WorkspaceState::Undoing => {
+            "Annulation interrompue : reprenez-la pour rétablir vos documents."
+        }
+        WorkspaceState::Conflict => {
+            "Publication interrompue sur un conflit. Les fichiers déplacés sont conservés ; une résolution explicite est nécessaire."
+        }
+        WorkspaceState::Committed => {
+            "Versions publiées dans vos documents. Annulable tant qu'ils n'ont pas changé."
+        }
+        WorkspaceState::RolledBack => "Publication annulée : documents initiaux rétablis.",
+        WorkspaceState::Abandoned => "Travail abandonné sans publication.",
     }
 }
 
@@ -129,7 +150,49 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
             {
                 command = Some(Action::Cancel);
             }
+            if info.can_apply
+                && ui
+                    .add_enabled_ui(!missions.busy(), |ui| {
+                        bouton(
+                            ui,
+                            "mission-apply",
+                            if info.publication == Some(WorkspaceState::Applying) {
+                                "Reprendre la publication"
+                            } else {
+                                "Appliquer à mes documents"
+                            },
+                            true,
+                        )
+                    })
+                    .inner
+                    .clicked()
+            {
+                command = Some(Action::Apply);
+            }
+            if info.can_undo
+                && ui
+                    .add_enabled_ui(!missions.busy(), |ui| {
+                        bouton(
+                            ui,
+                            "mission-undo",
+                            if info.publication == Some(WorkspaceState::Undoing) {
+                                "Reprendre l'annulation"
+                            } else {
+                                "Annuler la publication"
+                            },
+                            false,
+                        )
+                    })
+                    .inner
+                    .clicked()
+            {
+                command = Some(Action::Undo);
+            }
         });
+        if let Some(state) = info.publication {
+            ui.add_space(4.0);
+            small(ui, publication(state));
+        }
         if !reviewing {
             ui.add_space(10.0);
             phases(ui, info);
