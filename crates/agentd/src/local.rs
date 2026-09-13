@@ -353,8 +353,12 @@ impl Mission {
                         ..
                     } => {
                         control.check_live()?;
-                        let diff = workspace.diff().map_err(|e| e.to_string())?;
-                        return Ok(json!({"text":text,"tool_calls":calls,"diff":diff}));
+                        let review = workspace.seal_review().map_err(|e| e.to_string())?;
+                        control.check_live()?;
+                        let diff = review.diff();
+                        return Ok(
+                            json!({"text":text,"tool_calls":calls,"diff":diff,"review":review}),
+                        );
                     }
                     DriverEvent::Done { reason, .. } => {
                         return Err(reason.unwrap_or_else(|| "pilote interrompu".into()));

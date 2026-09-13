@@ -67,6 +67,12 @@ prophet task cancel note-locale
 Un identifiant déjà utilisé ne peut pas être relancé. Le jeton expire à partir de la
 planification ; un long délai de relecture peut donc nécessiter un nouveau plan.
 
+La surface appelle aussi `task.change` avec `{id,path}` pour lire les versions initiale et
+proposée d'un fichier du diff. Cette méthode exige une mission terminée, son index conservé
+et l'UID créateur observé sur le socket. Elle vérifie les octets, refuse les versions altérées
+et ne relit pas les originaux actuels. Les anciennes missions sans versions ou sans propriétaire
+observé n'offrent pas cet aperçu. Voir l'[ADR 0018](../../docs/adr/0018-examen-des-versions.md).
+
 ## Validation
 
 ```sh

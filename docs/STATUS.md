@@ -1,12 +1,12 @@
 # Prophet OS — Avancement
 
-> Réévaluation du 12 septembre 2026 : les coches historiques ci-dessous décrivent parfois une
+> État au 13 septembre 2026 : les coches historiques ci-dessous décrivent parfois une
 > bibliothèque ou une simulation, pas le parcours installé complet. Les exigences de livraison
 > sont désormais suivies dans [FRONTIER.md](FRONTIER.md). Le moteur local possède un client HTTP
-> concret avec un essai Qwen3/CPU et fichier vérifié (`c3b0c08`). La conversation native en flux
-> est implémentée ; son raccordement à l'exécution agentique via MCP/agentd reste à réaliser.
-> Voir [le rapport d'inférence](reports/local-inference-2026-09-12.md) et les
-> [captures et vérifications de l'espace natif](reports/espace-natif-2026-09-12.md).
+> concret, une conversation en flux et des missions via MCP/agentd avec vrais capd/ledger.
+> L'examen des versions est implémenté ; leur application approuvée et le parcours installé
+> complet restent à établir. Voir le [dernier rapport de revue des fichiers](reports/examen-fichiers-2026-09-13.md)
+> et les exigences ouvertes, notamment la refonte graphique et les sessions authentifiées.
 
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 
@@ -197,6 +197,31 @@ La CI de `395ecbb` réussit le protocole du moteur, les composants, l'isolation 
 ChatGPT demeure en échec. Le kiosque, la gestion graphique des poids, le contenu des diffs,
 leur validation, les clients authentifiés et la refonte visuelle demandée restent ouverts.
 Aucun critère complet de FRONTIER.md n'est coché pour ce raccordement.
+
+Examen des fichiers du 13 septembre 2026, après `1640e1c`, dans le commit portant ce rapport :
+la surface compare les versions initiales et proposées, permet la copie exacte et retire un
+aperçu altéré à l'actualisation. SFS conserve les octets initiaux et vérifie l'index final ;
+`task.change` exige l'UID créateur constaté et persisté. Les lectures et le calcul de lignes se
+font en arrière-plan. Les anciennes missions sans versions ne reçoivent pas d'aperçu inventé.
+Le [rapport](reports/examen-fichiers-2026-09-13.md) contient les preuves et captures ;
+l'[ADR 0018](adr/0018-examen-des-versions.md) décrit les bornes et les limites.
+
+**`just check` final réussi : 631 tests, aucun échec, 26 ignorés** ; les **16 tests graphiques
+explicites réussissent**. Trois essais Qwen3-1.7B lisent le contenu exact dans l'aperçu natif ;
+un quatrième réussit après compactage de la vue Fichiers. Les contrôles du propriétaire,
+des versions altérées, de la comparaison de longs textes et de la relecture après redémarrage
+sont inclus. Les captures finales sont examinées en trois tailles. Une lecture de journal WSL
+a expiré pendant les contrôles ; la connexion a repris et les tests ont abouti, sans arrêt forcé.
+
+La CI de `1640e1c` réussit composants, isolation et protocole du moteur. La surface échoue sur
+un bouton encore absent pendant la synchronisation ; son attente est corrigée dans le test.
+La VM charge Qwen3 puis échoue avant génération : `RestrictSUIDSGID` interdit l'ouverture sûre
+utilisée par SFS. L'erreur 38 est reproduite sous systemd puis supprimée avec le retrait ciblé
+de cette restriction pour agentd ; les autres protections sont conservées. La nouvelle VM
+doit confirmer le parcours complet. ChatGPT échoue toujours au contrôle Fontconfig.
+L'application et l'undo des fichiers, les droits des autres méthodes, le bureau humain complet,
+les clients authentifiés et la direction graphique demandée restent ouverts. Aucun critère
+complet de FRONTIER.md n'est coché pour cet examen.
 
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 

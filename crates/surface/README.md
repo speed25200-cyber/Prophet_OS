@@ -8,8 +8,9 @@ L'accueil est l'espace de supervision : missions sélectionnables, filtres, cont
 des décisions humaines. Préparer un objectif ouvre un brouillon de mission : intention, contexte
 et modèle effectivement disponible auprès du service. Le plan est préparé sans lancer d'agent.
 Une mission déjà planifiée par agentd peut être examinée puis lancée depuis son plan. Son
-inspecteur affiche les accès, l'état exact, le résultat textuel et les métadonnées des fichiers
-préparés. L'arrêt est explicite et sa confirmation vient du service. Les missions terminées
+inspecteur affiche les accès, l'état exact, le résultat textuel et les fichiers préparés.
+L'onglet Fichiers compare les versions initiales et proposées, vérifiées par le service ; il
+permet de copier le texte exact et d'actualiser l'examen. L'arrêt est explicite et sa confirmation vient du service. Les missions terminées
 restent consultables. Une erreur de commande est affichée sans renvoi automatique.
 Le thème clair utilise Inter 4.1 embarquée sous licence SIL OFL et supprime la sculpture Iris.
 Les [captures et vérifications](../../docs/reports/supervision-2026-09-13.md) proviennent du
@@ -45,6 +46,9 @@ le [guide de configuration](../agentd/README.md). Une demande humaine du dialogu
 un brouillon ; les réponses du modèle ne choisissent ni profil ni droits. Une préparation
 incertaine conserve sa référence et peut être retrouvée par lecture, sans nouvelle création.
 Les brouillons restent en mémoire ; les plans confirmés sont persistants dans le service.
-Le contenu ligne par ligne des diffs, la validation des fichiers et le journal détaillé restent
-à intégrer. Voir les ADR [0014](../../docs/adr/0014-inspection-et-commandes-de-mission.md) et
-[0015](../../docs/adr/0015-intention-et-profils-de-mission.md).
+La comparaison ligne par ligne est calculée en arrière-plan et son rendu est limité aux lignes
+visibles. Les aperçus binaires, trop grands, manquants ou altérés ont des états explicites.
+L'application approuvée des fichiers et le journal détaillé restent à intégrer. Voir les ADR
+[0014](../../docs/adr/0014-inspection-et-commandes-de-mission.md),
+[0015](../../docs/adr/0015-intention-et-profils-de-mission.md) et
+[0018](../../docs/adr/0018-examen-des-versions.md).

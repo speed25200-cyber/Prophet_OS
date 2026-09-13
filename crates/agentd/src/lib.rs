@@ -18,4 +18,14 @@ pub mod task;
 
 pub use budget::{Budget, Dimension, Limits, Spent};
 pub use runtime::{EtatPersistant, Inspection, Runtime, RuntimeError, TaskPlan};
+pub use sfs::{ChangeKind, FilePreview, FileReview, PreviewContent};
 pub use task::{State, Task, TaskError};
+
+/// Réponse d'examen corrélée à la mission demandée.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChangeReview {
+    /// Mission dont les versions ont été vérifiées.
+    pub task: String,
+    /// Versions du fichier choisi.
+    pub file: FileReview,
+}

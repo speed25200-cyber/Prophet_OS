@@ -33,6 +33,7 @@ struct Agents {
     local_endpoint: Option<String>,
     profiles: Vec<agentd::preparation::Profile>,
     preparing: Mutex<()>,
+    reviews: Arc<tokio::sync::Semaphore>,
     capd: std::path::PathBuf,
     ledger: std::path::PathBuf,
     /// Où l'état est écrit entre deux démarrages.
@@ -141,6 +142,9 @@ impl Handler for Agents {
                             OffsetDateTime::now_utc(),
                         )
                         .map_err(runtime_erreur)?;
+                    runtime
+                        .bind_owner(&request.id, pair.uid)
+                        .map_err(|e| Error::new(ErrorCode::InternalError, e))?;
                     ecrire(&self.etat, &runtime.etat()).map_err(|e| {
                         Error::new(
                             ErrorCode::InternalError,
@@ -158,6 +162,13 @@ impl Handler for Agents {
             // en connaissance de cause, ce qui suppose que tout y soit.
             "task.spawn" => {
                 let id = commun::texte(&params, "id")?;
+                let _preparing = self.preparing.lock().await;
+                if self.runtime.lock().await.task(&id).is_some() {
+                    return Err(Error::new(
+                        ErrorCode::Conflict,
+                        "Cette référence de mission existe déjà.",
+                    ));
+                }
                 let intention = commun::texte(&params, "intent")?;
                 let utilisateur = commun::texte(&params, "user")?;
                 let manifeste: Manifest = lire(&params, "manifest")?;
@@ -178,7 +189,7 @@ impl Handler for Agents {
                 let refs: Vec<&str> = perimetres.iter().map(String::as_str).collect();
                 let plan = {
                     let mut runtime = self.runtime.lock().await;
-                    runtime
+                    let plan = runtime
                         .plan_with_token(
                             &PlanRequest {
                                 id: &id,
@@ -192,7 +203,11 @@ impl Handler for Agents {
                             jeton,
                             maintenant,
                         )
-                        .map_err(runtime_erreur)?
+                        .map_err(runtime_erreur)?;
+                    runtime
+                        .bind_owner(&id, pair.uid)
+                        .map_err(|e| Error::new(ErrorCode::InternalError, e))?;
+                    plan
                 };
                 self.enregistrer().await?;
                 self.vider_le_journal().await;
@@ -240,6 +255,44 @@ impl Handler for Agents {
                     .result(&id)
                     .ok_or_else(|| Error::new(ErrorCode::NotFound, "résultat non disponible"))?;
                 Ok(result.clone())
+            }
+
+            "task.change" => {
+                #[derive(serde::Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Request {
+                    id: String,
+                    path: String,
+                }
+                let request: Request = serde_json::from_value(params)
+                    .map_err(|e| Error::new(ErrorCode::InvalidParams, e.to_string()))?;
+                if request.id.len() > 160 || request.path.len() > 4096 {
+                    return Err(Error::new(
+                        ErrorCode::InvalidParams,
+                        "Référence ou chemin trop long.",
+                    ));
+                }
+                let (home, index) = self
+                    .runtime
+                    .lock()
+                    .await
+                    .review_context(&request.id, pair.uid)
+                    .map_err(|e| Error::new(ErrorCode::PolicyDenied, e))?;
+                let task = request.id.clone();
+                let permit = self.reviews.clone().try_acquire_owned().map_err(|_| {
+                    Error::new(
+                        ErrorCode::Conflict,
+                        "Deux fichiers sont déjà en cours de lecture. Réessayez dans un instant.",
+                    )
+                })?;
+                let file = tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    index.read(&home, &request.id, &request.path)
+                })
+                .await
+                .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?
+                .map_err(|e| Error::new(ErrorCode::Conflict, e.to_string()))?;
+                commun::repondre(&agentd::ChangeReview { task, file })
             }
 
             // Une mission active accuse réception de la demande ; son travailleur confirme
@@ -615,6 +668,7 @@ async fn main() -> anyhow::Result<()> {
             local_endpoint: std::env::var("PROPHET_LOCAL_ENDPOINT").ok(),
             profiles,
             preparing: Mutex::new(()),
+            reviews: Arc::new(tokio::sync::Semaphore::new(2)),
             capd,
             ledger,
             etat: fichier_etat,

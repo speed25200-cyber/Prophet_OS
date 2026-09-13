@@ -5,17 +5,27 @@ let
   probe = pkgs.writeText "prophet-installed-mission.py" ''
     import json, socket, sys, time, uuid
 
-    def call(method, params):
+    def call(method, params, denied=False):
         with socket.socket(socket.AF_UNIX) as connection:
             connection.settimeout(10)
             connection.connect('/run/prophet/agentd.sock')
             connection.sendall((json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params})+'\n').encode())
             reply = json.loads(connection.makefile().readline())
+        if denied:
+            assert 'result' not in reply and reply.get('error', {}).get('code') == -32002, reply
+            return None
         assert 'error' not in reply, reply
         return reply['result']
 
+    def versions(ident):
+        return call('task.change', {'id':ident,'path':'Documents/Prophet/note.txt'})
+
+    if len(sys.argv) == 3 and sys.argv[1] == 'deny':
+        call('task.change', {'id':sys.argv[2],'path':'Documents/Prophet/note.txt'}, denied=True)
+        raise SystemExit(0)
+
     if len(sys.argv) == 2:
-        print(json.dumps(call('task.result', {'id':sys.argv[1]})))
+        print(json.dumps({'result':call('task.result', {'id':sys.argv[1]}), 'review':versions(sys.argv[1])}))
         raise SystemExit(0)
 
     options = call('task.options', {})
@@ -36,7 +46,11 @@ let
         assert time.monotonic() < deadline, state
         time.sleep(.2)
     result = call('task.result', {'id':ident})
-    print(json.dumps({'id':ident,'content':content,'result':result}), flush=True)
+    review = versions(ident)
+    assert review['task'] == ident, review
+    assert review['file']['before'] is None, review
+    assert review['file']['after']['content'] == {'kind':'text','text':content}, review
+    print(json.dumps({'id':ident,'content':content,'result':result,'review':review}), flush=True)
   '';
 in pkgs.testers.runNixOSTest {
   name = "prophet-local-engine";
@@ -69,8 +83,13 @@ in pkgs.testers.runNixOSTest {
     with subtest("le propriétaire personnalisé prépare et lance une vraie mission"):
         machine.succeed("install -m 0600 -o pilot -g users /etc/hostname /home/pilot/private-note")
         machine.fail("runuser -u agentd -- cat /home/pilot/private-note")
-        proof = json.loads(machine.succeed("runuser -u pilot -- python3 /etc/test-mission.py", timeout=180))
+        try:
+            proof = json.loads(machine.succeed("runuser -u pilot -- python3 /etc/test-mission.py", timeout=180))
+        except Exception:
+            print(machine.succeed("journalctl -u prophet-agentd -u prophet-local-engine --no-pager -n 100"))
+            raise
         ident, expected = proof["id"], proof["content"]
+        machine.succeed(f"python3 /etc/test-mission.py deny {ident}")
         actual = machine.succeed(f"cat /home/pilot/.prophet/tasks/{ident}/work/Documents/Prophet/note.txt")
         assert actual == expected, (actual, expected)
         machine.fail("test -e /home/pilot/Documents/Prophet/note.txt")
@@ -78,7 +97,8 @@ in pkgs.testers.runNixOSTest {
         machine.succeed("systemctl restart prophet-agentd")
         machine.wait_for_unit("prophet-agentd.service")
         persisted = json.loads(machine.succeed(f"runuser -u pilot -- python3 /etc/test-mission.py {ident}"))
-        assert persisted == proof["result"], persisted
+        assert persisted == {key:proof[key] for key in ['result','review']}, persisted
+        machine.succeed(f"python3 /etc/test-mission.py deny {ident}")
     with subtest("l'arrêt du moteur est effectif"):
         machine.succeed("systemctl stop prophet-local-engine")
         machine.fail("curl -fsS http://127.0.0.1:8080/health")

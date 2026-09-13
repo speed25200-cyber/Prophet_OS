@@ -99,3 +99,11 @@ Qwen3-1.7B réels réussissent : intention, préparation, lancement et contenu e
 Le test des unités installées avec poids réels est ajouté à la CI, mais son résultat reste
 à établir. La session humaine graphique complète, la direction visuelle attendue, les
 performances matérielles et les exigences de sécurité et de durabilité restent ouvertes.
+
+L'[examen des fichiers](reports/examen-fichiers-2026-09-13.md) ajoute ensuite la lecture des
+versions capturées, leur comparaison, la copie exacte et le refus d'un travail altéré. La
+méthode exige l'UID créateur enregistré ; les autres méthodes restent à sécuriser séparément.
+La CI de `1640e1c` charge le modèle installé puis échoue sur l'interdiction d'`openat2` par
+systemd. Le retrait ciblé de `RestrictSUIDSGID` pour agentd corrige la reproduction locale ;
+une nouvelle VM reste nécessaire. L'application approuvée, l'undo, la session humaine complète
+et la refonte graphique restent à livrer. Aucun critère complet n'est coché pour cet examen.

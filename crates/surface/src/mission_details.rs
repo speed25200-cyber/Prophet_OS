@@ -19,6 +19,7 @@ pub(crate) enum Tab {
     Result,
     Plan,
     History,
+    Files,
 }
 
 pub(crate) fn status(state: State) -> (&'static str, Color32) {
@@ -63,19 +64,32 @@ fn limited(text: &str, limit: usize) -> String {
 
 pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab: &mut Tab) {
     ui.spacing_mut().item_spacing.y = 6.0;
-    ui.horizontal(|ui| {
-        small(ui, "ESPACE DE MISSION");
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if bouton(ui, "copier-reference", "Copier la référence", false).clicked() {
-                ui.ctx().copy_text(c.tache.clone());
-            }
+    let reviewing = *tab == Tab::Files;
+    if !reviewing {
+        ui.horizontal(|ui| {
+            small(ui, "ESPACE DE MISSION");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if bouton(ui, "copier-reference", "Copier la référence", false).clicked() {
+                    ui.ctx().copy_text(c.tache.clone());
+                }
+            });
         });
-    });
-    ui.add_space(10.0);
+        ui.add_space(10.0);
+    }
     heading(
         ui,
-        &limited(&c.intitule, 350),
-        if ui.available_width() < 540.0 {
+        &if reviewing {
+            missions
+                .files
+                .path
+                .clone()
+                .unwrap_or_else(|| "Les fichiers de la mission".into())
+        } else {
+            limited(&c.intitule, 350)
+        },
+        if reviewing {
+            22.0
+        } else if ui.available_width() < 540.0 {
             24.0
         } else {
             32.0
@@ -84,6 +98,7 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
     ui.add_space(8.0);
     let mut command = None;
     let mut refresh = false;
+    let mut file_requested = None;
     if let Some(info) = missions.snapshot() {
         let (label, color) = status(info.task.state);
         ui.horizontal_wrapped(|ui| {
@@ -115,8 +130,10 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
                 command = Some(Action::Cancel);
             }
         });
-        ui.add_space(10.0);
-        phases(ui, info);
+        if !reviewing {
+            ui.add_space(10.0);
+            phases(ui, info);
+        }
         ui.add_space(10.0);
         let current = if *tab == Tab::Auto {
             if info.task.state == State::Planned {
@@ -132,6 +149,7 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
                 (Tab::Result, "mission-result-tab", "Proposition"),
                 (Tab::Plan, "mission-plan-tab", "Plan & accès"),
                 (Tab::History, "mission-history-tab", "Parcours"),
+                (Tab::Files, "mission-files-tab", "Fichiers"),
             ] {
                 if bouton(ui, id, label, current == value).clicked() {
                     *tab = value;
@@ -139,14 +157,19 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
             }
         });
         ui.add_space(14.0);
-        sheet().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            match current {
-                Tab::Plan => plan(ui, info, missions.busy(), &mut command),
-                Tab::History => history(ui, info),
-                _ => result(ui, info),
-            }
-        });
+        sheet()
+            .inner_margin(if reviewing { 16 } else { 24 })
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                match current {
+                    Tab::Plan => plan(ui, info, missions.busy(), &mut command),
+                    Tab::History => history(ui, info),
+                    Tab::Files => {
+                        file_requested = crate::file_review_view::draw(ui, info, &missions.files)
+                    }
+                    _ => result(ui, info, &mut file_requested),
+                }
+            });
         ui.add_space(12.0);
         ui.horizontal_wrapped(|ui| {
             small(ui, format!("{} étapes", info.task.budget.spent.steps));
@@ -196,6 +219,12 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
     }
     if refresh {
         missions.refresh();
+    }
+    if let Some(path) = file_requested {
+        *tab = Tab::Files;
+        if let Err(error) = missions.open_file(&path) {
+            ui.label(RichText::new(error).color(RED));
+        }
     }
     if let Some(action) = command
         && let Err(error) = missions.command(action)
@@ -311,7 +340,7 @@ fn plan(ui: &mut egui::Ui, info: &Inspection, busy: bool, command: &mut Option<A
     }
 }
 
-fn result(ui: &mut egui::Ui, info: &Inspection) {
+fn result(ui: &mut egui::Ui, info: &Inspection, file_requested: &mut Option<String>) {
     let state = info.task.state;
     if let Some(reason) = &info.task.reason {
         Frame::new()
@@ -414,6 +443,13 @@ fn result(ui: &mut egui::Ui, info: &Inspection) {
                                 change["size_after"].as_u64().unwrap_or(0)
                             ),
                         );
+                        if info.task.state == State::Done
+                            && let Some(path) = change["path"].as_str()
+                            && bouton(ui, &format!("mission-file-{path}"), "Examiner", false)
+                                .clicked()
+                        {
+                            *file_requested = Some(path.into());
+                        }
                     });
                 });
             ui.separator();
@@ -430,7 +466,7 @@ fn result(ui: &mut egui::Ui, info: &Inspection) {
         ui.add_space(12.0);
         small(
             ui,
-            "État enregistré à la fin de l'exécution. Le contenu ligne par ligne et la validation des fichiers restent à intégrer.",
+            "Versions enregistrées à la fin de la mission. Examinez chaque proposition avant de modifier vos originaux.",
         );
     } else {
         small(

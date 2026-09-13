@@ -88,6 +88,14 @@ const META: &str = "meta.json";
 const TX: &str = "tx";
 
 impl Workspace {
+    /// Fige les empreintes des changements d'une capture autorisée, pour leur examen humain.
+    ///
+    /// # Errors
+    /// Capture historique sans versions conservées, lien, fichier spécial ou travail trop grand.
+    pub fn seal_review(&self) -> Result<crate::ReviewIndex, SfsError> {
+        crate::review::seal(&self.home, &self.meta.task, &self.meta.base).map_err(Into::into)
+    }
+
     /// Capture de service : droits vérifiés par descendant et ouvertures Linux sans liens.
     ///
     /// # Errors

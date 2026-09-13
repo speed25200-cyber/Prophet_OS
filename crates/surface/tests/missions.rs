@@ -534,6 +534,10 @@ fn une_intention_saisie_dans_la_surface_devient_une_mission_et_un_fichier_prepar
             .missions()
             .snapshot()
             .is_some_and(|s| s.task.id == id && s.task.state == State::Planned)
+            && bureau
+                .ctx
+                .read_response(egui::Id::new("mission-start"))
+                .is_some_and(|r| r.enabled())
         {
             break;
         }
@@ -662,6 +666,10 @@ fn une_intention_graphique_est_executee_par_un_modele_reel() {
             .missions()
             .snapshot()
             .is_some_and(|s| s.task.id == id && s.task.state == State::Planned)
+            && bureau
+                .ctx
+                .read_response(egui::Id::new("mission-start"))
+                .is_some_and(|r| r.enabled())
         {
             break;
         }
@@ -740,8 +748,147 @@ fn une_intention_graphique_est_executee_par_un_modele_reel() {
         frame(&mut bureau, &mut source, &context, &target, vec![]);
     }
     capture(&context, &target, "reel-resultat");
+    let events = click(&bureau, &target, "mission-file-docs/note.txt");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while bureau.missions().file_review().is_none() {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        assert!(
+            Instant::now() < deadline,
+            "aperçu absent : {:?}",
+            bureau.missions().file_error()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let review = bureau.missions().file_review().unwrap();
+    assert_eq!(review.task, id);
+    assert_eq!(
+        review.file.after.as_ref().unwrap().content,
+        agentd::PreviewContent::Text {
+            text: expected.clone()
+        }
+    );
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    capture(&context, &target, "reel-fichier");
     println!(
         "modèle={model}, mission={id}, contenu={expected}, durée={:?}, images pendant exécution={running_frames}",
         started.elapsed()
+    );
+}
+
+#[test]
+#[ignore = "needs_gpu: examen des deux versions avec vrais services et modèle HTTP contrôlé"]
+fn les_widgets_comparent_les_versions_et_refusent_un_travail_altere() {
+    let mut model = Model::new();
+    let chain = Chain::new(&model.endpoint);
+    let before = "La supervision humaine\n\nDéfinir un objectif.\nRelire le travail proposé.\n";
+    let after = "L'humain définit, supervise et examine le travail des agents.";
+    std::fs::write(chain.dir.path().join("home/docs/note.txt"), before).unwrap();
+    let context = Contexte::hors_ecran().unwrap();
+    let mut source = Reel::demarrer(chain.sockets.clone());
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.brancher_missions(chain.sockets.agentd.clone());
+    bureau.figer_transitions();
+    let target = Cible::nouvelle(&context, 1440, 1000);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        if bureau
+            .ctx
+            .read_response(egui::Id::new("mission-start"))
+            .is_some_and(|r| r.enabled())
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let events = click(&bureau, &target, "mission-start");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    model
+        .received
+        .recv_timeout(Duration::from_secs(10))
+        .unwrap();
+    model.release.send(()).unwrap();
+    chain.wait(bureau.missions(), State::Done);
+    model.worker.take().unwrap().join().unwrap();
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    let events = click(&bureau, &target, "mission-file-docs/note.txt");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while bureau.missions().file_review().is_none() {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        assert!(
+            Instant::now() < deadline,
+            "lecture absente : {:?}",
+            bureau.missions().file_error()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let review = bureau.missions().file_review().unwrap();
+    assert_eq!(
+        review.file.before.as_ref().unwrap().content,
+        agentd::PreviewContent::Text {
+            text: before.into()
+        }
+    );
+    assert_eq!(
+        review.file.after.as_ref().unwrap().content,
+        agentd::PreviewContent::Text { text: after.into() }
+    );
+    for (width, height) in [(1440, 1000), (1280, 800), (640, 900)] {
+        let size = Cible::nouvelle(&context, width, height);
+        for _ in 0..3 {
+            frame(&mut bureau, &mut source, &context, &size, vec![]);
+        }
+        if width == 640 {
+            let events = click(&bureau, &size, &format!("mission-{ID}"));
+            frame(&mut bureau, &mut source, &context, &size, events);
+            for _ in 0..3 {
+                frame(&mut bureau, &mut source, &context, &size, vec![]);
+            }
+        }
+        capture(&context, &size, "fichier");
+        let events = click(&bureau, &size, "review-copy-after");
+        let output = frame(&mut bureau, &mut source, &context, &size, events);
+        assert!(
+            output
+                .commands
+                .iter()
+                .any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == after))
+        );
+    }
+    std::fs::write(
+        chain
+            .dir
+            .path()
+            .join(format!("home/.prophet/tasks/{ID}/work/docs/note.txt")),
+        "Travail altéré après la mission",
+    )
+    .unwrap();
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    let events = click(&bureau, &target, "review-refresh");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    assert!(bureau.missions().file_review().is_none());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while bureau.missions().file_error().is_none() {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(bureau.missions().file_review().is_none());
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    capture(&context, &target, "fichier-altere");
+    assert_eq!(
+        std::fs::read_to_string(chain.dir.path().join("home/docs/note.txt")).unwrap(),
+        before
     );
 }

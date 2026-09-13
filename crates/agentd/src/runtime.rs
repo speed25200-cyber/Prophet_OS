@@ -27,6 +27,44 @@ use time::OffsetDateTime;
 use crate::budget::{Budget, Dimension, Limits};
 use crate::task::{State, Task, TaskError};
 
+#[cfg(test)]
+mod review_ownership {
+    use super::*;
+
+    #[test]
+    fn le_pair_observe_est_persistant_et_ne_se_deduit_pas_du_nom_declare() {
+        let mut runtime = Runtime::sans_broker("/home/test");
+        let mut task = Task::new(
+            "one",
+            "Objectif",
+            "local:test",
+            "uid:2000",
+            Budget::new(Default::default()),
+            OffsetDateTime::now_utc(),
+        );
+        task.state = State::Done;
+        runtime.tasks.insert(task.id.clone(), task);
+        runtime
+            .results
+            .insert("one".into(), json!({"review":{"entries":[]}}));
+        assert!(runtime.review_context("one", 1000).is_err());
+        runtime.bind_owner("one", 1000).unwrap();
+        assert!(runtime.bind_owner("one", 2000).is_err());
+        assert!(runtime.review_context("one", 2000).is_err());
+        assert!(runtime.review_context("one", 0).is_err());
+        let encoded = serde_json::to_vec(&runtime.etat()).unwrap();
+        let mut restored = Runtime::sans_broker("/home/test");
+        restored.reprendre(serde_json::from_slice(&encoded).unwrap());
+        assert!(restored.review_context("one", 1000).is_ok());
+        assert!(restored.review_context("one", 2000).is_err());
+        let mut legacy: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
+        legacy.as_object_mut().unwrap().remove("owners");
+        let mut legacy_runtime = Runtime::sans_broker("/home/test");
+        legacy_runtime.reprendre(serde_json::from_value(legacy).unwrap());
+        assert!(legacy_runtime.review_context("one", 1000).is_err());
+    }
+}
+
 /// Erreur du runtime.
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
@@ -175,6 +213,9 @@ pub struct EtatPersistant {
     /// Résultats de missions relisibles après redémarrage.
     #[serde(default)]
     pub results: BTreeMap<String, serde_json::Value>,
+    /// UID constaté sur le socket à la création, distinct d'une identité déclarée dans le plan.
+    #[serde(default)]
+    pub owners: BTreeMap<String, u32>,
 }
 
 /// Le runtime.
@@ -192,6 +233,7 @@ pub struct Runtime {
     quota_policy: QuotaPolicy,
     plans: BTreeMap<String, TaskPlan>,
     results: BTreeMap<String, serde_json::Value>,
+    owners: BTreeMap<String, u32>,
 }
 
 impl std::fmt::Debug for Runtime {
@@ -216,6 +258,7 @@ impl Runtime {
             quota_policy: QuotaPolicy::default(),
             plans: BTreeMap::new(),
             results: BTreeMap::new(),
+            owners: BTreeMap::new(),
         }
     }
 
@@ -235,6 +278,7 @@ impl Runtime {
             quota_policy: QuotaPolicy::default(),
             plans: BTreeMap::new(),
             results: BTreeMap::new(),
+            owners: BTreeMap::new(),
         }
     }
 
@@ -256,6 +300,7 @@ impl Runtime {
             jetons: self.tokens.clone(),
             plans: self.plans.clone(),
             results: self.results.clone(),
+            owners: self.owners.clone(),
         }
     }
 
@@ -271,6 +316,7 @@ impl Runtime {
         self.tokens.extend(etat.jetons);
         self.plans.extend(etat.plans);
         self.results.extend(etat.results);
+        self.owners.extend(etat.owners);
     }
 
     /// Événements journalisés.
@@ -304,6 +350,47 @@ impl Runtime {
     #[must_use]
     pub fn result(&self, id: &str) -> Option<&serde_json::Value> {
         self.results.get(id)
+    }
+
+    /// Lie une nouvelle mission au pair réellement observé. Aucune méthode IPC ne permet de changer ce lien.
+    ///
+    /// # Errors
+    /// Tâche absente ou déjà liée à une autre identité.
+    pub fn bind_owner(&mut self, id: &str, uid: u32) -> Result<(), String> {
+        if !self.tasks.contains_key(id) || self.owners.get(id).is_some_and(|owner| *owner != uid) {
+            return Err("Propriétaire de mission incohérent.".into());
+        }
+        self.owners.insert(id.into(), uid);
+        Ok(())
+    }
+
+    /// Donne au créateur l'index de ses versions capturées, pour une lecture hors du verrou du runtime.
+    ///
+    /// # Errors
+    /// Identité absente ou différente, mission non terminée, anciennes versions indisponibles.
+    pub fn review_context(
+        &self,
+        id: &str,
+        uid: u32,
+    ) -> Result<(PathBuf, sfs::ReviewIndex), String> {
+        if self.owners.get(id) != Some(&uid) {
+            return Err("L'examen des fichiers est réservé au créateur de cette mission.".into());
+        }
+        if self
+            .tasks
+            .get(id)
+            .is_none_or(|task| task.state != State::Done)
+        {
+            return Err("Les versions ne sont disponibles qu'après la fin de la mission.".into());
+        }
+        let index = self
+            .results
+            .get(id)
+            .and_then(|result| result.get("review"))
+            .ok_or("Cette mission ne contient pas de versions vérifiables.")?;
+        let index =
+            serde_json::from_value(index.clone()).map_err(|_| "Index des versions illisible.")?;
+        Ok((self.home.clone(), index))
     }
 
     /// Vue de supervision cohérente, créée sous le verrou du service.

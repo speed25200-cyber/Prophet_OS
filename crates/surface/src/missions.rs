@@ -33,6 +33,7 @@ pub struct Notice {
 
 /// Contrôleur de l'inspecteur. Une lecture et une commande au maximum peuvent être en vol.
 pub struct Missions {
+    pub(crate) files: crate::file_review::Review,
     socket: Option<PathBuf>,
     selected: Option<String>,
     revision: u64,
@@ -51,6 +52,7 @@ impl Default for Missions {
     fn default() -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
+            files: crate::file_review::Review::default(),
             socket: None,
             selected: None,
             revision: 0,
@@ -79,6 +81,7 @@ impl Missions {
 
     /// Observe une sélection. Les réponses d'une ancienne sélection ne remplacent pas la vue.
     pub fn select(&mut self, id: Option<&str>) {
+        self.files.select(id);
         if self.selected.as_deref() != id {
             self.revision = self.revision.wrapping_add(1);
             self.selected = id.map(str::to_owned);
@@ -90,6 +93,7 @@ impl Missions {
 
     /// Dépose les réponses disponibles et programme une lecture, sans bloquer l'appelant.
     pub fn update(&mut self) {
+        self.files.update(self.socket.as_ref());
         while let Ok(reply) = self.rx.try_recv() {
             match reply {
                 Reply::Inspect(revision, result) => {
@@ -185,6 +189,38 @@ impl Missions {
     #[must_use]
     pub fn snapshot(&self) -> Option<&Inspection> {
         self.snapshot.as_ref()
+    }
+
+    /// Ouvre une version conservée d'un changement reçu dans le résultat de cette mission.
+    ///
+    /// # Errors
+    /// Mission non terminée, connexion absente ou chemin absent du résultat reçu.
+    pub fn open_file(&mut self, path: &str) -> Result<(), String> {
+        let info = self.snapshot.as_ref().ok_or("Détail de mission absent.")?;
+        if info.task.state != State::Done
+            || self.socket.is_none()
+            || !info
+                .result
+                .as_ref()
+                .and_then(|r| r["diff"]["changes"].as_array())
+                .is_some_and(|changes| changes.iter().any(|c| c["path"].as_str() == Some(path)))
+        {
+            return Err("Ce fichier n'est pas disponible dans le résultat de la mission.".into());
+        }
+        self.files.open(path.into());
+        Ok(())
+    }
+
+    /// Version vérifiée actuellement affichée ; absente pendant une lecture ou après erreur.
+    #[must_use]
+    pub fn file_review(&self) -> Option<&agentd::ChangeReview> {
+        self.files.document.as_ref().map(|d| &d.review)
+    }
+
+    /// Échec de la dernière lecture de fichier, sans réutiliser son ancien aperçu.
+    #[must_use]
+    pub fn file_error(&self) -> Option<&str> {
+        self.files.error.as_deref()
     }
     /// Réconcilie les deux lectures : la liste et l'inspecteur doivent montrer le même état.
     pub(crate) fn align_scene(&mut self, scene: &mut crate::scene::Scene) {

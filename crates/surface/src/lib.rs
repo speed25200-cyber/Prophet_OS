@@ -7,6 +7,8 @@ pub mod bureau;
 pub mod depuis;
 pub mod disposition;
 pub mod fenetre;
+mod file_review;
+mod file_review_view;
 mod glyphes;
 pub mod gpu;
 mod mission_details;

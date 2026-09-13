@@ -18,6 +18,15 @@ async fn l_inspection_retourne_le_plan_sans_exposer_le_jeton() {
     assert_eq!(info["plan"]["scopes"], json!(["~/docs"]));
     assert_eq!(info["can_start"], true);
     assert!(info["result"].is_null());
+    let refused = chain
+        .agents
+        .call(
+            "task.change",
+            json!({"id":"local-test","path":"docs/note.txt"}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, prophet_ipc::ErrorCode::PolicyDenied);
     assert!(!info.to_string().contains("signature"));
     assert!(!info.to_string().contains("jeton"));
     chain
@@ -36,6 +45,7 @@ async fn l_inspection_retourne_le_plan_sans_exposer_le_jeton() {
 
 struct Chain {
     dir: tempfile::TempDir,
+    endpoint: String,
     _capd: Daemon,
     _ledger: Option<Daemon>,
     agentd: Option<Daemon>,
@@ -77,6 +87,7 @@ impl Chain {
         let agents = agentd.joindre().await;
         Self {
             dir,
+            endpoint: endpoint.into(),
             _capd: capd,
             _ledger: Some(ledger),
             agentd: Some(agentd),
@@ -513,6 +524,17 @@ async fn le_cli_lance_et_relit_un_resultat_persistant() {
     let result = cli(&chain, &["--json", "task", "result", "local-test"]).await;
     let result: Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(result["diff"]["changes"][0]["path"], "docs/note.txt");
+    let review = chain
+        .agents
+        .call(
+            "task.change",
+            json!({"id":"local-test","path":"docs/note.txt"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(review["task"], "local-test");
+    assert!(review["file"]["before"].is_null());
+    assert_eq!(review["file"]["after"]["content"]["text"], "preuve");
     assert_eq!(
         std::fs::read_to_string(
             chain
@@ -538,6 +560,44 @@ async fn le_cli_lance_et_relit_un_resultat_persistant() {
     assert!(
         text.contains("Terminé.") && text.contains("docs/note.txt"),
         "{text}"
+    );
+    assert_eq!(
+        chain
+            .agents
+            .call(
+                "task.change",
+                json!({"id":"local-test","path":"docs/note.txt"})
+            )
+            .await
+            .unwrap(),
+        review
+    );
+    for path in ["../docs/note.txt", "/etc/passwd", "docs/absent.txt"] {
+        assert!(
+            chain
+                .agents
+                .call("task.change", json!({"id":"local-test","path":path}))
+                .await
+                .is_err()
+        );
+    }
+    std::fs::write(
+        chain
+            .dir
+            .path()
+            .join("home/.prophet/tasks/local-test/work/docs/note.txt"),
+        "altéré",
+    )
+    .unwrap();
+    assert!(
+        chain
+            .agents
+            .call(
+                "task.change",
+                json!({"id":"local-test","path":"docs/note.txt"})
+            )
+            .await
+            .is_err()
     );
     model.worker.abort();
 }
@@ -567,7 +627,21 @@ async fn restart(chain: &mut Chain) {
         AGENTD,
         &chain.dir.path().join("agents.sock"),
         &chain.dir.path().join("agent-state"),
-        &[],
+        &[
+            (
+                "PROPHET_HOME",
+                chain.dir.path().join("home").to_str().unwrap(),
+            ),
+            (
+                "PROPHET_CAPD_SOCKET",
+                chain.dir.path().join("cap.sock").to_str().unwrap(),
+            ),
+            (
+                "PROPHET_LEDGER_SOCKET",
+                chain.dir.path().join("ledger.sock").to_str().unwrap(),
+            ),
+            ("PROPHET_LOCAL_ENDPOINT", &chain.endpoint),
+        ],
     ));
     chain.agents = chain.agentd.as_ref().unwrap().joindre().await;
 }

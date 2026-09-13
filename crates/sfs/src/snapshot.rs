@@ -71,6 +71,7 @@ pub(crate) fn capture(
     fs::mkdirat(&tasks, task, Mode::RWXU)?;
     let task_root = open(&tasks, Path::new(task), OFlags::RDONLY | OFlags::DIRECTORY)?;
     let work = directory(&task_root, "work")?;
+    let original = directory(&task_root, "base")?;
     directory(&task_root, "restore")?;
     let mut base = Fingerprints::new();
     let mut pending: Vec<_> = scopes.iter().map(|p| (p.clone(), 0_u32)).collect();
@@ -100,16 +101,19 @@ pub(crate) fn capture(
         };
         let meta = from.metadata()?;
         let mut target_parent = work.try_clone()?;
+        let mut original_parent = original.try_clone()?;
         for component in relative.parent().unwrap_or(Path::new("")).components() {
             let Component::Normal(name) = component else {
                 return Err(denied());
             };
             target_parent = directory(&target_parent, name.to_str().ok_or_else(denied)?)?;
+            original_parent = directory(&original_parent, name.to_str().ok_or_else(denied)?)?;
         }
         let name = relative.file_name().and_then(|n| n.to_str());
         if meta.is_dir() {
             if let Some(name) = name {
                 directory(&target_parent, name)?;
+                directory(&original_parent, name)?;
             }
             let dir = open(&source, &relative, OFlags::RDONLY | OFlags::DIRECTORY)?;
             for entry in fs::Dir::new(dir)? {
@@ -139,6 +143,14 @@ pub(crate) fn capture(
             )?
             .into();
             let mut hash = blake3::Hasher::new();
+            let mut saved: File = fs::openat2(
+                &original_parent,
+                Path::new(name.ok_or_else(denied)?),
+                OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC,
+                Mode::RUSR | Mode::WUSR,
+                FLAGS,
+            )?
+            .into();
             let mut buffer = [0_u8; 65536];
             let mut size = 0_u64;
             loop {
@@ -155,10 +167,12 @@ pub(crate) fn capture(
                 }
                 hash.update(&buffer[..n]);
                 to.write_all(&buffer[..n])?;
+                saved.write_all(&buffer[..n])?;
                 size += n as u64;
             }
             fs::fchmod(&to, Mode::from_bits_truncate(meta.mode() & 0o777))?;
             to.sync_all()?;
+            saved.sync_all()?;
             // Une source modifiée pendant sa copie demande une nouvelle capture.
             let after = from.metadata()?;
             if meta.len() != size
@@ -182,5 +196,6 @@ pub(crate) fn capture(
         }
     }
     work.sync_all()?;
+    original.sync_all()?;
     Ok(base)
 }

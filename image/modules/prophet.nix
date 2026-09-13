@@ -292,6 +292,10 @@ in
           environment.PROPHET_HOME = config.users.users.${cfg.user}.home;
           requires = [ "prophet-capd.service" "prophet-ledger.service" ];
           serviceConfig = {
+            # RestrictSUIDSGID bloque openat2 avec ENOSYS, même sans création de fichier.
+            # SFS/MCP en ont besoin pour refuser les liens sans course de chemins (ADR 0018).
+            # UID statique non privilégié, NoNewPrivileges et capabilities vides conservés.
+            RestrictSUIDSGID = lib.mkForce false;
             ReadWritePaths = [ config.users.users.${cfg.user}.home "/var/lib/prophet" ];
             # `ProtectHome = true`, hérité du modèle commun, rend `/home` inaccessible et **vide**
             # dans l'espace de montage du service. Il l'emporte sur `ReadWritePaths` : le test des

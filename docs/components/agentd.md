@@ -17,13 +17,18 @@
 | `task.status` | Rend une tâche par identifiant |
 | `task.inspect` | Rend tâche, plan, résultat et commandes possibles, sans jeton |
 | `task.result` | Rend le résultat conservé ; erreur tant qu'il n'est pas disponible |
+| `task.change` | Rend les versions vérifiées d'un fichier au créateur de la mission terminée |
 | `task.cancel` | Demande l'arrêt d'une mission active ou annule un plan non lancé |
 
 `task.start`, `task.status`, `task.inspect`, `task.result` et `task.cancel` prennent `{"id":"…"}`.
 Le format de planification complet est illustré dans
 [`examples/missions/note-locale.json`](../../examples/missions/note-locale.json).
 Les méthodes sont réservées aux pairs de confiance. Le contrôle existant est global au
-socket ; les droits propres à chaque méthode ne sont pas encore appliqués.
+socket ; la nouvelle méthode `task.change` exige en plus l'UID créateur persisté. Elle prend
+`{id,path}`, où `path` est relatif au home et appartient au diff final. La mission doit être
+`done` et posséder ses versions conservées ; aucun propriétaire n'est déduit des anciennes
+identités déclarées. Deux lectures simultanées sont admises. Les autres méthodes conservent
+leur contrôle global et restent à traiter individuellement.
 
 `task.prepare` prend uniquement `{id, intent, profile, model}`. Son utilisateur provient du pair
 Unix. `PROPHET_MISSION_PROFILES` fixe les manifestes et périmètres au démarrage ; les modèles sont

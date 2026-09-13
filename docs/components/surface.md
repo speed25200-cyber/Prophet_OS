@@ -18,7 +18,10 @@ remplacent la direction Iris précédente. L'inspecteur lit maintenant `task.ins
 accès, état exact, réponse finale, métadonnées de changements et parcours des états. Les missions
 terminées restent accessibles. Les contrôles de lancement et d'arrêt envoient une commande
 explicite hors de la boucle de rendu, affichent son acquittement ou son erreur et relisent l'état.
-Le contenu des diffs, leur validation et le journal détaillé des actions restent à intégrer.
+L'onglet Fichiers lit les deux versions par `task.change`, les compare en arrière-plan et propose
+une copie exacte du texte final. Un travail altéré fait échouer l'actualisation ; les textes trop
+grands et les binaires sont explicites. L'accès dépend du créateur Unix constaté par agentd.
+L'application approuvée et le journal détaillé restent à intégrer. Voir l'[ADR 0018](../adr/0018-examen-des-versions.md).
 
 La préparation d'une mission possède maintenant son propre écran : objectif humain, contexte
 configuré dans le service, modèle disponible et limites. `task.prepare` conserve le plan, qui
