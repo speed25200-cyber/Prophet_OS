@@ -17,9 +17,13 @@ restent consultables. Une erreur de commande est affichée sans renvoi automatiq
 Une mission terminée offre à son créateur « Appliquer à mes documents », puis « Annuler la
 publication » ; l'état de publication lu dans SFS est affiché, y compris une intention
 interrompue à reprendre ou un conflit conservé.
-Le thème clair utilise Inter 4.1 embarquée sous licence SIL OFL et supprime la sculpture Iris.
-Les [captures et vérifications](../../docs/reports/atelier-2026-09-13.md) proviennent du
-binaire natif ; les scènes d'exemple sont explicitement marquées.
+La direction Réacteur ([ADR 0025](../../docs/adr/0025-direction-visuelle-reacteur.md)) donne à
+l'atelier une nuit, des plaques de verre à crochets, des jauges graduées, Inter embarquée en trois
+graisses, un champ GPU où chaque mission reçue est un ruban de lumière qui avance au rythme réel
+de ses étapes, et cinq accents de couleur au choix (`--accent arc|or|plasma|jade|nacre`,
+`PROPHET_SURFACE_ACCENT`, ou la page Système, qui conserve le choix dans
+`$XDG_CONFIG_HOME/prophet/surface.json`). Les [captures et vérifications](../../docs/reports/interface-reacteur-2026-09-13.md)
+proviennent du binaire natif ; les scènes d'exemple sont explicitement marquées.
 
 ```sh
 nix develop --command cargo run -p surface --bin prophet-surface -- \

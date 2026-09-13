@@ -1,19 +1,15 @@
 //! Espace de supervision : les missions reçues, leur contexte et les décisions humaines.
 
-use egui::{Align2, Color32, FontId, Frame, RichText, Stroke, pos2, vec2};
+use egui::{Color32, FontId, Frame, RichText, Stroke, pos2, vec2};
 
 use crate::atelier::{Atelier, Page};
 use crate::fenetre::Reponse;
+use crate::hud;
 use crate::scene::{Courant, Etat, Scene};
-
-pub(crate) const FOND: Color32 = Color32::from_rgb(241, 243, 246);
-const BLANC: Color32 = Color32::from_rgb(254, 254, 255);
-const TEXTE: Color32 = Color32::from_rgb(30, 35, 44);
-const DISCRET: Color32 = Color32::from_rgb(106, 114, 126);
-const TRAIT: Color32 = Color32::from_rgb(222, 226, 232);
-const BLEU: Color32 = Color32::from_rgb(43, 94, 175);
-const VERT: Color32 = Color32::from_rgb(38, 116, 96);
-const AMBRE: Color32 = Color32::from_rgb(160, 102, 35);
+use crate::theme::palette::{
+    ACCOMPLI, ATTENTE, ATTENTE_VOILE, CREUX, DISCRET, EFFACE, ENCRE, TRAIT, VERRE_HAUT, VOILE,
+};
+use crate::theme::{ACCENTS, Accent};
 
 #[derive(Default)]
 pub(crate) struct Supervision {
@@ -29,6 +25,7 @@ pub(crate) struct Supervision {
     focus_compact: bool,
     isolate: bool,
     query: String,
+    apparence: Option<(String, bool)>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -53,106 +50,97 @@ impl Filtre {
     }
 }
 
+/// Le style d'egui, réglé sur la nuit : verre, fil d'accent, encre.
+///
+/// Il se réinstalle à chaque changement d'accent, parce que les widgets natifs d'egui (choix
+/// déroulants, cases, curseur de saisie) lisent leurs couleurs dans le style.
 pub(crate) fn installer_style(ctx: &egui::Context) {
-    ctx.set_theme(egui::Theme::Light);
-    let mut style = (*ctx.style_of(egui::Theme::Light)).clone();
-    style.visuals = egui::Visuals::light();
-    style.visuals.override_text_color = Some(TEXTE);
-    style.visuals.panel_fill = FOND;
-    style.visuals.window_fill = BLANC;
-    style.visuals.extreme_bg_color = Color32::from_rgb(235, 238, 242);
-    style.visuals.selection.bg_fill = Color32::from_rgb(219, 230, 248);
-    style.visuals.selection.stroke = Stroke::new(1.0, BLEU);
-    style.visuals.widgets.inactive.bg_fill = BLANC;
-    style.visuals.widgets.inactive.weak_bg_fill = BLANC;
-    style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, TRAIT);
-    style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(231, 236, 244);
-    style.visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(231, 236, 244);
-    style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(184, 197, 217));
-    style.visuals.widgets.active.bg_fill = Color32::from_rgb(218, 228, 244);
+    let accent = Accent::de(ctx);
+    ctx.set_theme(egui::Theme::Dark);
+    let mut style = (*ctx.style_of(egui::Theme::Dark)).clone();
+    style.visuals = egui::Visuals::dark();
+    style.visuals.override_text_color = Some(ENCRE);
+    style.visuals.panel_fill = Color32::TRANSPARENT;
+    style.visuals.window_fill = Color32::from_rgb(10, 14, 19);
+    style.visuals.window_stroke = Stroke::new(1.0, accent.fil_vif);
+    style.visuals.window_corner_radius = 4.into();
+    style.visuals.window_shadow = egui::Shadow::NONE;
+    style.visuals.popup_shadow = egui::Shadow::NONE;
+    style.visuals.extreme_bg_color = CREUX;
+    style.visuals.faint_bg_color = VERRE_HAUT;
+    style.visuals.code_bg_color = CREUX;
+    style.visuals.hyperlink_color = accent.vif;
+    style.visuals.selection.bg_fill = hud::voile(accent.vif, 90);
+    style.visuals.selection.stroke = Stroke::new(1.0, accent.vif);
+    style.visuals.text_cursor.stroke = Stroke::new(2.0, accent.vif);
+    style.visuals.widgets.noninteractive.bg_fill = Color32::TRANSPARENT;
+    style.visuals.widgets.noninteractive.weak_bg_fill = Color32::TRANSPARENT;
     style.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, TRAIT);
-    style.visuals.widgets.inactive.corner_radius = 9.into();
-    style.visuals.widgets.hovered.corner_radius = 9.into();
-    style.visuals.widgets.active.corner_radius = 9.into();
-    style.visuals.faint_bg_color = FOND;
+    style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, ENCRE);
+    style.visuals.widgets.inactive.bg_fill = VERRE_HAUT;
+    style.visuals.widgets.inactive.weak_bg_fill = VERRE_HAUT;
+    style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, accent.fil);
+    style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, ENCRE);
+    style.visuals.widgets.hovered.bg_fill = hud::voile(accent.vif, 34);
+    style.visuals.widgets.hovered.weak_bg_fill = hud::voile(accent.vif, 34);
+    style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, accent.fil_vif);
+    style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, accent.vif);
+    style.visuals.widgets.active.bg_fill = hud::voile(accent.vif, 60);
+    style.visuals.widgets.active.weak_bg_fill = hud::voile(accent.vif, 60);
+    style.visuals.widgets.active.bg_stroke = Stroke::new(1.0, accent.vif);
+    style.visuals.widgets.active.fg_stroke = Stroke::new(1.0, ENCRE);
+    style.visuals.widgets.open.bg_fill = VERRE_HAUT;
+    style.visuals.widgets.open.weak_bg_fill = VERRE_HAUT;
+    style.visuals.widgets.open.bg_stroke = Stroke::new(1.0, accent.fil_vif);
+    style.visuals.widgets.open.fg_stroke = Stroke::new(1.0, accent.vif);
+    for widget in [
+        &mut style.visuals.widgets.inactive,
+        &mut style.visuals.widgets.hovered,
+        &mut style.visuals.widgets.active,
+        &mut style.visuals.widgets.open,
+    ] {
+        widget.corner_radius = 3.into();
+    }
     style.spacing.item_spacing = vec2(10.0, 10.0);
     style.spacing.scroll.fade.strength = 0.0;
-    style.spacing.button_padding = vec2(14.0, 9.0);
+    style.spacing.button_padding = vec2(14.0, 8.0);
     style
         .text_styles
         .insert(egui::TextStyle::Body, FontId::proportional(14.0));
     style
         .text_styles
-        .insert(egui::TextStyle::Button, FontId::proportional(13.0));
+        .insert(egui::TextStyle::Button, FontId::proportional(12.0));
     style
         .text_styles
-        .insert(egui::TextStyle::Heading, FontId::proportional(28.0));
-    ctx.set_style_of(egui::Theme::Light, style);
+        .insert(egui::TextStyle::Heading, FontId::new(28.0, hud::fin()));
+    ctx.set_style_of(egui::Theme::Dark, style);
 }
 
-fn surface() -> Frame {
-    Frame::new()
-        .fill(BLANC)
-        .corner_radius(22)
-        .inner_margin(24)
-        .stroke(Stroke::new(1.0, Color32::from_white_alpha(220)))
-        .shadow(egui::Shadow {
-            offset: [0, 5],
-            blur: 22,
-            spread: 0,
-            color: Color32::from_black_alpha(8),
-        })
+/// Une plaque de verre à crochets, pour tout ce qui se lit.
+fn plaque<R>(ui: &mut egui::Ui, margin: i8, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let accent = Accent::de(ui.ctx());
+    hud::plaque(ui, &accent, margin, add).inner
 }
 
-fn petit(ui: &mut egui::Ui, texte: impl Into<String>) {
+/// Un texte de titre, en graisse fine.
+pub(crate) fn titre(text: impl Into<String>, size: f32) -> RichText {
+    hud::titre(text, size)
+}
+
+/// Une étiquette en capitales espacées, dans l'accent sourd : le vocabulaire des rubriques.
+pub(crate) fn etiquette(ui: &mut egui::Ui, text: impl Into<String>) {
+    let accent = Accent::de(ui.ctx());
+    hud::etiquette(ui, text, accent.sourd);
+}
+
+pub(crate) fn petit(ui: &mut egui::Ui, texte: impl Into<String>) {
     ui.label(RichText::new(texte).size(11.0).color(DISCRET));
 }
 
+/// Un bouton du tableau de bord ; l'identifiant reste stable pour les parcours.
 pub(crate) fn bouton(ui: &mut egui::Ui, id: &str, texte: &str, actif: bool) -> egui::Response {
-    let width = ui.fonts_mut(|fonts| {
-        fonts
-            .layout_no_wrap(texte.to_owned(), FontId::proportional(12.0), TEXTE)
-            .size()
-            .x
-    }) + 28.0;
-    let (_, rect) = ui.allocate_space(vec2(width, 34.0));
-    let response = ui.interact(rect, egui::Id::new(id), egui::Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, actif, texte)
-    });
-    ui.painter().rect_filled(
-        rect,
-        9,
-        if !ui.is_enabled() {
-            Color32::from_rgb(224, 228, 233)
-        } else if actif {
-            TEXTE
-        } else if response.hovered() {
-            Color32::from_rgb(230, 234, 240)
-        } else {
-            Color32::TRANSPARENT
-        },
-    );
-    if response.has_focus() {
-        ui.painter().rect_stroke(
-            rect.expand(2.0),
-            11,
-            Stroke::new(2.0, BLEU),
-            egui::StrokeKind::Inside,
-        );
-    }
-    ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        texte,
-        FontId::proportional(12.0),
-        if actif && ui.is_enabled() {
-            BLANC
-        } else {
-            DISCRET
-        },
-    );
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    let accent = Accent::de(ui.ctx());
+    hud::bouton(ui, id, texte, actif, &accent)
 }
 
 fn action(ui: &mut egui::Ui, id: &str, texte: &str) -> egui::Response {
@@ -172,29 +160,36 @@ fn largeur(ui: &mut egui::Ui, max: f32, contenu: impl FnOnce(&mut egui::Ui)) {
     });
 }
 
-fn statut(etat: Etat) -> (&'static str, Color32) {
+fn statut(etat: Etat, accent: &Accent) -> (&'static str, Color32) {
     match etat {
-        Etat::Court => ("En cours", VERT),
-        Etat::Attend => ("Votre décision", AMBRE),
-        Etat::Bloque => ("À examiner", AMBRE),
+        Etat::Court => ("En cours", accent.vif),
+        Etat::Attend => ("Votre décision", ATTENTE),
+        Etat::Bloque => ("À examiner", ATTENTE),
         Etat::Fini => ("Terminée", DISCRET),
     }
 }
 
-fn statut_mission(c: &Courant) -> (&'static str, Color32) {
-    c.task_state
-        .map_or_else(|| statut(c.etat), crate::mission_details::status)
+fn statut_mission(c: &Courant, accent: &Accent) -> (&'static str, Color32) {
+    c.task_state.map_or_else(
+        || statut(c.etat, accent),
+        |state| crate::mission_details::status(state, accent),
+    )
 }
 
 fn pastille(ui: &mut egui::Ui, texte: &str, couleur: Color32) {
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(6.0, 10.0), egui::Sense::hover());
         ui.painter().circle_filled(r.center(), 2.5, couleur);
-        ui.label(RichText::new(texte).size(11.0).color(couleur));
+        hud::etiquette(ui, texte.to_uppercase(), couleur);
     });
 }
 
 impl Supervision {
+    /// La mission choisie, pour que le champ l'éclaire.
+    pub(crate) fn selection(&self) -> Option<&str> {
+        self.selection.as_deref()
+    }
+
     pub(crate) fn dessiner(
         &mut self,
         root: &mut egui::Ui,
@@ -217,22 +212,34 @@ impl Supervision {
         if atelier.mouvement_reduit {
             ctx.all_styles_mut(|s| s.animation_time = 0.0);
         }
-        crate::desk::background(root);
         crate::desk::chrome(root, atelier, scene, compact);
         if scene.decision.is_some() {
             egui::Panel::top("attention-globale")
-                .exact_size(52.0)
+                .exact_size(54.0)
                 .frame(
                     Frame::new()
-                        .fill(Color32::from_rgb(249, 243, 232))
-                        .inner_margin(egui::Margin::symmetric(24, 9)),
+                        .fill(ATTENTE_VOILE)
+                        .inner_margin(egui::Margin::symmetric(28, 10)),
                 )
                 .show(root, |ui| {
+                    let r = ui.max_rect();
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_size(
+                            pos2(r.left() - 28.0, r.top() - 10.0),
+                            vec2(3.0, r.height() + 20.0),
+                        ),
+                        0,
+                        ATTENTE,
+                    );
                     ui.horizontal(|ui| {
+                        let (dot, _) =
+                            ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
+                        ui.painter().circle_filled(dot.center(), 3.0, ATTENTE);
+                        hud::etiquette(ui, "DÉCISION EN ATTENTE", ATTENTE);
                         ui.label(
                             RichText::new("Une action attend votre accord")
-                                .size(13.0)
-                                .color(AMBRE),
+                                .size(14.0)
+                                .color(ENCRE),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if action(ui, "examiner-decision", "Examiner l'action").clicked() {
@@ -248,15 +255,15 @@ impl Supervision {
                 .frame(
                     Frame::new()
                         .fill(Color32::TRANSPARENT)
-                        .inner_margin(if compact { 12 } else { 22 }),
+                        .inner_margin(if compact { 12 } else { 24 }),
                 )
-                .show(root, |ui| largeur(ui, 880.0, |ui| composer(ui, atelier)));
+                .show(root, |ui| largeur(ui, 900.0, |ui| composer(ui, atelier)));
         }
         egui::CentralPanel::default()
             .frame(
                 Frame::new()
                     .fill(Color32::TRANSPARENT)
-                    .inner_margin(if compact { 14 } else { 28 }),
+                    .inner_margin(if compact { 14 } else { 30 }),
             )
             .show(root, |ui| match atelier.page {
                 Page::Accueil if self.composing => largeur(ui, 1240.0, |ui| {
@@ -264,8 +271,8 @@ impl Supervision {
                         self.composing = false;
                     }
                 }),
-                Page::Accueil => largeur(ui, 1480.0, |ui| self.accueil(ui, scene)),
-                Page::Conversation => largeur(ui, 880.0, |ui| {
+                Page::Accueil => largeur(ui, 1560.0, |ui| self.accueil(ui, scene)),
+                Page::Conversation => largeur(ui, 900.0, |ui| {
                     if !atelier.generation
                         && (!atelier.brouillon.trim().is_empty() || !atelier.tours.is_empty())
                         && bouton(
@@ -300,7 +307,7 @@ impl Supervision {
                     conversation(ui, atelier);
                 }),
                 Page::Modeles => largeur(ui, 1100.0, |ui| modeles(ui, atelier)),
-                Page::Activite => largeur(ui, 1100.0, |ui| systeme(ui, scene)),
+                Page::Activite => largeur(ui, 1100.0, |ui| self.systeme(ui, scene)),
             });
         if self.examen != empreinte_decision(scene) {
             self.examen = None;
@@ -311,24 +318,12 @@ impl Supervision {
     }
 
     fn accueil(&mut self, ui: &mut egui::Ui, scene: &Scene) {
+        let accent = Accent::de(ui.ctx());
         let compact = ui.available_width() < 850.0;
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.label(
-                    RichText::new("Vos missions")
-                        .size(if compact { 23.0 } else { 28.0 })
-                        .family(egui::FontFamily::Name("Inter600".into())),
-                );
-                petit(
-                    ui,
-                    format!(
-                        "{} mission{} · {} en cours · {} à examiner",
-                        scene.courants.len(),
-                        if scene.courants.len() == 1 { "" } else { "s" },
-                        scene.actives(),
-                        scene.courants.iter().filter(|c| c.reclame()).count()
-                    ),
-                );
+                etiquette(ui, "SUPERVISION");
+                ui.label(titre("Vos missions", if compact { 28.0 } else { 34.0 }));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if action(ui, "preparer-mission", "Nouvel objectif  ↗").clicked() {
@@ -343,7 +338,7 @@ impl Supervision {
                 }
             });
         });
-        ui.add_space(if compact { 12.0 } else { 18.0 });
+        ui.add_space(if compact { 10.0 } else { 14.0 });
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             for (filtre, id, label) in [
@@ -358,17 +353,24 @@ impl Supervision {
                     self.isolate = false;
                 }
             }
+            ui.add_space(10.0);
             let search_id = egui::Id::new("mission-search");
             if ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::K)) {
                 ui.memory_mut(|m| m.request_focus(search_id));
             }
-            let search = ui.add(
-                egui::TextEdit::singleline(&mut self.query)
-                    .id(search_id)
-                    .desired_width(176.0)
-                    .hint_text("Rechercher  ·  Ctrl K")
-                    .char_limit(160),
-            );
+            let search = hud::cadre_saisie(&accent)
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.query)
+                            .id(search_id)
+                            .desired_width(150.0)
+                            .frame(Frame::NONE)
+                            .font(FontId::proportional(12.0))
+                            .hint_text("Rechercher  ·  Ctrl K")
+                            .char_limit(160),
+                    )
+                })
+                .inner;
             if search.changed() {
                 self.isolate = false;
                 self.focus_compact = false;
@@ -393,7 +395,7 @@ impl Supervision {
                 });
             }
         });
-        ui.add_space(12.0);
+        ui.add_space(if compact { 12.0 } else { 16.0 });
         if let Some(id) = &self.prepared_selection {
             if scene.courants.iter().any(|c| &c.tache == id) {
                 self.selection = self.prepared_selection.take();
@@ -457,116 +459,177 @@ impl Supervision {
                             self.focus_compact = false;
                             self.isolate = false;
                         }
+                        ui.add_space(8.0);
                         if let Some(c) = courant {
-                            self.inspecteur(ui, c, scene);
+                            plaque(ui, 18, |ui| {
+                                ui.set_width(ui.available_width());
+                                self.inspecteur(ui, c, scene);
+                            });
                         }
                     } else {
                         let precedente = self.selection.clone();
-                        self.liste(ui, &visibles);
+                        plaque(ui, 6, |ui| {
+                            ui.set_width(ui.available_width());
+                            self.liste(ui, &visibles, f32::INFINITY);
+                        });
                         if self.selection != precedente {
                             self.focus_compact = true;
                         }
                     }
                 });
-        } else {
-            if !self.isolate && scene.courants.len() > 1 {
-                if let Some(picked) =
-                    crate::desk::gallery(ui, &visibles, self.selection.as_deref(), true)
-                {
-                    self.selection = Some(picked);
-                    self.focus_compact = true;
-                }
-                ui.add_space(18.0);
-            }
-            egui::ScrollArea::vertical()
-                .id_salt("contexte")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    if let Some(c) = courant {
-                        crate::desk::work_surface().show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            self.inspecteur(ui, c, scene);
-                        });
-                    } else {
-                        ui.label("Aucune mission dans cette vue.");
-                    }
-                });
+            return;
         }
+        // Sur un grand écran, la liste tient à gauche et l'espace de mission à droite, avec
+        // de l'air entre les deux ; la Focale retire la liste pour lire un plan ou comparer
+        // des versions sur toute la largeur.
+        let available = ui.available_width();
+        let show_list = !self.isolate && scene.courants.len() > 1;
+        let list_width = if show_list {
+            (available * 0.30).clamp(300.0, 420.0)
+        } else {
+            0.0
+        };
+        let gap = if show_list { 32.0 } else { 0.0 };
+        let detail_width = available - list_width - gap;
+        let height = ui.available_height();
+        ui.horizontal_top(|ui| {
+            if show_list {
+                ui.allocate_ui_with_layout(
+                    vec2(list_width, height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        let count = visibles.len();
+                        hud::etiquette(
+                            ui,
+                            format!(
+                                "{count} MISSION{} DANS CETTE VUE",
+                                if count == 1 { "" } else { "S" }
+                            ),
+                            EFFACE,
+                        );
+                        ui.add_space(6.0);
+                        plaque(ui, 6, |ui| {
+                            ui.set_width(ui.available_width());
+                            self.liste(ui, &visibles, height - 56.0);
+                        });
+                    },
+                );
+                ui.add_space(gap);
+            }
+            ui.allocate_ui_with_layout(
+                vec2(detail_width, height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("contexte")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            if let Some(c) = courant {
+                                plaque(ui, 22, |ui| {
+                                    ui.set_width(detail_width - 44.0);
+                                    self.inspecteur(ui, c, scene);
+                                });
+                            } else {
+                                ui.label("Aucune mission dans cette vue.");
+                            }
+                        });
+                },
+            );
+        });
     }
 
-    fn liste(&mut self, ui: &mut egui::Ui, courants: &[&Courant]) {
+    fn liste(&mut self, ui: &mut egui::Ui, courants: &[&Courant], height: f32) {
         if courants.is_empty() {
             ui.label("Aucune mission dans cette vue.");
         }
-        if let Some(picked) = crate::desk::gallery(ui, courants, self.selection.as_deref(), false) {
+        if let Some(picked) = crate::desk::liste(ui, courants, self.selection.as_deref(), height) {
             self.selection = Some(picked);
             self.focus_compact = true;
         }
     }
 
     fn inspecteur(&mut self, ui: &mut egui::Ui, c: &Courant, scene: &Scene) {
+        let accent = Accent::de(ui.ctx());
         if self.missions.connected() {
             crate::mission_details::draw(ui, c, &mut self.missions, &mut self.detail_tab);
             if let Some(d) = scene.decision.as_ref().filter(|d| d.tache == c.tache) {
                 ui.add_space(12.0);
-                ui.label(&d.question);
+                ui.label(titre(&d.question, 20.0));
                 if action(ui, "inspecter-action", "Lire les conséquences").clicked() {
                     self.examen = empreinte_decision(scene);
                 }
             }
             return;
         }
-        Frame::NONE.show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                petit(ui, "MISSION EN FOCALE");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if bouton(ui, "copier-reference", "Copier la référence", false).clicked() { ui.ctx().copy_text(c.tache.clone()); }
-                });
-            });
-            ui.add_space(16.0);
-            ui.label(RichText::new(&c.intitule).size(28.0).family(egui::FontFamily::Name("Inter600".into())).line_height(Some(34.0)));
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), egui::Sense::hover());
-                crate::instruments::monogramme(ui.painter(), r.center(), &c.agent, 18.0);
-                ui.label(RichText::new(&c.agent).size(13.0).color(DISCRET));
-                let (label, color) = statut_mission(c);
-                pastille(ui, label, color);
-            });
-            ui.add_space(22.0);
-            Frame::new().fill(if c.reclame() { Color32::from_rgb(250, 245, 235) } else { Color32::from_rgb(241, 245, 248) }).corner_radius(13).inner_margin(18).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(RichText::new(if c.reclame() { "Votre attention" } else { "Point de supervision" }).size(14.0).family(egui::FontFamily::Name("Inter600".into())));
-                if let Some(d) = scene.decision.as_ref().filter(|d| d.tache == c.tache) {
-                    ui.label(RichText::new(&d.question).size(17.0).family(egui::FontFamily::Name("Inter600".into())));
-                    if action(ui, "inspecter-action", "Lire les conséquences").clicked() { self.examen = empreinte_decision(scene); }
-                } else {
-                    ui.label(RichText::new(match c.etat {
-                        Etat::Court => "La mission est signalée en cours. Aucune demande d'accord reçue pour cette mission.",
-                        Etat::Bloque => "Le service signale un blocage. Sa cause détaillée n'a pas été fournie.",
-                        Etat::Attend => "La mission attend. Le détail de sa demande n'est pas disponible dans cette scène.",
-                        Etat::Fini => "Le service signale la fin de la mission. Les livrables restent à examiner lorsqu'ils sont disponibles.",
-                    }).size(13.0).color(DISCRET));
+        let (label, color) = statut_mission(c, &accent);
+        let wide = ui.available_width() > 620.0;
+        ui.horizontal(|ui| {
+            etiquette(ui, "MISSION EN FOCALE");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if bouton(ui, "copier-reference", "Copier la référence", false).clicked() {
+                    ui.ctx().copy_text(c.tache.clone());
                 }
             });
-            ui.add_space(22.0);
-            ui.separator();
-            ui.add_space(14.0);
-            crate::instruments::tableau(
-                ui,
-                c.etapes,
-                c.debit,
-                c.budget_consomme,
-                if c.reclame() { AMBRE } else { BLEU },
-                false,
-            );
-            ui.add_space(26.0);
-            petit(ui, "RÉSULTATS ET CHANGEMENTS");
-            ui.label(RichText::new("Aucun livrable ni diff reçu.").size(13.0).color(DISCRET));
-            ui.add_space(6.0);
-            petit(ui, &c.tache);
         });
+        ui.add_space(14.0);
+        // Le cadran à droite, le titre à gauche : la mission se lit d'un seul regard.
+        let cadran = if wide { 96.0 } else { 0.0 };
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(
+                vec2(ui.available_width() - cadran * 2.0 - 24.0, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.label(titre(&c.intitule, if wide { 34.0 } else { 26.0 }).line_height(Some(if wide { 40.0 } else { 31.0 })));
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), egui::Sense::hover());
+                        crate::instruments::monogramme(ui.painter(), r.center(), &c.agent, 18.0);
+                        ui.label(RichText::new(&c.agent).size(13.0).color(DISCRET));
+                        pastille(ui, label, color);
+                    });
+                    ui.add_space(20.0);
+                    Frame::new()
+                        .fill(if c.reclame() { ATTENTE_VOILE } else { VERRE_HAUT })
+                        .stroke(Stroke::new(1.0, if c.reclame() { hud::voile(ATTENTE, 150) } else { accent.fil }))
+                        .corner_radius(3)
+                        .inner_margin(18)
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            hud::etiquette(ui, if c.reclame() { "VOTRE ATTENTION" } else { "POINT DE SUPERVISION" }, if c.reclame() { ATTENTE } else { accent.sourd });
+                            ui.add_space(4.0);
+                            if let Some(d) = scene.decision.as_ref().filter(|d| d.tache == c.tache) {
+                                ui.label(titre(&d.question, 20.0));
+                                ui.add_space(6.0);
+                                if action(ui, "inspecter-action", "Lire les conséquences").clicked() { self.examen = empreinte_decision(scene); }
+                            } else {
+                                ui.label(RichText::new(match c.etat {
+                                    Etat::Court => "La mission est signalée en cours. Aucune demande d'accord reçue pour cette mission.",
+                                    Etat::Bloque => "Le service signale un blocage. Sa cause détaillée n'a pas été fournie.",
+                                    Etat::Attend => "La mission attend. Le détail de sa demande n'est pas disponible dans cette scène.",
+                                    Etat::Fini => "Le service signale la fin de la mission. Les livrables restent à examiner lorsqu'ils sont disponibles.",
+                                }).size(13.0).color(DISCRET));
+                            }
+                        });
+                },
+            );
+            if wide {
+                let (r, _) = ui.allocate_exact_size(vec2(cadran * 2.0 + 24.0, cadran * 2.0 + 44.0), egui::Sense::hover());
+                hud::cadran(ui.painter(), pos2(r.center().x + 12.0, r.top() + cadran + 8.0), cadran, c.etapes, c.budget_consomme, color, &accent);
+            }
+        });
+        ui.add_space(24.0);
+        ui.separator();
+        ui.add_space(18.0);
+        crate::instruments::tableau(ui, c.etapes, c.debit, c.budget_consomme, color, false);
+        ui.add_space(24.0);
+        etiquette(ui, "RÉSULTATS ET CHANGEMENTS");
+        ui.label(
+            RichText::new("Aucun livrable ni diff reçu.")
+                .size(13.0)
+                .color(DISCRET),
+        );
+        ui.add_space(6.0);
+        ui.label(RichText::new(&c.tache).size(11.0).color(EFFACE));
     }
 
     fn decision(&mut self, ctx: &egui::Context, scene: &Scene, reponse: &mut Option<Reponse>) {
@@ -576,28 +639,35 @@ impl Supervision {
         let id = egui::Id::new("decision");
         egui::Modal::new(id)
             .area(egui::Modal::default_area(id).fade_in(false))
-            .backdrop_color(Color32::from_black_alpha(90))
-            .frame(surface().inner_margin(28))
+            .backdrop_color(VOILE)
+            .frame(
+                Frame::new()
+                    .fill(Color32::from_rgb(10, 12, 16))
+                    .stroke(Stroke::new(1.0, hud::voile(ATTENTE, 160)))
+                    .corner_radius(4)
+                    .inner_margin(32),
+            )
             .show(ctx, |ui| {
-                ui.set_max_width(570.0);
-                petit(ui, "DÉCISION HUMAINE");
-                ui.add_space(12.0);
-                ui.label(
-                    RichText::new(&d.question)
-                        .size(27.0)
-                        .family(egui::FontFamily::Name("Inter600".into())),
-                );
+                ui.set_max_width(600.0);
+                ui.horizontal(|ui| {
+                    let (dot, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
+                    ui.painter().circle_filled(dot.center(), 3.0, ATTENTE);
+                    hud::etiquette(ui, "DÉCISION HUMAINE", ATTENTE);
+                });
                 ui.add_space(14.0);
-                ui.label(&d.consequence);
+                ui.label(titre(&d.question, 30.0).line_height(Some(36.0)));
+                ui.add_space(14.0);
+                ui.label(RichText::new(&d.consequence).size(15.0).color(ENCRE));
                 if d.irreversible {
-                    ui.label(RichText::new("Action irréversible").size(13.0).color(AMBRE));
+                    ui.add_space(4.0);
+                    hud::etiquette(ui, "ACTION IRRÉVERSIBLE", ATTENTE);
                 }
-                ui.add_space(8.0);
+                ui.add_space(10.0);
                 petit(
                     ui,
                     format!("Mission {} · attente {} s", d.tache, d.depuis_secondes),
                 );
-                ui.add_space(18.0);
+                ui.add_space(22.0);
                 ui.horizontal_wrapped(|ui| {
                     if bouton(ui, "decision-retour", "Revenir aux missions", false).clicked() {
                         self.examen = None;
@@ -609,6 +679,138 @@ impl Supervision {
                     if action(ui, "decision-autoriser", "Autoriser cette action").clicked() {
                         *reponse = Some(Reponse::Accepte);
                         self.examen = None;
+                    }
+                });
+                // Les crochets sur ce que le panneau occupe réellement, une fois composé.
+                hud::crochets(ui.painter(), ui.min_rect().expand(33.0), ATTENTE, 16.0);
+            });
+    }
+
+    fn systeme(&mut self, ui: &mut egui::Ui, scene: &Scene) {
+        let accent = Accent::de(ui.ctx());
+        etiquette(ui, "SYSTÈME");
+        ui.label(titre("Le cadre d'exécution.", 40.0));
+        ui.add_space(26.0);
+        egui::ScrollArea::vertical()
+            .id_salt("systeme")
+            .show(ui, |ui| {
+                plaque(ui, 28, |ui| {
+                    ui.set_width(ui.available_width());
+                    etiquette(ui, "ISOLATION DISPONIBLE");
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        let (r, _) = ui.allocate_exact_size(vec2(120.0, 120.0), egui::Sense::hover());
+                        hud::jauge(
+                            ui.painter(),
+                            r.center(),
+                            56.0,
+                            f32::from(scene.isolation.niveau_max) / 3.0,
+                            accent.vif,
+                            &accent,
+                            (&scene.isolation.niveau_max.to_string(), "NIVEAU"),
+                        );
+                        ui.add_space(12.0);
+                        ui.vertical(|ui| {
+                            ui.label(titre(format!("Niveau {} sur 3", scene.isolation.niveau_max), 26.0));
+                            if let Some(manque) = &scene.isolation.manque {
+                                ui.label(RichText::new(manque).color(DISCRET));
+                            }
+                            ui.add_space(8.0);
+                            petit(
+                                ui,
+                                "Cette capacité annoncée ne prouve pas le confinement de chaque mission.",
+                            );
+                        });
+                    });
+                });
+                ui.add_space(22.0);
+                plaque(ui, 28, |ui| {
+                    ui.set_width(ui.available_width());
+                    etiquette(ui, "APPARENCE");
+                    ui.add_space(4.0);
+                    ui.label(titre("La couleur de ce qui signale.", 22.0));
+                    ui.label(
+                        RichText::new(
+                            "L'accent colore le champ, les fils et ce qui est actif. La nuit, l'encre et l'alerte ne changent pas.",
+                        )
+                        .size(12.0)
+                        .color(DISCRET),
+                    );
+                    ui.add_space(14.0);
+                    let mut chosen = None;
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = vec2(18.0, 10.0);
+                        for candidate in ACCENTS {
+                            let selected = candidate.nom == accent.nom;
+                            let (r, response) = ui.allocate_exact_size(vec2(96.0, 74.0), egui::Sense::click());
+                            let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+                            response.widget_info(|| {
+                                egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, candidate.titre)
+                            });
+                            ui.ctx().check_for_id_clash(egui::Id::new(format!("accent-{}", candidate.nom)), r, "accent");
+                            let p = ui.painter();
+                            let center = pos2(r.center().x, r.top() + 26.0);
+                            if selected || response.hovered() {
+                                hud::lueur(p, center, 14.0, &candidate);
+                            }
+                            p.circle_filled(center, 13.0, candidate.vif);
+                            if selected {
+                                p.circle_stroke(center, 19.0, Stroke::new(1.5, candidate.vif));
+                                hud::graduations(p, center, 24.0, 24, 24, 2.5, (candidate.fil_vif, candidate.fil));
+                            } else {
+                                p.circle_stroke(center, 19.0, Stroke::new(1.0, candidate.fil));
+                            }
+                            hud::texte_espace(
+                                p,
+                                pos2(r.center().x, r.bottom() - 8.0),
+                                egui::Align2::CENTER_CENTER,
+                                &candidate.titre.to_uppercase(),
+                                FontId::proportional(9.0),
+                                if selected { candidate.vif } else { DISCRET },
+                                1.6,
+                            );
+                            if response.has_focus() {
+                                p.rect_stroke(r, 3, Stroke::new(1.0, candidate.fil_vif), egui::StrokeKind::Inside);
+                            }
+                            if response.clicked() {
+                                chosen = Some(candidate);
+                            }
+                        }
+                    });
+                    if let Some(candidate) = chosen {
+                        candidate.installer(ui.ctx());
+                        installer_style(ui.ctx());
+                        self.apparence = Some(match crate::theme::enregistrer_accent(candidate) {
+                            Ok(chemin) => (format!("Accent {} conservé dans {}.", candidate.titre, chemin.display()), false),
+                            Err(error) => (format!("Accent {} appliqué à cette session ; il n'a pas pu être conservé : {error}", candidate.titre), true),
+                        });
+                    }
+                    if let Some((text, error)) = &self.apparence {
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(text).size(11.0).color(if *error { ATTENTE } else { DISCRET }));
+                    }
+                    ui.add_space(6.0);
+                    petit(ui, "Ligne de commande : --accent <nom> ; variable : PROPHET_SURFACE_ACCENT.");
+                });
+                ui.add_space(22.0);
+                plaque(ui, 28, |ui| {
+                    ui.set_width(ui.available_width());
+                    etiquette(ui, "MISSIONS REÇUES");
+                    ui.add_space(6.0);
+                    if scene.courants.is_empty() {
+                        ui.label("Aucune mission reçue.");
+                    }
+                    for c in &scene.courants {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(&c.intitule).size(14.0).color(ENCRE));
+                            let (label, color) = statut_mission(c, &accent);
+                            pastille(ui, label, color);
+                        });
+                        petit(
+                            ui,
+                            format!("{} · {} · {} étapes", c.tache, c.agent, c.etapes),
+                        );
+                        ui.add_space(8.0);
                     }
                 });
             });
@@ -626,6 +828,7 @@ fn empreinte_decision(scene: &Scene) -> Option<String> {
 
 fn composer(ui: &mut egui::Ui, atelier: &mut Atelier) {
     let ctx = ui.ctx().clone();
+    let accent = Accent::de(&ctx);
     if let Some(error) = &atelier.erreur {
         ui.horizontal_wrapped(|ui| {
             ui.label(
@@ -635,14 +838,14 @@ fn composer(ui: &mut egui::Ui, atelier: &mut Atelier) {
                     error
                 })
                 .size(12.0)
-                .color(AMBRE),
+                .color(ATTENTE),
             );
             if ui.link("Vérifier la connexion").clicked() {
                 atelier.page = Page::Modeles;
             }
         });
     }
-    surface().inner_margin(18).show(ui, |ui| {
+    plaque(ui, 18, |ui| {
         ui.set_width(ui.available_width());
         let response = ui.add(
             egui::TextEdit::multiline(&mut atelier.brouillon)
@@ -681,12 +884,10 @@ fn composer(ui: &mut egui::Ui, atelier: &mut Atelier) {
                         && !atelier.choisi.is_empty()
                         && !atelier.brouillon.trim().is_empty();
                     let clicked = ui
-                        .add_enabled(
-                            enabled,
-                            egui::Button::new(RichText::new("Envoyer ↑").color(BLANC))
-                                .fill(TEXTE)
-                                .min_size(vec2(96.0, 34.0)),
-                        )
+                        .add_enabled_ui(enabled, |ui| {
+                            hud::bouton(ui, "envoyer", "Envoyer ↑", true, &accent)
+                        })
+                        .inner
                         .clicked();
                     if clicked || (enabled && shortcut) {
                         atelier.envoyer(&ctx);
@@ -696,20 +897,19 @@ fn composer(ui: &mut egui::Ui, atelier: &mut Atelier) {
         });
     });
     ui.horizontal(|ui| {
-        petit(ui, "Conversation locale · en mémoire");
+        hud::etiquette(ui, "CONVERSATION LOCALE · EN MÉMOIRE", EFFACE);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            petit(ui, "Ctrl + Entrée pour envoyer");
+            hud::etiquette(ui, "CTRL + ENTRÉE POUR ENVOYER", EFFACE);
         });
     });
 }
 
 fn conversation(ui: &mut egui::Ui, atelier: &mut Atelier) {
     ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("Le dialogue, à votre rythme.")
-                .size(26.0)
-                .family(egui::FontFamily::Name("Inter600".into())),
-        );
+        ui.vertical(|ui| {
+            etiquette(ui, "DIALOGUE");
+            ui.label(titre("Le dialogue, à votre rythme.", 32.0));
+        });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if bouton(ui, "nouveau-dialogue", "+ Nouveau", false).clicked() {
                 atelier.nouvelle();
@@ -717,15 +917,15 @@ fn conversation(ui: &mut egui::Ui, atelier: &mut Atelier) {
             }
         });
     });
-    ui.add_space(12.0);
+    ui.add_space(16.0);
     egui::ScrollArea::vertical().id_salt("dialogue").stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
         if atelier.tours.is_empty() {
-            surface().show(ui, |ui| {
+            plaque(ui, 28, |ui| {
                 ui.set_width(ui.available_width());
-                petit(ui, "AVANT DE DÉLÉGUER");
-                ui.label(RichText::new("Précisez le résultat attendu.").size(25.0));
+                etiquette(ui, "AVANT DE DÉLÉGUER");
+                ui.label(titre("Précisez le résultat attendu.", 26.0));
                 ui.label(RichText::new("Explorez un objectif avec votre modèle local. Ce dialogue ne lance pas d'agent et n'accorde aucun droit système.").size(13.0).color(DISCRET));
-                ui.add_space(12.0);
+                ui.add_space(14.0);
                 if bouton(ui, "cadrer-objectif", "Structurer mon objectif", false).clicked() {
                     atelier.brouillon = "Aide-moi à préciser cet objectif, ses contraintes et les critères qui permettront de vérifier le résultat : ".into();
                     ui.ctx().memory_mut(|m| m.request_focus(egui::Id::new("intention")));
@@ -734,28 +934,28 @@ fn conversation(ui: &mut egui::Ui, atelier: &mut Atelier) {
         }
         for (i, tour) in atelier.tours.iter().enumerate() {
             ui.push_id(i, |ui| {
-                Frame::new().fill(Color32::from_rgb(230, 235, 242)).corner_radius(16).inner_margin(18).show(ui, |ui| {
+                Frame::new().fill(VERRE_HAUT).stroke(Stroke::new(1.0, TRAIT)).corner_radius(3).inner_margin(18).show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    petit(ui, "VOUS");
+                    hud::etiquette(ui, "VOUS", EFFACE);
                     ui.label(RichText::new(&tour.demande).size(15.0));
                 });
-                ui.add_space(6.0);
-                surface().show(ui, |ui| {
+                ui.add_space(8.0);
+                plaque(ui, 22, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
-                        petit(ui, &tour.modele);
+                        etiquette(ui, tour.modele.to_uppercase());
                         if !tour.reponse.is_empty() && ui.small_button("Copier").clicked() { ui.ctx().copy_text(tour.reponse.clone()); }
                     });
                     ui.add_space(10.0);
                     if tour.reponse.is_empty() && tour.erreur.is_none() { petit(ui, "Le modèle prépare sa réponse…"); }
                     else { ui.label(RichText::new(&tour.reponse).size(15.0).line_height(Some(24.0))); }
-                    if let Some(error) = &tour.erreur { ui.label(RichText::new(error).color(AMBRE)); }
+                    if let Some(error) = &tour.erreur { ui.label(RichText::new(error).color(ATTENTE)); }
                     if let Some(mesure) = &tour.mesure {
                         ui.add_space(12.0);
                         petit(ui, format!("{} tokens · {:.2} s · premier texte {} ms", mesure.usage.tokens_out, mesure.elapsed.as_secs_f64(), mesure.first_token.unwrap_or_default().as_millis()));
                     }
                 });
-                ui.add_space(16.0);
+                ui.add_space(18.0);
             });
         }
     });
@@ -881,21 +1081,16 @@ fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
 }
 
 fn modeles(ui: &mut egui::Ui, atelier: &mut Atelier) {
-    ui.label(
-        RichText::new("L'intelligence sur votre machine.")
-            .size(30.0)
-            .family(egui::FontFamily::Name("Inter600".into())),
-    );
-    petit(
-        ui,
-        "Modèles du moteur local et clients officiels, tels qu'ils répondent",
-    );
-    ui.add_space(22.0);
+    let accent = Accent::de(ui.ctx());
+    etiquette(ui, "MODÈLES");
+    ui.label(titre("L'intelligence sur votre machine.", 40.0));
+    hud::etiquette(ui, "MOTEUR LOCAL ET CLIENTS OFFICIELS", EFFACE);
     atelier.sonder_les_clients(&ui.ctx().clone());
+    ui.add_space(26.0);
     egui::ScrollArea::vertical()
         .id_salt("bibliotheque")
         .show(ui, |ui| {
-            surface().show(ui, |ui| {
+            plaque(ui, 28, |ui| {
                 ui.set_width(ui.available_width());
                 clients_officiels(ui, atelier);
             });
@@ -910,7 +1105,10 @@ fn modeles(ui: &mut egui::Ui, atelier: &mut Atelier) {
                             .color(DISCRET),
                     );
                     if ui
-                        .add_enabled(!atelier.decouverte, egui::Button::new("Actualiser"))
+                        .add_enabled_ui(!atelier.decouverte, |ui| {
+                            hud::bouton(ui, "modeles-actualiser", "Actualiser", false, &accent)
+                        })
+                        .inner
                         .clicked()
                     {
                         atelier.decouvrir(&ui.ctx().clone());
@@ -921,19 +1119,19 @@ fn modeles(ui: &mut egui::Ui, atelier: &mut Atelier) {
                 });
                 if let Some(error) = &atelier.erreur {
                     egui::CollapsingHeader::new("Diagnostic de connexion").show(ui, |ui| {
-                        ui.label(RichText::new(error).size(12.0).color(AMBRE));
+                        ui.label(RichText::new(error).size(12.0).color(ATTENTE));
                     });
                 }
                 if atelier.modeles.is_empty() {
                     ui.add_space(28.0);
-                    ui.label(
-                        RichText::new(if atelier.decouverte {
+                    ui.label(titre(
+                        if atelier.decouverte {
                             "Recherche en cours…"
                         } else {
                             "Aucun modèle connecté."
-                        })
-                        .size(28.0),
-                    );
+                        },
+                        30.0,
+                    ));
                     ui.label(
                         RichText::new(
                             "Démarrez un moteur local compatible, puis actualisez cette vue.",
@@ -947,23 +1145,25 @@ fn modeles(ui: &mut egui::Ui, atelier: &mut Atelier) {
                     );
                 }
             });
-            ui.add_space(14.0);
+            ui.add_space(18.0);
             for model in &atelier.modeles {
-                surface().show(ui, |ui| {
+                plaque(ui, 24, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
-                            ui.label(RichText::new(model).size(23.0));
-                            pastille(ui, "Disponible pour dialoguer", VERT);
+                            ui.label(titre(model, 24.0));
+                            pastille(ui, "Disponible pour dialoguer", ACCOMPLI);
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .button(if atelier.choisi == *model {
-                                    "Sélectionné"
-                                } else {
-                                    "Choisir"
-                                })
-                                .clicked()
+                            let selected = atelier.choisi == *model;
+                            if hud::bouton(
+                                ui,
+                                &format!("modele-choisir-{model}"),
+                                if selected { "Sélectionné" } else { "Choisir" },
+                                selected,
+                                &accent,
+                            )
+                            .clicked()
                             {
                                 atelier.choisi.clone_from(model);
                             }
@@ -972,57 +1172,6 @@ fn modeles(ui: &mut egui::Ui, atelier: &mut Atelier) {
                 });
                 ui.add_space(14.0);
             }
-        });
-}
-
-fn systeme(ui: &mut egui::Ui, scene: &Scene) {
-    ui.label(
-        RichText::new("Le cadre d'exécution.")
-            .size(30.0)
-            .family(egui::FontFamily::Name("Inter600".into())),
-    );
-    petit(ui, "Capacités et états signalés par les services");
-    ui.add_space(24.0);
-    egui::ScrollArea::vertical()
-        .id_salt("systeme")
-        .show(ui, |ui| {
-            surface().show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                petit(ui, "ISOLATION DISPONIBLE");
-                ui.add_space(10.0);
-                crate::instruments::echelle_isolation(
-                    ui,
-                    scene.isolation.niveau_max,
-                    scene.isolation.manque.as_deref(),
-                );
-                ui.add_space(12.0);
-                petit(
-                    ui,
-                    "Cette capacité annoncée ne prouve pas le confinement de chaque mission.",
-                );
-            });
-            ui.add_space(16.0);
-            surface().show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                petit(ui, "MISSIONS REÇUES");
-                if scene.courants.is_empty() {
-                    ui.label("Aucune mission reçue.");
-                }
-                for c in &scene.courants {
-                    ui.horizontal_wrapped(|ui| {
-                        let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), egui::Sense::hover());
-                        crate::instruments::monogramme(ui.painter(), r.center(), &c.agent, 16.0);
-                        ui.label(RichText::new(&c.intitule).size(14.0));
-                        let (label, color) = statut_mission(c);
-                        pastille(ui, label, color);
-                    });
-                    petit(
-                        ui,
-                        format!("{} · {} · {} étapes", c.tache, c.agent, c.etapes),
-                    );
-                    ui.add_space(8.0);
-                }
-            });
         });
 }
 

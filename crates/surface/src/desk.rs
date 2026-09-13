@@ -1,78 +1,54 @@
 //! Composition du bureau et objets de mission, dessinés avec les données de la scène.
+//!
+//! La direction Réacteur : une nuit où le champ vit, un rail de verre à gauche, une barre du
+//! système qui ne relève que des comptes réels, et des plaques de verre à crochets pour tout
+//! ce qui se lit. L'accent signale, l'encre nomme, les capitales espacées rubriquent.
+
 use crate::atelier::{Atelier, Page};
+use crate::hud;
 use crate::scene::{Courant, Etat, Scene};
+use crate::theme::Accent;
+use crate::theme::palette::{ATTENTE, CREUX, DISCRET, EFFACE, ENCRE, TRAIT, VERRE};
 use egui::{Align2, Color32, FontId, Frame, Rect, RichText, Stroke, pos2, vec2};
 
-pub(crate) const INK: Color32 = Color32::from_rgb(28, 33, 39);
-const MUTED: Color32 = Color32::from_rgb(108, 119, 128);
-const RAIL: Color32 = Color32::from_rgb(34, 41, 47);
-const WHITE: Color32 = Color32::from_rgb(252, 253, 253);
-const BLUE: Color32 = Color32::from_rgb(49, 99, 142);
+/// Largeur du rail de navigation, panneau compris.
+const RAIL: f32 = 92.0;
+/// Hauteur d'une ligne de mission dans la liste.
+const LIGNE: f32 = 72.0;
 
-pub(crate) fn background(ui: &egui::Ui) {
-    let r = ui.max_rect();
-    let mut mesh = egui::Mesh::default();
-    for (p, c) in [
-        (r.left_top(), Color32::from_rgb(239, 243, 244)),
-        (r.right_top(), Color32::from_rgb(246, 246, 240)),
-        (r.right_bottom(), Color32::from_rgb(230, 232, 225)),
-        (r.left_bottom(), Color32::from_rgb(211, 225, 229)),
-    ] {
-        mesh.colored_vertex(p, c);
-    }
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(0, 2, 3);
-    ui.painter().add(mesh);
-}
-
-fn symbol(p: &egui::Painter, center: egui::Pos2, page: Page, color: Color32) {
-    let at = |x, y| center + vec2(x, y);
-    let stroke = Stroke::new(1.5, color);
-    match page {
-        Page::Accueil => {
-            for (x, y, w, h) in [(-9., -9., 7., 18.), (2., -9., 7., 7.), (2., 2., 7., 7.)] {
-                p.rect_stroke(
-                    Rect::from_min_size(at(x, y), vec2(w, h)),
-                    2,
-                    stroke,
-                    egui::StrokeKind::Inside,
-                );
-            }
-        }
-        Page::Conversation => {
-            p.rect_stroke(
-                Rect::from_center_size(center, vec2(21., 16.)),
-                5,
-                stroke,
-                egui::StrokeKind::Inside,
-            );
-            p.line_segment([at(-5., 8.), at(-8., 12.)], stroke);
-            p.line_segment([at(-5., -2.), at(5., -2.)], stroke);
-            p.line_segment([at(-5., 3.), at(2., 3.)], stroke);
-        }
-        Page::Modeles => crate::glyphes::icon(p, center, crate::glyphes::Icon::Models, 22., color),
-        Page::Activite => {
-            p.line_segment([at(-10., 9.), at(10., 9.)], stroke);
-            for (x, y) in [(-7., -1.), (0., -9.), (7., -5.)] {
-                p.line_segment([at(x, 5.), at(x, y)], Stroke::new(2.5, color));
-            }
-        }
-    }
-}
-
-fn nav(ui: &mut egui::Ui, atelier: &mut Atelier, wide: bool) {
+fn nav(ui: &mut egui::Ui, atelier: &mut Atelier, wide: bool, accent: &Accent) {
     let items = [
-        (Page::Accueil, "nav-accueil", "Missions"),
-        (Page::Conversation, "nav-conversation", "Dialogue"),
-        (Page::Modeles, "nav-modeles", "Modèles"),
-        (Page::Activite, "nav-activite", "Système"),
+        (
+            Page::Accueil,
+            "nav-accueil",
+            "MISSIONS",
+            crate::glyphes::Icon::Missions,
+        ),
+        (
+            Page::Conversation,
+            "nav-conversation",
+            "DIALOGUE",
+            crate::glyphes::Icon::Dialogue,
+        ),
+        (
+            Page::Modeles,
+            "nav-modeles",
+            "MODÈLES",
+            crate::glyphes::Icon::Models,
+        ),
+        (
+            Page::Activite,
+            "nav-activite",
+            "SYSTÈME",
+            crate::glyphes::Icon::System,
+        ),
     ];
-    for (page, id, label) in items {
+    for (page, id, label, icon) in items {
         let selected = atelier.page == page;
         let size = if wide {
-            vec2(62., 64.)
+            vec2(64., 64.)
         } else {
-            vec2(110., 42.)
+            vec2(112., 44.)
         };
         let (_, r) = ui.allocate_space(size);
         let response = ui.interact(r, egui::Id::new(id), egui::Sense::click());
@@ -80,35 +56,48 @@ fn nav(ui: &mut egui::Ui, atelier: &mut Atelier, wide: bool) {
             egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, label)
         });
         let p = ui.painter();
-        p.rect_filled(
-            r,
-            14,
-            if selected {
-                Color32::from_rgb(246, 247, 244)
-            } else if response.hovered() {
-                Color32::from_rgb(55, 66, 73)
-            } else {
-                Color32::TRANSPARENT
-            },
-        );
-        let color = if selected {
-            INK
+        let icon_at = if wide {
+            pos2(r.center().x, r.top() + 24.)
         } else {
-            Color32::from_rgb(191, 204, 208)
+            pos2(r.left() + 24., r.center().y)
         };
-        symbol(
+        if selected {
+            hud::lueur(p, icon_at, 15.0, accent);
+            // Un trait d'accent sur le bord : la page où l'on est, sans le lire.
+            if wide {
+                p.rect_filled(
+                    Rect::from_min_size(
+                        pos2(r.left() - 2., r.top() + 16.),
+                        vec2(2., r.height() - 32.),
+                    ),
+                    1,
+                    accent.vif,
+                );
+            } else {
+                p.rect_filled(
+                    Rect::from_min_size(
+                        pos2(r.left() + 18., r.bottom() - 2.),
+                        vec2(r.width() - 36., 2.),
+                    ),
+                    1,
+                    accent.vif,
+                );
+            }
+        } else if response.hovered() {
+            p.rect_filled(r, 4, hud::voile(accent.vif, 14));
+        }
+        let color = if selected {
+            accent.vif
+        } else if response.hovered() {
+            ENCRE
+        } else {
+            DISCRET
+        };
+        crate::glyphes::icon(p, icon_at, icon, 22., color);
+        hud::texte_espace(
             p,
             if wide {
-                pos2(r.center().x, r.top() + 22.)
-            } else {
-                pos2(r.left() + 22., r.center().y)
-            },
-            page,
-            color,
-        );
-        p.text(
-            if wide {
-                pos2(r.center().x, r.bottom() - 13.)
+                pos2(r.center().x, r.bottom() - 12.)
             } else {
                 pos2(r.left() + 42., r.center().y)
             },
@@ -118,14 +107,15 @@ fn nav(ui: &mut egui::Ui, atelier: &mut Atelier, wide: bool) {
                 Align2::LEFT_CENTER
             },
             label,
-            FontId::proportional(if wide { 10. } else { 12. }),
+            FontId::proportional(if wide { 8. } else { 9.5 }),
             color,
+            1.4,
         );
         if response.has_focus() {
             p.rect_stroke(
                 r.expand(2.),
-                16,
-                Stroke::new(2., Color32::from_rgb(143, 204, 218)),
+                4,
+                Stroke::new(1., accent.fil_vif),
                 egui::StrokeKind::Inside,
             );
         }
@@ -139,85 +129,191 @@ fn nav(ui: &mut egui::Ui, atelier: &mut Atelier, wide: bool) {
 }
 
 pub(crate) fn chrome(root: &mut egui::Ui, atelier: &mut Atelier, scene: &Scene, compact: bool) {
+    let accent = Accent::de(root.ctx());
+    egui::Panel::top("barre-systeme")
+        .exact_size(if compact { 52. } else { 64. })
+        .frame(
+            Frame::new()
+                .fill(Color32::TRANSPARENT)
+                .inner_margin(egui::Margin::symmetric(if compact { 16 } else { 28 }, 0)),
+        )
+        .show(root, |ui| {
+            let r = ui.max_rect();
+            let p = ui.painter();
+            p.line_segment(
+                [
+                    pos2(r.left() - 28., r.bottom()),
+                    pos2(r.right() + 28., r.bottom()),
+                ],
+                Stroke::new(1., accent.fil),
+            );
+            // Le mot-marque : l'œil, puis le nom en capitales espacées. Ce n'est pas un logo
+            // posé, c'est le fil qui cercle toutes les plaques, écrit une fois en toutes lettres.
+            let eye = pos2(r.left() + 16., r.center().y);
+            hud::lueur(p, eye, 10.0, &accent);
+            crate::glyphes::oeil(p, eye, if compact { 24. } else { 30. }, accent.vif);
+            let mark = hud::texte_espace(
+                p,
+                pos2(r.left() + (if compact { 38. } else { 48. }), r.center().y),
+                Align2::LEFT_CENTER,
+                "PROPHET OS",
+                FontId::new(if compact { 12. } else { 13.5 }, hud::fort()),
+                accent.vif,
+                if compact { 3.0 } else { 4.2 },
+            );
+            if !compact {
+                hud::texte_espace(
+                    p,
+                    pos2(mark.right() + 16., r.center().y + 0.5),
+                    Align2::LEFT_CENTER,
+                    "ATELIER",
+                    FontId::proportional(8.5),
+                    EFFACE,
+                    2.2,
+                );
+                // L'heure au centre, en chiffres fins : la machine est là.
+                let clock = hud::texte_espace(
+                    p,
+                    pos2(r.center().x, r.center().y - 6.),
+                    Align2::CENTER_CENTER,
+                    &scene.heure,
+                    FontId::new(22., hud::fin()),
+                    ENCRE,
+                    1.0,
+                );
+                hud::texte_espace(
+                    p,
+                    pos2(r.center().x, clock.bottom() + 2.),
+                    Align2::CENTER_TOP,
+                    &format!("{} · UTC", scene.date.to_uppercase()),
+                    FontId::proportional(8.),
+                    EFFACE,
+                    1.5,
+                );
+                p.circle_filled(pos2(clock.left() - 14., clock.center().y), 2.4, accent.vif);
+                // Les relevés, à droite : des comptes réels, rien d'autre.
+                let mut x = r.right();
+                let actives = scene.actives();
+                let reclament = scene.courants.iter().filter(|c| c.reclame()).count();
+                let readouts = [
+                    (
+                        "MODÈLES",
+                        if atelier.demonstration {
+                            "—".to_owned()
+                        } else {
+                            format!("{:02}", atelier.modeles.len())
+                        },
+                        DISCRET,
+                    ),
+                    (
+                        "ISOLATION",
+                        format!("{:02}", scene.isolation.niveau_max),
+                        ENCRE,
+                    ),
+                    (
+                        "À EXAMINER",
+                        format!("{reclament:02}"),
+                        if reclament > 0 { ATTENTE } else { DISCRET },
+                    ),
+                    (
+                        "ACTIVES",
+                        format!("{actives:02}"),
+                        if actives > 0 { accent.vif } else { DISCRET },
+                    ),
+                ];
+                for (label, value, color) in readouts {
+                    let rect = hud::releve(
+                        p,
+                        pos2(x, r.center().y - 9.),
+                        Align2::RIGHT_CENTER,
+                        label,
+                        &value,
+                        color,
+                    );
+                    x = rect.left() - 26.;
+                    p.line_segment(
+                        [
+                            pos2(x + 13., r.center().y - 12.),
+                            pos2(x + 13., r.center().y + 12.),
+                        ],
+                        Stroke::new(1., TRAIT),
+                    );
+                }
+                if atelier.demonstration {
+                    hud::texte_espace(
+                        p,
+                        pos2(x - 4., r.center().y),
+                        Align2::RIGHT_CENTER,
+                        "DÉMONSTRATION",
+                        FontId::proportional(9.),
+                        ATTENTE,
+                        1.8,
+                    );
+                }
+            } else if atelier.demonstration {
+                hud::texte_espace(
+                    p,
+                    pos2(r.right(), r.center().y),
+                    Align2::RIGHT_CENTER,
+                    "DÉMONSTRATION",
+                    FontId::proportional(9.),
+                    ATTENTE,
+                    1.8,
+                );
+            }
+        });
     if !compact {
         egui::Panel::left("navigation-atelier")
-            .exact_size(86.)
-            .frame(Frame::new().fill(RAIL).inner_margin(12))
+            .exact_size(RAIL)
+            .frame(Frame::new().fill(Color32::TRANSPARENT).inner_margin(0))
             .show(root, |ui| {
-                rail_depth(ui);
-                ui.vertical_centered(|ui| {
-                    ui.add_space(7.);
-                    let (r, _) = ui.allocate_exact_size(vec2(46., 46.), egui::Sense::hover());
-                    emblem(ui.painter(), r.center(), scene);
-                    ui.add_space(33.);
-                    nav(ui, atelier, true);
-                });
+                let full = ui.max_rect();
+                let rail = Rect::from_min_max(
+                    pos2(full.left() + 14., full.top() + 20.),
+                    pos2(full.right() - 14., full.bottom() - 20.),
+                );
+                let p = ui.painter();
+                p.rect_filled(rail, 4, VERRE);
+                p.rect_stroke(
+                    rail,
+                    4,
+                    Stroke::new(1., accent.fil),
+                    egui::StrokeKind::Inside,
+                );
+                hud::crochets(p, rail.expand(1.), accent.fil_vif, 10.);
+                ui.scope_builder(
+                    egui::UiBuilder::new().max_rect(rail.shrink2(vec2(0., 16.))),
+                    |ui| {
+                        ui.vertical_centered(|ui| {
+                            let (r, _) =
+                                ui.allocate_exact_size(vec2(52., 52.), egui::Sense::hover());
+                            emblem(ui.painter(), r.center(), scene, &accent);
+                            ui.add_space(18.);
+                            nav(ui, atelier, true, &accent);
+                        });
+                    },
+                );
             });
     } else {
         egui::Panel::bottom("navigation-atelier-mobile")
             .exact_size(60.)
-            .frame(Frame::new().fill(RAIL).inner_margin(9))
+            .frame(Frame::new().fill(VERRE).inner_margin(8))
             .show(root, |ui| {
+                let r = ui.max_rect();
+                ui.painter().line_segment(
+                    [
+                        pos2(r.left() - 8., r.top() - 8.),
+                        pos2(r.right() + 8., r.top() - 8.),
+                    ],
+                    Stroke::new(1., accent.fil),
+                );
                 ui.horizontal(|ui| {
-                    let width = 4. * 110. + 3. * ui.spacing().item_spacing.x;
+                    let width = 4. * 112. + 3. * ui.spacing().item_spacing.x;
                     ui.add_space(((ui.available_width() - width) * 0.5).max(0.));
-                    nav(ui, atelier, false);
+                    nav(ui, atelier, false, &accent);
                 });
             });
     }
-    egui::Panel::top("barre-systeme")
-        .exact_size(if compact { 48. } else { 64. })
-        .frame(
-            Frame::new()
-                .fill(Color32::TRANSPARENT)
-                .inner_margin(egui::Margin::symmetric(if compact { 16 } else { 28 }, 14)),
-        )
-        .show(root, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("prophet")
-                        .size(20.)
-                        .family(egui::FontFamily::Name("Inter600".into()))
-                        .color(INK),
-                );
-                ui.label(RichText::new("/  ATELIER").size(10.).color(MUTED));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(format!("{} UTC", scene.heure))
-                            .size(11.)
-                            .color(MUTED),
-                    );
-                    if atelier.demonstration {
-                        ui.label(
-                            RichText::new("DÉMONSTRATION")
-                                .size(10.)
-                                .color(Color32::from_rgb(143, 90, 35)),
-                        );
-                    } else if !compact {
-                        let text = if atelier.decouverte {
-                            "Recherche de modèles…".into()
-                        } else {
-                            format!(
-                                "Dialogue · {} modèle{} détecté{}",
-                                atelier.modeles.len(),
-                                if atelier.modeles.len() == 1 { "" } else { "s" },
-                                if atelier.modeles.len() == 1 { "" } else { "s" }
-                            )
-                        };
-                        if ui
-                            .add(
-                                egui::Button::new(RichText::new(text).size(11.).color(MUTED))
-                                    .fill(Color32::from_rgb(248, 250, 248))
-                                    .corner_radius(12),
-                            )
-                            .clicked()
-                        {
-                            atelier.page = Page::Modeles;
-                        }
-                    }
-                });
-            });
-        });
     egui::Panel::bottom("etat-systeme")
         .exact_size(28.)
         .frame(
@@ -227,109 +323,69 @@ pub(crate) fn chrome(root: &mut egui::Ui, atelier: &mut Atelier, scene: &Scene, 
         )
         .show(root, |ui| {
             ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(if atelier.demonstration {
-                        "Scène d'exemple · aucune exécution"
+                hud::etiquette(
+                    ui,
+                    if atelier.demonstration {
+                        "SCÈNE D'EXEMPLE · AUCUNE EXÉCUTION"
                     } else {
-                        "Supervision humaine · états reçus des services"
-                    })
-                    .size(10.)
-                    .color(MUTED),
+                        "SUPERVISION HUMAINE · ÉTATS REÇUS DES SERVICES"
+                    },
+                    EFFACE,
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.checkbox(
                         &mut atelier.mouvement_reduit,
-                        RichText::new("Mouvement réduit").size(10.).color(MUTED),
+                        RichText::new("Mouvement réduit").size(10.).color(DISCRET),
                     );
                 });
             });
         });
 }
 
-/// Le rail n'est pas un aplat : une lumière descend du haut, comme sur un instrument posé.
-fn rail_depth(ui: &egui::Ui) {
-    let r = ui.max_rect().expand(12.);
-    let mut mesh = egui::Mesh::default();
-    for (p, c) in [
-        (r.left_top(), Color32::from_rgb(46, 55, 63)),
-        (r.right_top(), Color32::from_rgb(40, 48, 55)),
-        (r.right_bottom(), Color32::from_rgb(26, 31, 36)),
-        (r.left_bottom(), Color32::from_rgb(30, 36, 41)),
-    ] {
-        mesh.colored_vertex(p, c);
-    }
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(0, 2, 3);
-    ui.painter().add(mesh);
-    ui.painter().line_segment(
-        [r.right_top(), r.right_bottom()],
-        Stroke::new(1., Color32::from_white_alpha(14)),
-    );
-}
-
-/// L'emblème : la lettre, cerclée d'un anneau qui dit combien de missions sont actives.
+/// L'emblème du rail : l'anneau des missions actives autour du chiffre qui les compte.
 ///
 /// Rien n'y bouge. L'anneau se remplit avec les missions en cours, part par part, et s'éteint
 /// quand tout est fini : c'est la seule chose que le rail affirme, et il l'affirme sans texte.
-fn emblem(p: &egui::Painter, center: egui::Pos2, scene: &Scene) {
+fn emblem(p: &egui::Painter, center: egui::Pos2, scene: &Scene, accent: &Accent) {
     let total = scene.courants.len().max(1) as f32;
     let active = scene.actives() as f32;
-    p.circle_filled(center, 23., Color32::from_white_alpha(10));
-    p.circle_stroke(center, 21., Stroke::new(2., Color32::from_white_alpha(28)));
-    crate::instruments::arc(
+    if scene.actives() > 0 {
+        hud::lueur(p, center, 14., accent);
+    }
+    p.circle_filled(center, 24., CREUX);
+    hud::graduations(
         p,
         center,
-        21.,
-        active / total,
-        Stroke::new(2., Color32::from_rgb(228, 200, 140)),
+        24.,
+        36,
+        ((active / total) * 36.0).round() as usize,
+        3.0,
+        (accent.vif, hud::voile(accent.eteint, 120)),
     );
+    p.circle_stroke(center, 17., Stroke::new(1., accent.fil));
     p.text(
-        center + vec2(0., 1.),
+        center + vec2(0., 0.5),
         Align2::CENTER_CENTER,
-        "p",
-        FontId::new(30., egui::FontFamily::Name("Inter600".into())),
-        WHITE,
+        scene.actives().to_string(),
+        FontId::new(18., hud::fin()),
+        if scene.actives() > 0 {
+            accent.vif
+        } else {
+            DISCRET
+        },
     );
 }
 
-pub(crate) fn work_surface() -> Frame {
-    Frame::new()
-        .fill(WHITE)
-        .corner_radius(24)
-        .inner_margin(24)
-        .stroke(Stroke::new(1., Color32::from_rgb(226, 231, 229)))
-        .shadow(egui::Shadow {
-            offset: [0, 8],
-            blur: 28,
-            spread: 0,
-            color: Color32::from_black_alpha(12),
-        })
-}
-
-fn text(
-    p: &egui::Painter,
-    content: &str,
-    at: egui::Pos2,
-    width: f32,
-    font: FontId,
-    rows: usize,
-    color: Color32,
-) {
-    let mut job = egui::text::LayoutJob::simple(content.into(), font, color, width);
-    job.wrap.max_rows = rows;
-    let galley = p.layout_job(job);
-    p.galley(at, galley, color);
-}
-
-fn tile(ui: &mut egui::Ui, c: &Courant, r: Rect, selected: bool) -> bool {
+/// Une ligne de mission dans la liste : anneau de budget, état, titre, pilote, étapes.
+fn ligne(ui: &mut egui::Ui, c: &Courant, r: Rect, selected: bool, accent: &Accent) -> bool {
     let (status, color) = c.task_state.map_or_else(
         || match c.etat {
-            Etat::Court => ("En cours", Color32::from_rgb(38, 112, 92)),
-            Etat::Attend => ("Votre décision", Color32::from_rgb(152, 101, 43)),
-            Etat::Bloque => ("À examiner", Color32::from_rgb(152, 101, 43)),
-            Etat::Fini => ("Terminée", MUTED),
+            Etat::Court => ("En cours", accent.vif),
+            Etat::Attend => ("Votre décision", ATTENTE),
+            Etat::Bloque => ("À examiner", ATTENTE),
+            Etat::Fini => ("Terminée", DISCRET),
         },
-        crate::mission_details::status,
+        |state| crate::mission_details::status(state, accent),
     );
     let response = ui.interact(
         r,
@@ -344,178 +400,184 @@ fn tile(ui: &mut egui::Ui, c: &Courant, r: Rect, selected: bool) -> bool {
             format!("{} · {} · {}", c.intitule, status, c.agent),
         )
     });
-    let p = ui.painter_at(r.expand(3.));
-    p.rect_filled(
-        r,
-        18,
-        if selected {
-            WHITE
-        } else if response.hovered() {
-            Color32::from_rgb(250, 252, 250)
-        } else {
-            Color32::from_rgb(242, 246, 243)
-        },
-    );
-    p.rect_stroke(
-        r,
-        18,
-        Stroke::new(
-            if selected { 1.5 } else { 1. },
-            if selected || response.has_focus() {
-                BLUE
-            } else {
-                Color32::from_rgb(227, 233, 229)
-            },
-        ),
-        egui::StrokeKind::Inside,
-    );
-    // Une bande de couleur à gauche dit l'état avant que l'œil lise le mot.
-    p.rect_filled(
-        Rect::from_min_size(r.min + vec2(0., 22.), vec2(3., r.height() - 44.)),
-        2,
-        color,
-    );
-    let top = r.min + vec2(20., 18.);
-    p.circle_filled(top + vec2(3., 7.), 3., color);
-    text(
-        &p,
-        status,
-        top + vec2(14., 0.),
-        r.width() - 96.,
-        FontId::proportional(11.),
-        1,
-        color,
-    );
-    // L'anneau de budget, en haut à droite : combien la mission a déjà consommé.
-    crate::instruments::anneau(
-        &p,
-        pos2(r.right() - 30., r.top() + 28.),
-        11.,
-        3.,
-        c.budget_consomme,
-        color,
-        None,
-    );
-    text(
-        &p,
-        &c.intitule,
-        top + vec2(0., 27.),
-        r.width() - 40.,
-        FontId::new(18., egui::FontFamily::Name("Inter600".into())),
-        2,
-        INK,
-    );
-    crate::instruments::monogramme(&p, pos2(r.left() + 29., r.bottom() - 24.), &c.agent, 18.);
-    text(
-        &p,
-        &c.agent,
-        pos2(r.left() + 44., r.bottom() - 30.),
-        r.width() - 150.,
-        FontId::proportional(10.),
-        1,
-        MUTED,
-    );
-    p.text(
-        pos2(r.right() - 18., r.bottom() - 22.),
-        Align2::RIGHT_CENTER,
-        format!("{} étapes", c.etapes),
-        FontId::proportional(10.),
-        MUTED,
-    );
+    let p = ui.painter_at(r.expand(2.));
     if selected {
+        p.rect_filled(r, 3, hud::voile(accent.vif, 20));
         p.rect_filled(
-            Rect::from_center_size(pos2(r.center().x, r.bottom() - 1.), vec2(42., 3.)),
-            2,
-            BLUE,
+            Rect::from_min_size(r.min, vec2(2., r.height())),
+            1,
+            accent.vif,
+        );
+        hud::crochets(&p, r, accent.fil_vif, 8.);
+    } else if response.hovered() {
+        p.rect_filled(r, 3, hud::voile(accent.vif, 10));
+    }
+    if response.has_focus() {
+        p.rect_stroke(
+            r,
+            3,
+            Stroke::new(1., accent.fil_vif),
+            egui::StrokeKind::Inside,
         );
     }
+    p.line_segment(
+        [
+            pos2(r.left() + 14., r.bottom()),
+            pos2(r.right() - 8., r.bottom()),
+        ],
+        Stroke::new(1., TRAIT),
+    );
+    let ring = pos2(r.left() + 30., r.center().y);
+    crate::instruments::anneau(&p, ring, 12., 2., c.budget_consomme, color, None);
+    p.circle_filled(ring, 3., color);
+    let text_left = r.left() + 56.;
+    let mut job = egui::text::LayoutJob::simple(
+        c.intitule.clone(),
+        FontId::proportional(14.),
+        ENCRE,
+        r.width() - 56. - 70.,
+    );
+    job.wrap.max_rows = 1;
+    let galley = p.layout_job(job);
+    p.galley(pos2(text_left, r.top() + 15.), galley, ENCRE);
+    hud::etiquette_peinte(
+        &p,
+        pos2(text_left, r.top() + 40.),
+        &status.to_uppercase(),
+        color,
+    );
+    crate::instruments::monogramme(&p, pos2(r.right() - 58., r.center().y - 9.), &c.agent, 15.);
+    p.text(
+        pos2(r.right() - 12., r.center().y - 9.),
+        Align2::RIGHT_CENTER,
+        format!("{}", c.etapes),
+        FontId::new(15., hud::fin()),
+        ENCRE,
+    );
+    hud::texte_espace(
+        &p,
+        pos2(r.right() - 12., r.bottom() - 12.),
+        Align2::RIGHT_CENTER,
+        "ÉTAPES",
+        FontId::proportional(7.5),
+        EFFACE,
+        1.4,
+    );
     response
         .on_hover_text(format!("{}\n{}\n{}", c.intitule, status, c.agent))
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
 }
 
-pub(crate) fn gallery(
+/// La liste des missions, virtualisée : seules les lignes proches de la vue sont composées.
+pub(crate) fn liste(
     ui: &mut egui::Ui,
     courants: &[&Courant],
     selection: Option<&str>,
-    horizontal: bool,
+    height: f32,
 ) -> Option<String> {
+    let accent = Accent::de(ui.ctx());
     let mut picked = None;
-    if horizontal {
-        let width = ((ui.available_width() - 24.) / 3.).clamp(250., 360.);
-        let stride = width + 12.;
-        egui::ScrollArea::horizontal()
-            .id_salt("objets-missions")
-            .animated(false)
-            .max_height(146.)
-            .auto_shrink([false, true])
-            .show_viewport(ui, |ui, view| {
-                let (_, bounds) =
-                    ui.allocate_space(vec2((courants.len() as f32 * stride - 12.).max(0.), 136.));
-                // Une sélection faite ailleurs (filtre, nouvelle mission) doit rester visible.
-                let memory_id = ui.id().with("selection-galerie");
-                let previous = ui.data(|d| d.get_temp::<String>(memory_id));
-                if previous.as_deref() != selection {
-                    ui.data_mut(|d| {
-                        d.insert_temp(memory_id, selection.unwrap_or_default().to_owned());
-                    });
-                    if let Some(index) = courants
-                        .iter()
-                        .position(|c| Some(c.tache.as_str()) == selection)
-                    {
-                        ui.scroll_to_rect(
-                            Rect::from_min_size(
-                                bounds.min + vec2(index as f32 * stride, 0.),
-                                vec2(width, 136.),
-                            ),
-                            None,
-                        );
-                    }
-                }
-                let first = (view.min.x / stride).floor().max(0.) as usize;
-                let last = ((view.max.x / stride).ceil() as usize + 1).min(courants.len());
-                for (i, c) in courants.iter().enumerate().take(last).skip(first) {
-                    let r = Rect::from_min_size(
-                        bounds.min + vec2(i as f32 * stride, 0.),
-                        vec2(width, 136.),
+    egui::ScrollArea::vertical()
+        .id_salt("objets-missions")
+        .animated(false)
+        .max_height(height)
+        .auto_shrink([false, true])
+        .show_viewport(ui, |ui, view| {
+            let width = ui.available_width();
+            let (_, bounds) =
+                ui.allocate_space(vec2(width, (courants.len() as f32 * LIGNE).max(0.)));
+            // Une sélection faite ailleurs (filtre, nouvelle mission) doit rester visible.
+            let memory_id = ui.id().with("selection-liste");
+            let previous = ui.data(|d| d.get_temp::<String>(memory_id));
+            if previous.as_deref() != selection {
+                ui.data_mut(|d| {
+                    d.insert_temp(memory_id, selection.unwrap_or_default().to_owned());
+                });
+                if let Some(index) = courants
+                    .iter()
+                    .position(|c| Some(c.tache.as_str()) == selection)
+                {
+                    ui.scroll_to_rect(
+                        Rect::from_min_size(
+                            bounds.min + vec2(0., index as f32 * LIGNE),
+                            vec2(width, LIGNE),
+                        ),
+                        None,
                     );
-                    if tile(ui, c, r, selection == Some(c.tache.as_str())) {
-                        picked = Some(c.tache.clone());
-                    }
                 }
-            });
-    } else {
-        for c in courants {
-            let (_, r) = ui.allocate_space(vec2(ui.available_width(), 136.));
-            if tile(ui, c, r, selection == Some(c.tache.as_str())) {
-                picked = Some(c.tache.clone());
             }
-            ui.add_space(4.);
-        }
-    }
+            let first = (view.min.y / LIGNE).floor().max(0.) as usize;
+            let last = ((view.max.y / LIGNE).ceil() as usize + 1).min(courants.len());
+            for (i, c) in courants.iter().enumerate().take(last).skip(first) {
+                let r = Rect::from_min_size(
+                    bounds.min + vec2(0., i as f32 * LIGNE),
+                    vec2(width, LIGNE),
+                );
+                if ligne(ui, c, r, selection == Some(c.tache.as_str()), &accent) {
+                    picked = Some(c.tache.clone());
+                }
+            }
+        });
     picked
 }
 
+/// L'espace vide : une seule plaque, à gauche, qui laisse le champ respirer à droite.
 pub(crate) fn empty(ui: &mut egui::Ui, compact: bool) {
-    work_surface().inner_margin(if compact {24} else {42}).show(ui,|ui| {
-        ui.set_width(ui.available_width());
-        ui.label(RichText::new("VOTRE ESPACE DE TRAVAIL").size(11.).color(MUTED));
-        ui.add_space(20.);
-        ui.label(RichText::new("Que voulez-vous\naccomplir ?").size(if compact {34.} else {54.}).line_height(Some(if compact {41.} else {63.})).family(egui::FontFamily::Name("Inter600".into())).color(INK));
-        ui.add_space(18.);
-        ui.label(RichText::new("Préparez un objectif. Examinez le plan.\nGardez la main sur le travail de vos agents.").size(16.).color(MUTED));
-        ui.add_space(32.);
-        ui.separator();
-        ui.add_space(18.);
-        ui.horizontal_wrapped(|ui| {
-            for (n,label) in [("01","Intention"),("02","Plan à examiner"),("03","Travail supervisé")] {
-                ui.label(RichText::new(n).monospace().size(11.).color(BLUE));
-                ui.label(RichText::new(label).size(13.).color(INK));
-                ui.add_space(16.);
-            }
-        });
-        ui.add_space(16.);
-        ui.label(RichText::new("Aucune mission reçue pour le moment.").size(11.).color(MUTED));
-    });
+    let accent = Accent::de(ui.ctx());
+    let width = if compact {
+        ui.available_width()
+    } else {
+        ui.available_width().min(640.)
+    };
+    ui.allocate_ui_with_layout(
+        vec2(width, ui.available_height()),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            hud::plaque(ui, &accent, if compact { 24 } else { 44 }, |ui| {
+                ui.set_width(width - if compact { 48. } else { 88. });
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(vec2(26., 14.), egui::Sense::hover());
+                    crate::glyphes::oeil(ui.painter(), r.center(), 22., accent.vif);
+                    hud::etiquette(ui, "VOTRE ESPACE DE TRAVAIL", accent.sourd);
+                });
+                ui.add_space(26.);
+                ui.label(
+                    hud::titre(
+                        "Que voulez-vous\naccomplir ?",
+                        if compact { 36. } else { 52. },
+                    )
+                    .line_height(Some(if compact { 40. } else { 58. })),
+                );
+                ui.add_space(14.);
+                ui.label(
+                    RichText::new(
+                        "Préparez un objectif. Examinez le plan.\nGardez la main sur le travail de vos agents.",
+                    )
+                    .size(15.)
+                    .color(DISCRET),
+                );
+                ui.add_space(30.);
+                let (line, _) = ui.allocate_exact_size(vec2(64., 1.), egui::Sense::hover());
+                ui.painter().rect_filled(line, 0, accent.vif);
+                ui.add_space(22.);
+                for (n, label, detail) in [
+                    ("01", "Intention", "Ce que vous voulez obtenir, dans vos mots."),
+                    ("02", "Plan à examiner", "Les accès et les limites, avant tout lancement."),
+                    ("03", "Travail supervisé", "Vous lancez, vous voyez, vous pouvez arrêter."),
+                ] {
+                    ui.horizontal_top(|ui| {
+                        ui.label(RichText::new(n).family(hud::fin()).size(15.).color(accent.vif));
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new(label).size(14.).color(ENCRE));
+                            ui.label(RichText::new(detail).size(12.).color(DISCRET));
+                        });
+                    });
+                    ui.add_space(8.);
+                }
+                ui.add_space(18.);
+                hud::etiquette(ui, "AUCUNE MISSION REÇUE POUR LE MOMENT", EFFACE);
+            });
+        },
+    );
 }

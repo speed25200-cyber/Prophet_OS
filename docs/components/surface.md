@@ -8,14 +8,26 @@
 La surface propose un accueil, une conversation en flux, une sélection de modèle et les tâches
 des services. La saisie, le presse-papiers, le défilement et les événements d'accessibilité passent
 par egui/winit ; wgpu dessine l'interface. L'espace principal rassemble les missions reçues,
-leur contexte et les décisions à examiner, dans un thème clair avec Inter embarquée. Les
-compteurs viennent du moteur et des services, et les réponses du modèle sélectionné.
+leur contexte et les décisions à examiner. Les compteurs viennent du moteur et des services,
+et les réponses du modèle sélectionné.
+
+Depuis la direction Réacteur ([ADR 0025](../adr/0025-direction-visuelle-reacteur.md)), l'espace
+est une nuit : plaques de verre à crochets d'angle, jauges à couronne de graduations, chiffres
+fins, capitales espacées, et un **accent** au choix de la personne — Arc, Or, Plasma, Jade,
+Nacre — qui colore tout ce qui signale et rien d'autre. Le choix se fait dans la page Système
+et se conserve dans la configuration ; `--accent` et `PROPHET_SURFACE_ACCENT` le forcent.
+Derrière les plaques, le **champ** dessine au GPU une grille et une voûte de grains fixes et,
+pour chaque mission reçue, un ruban de lumière tissé de fils qui avancent à la vitesse réelle
+de ses étapes : clair tant qu'il reste du budget, à la teinte d'alerte quand un humain est
+attendu, immobile dès que la mission s'arrête. Rien n'y bouge au repos, et le mouvement réduit
+le fige. La barre du système ne relève que des comptes reçus ; le rail porte l'anneau des
+missions actives ; le cadran d'une mission grave une graduation par étape franchie.
 
 L'atelier présente plusieurs missions dans une galerie horizontale et permet de les rechercher
 par titre, référence ou pilote avec Ctrl+K. Les objets hors de la vue ne sont pas composés.
 La Focale agrandit l'inspecteur ; une mission seule reçoit directement cet espace. Le plan
-nouvellement préparé s'ouvre en Focale et efface la recherche antérieure. Le fond reste statique.
-Voir l'[ADR 0019](../adr/0019-atelier-et-focale.md).
+nouvellement préparé s'ouvre en Focale et efface la recherche antérieure. Le fond ne bouge
+qu'avec les missions en cours. Voir l'[ADR 0019](../adr/0019-atelier-et-focale.md).
 
 Les filtres et la sélection pilotent l'inspecteur. À petite taille, celui-ci remplace la liste
 avec un retour aux missions. Une décision attend dans une bande persistante ; l'humain ouvre

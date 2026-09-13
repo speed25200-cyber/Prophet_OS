@@ -1,10 +1,14 @@
 //! Espace de travail natif : saisie, sélection, conversation en flux et activité réelle.
 
+use std::time::Duration;
+
 use crate::atelier::Atelier;
+use crate::champ::Champ;
 use crate::fenetre::Reponse;
 use crate::gpu::{Cible, Contexte, FORMAT};
 use crate::scene::Scene;
 use crate::supervision::Supervision;
+use crate::theme::Accent;
 
 /// Dessin et contrôleur de l'interface interactive, aussi utilisables hors écran.
 pub struct Bureau {
@@ -13,53 +17,48 @@ pub struct Bureau {
     /// Conversation et connexion au moteur.
     pub atelier: Atelier,
     rendu: egui_wgpu::Renderer,
+    champ: Champ,
     supervision: Supervision,
 }
 
 impl Bureau {
-    /// Installe le thème et le renderer sans ouvrir de connexion au moteur.
+    /// Installe le thème, les polices embarquées, le champ et le renderer, sans ouvrir de
+    /// connexion au moteur.
     #[must_use]
     pub fn nouveau(contexte: &Contexte, endpoint: String, demonstration: bool) -> Self {
         let ctx = egui::Context::default();
-        let mut fonts = egui::FontDefinitions::default();
-        fonts.font_data.insert(
-            "Inter".into(),
-            egui::FontData::from_static(include_bytes!("../assets/InterVariable.ttf")).into(),
-        );
-        fonts
-            .families
-            .get_mut(&egui::FontFamily::Proportional)
-            .expect("famille proportionnelle")
-            .insert(0, "Inter".into());
-        let mut semibold =
-            egui::FontData::from_static(include_bytes!("../assets/InterVariable.ttf"));
-        semibold.tweak.coords = egui::epaint::text::VariationCoords::new([(b"wght", 600.0)]);
-        fonts.font_data.insert("Inter600".into(), semibold.into());
-        fonts.families.insert(
-            egui::FontFamily::Name("Inter600".into()),
-            vec!["Inter600".into()],
-        );
-        ctx.set_fonts(fonts);
+        ctx.set_fonts(polices());
+        crate::theme::accent_configure().installer(&ctx);
         crate::supervision::installer_style(&ctx);
+        let format = contexte
+            .configuration_surface
+            .as_ref()
+            .map_or(FORMAT, |config| config.format)
+            .remove_srgb_suffix();
         Self {
             ctx,
             atelier: Atelier::nouveau(endpoint, demonstration),
             supervision: Supervision::default(),
-            rendu: egui_wgpu::Renderer::new(
-                &contexte.device,
-                contexte
-                    .configuration_surface
-                    .as_ref()
-                    .map_or(FORMAT, |config| config.format)
-                    .remove_srgb_suffix(),
-                Default::default(),
-            ),
+            champ: Champ::nouveau(&contexte.device, format),
+            rendu: egui_wgpu::Renderer::new(&contexte.device, format, Default::default()),
         }
     }
 
     /// Fige les transitions d'apparition pour les captures à un instant constant.
     pub fn figer_transitions(&self) {
         self.ctx.all_styles_mut(|style| style.animation_time = 0.0);
+    }
+
+    /// Change l'accent de cette session sans le conserver.
+    pub fn choisir_accent(&self, accent: Accent) {
+        accent.installer(&self.ctx);
+        crate::supervision::installer_style(&self.ctx);
+    }
+
+    /// L'accent en vigueur.
+    #[must_use]
+    pub fn accent(&self) -> Accent {
+        Accent::de(&self.ctx)
     }
 
     /// Raccorde les commandes explicites de mission à un service de confiance.
@@ -89,6 +88,13 @@ impl Bureau {
         &mut self.supervision.preparation
     }
 
+    /// Vrai si le champ avancera à l'image suivante : une mission progresse et le mouvement
+    /// n'est pas réduit. C'est ce qui décide du rythme de redessin de la fenêtre.
+    #[must_use]
+    pub fn champ_vivant(&self) -> bool {
+        self.champ.vivant(self.atelier.mouvement_reduit)
+    }
+
     /// Prépare les widgets et retourne une éventuelle décision humaine.
     pub fn composer(
         &mut self,
@@ -99,16 +105,29 @@ impl Bureau {
         self.supervision.missions.update();
         let mut scene = scene.clone();
         self.supervision.missions.align_scene(&mut scene);
+        let temps = input.time.unwrap_or(0.0);
         let mut decision = None;
         let atelier = &mut self.atelier;
         let supervision = &mut self.supervision;
         let output = self.ctx.run_ui(input, |root| {
             supervision.dessiner(root, atelier, &scene, &mut decision);
         });
+        self.champ.preparer(
+            &scene,
+            supervision.selection(),
+            temps,
+            atelier.mouvement_reduit,
+            Accent::de(&self.ctx),
+        );
+        if self.champ.vivant(atelier.mouvement_reduit) {
+            // Le champ avance à la cadence de l'écran tant qu'une mission progresse ; au repos,
+            // la surveillance des services garde son propre rythme et rien ne se redessine.
+            self.ctx.request_repaint_after(Duration::from_millis(16));
+        }
         (output, decision)
     }
 
-    /// Soumet les formes de l'interface au GPU, avec des ressources de texte réutilisées.
+    /// Soumet le champ puis les formes de l'interface au GPU, avec des ressources réutilisées.
     pub fn rendre(&mut self, contexte: &Contexte, cible: &Cible, output: &mut egui::FullOutput) {
         let device = &contexte.device;
         let queue = &contexte.queue;
@@ -137,14 +156,21 @@ impl Bureau {
             .rendu
             .update_buffers(device, queue, &mut encoder, &jobs, &screen);
         {
-            let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let fond = crate::theme::palette::FOND;
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("bureau"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        // La vue est Unorm : la valeur écrite est celle qu'on lit à l'écran.
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: f64::from(fond.r()) / 255.0,
+                            g: f64::from(fond.g()) / 255.0,
+                            b: f64::from(fond.b()) / 255.0,
+                            a: 1.0,
+                        }),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -153,6 +179,9 @@ impl Bureau {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            // Le champ d'abord, l'interface ensuite : les surfaces de verre le laissent passer.
+            self.champ
+                .dessiner(queue, &mut pass, cible.largeur, cible.hauteur);
             self.rendu
                 .render(&mut pass.forget_lifetime(), &jobs, &screen);
         }
@@ -162,4 +191,29 @@ impl Bureau {
         }
         output.textures_delta.clear();
     }
+}
+
+/// La police embarquée : Inter, en trois graisses. Une graisse est une coordonnée sur le
+/// même fichier variable, pas une copie : la fine pour les grands chiffres et les titres, la
+/// régulière pour lire, la demi-grasse pour ce qui doit tenir sans crier.
+fn polices() -> egui::FontDefinitions {
+    let mut fonts = egui::FontDefinitions::default();
+    let inter = include_bytes!("../assets/InterVariable.ttf");
+    fonts
+        .font_data
+        .insert("Inter".into(), egui::FontData::from_static(inter).into());
+    fonts
+        .families
+        .get_mut(&egui::FontFamily::Proportional)
+        .expect("famille proportionnelle")
+        .insert(0, "Inter".into());
+    for (name, weight) in [("Inter300", 300.0), ("Inter600", 600.0)] {
+        let mut font = egui::FontData::from_static(inter);
+        font.tweak.coords = egui::epaint::text::VariationCoords::new([(b"wght", weight)]);
+        fonts.font_data.insert(name.into(), font.into());
+        fonts
+            .families
+            .insert(egui::FontFamily::Name(name.into()), vec![name.into()]);
+    }
+    fonts
 }

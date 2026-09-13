@@ -1,20 +1,19 @@
 //! Composition d'une mission : une intention, un contexte et un passage de relais explicite.
+use crate::hud;
 use crate::preparation::Preparation;
 use crate::supervision::bouton;
+use crate::theme::Accent;
+use crate::theme::palette::{ATTENTE, DISCRET, ENCRE, VERRE, VERRE_HAUT};
 use egui::{Color32, Frame, RichText, Stroke, vec2};
 
-const INK: Color32 = Color32::from_rgb(27, 35, 50);
-const MUTED: Color32 = Color32::from_rgb(105, 115, 132);
-const LINE: Color32 = Color32::from_rgb(218, 224, 233);
-const BLUE: Color32 = Color32::from_rgb(51, 94, 184);
+const INK: Color32 = ENCRE;
+const MUTED: Color32 = DISCRET;
 
 fn title(text: impl Into<String>, size: f32) -> RichText {
-    RichText::new(text)
-        .size(size)
-        .family(egui::FontFamily::Name("Inter600".into()))
+    crate::supervision::titre(text, size)
 }
 fn caption(ui: &mut egui::Ui, text: &str) {
-    ui.label(RichText::new(text).size(11.0).color(MUTED));
+    crate::supervision::etiquette(ui, text);
 }
 
 pub(crate) fn draw(ui: &mut egui::Ui, preparation: &mut Preparation) -> bool {
@@ -59,27 +58,33 @@ pub(crate) fn draw(ui: &mut egui::Ui, preparation: &mut Preparation) -> bool {
 }
 
 fn direction(ui: &mut egui::Ui, preparation: &Preparation, short: bool) {
+    let accent = Accent::de(ui.ctx());
     Frame::new()
-        .fill(INK)
-        .corner_radius(26)
+        .fill(hud::voile(accent.vif, 22))
+        .stroke(Stroke::new(1.0, accent.fil_vif))
+        .corner_radius(4)
         .inner_margin(if short { 22 } else { 30 })
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(
-                RichText::new("DE L'INTENTION AU TRAVAIL")
-                    .size(10.0)
-                    .color(Color32::from_rgb(148, 176, 215)),
+            hud::crochets(
+                ui.painter(),
+                ui.max_rect()
+                    .expand(if short { 22.0 } else { 30.0 })
+                    .expand(1.0),
+                accent.fil_vif,
+                14.0,
             );
+            hud::etiquette(ui, "DE L'INTENTION AU TRAVAIL", accent.sourd);
             ui.add_space(if short { 18.0 } else { 26.0 });
             ui.label(
-                title("Donnez une\ndirection.", if short { 32.0 } else { 38.0 })
-                    .line_height(Some(if short { 36.0 } else { 44.0 }))
-                    .color(Color32::WHITE),
+                title("Donnez une\ndirection.", if short { 36.0 } else { 44.0 })
+                    .line_height(Some(if short { 38.0 } else { 46.0 }))
+                    .color(ENCRE),
             );
             ui.label(
-                title("Gardez\nla main.", if short { 32.0 } else { 38.0 })
-                    .line_height(Some(if short { 36.0 } else { 44.0 }))
-                    .color(Color32::from_rgb(165, 191, 229)),
+                title("Gardez\nla main.", if short { 36.0 } else { 44.0 })
+                    .line_height(Some(if short { 38.0 } else { 46.0 }))
+                    .color(accent.vif),
             );
             ui.add_space(if short { 18.0 } else { 32.0 });
             for (number, heading, description) in [
@@ -89,18 +94,10 @@ fn direction(ui: &mut egui::Ui, preparation: &Preparation, short: bool) {
                 ("04", "Relire", "Le résultat et les fichiers préparés."),
             ] {
                 ui.horizontal_top(|ui| {
-                    ui.label(
-                        RichText::new(number)
-                            .size(11.0)
-                            .color(Color32::from_rgb(126, 160, 206)),
-                    );
+                    ui.label(title(number, 15.0).color(accent.vif));
                     ui.vertical(|ui| {
-                        ui.label(title(heading, 15.0).color(Color32::WHITE));
-                        ui.label(
-                            RichText::new(description)
-                                .size(12.0)
-                                .color(Color32::from_rgb(161, 173, 191)),
-                        );
+                        ui.label(RichText::new(heading).size(14.0).color(ENCRE));
+                        ui.label(RichText::new(description).size(12.0).color(DISCRET));
                     });
                 });
                 ui.add_space(if short { 8.0 } else { 12.0 });
@@ -117,15 +114,16 @@ fn direction(ui: &mut egui::Ui, preparation: &Preparation, short: bool) {
                     },
                 )
                 .size(11.0)
-                .color(Color32::from_rgb(165, 191, 229)),
+                .color(accent.sourd),
             );
         });
 }
 
 fn form(ui: &mut egui::Ui, preparation: &mut Preparation, compact: bool) {
     let ctx = ui.ctx().clone();
+    let accent = Accent::de(&ctx);
     let locked = preparation.pending() || preparation.attempted_id().is_some();
-    Frame::new().fill(Color32::WHITE).stroke(Stroke::new(1.0,LINE)).corner_radius(24).inner_margin(if compact{22}else{30}).show(ui,|ui| {
+    Frame::new().fill(VERRE).stroke(Stroke::new(1.0,accent.fil)).corner_radius(4).inner_margin(if compact{22}else{30}).show(ui,|ui| {
         ui.set_width(ui.available_width());
         caption(ui,"01 / VOTRE OBJECTIF");
         if !compact {ui.label(title("Que voulez-vous accomplir ?",29.0));}
@@ -161,9 +159,9 @@ fn form(ui: &mut egui::Ui, preparation: &mut Preparation, compact: bool) {
         });
         ui.add_space(12.0);
         if let Some(profile)=preparation.selected() {
-            Frame::new().fill(Color32::from_rgb(245,247,251)).corner_radius(12).inner_margin(14).show(ui,|ui| {
+            Frame::new().fill(VERRE_HAUT).stroke(Stroke::new(1.0,accent.fil)).corner_radius(3).inner_margin(14).show(ui,|ui| {
                 ui.set_width(ui.available_width());
-                ui.label(title("Le cadre de la mission",13.0).color(BLUE));
+                ui.label(RichText::new("Le cadre de la mission").size(13.0).family(hud::fort()).color(accent.vif));
                 ui.label(RichText::new(format!("{} tokens · {} s au maximum",profile.limits.tokens,profile.limits.wall_time_s)).size(12.0).color(INK));
                 caption(ui,"Les accès détaillés seront présentés dans le plan.");
                 if profile.web {
@@ -176,9 +174,9 @@ fn form(ui: &mut egui::Ui, preparation: &mut Preparation, compact: bool) {
             });
         }
         if let Some(error)=preparation.options().and_then(|o|o.model_error.as_ref()) {
-            ui.label(RichText::new(format!("Moteur indisponible : {error}")).size(12.0).color(Color32::from_rgb(159,70,48)));
+            ui.label(RichText::new(format!("Moteur indisponible : {error}")).size(12.0).color(ATTENTE));
         }
-        if let Some(error)=preparation.error() {ui.label(RichText::new(error).size(12.0).color(Color32::from_rgb(159,70,48)));}
+        if let Some(error)=preparation.error() {ui.label(RichText::new(error).size(12.0).color(ATTENTE));}
         ui.add_space(14.0);
         if let Some(id)=preparation.attempted_id() {
             caption(ui,&format!("Référence : {id}"));

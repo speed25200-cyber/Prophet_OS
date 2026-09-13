@@ -4,6 +4,7 @@
 
 pub mod atelier;
 pub mod bureau;
+mod champ;
 pub mod depuis;
 mod desk;
 pub mod disposition;
@@ -12,6 +13,7 @@ mod file_review;
 mod file_review_view;
 mod glyphes;
 pub mod gpu;
+mod hud;
 mod instruments;
 mod mission_details;
 pub mod missions;

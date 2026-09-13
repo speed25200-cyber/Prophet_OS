@@ -1,14 +1,20 @@
 //! Espace de lecture du document, avec contexte, lignes et versions explicitement nommées.
 use agentd::{Inspection, PreviewContent};
-use egui::{Color32, Frame, RichText};
+use egui::{Color32, Frame, RichText, Stroke};
 
 use crate::file_review::{Kind, Review};
 use crate::supervision::bouton;
+use crate::theme::Accent;
+use crate::theme::palette::{ACCOMPLI, ATTENTE, DISCRET, ENCRE, VERRE_HAUT};
 
-const INK: Color32 = Color32::from_rgb(28, 35, 44);
-const MUTED: Color32 = Color32::from_rgb(105, 115, 128);
-const GREEN: Color32 = Color32::from_rgb(29, 105, 78);
-const RED: Color32 = Color32::from_rgb(155, 57, 57);
+const INK: Color32 = ENCRE;
+const MUTED: Color32 = DISCRET;
+const GREEN: Color32 = ACCOMPLI;
+const RED: Color32 = ATTENTE;
+/// Le fond d'une ligne ajoutée : un jade de nuit, lisible sous le monospace clair.
+const AJOUT: Color32 = Color32::from_rgba_premultiplied(8, 30, 20, 200);
+/// Le fond d'une ligne retirée : la braise, éteinte.
+const RETRAIT: Color32 = Color32::from_rgba_premultiplied(40, 12, 8, 200);
 
 fn small(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.label(RichText::new(text).size(12.0).color(MUTED));
@@ -49,21 +55,20 @@ pub(crate) fn draw(ui: &mut egui::Ui, info: &Inspection, files: &Review) -> Opti
     });
     ui.add_space(16.0);
     if let Some(error) = &files.error {
-        ui.label(RichText::new("Aperçu non confirmé").size(22.0).color(INK));
+        ui.label(crate::supervision::titre("Aperçu non confirmé", 24.0));
         ui.add_space(8.0);
         ui.label(RichText::new(error).color(RED).size(14.0));
         return requested;
     }
     let Some(document) = &files.document else {
-        ui.label(
-            RichText::new(if files.loading() {
+        ui.label(crate::supervision::titre(
+            if files.loading() {
                 "Lecture des versions…"
             } else {
                 "Choisissez un fichier à examiner"
-            })
-            .size(23.0)
-            .color(INK),
-        );
+            },
+            25.0,
+        ));
         ui.add_space(8.0);
         small(
             ui,
@@ -78,8 +83,9 @@ pub(crate) fn draw(ui: &mut egui::Ui, info: &Inspection, files: &Review) -> Opti
             ("Proposition", &file.after, GREEN),
         ] {
             Frame::new()
-                .fill(Color32::from_rgb(242, 245, 247))
-                .corner_radius(10)
+                .fill(VERRE_HAUT)
+                .stroke(Stroke::new(1.0, Accent::de(ui.ctx()).fil))
+                .corner_radius(3)
                 .inner_margin(12)
                 .show(ui, |ui| {
                     ui.label(RichText::new(label).size(12.0).color(color));
@@ -148,9 +154,9 @@ pub(crate) fn draw(ui: &mut egui::Ui, info: &Inspection, files: &Review) -> Opti
                 .show_rows(ui, 24.0, rows.len(), |ui, range| {
                     for line in &rows[range] {
                         let (fill, color, marker) = match line.kind {
-                            Kind::Equal => (Color32::WHITE, INK, " "),
-                            Kind::Added => (Color32::from_rgb(233, 245, 239), GREEN, "+"),
-                            Kind::Removed => (Color32::from_rgb(251, 237, 237), RED, "−"),
+                            Kind::Equal => (Color32::TRANSPARENT, INK, " "),
+                            Kind::Added => (AJOUT, GREEN, "+"),
+                            Kind::Removed => (RETRAIT, RED, "−"),
                         };
                         Frame::new()
                             .fill(fill)

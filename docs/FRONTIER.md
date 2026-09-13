@@ -164,3 +164,10 @@ une identité qui se lit sans mots : anneaux, monogrammes, bandes d'état, rail 
 animation au repos, vérifiés en rendu logiciel par les tests de propriétés et d'inspecteur.
 Les captures d'états réels sont régénérées ; les temps de rendu, la mémoire et la consommation
 sur écran physique attendus par le critère d'interface restent à mesurer.
+
+La [direction Réacteur](reports/interface-reacteur-2026-09-13.md) remplace ensuite la
+présentation de l'atelier : nuit, plaques de verre à crochets, jauges graduées, cinq accents de
+couleur au choix conservés dans la configuration, et un champ GPU où chaque mission reçue est
+un ruban qui avance au rythme réel de ses étapes. Les parcours graphiques existants passent
+inchangés et deux tests de propriétés s'y ajoutent ; les temps de rendu, la mémoire et la
+consommation sur écran physique attendus par le critère d'interface restent à mesurer.

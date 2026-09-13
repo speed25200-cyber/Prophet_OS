@@ -64,6 +64,10 @@ struct Args {
     /// Fige les animations décoratives.
     #[arg(long)]
     mouvement_reduit: bool,
+    /// Accent de couleur : arc, or, plasma, jade ou nacre. Sinon PROPHET_SURFACE_ACCENT,
+    /// puis le choix conservé dans la configuration.
+    #[arg(long)]
+    accent: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -81,6 +85,19 @@ fn executer(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     if !args.temps.is_finite() || args.temps < 0.0 {
         return Err("instant de capture invalide".into());
     }
+    let accent = match &args.accent {
+        Some(nom) => Some(surface::theme::Accent::par_nom(nom).ok_or_else(|| {
+            format!(
+                "accent inconnu : {nom} ; accents proposés : {}",
+                surface::theme::ACCENTS
+                    .iter()
+                    .map(|a| a.nom)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })?),
+        None => None,
+    };
     let options = Options {
         endpoint: args
             .endpoint
@@ -95,6 +112,7 @@ fn executer(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             Vue::Modeles => Page::Modeles,
             Vue::Activite => Page::Activite,
         },
+        accent,
     };
     let mut source: Box<dyn Source> = if args.demonstration {
         Box::new(Demonstration {
@@ -117,6 +135,9 @@ fn executer(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         renderer.dessiner(&context, &target, &scene, args.temps)?;
     } else {
         let mut bureau = Bureau::nouveau(&context, options.endpoint, args.demonstration);
+        if let Some(accent) = options.accent {
+            bureau.choisir_accent(accent);
+        }
         bureau.brancher_missions(surface::reel::Sockets::default().agentd);
         bureau.brancher_journal(surface::reel::socket_du_journal());
         bureau.figer_transitions();

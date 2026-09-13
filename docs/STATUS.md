@@ -227,6 +227,15 @@ et le [rapport de la séance](reports/seance-mcp-2026-09-13.md).
 Le lanceur du bureau offre « Claude Code · mission » (mission préparée sans moteur local,
 configuration MCP écrite dans la session, client lancé avec) ; cette entrée attend la CI.
 Le client n'est pas confiné par la séance.
+Direction Réacteur du 13 septembre 2026, dans le commit portant ce rapport : l'atelier devient
+une nuit à plaques de verre, crochets d'angle, jauges graduées et chiffres fins, avec cinq
+accents de couleur au choix (Arc, Or, Plasma, Jade, Nacre) conservés dans la configuration ou
+forcés par `--accent`. Un champ GPU dessine derrière les plaques une grille et une voûte fixes
+et, pour chaque mission reçue, un ruban qui avance à la vitesse réelle de ses étapes, immobile
+dès qu'elle s'arrête. La barre du système, le rail, le cadran et les jauges ne relèvent que des
+comptes reçus. Validation locale sans Nix, rendu llvmpipe : format, clippy, 64 tests unitaires de la surface, 20 tests graphiques, 5 parcours de mission avec vrais capd, ledger et agentd, outils du dépôt réussis ; `cargo test --workspace` compte 428 réussites, 3 ignorés et un échec propre à cette session (sonde d'un vrai Claude Code connecté), sans lien avec la surface. Voir le [rapport Réacteur](reports/interface-reacteur-2026-09-13.md)
+et l'[ADR 0025](adr/0025-direction-visuelle-reacteur.md). La fluidité et la consommation sur une
+carte graphique réelle restent à mesurer ; aucune case complète de FRONTIER n'est cochée.
 
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 
