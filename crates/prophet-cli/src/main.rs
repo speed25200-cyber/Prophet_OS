@@ -230,12 +230,19 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
         Command::Status => {
             let taches = taches_en_cours(&socket_agentd()).unwrap_or_default();
             let refs: Vec<&agentd::Task> = taches.iter().collect();
-            Ok(shell::status_avec_services(
+            let navigateur = navigateur_pilote(&socket_agentd());
+            Ok(shell::status_complet(
                 &sandboxd::Capabilities::probe(),
                 &sfs::detect_backend(&home()),
                 &refs,
                 0,
                 &services(),
+                &navigateur
+                    .as_ref()
+                    .map_or(shell::Navigateur::Inconnu, |etat| {
+                        etat.as_ref()
+                            .map_or(shell::Navigateur::Aucun, shell::Navigateur::Sonde)
+                    }),
             ))
         }
         Command::Freeze => {
@@ -1071,6 +1078,26 @@ fn task_rpc(
 /// en attente d'approbation. Quand il n'est pas là, on le dit — c'est une information, pas une
 /// panne : sur une machine où rien ne tourne, `prophet log` et `prophet task show` restent utiles
 /// parce qu'ils lisent des fichiers.
+/// Le verdict de la sonde du navigateur piloté ; `None` si agentd ne répond pas, `Some(None)`
+/// s'il n'en configure aucun.
+fn navigateur_pilote(
+    socket: &std::path::Path,
+) -> Option<Option<agentd::preparation::BrowserState>> {
+    sous_delai(async {
+        let client = prophet_ipc::Client::connect(socket)
+            .await
+            .map_err(|e| e.to_string())?;
+        let options = client
+            .call("task.options", serde_json::json!({}))
+            .await
+            .map_err(|e| e.message.clone())?;
+        let options: agentd::preparation::Options =
+            serde_json::from_value(options).map_err(|e| e.to_string())?;
+        Ok(options.browser)
+    })
+    .ok()
+}
+
 fn taches_en_cours(socket: &std::path::Path) -> Result<Vec<agentd::Task>, String> {
     sous_delai(async {
         let client = prophet_ipc::Client::connect(socket)

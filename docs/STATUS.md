@@ -116,7 +116,11 @@ egress et capd, puis relit où l'agent a navigué. Cette partie de l'image n'a p
 construite localement (pas de Nix) et attend la CI. Voir
 l'[ADR 0025](adr/0025-profils-de-mission-web-et-sonde-du-navigateur.md). La CI de `7d19592`
 réussit les sept services sous systemd, l'ISO, son démarrage et l'installeur ; le parcours du
-système installé avec le bureau (Chromium, X) était encore en cours à l'écriture de ces lignes.
+système installé échoue de nouveau au relevé du processus Claude Code, avant d'atteindre le
+lanceur (Chromium, X). Cause lue dans le journal : le client natif quitte en moins d'une seconde
+sans réseau, et le relevé commençait après l'apparition de sa fenêtre. Le test échantillonne
+désormais les processus du paquet à 50 ms avant d'ouvrir l'application ; `prophet status` dit
+en outre si le navigateur piloté répond. Cette révision attend la CI.
 Aucune case complète de FRONTIER n'est cochée.
 
 Jalons d'intégration réellement exercés le 12 septembre 2026 :

@@ -303,6 +303,10 @@ pkgs.testers.runNixOSTest {
         droits = " ".join(contextes["web"]["grants"])
         assert "net.egress sur *" in droits and "ui.act sur browser" in droits, droits
         assert contextes["documents"]["web"] is False, contextes["documents"]
+        # Et l'humain le lit sans passer par le socket : `prophet status` porte le verdict.
+        statut = machine.succeed("timeout 30 prophet status")
+        print(statut)
+        assert "Navigateur piloté" in statut and "✓ " in statut.split("Navigateur piloté")[1].splitlines()[1], statut
 
     with subtest("sandboxd peut réellement isoler, et pas seulement le dire"):
         # Le module donne à `sandboxd` les capacités CAP_SETUID et CAP_SYS_ADMIN, puis lui laisse

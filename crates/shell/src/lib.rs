@@ -235,6 +235,40 @@ pub fn status_avec_services(
     pending_approvals: usize,
     services: &[(String, Option<String>)],
 ) -> String {
+    status_complet(
+        caps,
+        backend,
+        tasks,
+        pending_approvals,
+        services,
+        &Navigateur::Inconnu,
+    )
+}
+
+/// Ce que `agentd` dit de son navigateur piloté, tel que `task.options` le rend.
+#[derive(Debug, Clone, Copy)]
+pub enum Navigateur<'a> {
+    /// Personne n'a demandé, ou `agentd` ne répond pas : ne rien inventer.
+    Inconnu,
+    /// Le service n'en configure aucun : les contextes web sont refusés à la préparation.
+    Aucun,
+    /// Le verdict de la sonde du service.
+    Sonde(&'a agentd::preparation::BrowserState),
+}
+
+/// Comme [`status_avec_services`], en disant aussi si le navigateur piloté répond.
+///
+/// C'est ce qui sépare « un navigateur est installé » de « une mission peut ouvrir une page » :
+/// le service le sonde sous ses propres contraintes, et c'est son verdict qu'on affiche.
+#[must_use]
+pub fn status_complet(
+    caps: &sandboxd::Capabilities,
+    backend: &sfs::Backend,
+    tasks: &[&Task],
+    pending_approvals: usize,
+    services: &[(String, Option<String>)],
+    navigateur: &Navigateur<'_>,
+) -> String {
     let actives = tasks.iter().filter(|t| !t.state.is_terminal()).count();
     let mut out = String::from("Prophet OS\n\n");
     out.push_str(&format!(
@@ -265,6 +299,20 @@ pub fn status_avec_services(
             out.push_str(&format!(
                 "    {muets} service(s) muet(s) : voir `docs/components/` pour ce que chacun\n\
                  \x20   emporte avec lui, et `journalctl -u prophet-<nom>` pour savoir pourquoi\n"
+            ));
+        }
+    }
+
+    match navigateur {
+        Navigateur::Inconnu => {}
+        Navigateur::Aucun => out.push_str(
+            "\n  Navigateur piloté\n    aucun — sans PROPHET_BROWSER, les contextes web sont refusés à la préparation\n",
+        ),
+        Navigateur::Sonde(etat) => {
+            let signe = if etat.ready { '✓' } else { '✗' };
+            out.push_str(&format!(
+                "\n  Navigateur piloté\n    {signe} {} — {}\n",
+                etat.program, etat.detail
             ));
         }
     }
@@ -484,6 +532,39 @@ mod tests {
             rendu.contains("1 service(s) muet(s)"),
             "l'absence doit être comptée et sa conséquence dite : {rendu}"
         );
+    }
+
+    #[test]
+    fn le_statut_dit_si_le_navigateur_pilote_repond_ou_ce_que_son_absence_coute() {
+        let backend = sfs::Backend {
+            kind: sfs::BackendKind::Portable,
+            reason: "essai".to_owned(),
+        };
+        let caps = sandboxd::Capabilities::probe();
+        let pret = agentd::preparation::BrowserState {
+            program: "/run/current-system/sw/bin/chromium".to_owned(),
+            ready: true,
+            detail: "HeadlessChrome/131.0".to_owned(),
+        };
+        let rendu = status_complet(&caps, &backend, &[], 0, &[], &Navigateur::Sonde(&pret));
+        assert!(
+            rendu.contains("✓ /run/current-system/sw/bin/chromium — HeadlessChrome/131.0"),
+            "{rendu}"
+        );
+        let panne = agentd::preparation::BrowserState {
+            ready: false,
+            detail: "lancement : SIGSYS".to_owned(),
+            ..pret
+        };
+        let rendu = status_complet(&caps, &backend, &[], 0, &[], &Navigateur::Sonde(&panne));
+        assert!(
+            rendu.contains("✗ /run/current-system/sw/bin/chromium — lancement : SIGSYS"),
+            "{rendu}"
+        );
+        let rendu = status_complet(&caps, &backend, &[], 0, &[], &Navigateur::Aucun);
+        assert!(rendu.contains("aucun — sans PROPHET_BROWSER"), "{rendu}");
+        let rendu = status_complet(&caps, &backend, &[], 0, &[], &Navigateur::Inconnu);
+        assert!(!rendu.contains("Navigateur piloté"), "{rendu}");
     }
 
     #[test]

@@ -34,6 +34,7 @@ pkgs.testers.runNixOSTest {
     import os
     import re
     import shlex
+    import time
     from datetime import timedelta
 
     q = shlex.quote
@@ -77,6 +78,33 @@ pkgs.testers.runNixOSTest {
         command = "for pid in $(pgrep -u pilot); do exe=$(readlink /proc/$pid/exe || true); case $exe in "
         command += "|".join(q(path) for path in executables) + ") echo $pid;; esac; done"
         return command
+
+    def watch_processes(package, name):
+        # Un relevé lancé après l'apparition de la fenêtre arrive trop tard pour un client qui
+        # quitte en moins d'une seconde : réseau bloqué, diagnostic immédiat, fin. C'est ce que
+        # Claude Code fait ici, et ce que la CI montrait, capture à l'appui, sans jamais voir le
+        # processus. On échantillonne donc à 50 ms, avant d'ouvrir l'application : pid, uid,
+        # parent et répertoire courant de tout processus dont l'exécutable est dans le paquet.
+        script = (
+            "while [ ! -e /tmp/stop-watch-" + name + " ]; do for pid in $(pgrep -u pilot); do "
+            "exe=$(readlink /proc/$pid/exe 2>/dev/null || true); case $exe in " + q(package) + "/*) "
+            "echo $pid $(stat -c %u /proc/$pid 2>/dev/null) $(awk '/^PPid/{print $2}' /proc/$pid/status 2>/dev/null) "
+            "$(readlink /proc/$pid/cwd 2>/dev/null);; esac; done; sleep 0.05; done"
+        )
+        machine.succeed("rm -f /tmp/stop-watch-" + name + " /tmp/watch-" + name)
+        machine.execute("(" + script + " > /tmp/watch-" + name + " 2>/dev/null &)")
+
+    def watched_process(terminal, name):
+        # Le premier échantillon complet dont le parent est le terminal humain.
+        for _ in range(60):
+            for line in machine.succeed("cat /tmp/watch-" + name + " 2>/dev/null || true").splitlines():
+                parts = line.split()
+                if len(parts) == 4 and int(parts[2]) == int(terminal["pid"]):
+                    assert parts[1] == "1000", line
+                    assert parts[3] == "/home/pilot/Documents/Prophet", line
+                    return int(parts[0])
+            time.sleep(1)
+        raise AssertionError(name + " doit être un processus du terminal humain")
 
     def client_process(terminal, package, binary):
         # Lire le processus et sa filiation, jamais le contenu d'un profil de connexion.
@@ -170,9 +198,10 @@ pkgs.testers.runNixOSTest {
             machine.screenshot("bureau-travail")
 
         with subtest("les clients officiels sont des applications humaines"):
+            watch_processes("${pkgs.claude-code}", "claude")
             open_app("claude-code")
             claude = window("org.prophet.ClaudeCode")
-            claude_pid = client_process(claude, "${pkgs.claude-code}", "claude")
+            claude_pid = watched_process(claude, "claude")
             machine.screenshot("bureau-claude-demarrage")
             open_app("codex")
             codex = window("org.prophet.Codex")
@@ -193,6 +222,7 @@ pkgs.testers.runNixOSTest {
             wait_text(r"Unable\s+to\s+connect\s+to\s+Anthropic\s+services", timeout=timedelta(seconds=30))
             wait_text("ENOTFOUND", timeout=timedelta(seconds=30))
             machine.wait_until_fails(f"test -d /proc/{claude_pid}", timeout=30)
+            machine.succeed("touch /tmp/stop-watch-claude")
             machine.screenshot("bureau-claude")
             open_app("codex")
             window("org.prophet.Codex", focused=True)
