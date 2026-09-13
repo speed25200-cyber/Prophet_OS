@@ -101,7 +101,9 @@ dès qu'elle s'arrête. La barre du système, le rail, le cadran et les jauges n
 comptes reçus. `prophet-surface --mesure` donne les temps par image et la mémoire résidente ;
 en build release sur llvmpipe, cinq missions à 1920 × 1080 coûtent 24,44 ms en médiane avec le
 champ allégé que reçoit un rastériseur logiciel, 51,22 ms avec le champ complet, 8,06 ms sans
-mission ; la fenêtre ne redessine plus un écran inchangé. Validation locale sans Nix, rendu llvmpipe : format, clippy, 64 tests unitaires de la surface, 20 tests graphiques, 5 parcours de mission avec vrais capd, ledger et agentd, outils du dépôt réussis ; `cargo test --workspace` compte 428 réussites, 3 ignorés et un échec propre à cette session (sonde d'un vrai Claude Code connecté), sans lien avec la surface. Voir le [rapport Réacteur](reports/interface-reacteur-2026-09-13.md)
+mission ; la fenêtre ne redessine plus un écran inchangé, et `--repos` le mesure : trois
+images et 2 % d'un cœur en dix secondes de repos, contre 29 % avant la correction d'une
+empreinte sensible à l'ordre des courants. Validation locale sans Nix, rendu llvmpipe : format, clippy, 64 tests unitaires de la surface, 20 tests graphiques, 5 parcours de mission avec vrais capd, ledger et agentd, outils du dépôt réussis ; `cargo test --workspace` compte 428 réussites, 3 ignorés et un échec propre à cette session (sonde d'un vrai Claude Code connecté), sans lien avec la surface. Voir le [rapport Réacteur](reports/interface-reacteur-2026-09-13.md)
 et l'[ADR 0025](adr/0025-direction-visuelle-reacteur.md). La fluidité et la consommation sur une
 carte graphique réelle restent à mesurer ; aucune case complète de FRONTIER n'est cochée.
 

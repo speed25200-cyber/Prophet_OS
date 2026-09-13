@@ -65,7 +65,7 @@ périphérique de type processeur, le champ s'allège de lui-même (1 600 partic
 1 200 grains, 30 images par seconde) ; `--champ-complet` rétablit le champ entier. La fenêtre
 ne redessine un écran que si l'empreinte de la scène a changé ou si l'interface l'a demandé.
 `prophet-surface --mesure N` donne, sur n'importe quelle machine, les temps par image et la
-mémoire résidente attendus par le critère d'interface ; les chiffres de cette session, en
+mémoire résidente attendus par le critère d'interface, et `--repos N` la consommation au repos ; les chiffres de cette session, en
 rendu logiciel, sont dans le rapport. La fluidité et la consommation sur une carte graphique
 réelle restent à mesurer avec cette commande.
 

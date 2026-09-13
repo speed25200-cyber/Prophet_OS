@@ -76,6 +76,12 @@ struct Args {
     /// pour des captures et des mesures comparables à celles d'une carte graphique.
     #[arg(long)]
     champ_complet: bool,
+    /// Mesure la consommation au repos : rejoue pendant ce nombre de secondes la politique de
+    /// la fenêtre (relecture des services quatre fois par seconde, redessin seulement si la
+    /// scène a changé ou si l'interface l'a demandé) et imprime les images rendues et le temps
+    /// processeur consommé.
+    #[arg(long, conflicts_with_all = ["capture", "fenetree", "mesure"], value_parser = clap::value_parser!(u32).range(1..=3600))]
+    repos: Option<u32>,
 }
 
 fn main() -> ExitCode {
@@ -137,6 +143,15 @@ fn executer(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             source.as_mut(),
             &options,
             images,
+            args.largeur,
+            args.hauteur,
+        );
+    }
+    if let Some(secondes) = args.repos {
+        return reposer(
+            source.as_mut(),
+            &options,
+            secondes,
             args.largeur,
             args.hauteur,
         );
@@ -360,6 +375,147 @@ fn mesurer(
         _ => println!("mémoire résidente : indisponible sur ce système"),
     }
     Ok(())
+}
+
+/// Mesure ce que coûte le repos : la fenêtre relit les services quatre fois par seconde et
+/// ne redessine que si la scène a changé ou si l'interface l'a demandé. Ici, sans fenêtre,
+/// la même politique tourne pendant `secondes` et l'on compte les images réellement rendues
+/// et le temps processeur consommé. Une scène immobile doit coûter une image, puis rien.
+fn reposer(
+    source: &mut dyn Source,
+    options: &Options,
+    secondes: u32,
+    largeur: u32,
+    hauteur: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let context = Contexte::hors_ecran()?;
+    let target = Cible::nouvelle(&context, largeur, hauteur);
+    let mut bureau = Bureau::nouveau(&context, options.endpoint.clone(), options.demonstration);
+    if let Some(accent) = options.accent {
+        bureau.choisir_accent(accent);
+    }
+    if options.champ_complet {
+        bureau.forcer_champ_complet(&context);
+    }
+    bureau.brancher_missions(surface::reel::Sockets::default().agentd);
+    bureau.atelier.mouvement_reduit = options.mouvement_reduit;
+    bureau.atelier.page = options.page;
+    // Les demandes de redessin de l'interface arrivent par ce canal, comme dans la fenêtre.
+    let (tx, rx) = std::sync::mpsc::channel::<Duration>();
+    bureau.ctx.set_request_repaint_callback(move |request| {
+        let _ = tx.send(request.delay);
+    });
+    let debut = Instant::now();
+    let cpu_debut = temps_processeur_secondes();
+    let mut empreinte = None;
+    let mut repeindre = true;
+    let mut prochaine_lecture = Instant::now();
+    let mut prochain_redessin: Option<Instant> = None;
+    let mut images = 0u32;
+    while debut.elapsed() < Duration::from_secs(u64::from(secondes)) {
+        while let Ok(delai) = rx.try_recv() {
+            let quand = Instant::now() + delai;
+            prochain_redessin = Some(prochain_redessin.map_or(quand, |p| p.min(quand)));
+        }
+        let maintenant = Instant::now();
+        if prochain_redessin.is_some_and(|p| maintenant >= p) {
+            prochain_redessin = None;
+            repeindre = true;
+        }
+        let mut redessiner = false;
+        if maintenant >= prochaine_lecture {
+            prochaine_lecture = maintenant + Duration::from_millis(250);
+            let scene = source.scene();
+            redessiner = surface::fenetre::doit_redessiner(repeindre, empreinte, &scene);
+        } else if repeindre {
+            redessiner = true;
+        }
+        if redessiner {
+            let mut scene = source.scene();
+            scene.ordonner();
+            empreinte = Some(scene.empreinte());
+            repeindre = false;
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(largeur as f32, hauteur as f32),
+                )),
+                time: Some(debut.elapsed().as_secs_f64()),
+                ..Default::default()
+            };
+            let (mut output, _) = bureau.composer(input, &scene);
+            bureau.rendre(&context, &target, &mut output);
+            context
+                .device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: None,
+                })
+                .map_err(|e| format!("attente du GPU : {e}"))?;
+            images += 1;
+        } else {
+            let attente = [Some(prochaine_lecture), prochain_redessin]
+                .into_iter()
+                .flatten()
+                .min()
+                .unwrap_or(prochaine_lecture);
+            std::thread::sleep(
+                attente
+                    .saturating_duration_since(Instant::now())
+                    .min(Duration::from_millis(250)),
+            );
+        }
+    }
+    let ecoule = debut.elapsed().as_secs_f64();
+    let cpu = temps_processeur_secondes()
+        .zip(cpu_debut)
+        .map(|(fin, debut)| fin - debut);
+    let scene = source.scene();
+    println!("adaptateur : {}", context.adaptateur);
+    println!(
+        "scène : {} mission{} ({} active{}), {}×{}, champ {}",
+        scene.courants.len(),
+        if scene.courants.len() == 1 { "" } else { "s" },
+        scene.actives(),
+        if scene.actives() == 1 { "" } else { "s" },
+        largeur,
+        hauteur,
+        if bureau.champ_vivant() {
+            "vivant"
+        } else {
+            "immobile"
+        }
+    );
+    println!(
+        "{ecoule:.1} s : {images} image{} rendue{}, {:.1} par seconde",
+        if images == 1 { "" } else { "s" },
+        if images == 1 { "" } else { "s" },
+        f64::from(images) / ecoule
+    );
+    match cpu {
+        Some(cpu) => println!(
+            "temps processeur : {cpu:.3} s, soit {:.1} % d'un cœur",
+            cpu / ecoule * 100.0
+        ),
+        None => println!("temps processeur : indisponible sur ce système"),
+    }
+    match memoire_residente_kio() {
+        Some(kio) => println!("mémoire résidente : {:.1} Mio", kio as f64 / 1024.0),
+        None => println!("mémoire résidente : indisponible sur ce système"),
+    }
+    Ok(())
+}
+
+/// Le temps processeur du processus (utilisateur et système), en secondes, lu dans `/proc`.
+fn temps_processeur_secondes() -> Option<f64> {
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    // Le nom du programme, entre parenthèses, peut contenir des espaces : on lit après.
+    let apres = &stat[stat.rfind(')')? + 2..];
+    let champs: Vec<&str> = apres.split_whitespace().collect();
+    let utime: f64 = champs.get(11)?.parse().ok()?;
+    let stime: f64 = champs.get(12)?.parse().ok()?;
+    let tics = 100.0;
+    Some((utime + stime) / tics)
 }
 
 /// La mémoire résidente du processus, en Kio, lue dans `/proc` ; absente ailleurs.

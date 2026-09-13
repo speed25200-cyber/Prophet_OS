@@ -167,6 +167,10 @@ impl Scene {
 
     /// Une empreinte de tout ce qui se voit : deux scènes de même empreinte donnent la même
     /// image. La fenêtre s'en sert pour ne pas redessiner un écran qui n'a pas changé.
+    ///
+    /// L'ordre des courants n'y entre pas : `ordonner` le déduit du contenu, et une scène lue
+    /// avant ou après l'avoir ordonnée doit donner la même empreinte, sans quoi la fenêtre
+    /// redessinerait quatre fois par seconde un écran immobile.
     #[must_use]
     pub fn empreinte(&self) -> u64 {
         use std::hash::{Hash as _, Hasher as _};
@@ -174,7 +178,9 @@ impl Scene {
         self.heure.hash(&mut h);
         self.date.hash(&mut h);
         self.courants.len().hash(&mut h);
-        for c in &self.courants {
+        let mut courants: Vec<&Courant> = self.courants.iter().collect();
+        courants.sort_by(|a, b| a.tache.cmp(&b.tache));
+        for c in courants {
             c.tache.hash(&mut h);
             c.intitule.hash(&mut h);
             c.agent.hash(&mut h);
@@ -348,6 +354,29 @@ mod tests {
             decision.empreinte(),
             "une décision se voit"
         );
+    }
+
+    #[test]
+    fn l_empreinte_ignore_l_ordre_des_courants() {
+        // La fenêtre lit la scène avant de l'ordonner et la dessine après : les deux doivent
+        // avoir la même empreinte, sinon un écran immobile serait redessiné sans fin.
+        let mut scene = Scene {
+            heure: "14:37".to_owned(),
+            date: "jeudi".to_owned(),
+            courants: vec![
+                courant("lent", Etat::Court, 2.0, 0.1),
+                courant("bloque", Etat::Bloque, 0.0, 0.4),
+                courant("rapide", Etat::Court, 38.0, 0.1),
+            ],
+            decision: None,
+            isolation: Isolation {
+                niveau_max: 1,
+                manque: None,
+            },
+        };
+        let avant = scene.empreinte();
+        scene.ordonner();
+        assert_eq!(avant, scene.empreinte());
     }
 
     #[test]
