@@ -18,6 +18,9 @@ const AMBRE: Color32 = Color32::from_rgb(160, 102, 35);
 
 #[derive(Default)]
 pub(crate) struct Supervision {
+    pub(crate) missions: crate::missions::Missions,
+    detail_tab: crate::mission_details::Tab,
+    detail_id: Option<String>,
     selection: Option<String>,
     filtre: Filtre,
     examen: Option<String>,
@@ -39,7 +42,9 @@ impl Filtre {
             Self::Toutes => true,
             Self::Attention => courant.reclame(),
             Self::Actives => courant.etat == Etat::Court,
-            Self::Terminees => courant.etat == Etat::Fini,
+            Self::Terminees => courant
+                .task_state
+                .map_or(courant.etat == Etat::Fini, agentd::State::is_terminal),
         }
     }
 }
@@ -99,7 +104,7 @@ fn petit(ui: &mut egui::Ui, texte: impl Into<String>) {
     ui.label(RichText::new(texte).size(11.0).color(DISCRET));
 }
 
-fn bouton(ui: &mut egui::Ui, id: &str, texte: &str, actif: bool) -> egui::Response {
+pub(crate) fn bouton(ui: &mut egui::Ui, id: &str, texte: &str, actif: bool) -> egui::Response {
     let width = ui.fonts_mut(|fonts| {
         fonts
             .layout_no_wrap(texte.to_owned(), FontId::proportional(12.0), TEXTE)
@@ -114,7 +119,9 @@ fn bouton(ui: &mut egui::Ui, id: &str, texte: &str, actif: bool) -> egui::Respon
     ui.painter().rect_filled(
         rect,
         9,
-        if actif {
+        if !ui.is_enabled() {
+            Color32::from_rgb(224, 228, 233)
+        } else if actif {
             TEXTE
         } else if response.hovered() {
             Color32::from_rgb(230, 234, 240)
@@ -135,7 +142,11 @@ fn bouton(ui: &mut egui::Ui, id: &str, texte: &str, actif: bool) -> egui::Respon
         Align2::CENTER_CENTER,
         texte,
         FontId::proportional(12.0),
-        if actif { BLANC } else { DISCRET },
+        if actif && ui.is_enabled() {
+            BLANC
+        } else {
+            DISCRET
+        },
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -164,6 +175,11 @@ fn statut(etat: Etat) -> (&'static str, Color32) {
         Etat::Bloque => ("À examiner", AMBRE),
         Etat::Fini => ("Terminée", DISCRET),
     }
+}
+
+fn statut_mission(c: &Courant) -> (&'static str, Color32) {
+    c.task_state
+        .map_or_else(|| statut(c.etat), crate::mission_details::status)
 }
 
 fn pastille(ui: &mut egui::Ui, texte: &str, couleur: Color32) {
@@ -214,9 +230,9 @@ impl Supervision {
                             pastille(
                                 ui,
                                 if atelier.modeles.is_empty() {
-                                    "Moteur non connecté"
+                                    "Dialogue local déconnecté"
                                 } else {
-                                    "Moteur local connecté"
+                                    "Dialogue local connecté"
                                 },
                                 if atelier.modeles.is_empty() {
                                     DISCRET
@@ -368,6 +384,7 @@ impl Supervision {
                 .map(|c| c.tache.clone());
         }
         if scene.courants.is_empty() {
+            self.missions.select(None);
             egui::ScrollArea::vertical().id_salt("supervision-vide").show(ui, |ui| {
                 surface().inner_margin(if compact { 24 } else { 44 }).show(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -386,6 +403,11 @@ impl Supervision {
             return;
         }
         let selection = self.selection.clone();
+        if self.detail_id != selection {
+            self.detail_tab = crate::mission_details::Tab::Auto;
+            self.detail_id = selection.clone();
+        }
+        self.missions.select(selection.as_deref());
         let courant = visibles
             .iter()
             .copied()
@@ -413,9 +435,10 @@ impl Supervision {
                 });
         } else {
             let width = ui.available_width();
+            let sidebar = (width * 0.29).clamp(250.0, 360.0);
             ui.horizontal_top(|ui| {
                 ui.allocate_ui_with_layout(
-                    vec2(width * 0.53 - 12.0, ui.available_height()),
+                    vec2(sidebar, ui.available_height()),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         egui::ScrollArea::vertical()
@@ -426,7 +449,7 @@ impl Supervision {
                 );
                 ui.add_space(12.0);
                 ui.allocate_ui_with_layout(
-                    vec2(width * 0.47 - 12.0, ui.available_height()),
+                    vec2(width - sidebar - 22.0, ui.available_height()),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         egui::ScrollArea::vertical()
@@ -516,21 +539,25 @@ impl Supervision {
             let badge = egui::Rect::from_min_size(rect.min + vec2(20.0, 20.0), vec2(32.0, 32.0));
             p.rect_filled(badge, 10, Color32::from_rgb(232, 237, 244));
             icon(&p, badge.center(), Icon::Models, 16.0, DISCRET);
-            p.text(
-                rect.min + vec2(64.0, 21.0),
-                Align2::LEFT_TOP,
-                &c.agent,
+            let mut agent_job = egui::text::LayoutJob::simple(
+                c.agent.clone(),
                 FontId::proportional(11.0),
                 DISCRET,
+                rect.width() - 88.0,
             );
-            let title = p.layout(
+            agent_job.wrap.max_rows = 1;
+            let agent = ui.fonts_mut(|fonts| fonts.layout_job(agent_job));
+            p.galley(rect.min + vec2(64.0, 21.0), agent, DISCRET);
+            let mut title_job = egui::text::LayoutJob::simple(
                 c.intitule.clone(),
                 FontId::new(16.0, egui::FontFamily::Name("Inter600".into())),
                 TEXTE,
                 rect.width() - 88.0,
             );
+            title_job.wrap.max_rows = 2;
+            let title = ui.fonts_mut(|fonts| fonts.layout_job(title_job));
             p.galley(rect.min + vec2(64.0, 40.0), title, TEXTE);
-            let (label, color) = statut(c.etat);
+            let (label, color) = statut_mission(c);
             p.circle_filled(rect.min + vec2(24.0, 93.0), 2.5, color);
             p.text(
                 rect.min + vec2(35.0, 93.0),
@@ -555,6 +582,17 @@ impl Supervision {
     }
 
     fn inspecteur(&mut self, ui: &mut egui::Ui, c: &Courant, scene: &Scene) {
+        if self.missions.connected() {
+            crate::mission_details::draw(ui, c, &mut self.missions, &mut self.detail_tab);
+            if let Some(d) = scene.decision.as_ref().filter(|d| d.tache == c.tache) {
+                ui.add_space(12.0);
+                ui.label(&d.question);
+                if action(ui, "inspecter-action", "Lire les conséquences").clicked() {
+                    self.examen = empreinte_decision(scene);
+                }
+            }
+            return;
+        }
         surface().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -568,7 +606,7 @@ impl Supervision {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&c.agent).size(13.0).color(DISCRET));
-                let (label, color) = statut(c.etat);
+                let (label, color) = statut_mission(c);
                 pastille(ui, label, color);
             });
             ui.add_space(22.0);
@@ -733,7 +771,7 @@ fn mission_carte(ui: &mut egui::Ui, c: &Courant, selected: bool) -> bool {
         rect.width() - 38.0,
     );
     p.galley(rect.min + vec2(18.0, 61.0), title, TEXTE);
-    let (label, color) = statut(c.etat);
+    let (label, color) = statut_mission(c);
     p.circle_filled(rect.min + vec2(21.0, 140.0), 2.5, color);
     p.text(
         rect.min + vec2(31.0, 140.0),
@@ -1025,7 +1063,7 @@ fn systeme(ui: &mut egui::Ui, scene: &Scene) {
                 for c in &scene.courants {
                     ui.horizontal_wrapped(|ui| {
                         ui.label(RichText::new(&c.intitule).size(14.0));
-                        let (label, color) = statut(c.etat);
+                        let (label, color) = statut_mission(c);
                         pastille(ui, label, color);
                     });
                     petit(
@@ -1052,6 +1090,8 @@ mod tests {
             debit: 0.0,
             budget_consomme: 0.2,
             etapes: 3,
+            task_state: None,
+            task_revision: 0,
         };
         assert!(Filtre::Attention.inclut(&c));
         assert!(!Filtre::Actives.inclut(&c));

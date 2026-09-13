@@ -13,10 +13,11 @@
 | `task.start` | Lance en arrière-plan une mission locale native de niveau 0 |
 | `task.list` | Rend les tâches et leurs budgets observés |
 | `task.status` | Rend une tâche par identifiant |
+| `task.inspect` | Rend tâche, plan, résultat et commandes possibles, sans jeton |
 | `task.result` | Rend le résultat conservé ; erreur tant qu'il n'est pas disponible |
 | `task.cancel` | Demande l'arrêt d'une mission active ou annule un plan non lancé |
 
-`task.start`, `task.status`, `task.result` et `task.cancel` prennent `{"id":"…"}`.
+`task.start`, `task.status`, `task.inspect`, `task.result` et `task.cancel` prennent `{"id":"…"}`.
 Le format de planification complet est illustré dans
 [`examples/missions/note-locale.json`](../../examples/missions/note-locale.json).
 Les méthodes sont réservées aux pairs de confiance. Le contrôle existant est global au

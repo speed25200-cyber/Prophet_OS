@@ -17,7 +17,7 @@
 //! est déposé, sans jamais attendre.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use agentd::task::Task;
@@ -88,12 +88,11 @@ impl std::fmt::Debug for Reel {
 impl Reel {
     /// Démarre l'interrogation des daemons et rend la source.
     ///
-    /// Le fil de fond vit aussi longtemps que le programme. Il ne rend jamais la main, et c'est
-    /// voulu : la surface est ce que la machine montre en s'allumant, elle ne s'arrête pas.
+    /// Les appels sont bornés et le fil s'arrête après la disparition de la source.
     #[must_use]
     pub fn demarrer(sockets: Sockets) -> Self {
         let partage = Arc::new(Mutex::new(Partage::default()));
-        let copie = Arc::clone(&partage);
+        let copie = Arc::downgrade(&partage);
         let adresses = sockets.clone();
         std::thread::spawn(move || interroger(&adresses, &copie));
         Self {
@@ -253,8 +252,8 @@ fn manque_pour_monter(capacites: &serde_json::Value) -> Option<String> {
     Some(format!("{} et {dernier}", manques.join(", ")))
 }
 
-/// La boucle qui interroge, pour toujours.
-fn interroger(sockets: &Sockets, partage: &Arc<Mutex<Partage>>) {
+/// La boucle qui interroge tant que sa source existe.
+fn interroger(sockets: &Sockets, partage: &Weak<Mutex<Partage>>) {
     let Ok(execution) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -265,21 +264,27 @@ fn interroger(sockets: &Sockets, partage: &Arc<Mutex<Partage>>) {
 
     execution.block_on(async {
         loop {
-            let taches = appeler(&sockets.agentd, "task.list", serde_json::json!({})).await;
-            let approbations =
-                appeler(&sockets.capd, "approval.pending", serde_json::json!({})).await;
-            let capacites = appeler(
-                &sockets.sandboxd,
-                "sandbox.capabilities",
-                serde_json::json!({}),
-            )
-            .await;
+            if partage.strong_count() == 0 {
+                break;
+            }
+            let (taches, approbations, capacites) = tokio::join!(
+                appeler(&sockets.agentd, "task.list", serde_json::json!({})),
+                appeler(&sockets.capd, "approval.pending", serde_json::json!({})),
+                appeler(
+                    &sockets.sandboxd,
+                    "sandbox.capabilities",
+                    serde_json::json!({})
+                ),
+            );
 
             let mut panne = None;
             if let Err(erreur) = &taches {
                 panne = Some(format!("agentd injoignable : {erreur}"));
             }
 
+            let Some(partage) = partage.upgrade() else {
+                break;
+            };
             if let Ok(mut etat) = partage.lock() {
                 // Un daemon qui ne répond pas met sa part à zéro, et ne laisse pas la précédente.
                 // Montrer d'anciennes tâches comme si elles couraient encore serait le pire des
@@ -293,6 +298,7 @@ fn interroger(sockets: &Sockets, partage: &Arc<Mutex<Partage>>) {
                 });
                 etat.panne = panne;
             }
+            drop(partage);
 
             tokio::time::sleep(PERIODE).await;
         }
@@ -316,13 +322,14 @@ async fn appeler(
     methode: &str,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let client = prophet_ipc::Client::connect(socket)
-        .await
-        .map_err(|e| e.to_string())?;
-    client
-        .call(methode, params)
-        .await
-        .map_err(|e| e.message.clone())
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let client = prophet_ipc::Client::connect(socket)
+            .await
+            .map_err(|e| e.to_string())?;
+        client.call(methode, params).await.map_err(|e| e.message)
+    })
+    .await
+    .map_err(|_| "délai de réponse dépassé".to_owned())?
 }
 
 fn heure(instant: OffsetDateTime) -> String {

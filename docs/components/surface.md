@@ -14,8 +14,11 @@ compteurs viennent du moteur et des services, et les réponses du modèle sélec
 Les filtres et la sélection pilotent l'inspecteur. À petite taille, celui-ci remplace la liste
 avec un retour aux missions. Une décision attend dans une bande persistante ; l'humain ouvre
 son examen, lit les conséquences puis choisit. Les [captures et limites de la supervision](../reports/supervision-2026-09-13.md)
-remplacent la direction Iris précédente. Les livrables, diffs et droits détaillés ne sont pas
-encore fournis par cette interface.
+remplacent la direction Iris précédente. L'inspecteur lit maintenant `task.inspect` : plan et
+accès, état exact, réponse finale, métadonnées de changements et parcours des états. Les missions
+terminées restent accessibles. Les contrôles de lancement et d'arrêt envoient une commande
+explicite hors de la boucle de rendu, affichent son acquittement ou son erreur et relisent l'état.
+Le contenu des diffs, leur validation et le journal détaillé des actions restent à intégrer.
 
 ## Ce qu'elle montre, et ce qu'elle ne montre pas
 

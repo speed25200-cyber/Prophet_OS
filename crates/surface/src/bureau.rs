@@ -61,6 +61,19 @@ impl Bureau {
         self.ctx.all_styles_mut(|style| style.animation_time = 0.0);
     }
 
+    /// Raccorde les commandes explicites de mission à un service de confiance.
+    /// Les scènes de démonstration ne peuvent pas activer ce transport.
+    pub fn brancher_missions(&mut self, socket: std::path::PathBuf) {
+        if !self.atelier.demonstration {
+            self.supervision.missions = crate::missions::Missions::connect(socket);
+        }
+    }
+
+    /// Contrôleur de la mission sélectionnée, pour l'intégration native et ses essais.
+    pub fn missions(&mut self) -> &mut crate::missions::Missions {
+        &mut self.supervision.missions
+    }
+
     /// Prépare les widgets et retourne une éventuelle décision humaine.
     pub fn composer(
         &mut self,
@@ -68,11 +81,14 @@ impl Bureau {
         scene: &Scene,
     ) -> (egui::FullOutput, Option<Reponse>) {
         self.atelier.actualiser();
+        self.supervision.missions.update();
+        let mut scene = scene.clone();
+        self.supervision.missions.align_scene(&mut scene);
         let mut decision = None;
         let atelier = &mut self.atelier;
         let supervision = &mut self.supervision;
         let output = self.ctx.run_ui(input, |root| {
-            supervision.dessiner(root, atelier, scene, &mut decision);
+            supervision.dessiner(root, atelier, &scene, &mut decision);
         });
         (output, decision)
     }

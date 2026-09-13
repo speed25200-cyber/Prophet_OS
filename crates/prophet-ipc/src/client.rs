@@ -4,7 +4,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader, WriteHalf};
+use tokio::io::{
+    AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader, WriteHalf,
+};
 use tokio::net::UnixStream;
 use tokio::sync::Mutex;
 
@@ -65,6 +67,9 @@ impl Client {
         let mut bytes = serde_json::to_vec(&request)
             .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?;
         bytes.push(b'\n');
+        if bytes.len() > crate::MAX_MESSAGE_BYTES {
+            return Err(Error::new(ErrorCode::InvalidParams, "requête trop grande"));
+        }
 
         let mut guard = self.inner.lock().await;
         guard
@@ -78,17 +83,35 @@ impl Client {
             .await
             .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?;
 
-        let mut line = String::new();
-        let read = guard
-            .reader
-            .read_line(&mut line)
+        let mut line = Vec::new();
+        let read = (&mut guard.reader)
+            .take(crate::MAX_MESSAGE_BYTES as u64 + 1)
+            .read_until(b'\n', &mut line)
             .await
             .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?;
         if read == 0 {
             return Err(Error::new(ErrorCode::InternalError, "connexion fermée"));
         }
-        let response: Response = serde_json::from_str(&line)
+        if line.len() > crate::MAX_MESSAGE_BYTES || !line.ends_with(b"\n") {
+            return Err(Error::new(
+                ErrorCode::ParseError,
+                "réponse tronquée ou trop grande",
+            ));
+        }
+        let body: Value = serde_json::from_slice(&line)
             .map_err(|e| Error::new(ErrorCode::ParseError, e.to_string()))?;
+        let response: Response = serde_json::from_value(body.clone())
+            .map_err(|e| Error::new(ErrorCode::ParseError, e.to_string()))?;
+        if response.jsonrpc != "2.0"
+            || response.id != json!(id)
+            || body.get("result").is_some() == body.get("error").is_some()
+            || (body.get("error").is_some() && response.error.is_none())
+        {
+            return Err(Error::new(
+                ErrorCode::ParseError,
+                "réponse non corrélée ou ambiguë",
+            ));
+        }
         if let Some(error) = response.error {
             return Err(error);
         }

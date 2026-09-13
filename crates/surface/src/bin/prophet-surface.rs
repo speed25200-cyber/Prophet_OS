@@ -117,6 +117,7 @@ fn executer(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         renderer.dessiner(&context, &target, &scene, args.temps)?;
     } else {
         let mut bureau = Bureau::nouveau(&context, options.endpoint, args.demonstration);
+        bureau.brancher_missions(surface::reel::Sockets::default().agentd);
         bureau.figer_transitions();
         bureau.atelier.mouvement_reduit = args.mouvement_reduit;
         bureau.atelier.decouvrir(&bureau.ctx);
@@ -152,8 +153,10 @@ fn executer(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 Vue::Activite => Page::Activite,
             };
         }
-        // Laisser les tailles des panneaux et l'atlas des polices se stabiliser.
-        for frame in 0..if args.examen { 6 } else { 3 } {
+        // Stabiliser le rendu et attendre une réponse de l'inspecteur réellement affiché.
+        let capture_started = Instant::now();
+        let mut frame = 0;
+        loop {
             let events = if args.examen && frame == 3 {
                 let response = bureau
                     .ctx
@@ -187,8 +190,24 @@ fn executer(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 events,
                 ..Default::default()
             };
-            let (mut output, _) = bureau.composer(input, &source.scene());
+            let scene = source.scene();
+            let (mut output, _) = bureau.composer(input, &scene);
             bureau.rendre(&context, &target, &mut output);
+            frame += 1;
+            if frame >= if args.examen { 6 } else { 3 } {
+                if args.demonstration
+                    || bureau.atelier.page != Page::Accueil
+                    || scene.courants.is_empty()
+                    || bureau.missions().snapshot().is_some()
+                    || bureau.missions().error().is_some()
+                {
+                    break;
+                }
+                if capture_started.elapsed() > Duration::from_secs(6) {
+                    return Err("détail de mission non reçu pour la capture".into());
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
         }
     }
     ecrire_png(path, args.largeur, args.hauteur, &target.pixels(&context)?)?;
@@ -264,6 +283,8 @@ fn demonstration(avec_decision: bool) -> Scene {
         debit,
         budget_consomme: budget,
         etapes,
+        task_state: None,
+        task_revision: 0,
     };
 
     Scene {

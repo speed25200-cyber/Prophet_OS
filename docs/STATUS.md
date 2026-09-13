@@ -110,6 +110,29 @@ processus sous sandboxd et l'intégration à l'image restent ouverts. Aucun crit
 de FRONTIER.md n'est coché pour ce jalon. La CI de `d7b5c90` a réussi composants, isolation
 et surface ; le test ChatGPT reste en échec (run `34726143307`).
 
+Jalon de supervision du 13 septembre 2026, après `a91ed22`, dans le commit portant ce rapport :
+`task.inspect` expose le plan et le résultat sans jeton. L'interface native permet de lancer
+un plan existant, de demander l'arrêt et de lire ou copier le résultat ; les missions terminées
+restent consultables. Les commandes attendent les réponses du service et les lectures anciennes
+sont écartées. La liste et le détail réconcilient leurs états, y compris après pause et reprise.
+Le client IPC borne les lectures et contrôle la corrélation et la forme des réponses.
+
+**`just check` réussi : 615 tests, aucun échec, 24 ignorés**, avec format, clippy, reconstruction
+des binaires et contrôles du dépôt. **Les 14 tests graphiques explicites réussissent** ; les
+deux nouveaux parcours utilisent les widgets natifs, agentd, capd et ledger réels, avec un
+serveur HTTP de modèle contrôlé. Douze captures montrent le plan, l'exécution, le résultat,
+le parcours, l'arrêt et l'échec, sur quatre largeurs. Un délai de lecture de cinq secondes
+pendant un essai d'arrêt ne s'est pas reproduit dans les exécutions suivantes ; sa cause reste
+inconnue. Voir le [rapport et les captures](reports/commandes-supervision-2026-09-13.md)
+et l'[ADR 0014](adr/0014-inspection-et-commandes-de-mission.md).
+
+Ce jalon ne valide pas la chaîne agentd avec un LLM réel : les trois échecs Qwen3 ci-dessus
+restent ouverts. La CI de `a91ed22` a réussi composants, isolation et surface ; le travail
+ChatGPT échoue toujours sur Fontconfig (run `34728460203`). La nouvelle révision reste à
+vérifier en CI. La création de plans depuis le dialogue, le contenu des diffs et leur validation,
+les processus isolés, les sessions authentifiées et l'intégration complète à l'image restent
+à réaliser. Aucun critère complet de FRONTIER.md n'est coché pour ce jalon.
+
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 
 Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'environnement de construction** ; le détail est dans `docs/reports/phase0.md` section 5.

@@ -95,6 +95,23 @@ pub struct TaskPlan {
     pub scopes: Vec<String>,
 }
 
+/// Vue atomique destinée à la supervision, sans jeton ni état interne du broker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Inspection {
+    /// État et budget observés.
+    pub task: Task,
+    /// Plan conservé, absent pour certaines anciennes tâches.
+    pub plan: Option<TaskPlan>,
+    /// Résultat conservé, absent avant la fin.
+    pub result: Option<serde_json::Value>,
+    /// Le service possède le parcours de lancement correspondant à ce plan.
+    pub can_start: bool,
+    /// Une annulation peut être demandée au service.
+    pub can_cancel: bool,
+    /// Pourquoi un plan ne peut pas être lancé ici.
+    pub start_reason: Option<String>,
+}
+
 impl TaskPlan {
     /// Rendu lisible, tel que le shell l'affiche avant de demander le feu vert.
     #[must_use]
@@ -287,6 +304,45 @@ impl Runtime {
     #[must_use]
     pub fn result(&self, id: &str) -> Option<&serde_json::Value> {
         self.results.get(id)
+    }
+
+    /// Vue de supervision cohérente, créée sous le verrou du service.
+    ///
+    /// # Errors
+    /// Tâche inconnue.
+    pub fn inspect(
+        &self,
+        id: &str,
+        local_configured: bool,
+        has_worker: bool,
+    ) -> Result<Inspection, RuntimeError> {
+        let task = self
+            .tasks
+            .get(id)
+            .ok_or_else(|| RuntimeError::Unknown(id.into()))?
+            .clone();
+        let plan = self.plans.get(id).cloned();
+        let start_reason = if !local_configured {
+            Some("Le moteur local du service n'est pas configuré.".into())
+        } else if plan.is_none() {
+            Some("Aucun plan conservé : cette mission doit être recréée.".into())
+        } else if plan
+            .as_ref()
+            .is_none_or(|p| !p.choice.reference.starts_with("local:") || p.sandbox_level != 0)
+        {
+            Some("Ce plan nécessite un pilote isolé qui reste à raccorder.".into())
+        } else {
+            None
+        };
+        Ok(Inspection {
+            can_start: task.state == State::Planned && start_reason.is_none(),
+            can_cancel: !task.state.is_terminal()
+                && (has_worker || matches!(task.state, State::Pending | State::Planned)),
+            task,
+            plan,
+            result: self.results.get(id).cloned(),
+            start_reason,
+        })
     }
 
     /// Annule une tâche qui n'a pas de travailleur lancé.

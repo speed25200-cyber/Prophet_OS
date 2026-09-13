@@ -68,7 +68,12 @@ action, annulation de l'inférence et résultats persistants. Le lanceur accepte
 outils natifs de confiance au niveau 0 ; les processus isolés restent à raccorder. Trois essais
 avec Qwen3-0.6B échouent sur une génération incomplète. La réussite de la chaîne de service avec
 un modèle réel reste donc à établir ; le lancement, les diffs et l'arrêt depuis l'interface
-ne sont pas encore livrés. Aucune exigence complète ci-dessus n'est cochée pour ce jalon.
+ne sont pas encore livrés à ce jalon. Le raccordement suivant ajoute un
+[inspecteur avec commandes explicites](reports/commandes-supervision-2026-09-13.md) : lecture
+cohérente du plan et du résultat, lancement et arrêt, réponses tardives écartées et missions
+terminées conservées. La liste des fichiers provient des métadonnées du diff ; leur contenu,
+validation et annulation restent à intégrer, ainsi que la création d'un plan depuis le dialogue.
+Aucune exigence complète ci-dessus n'est cochée pour ces jalons.
 Codex et Claude Code sont maintenant obligatoires dans la configuration de l'image ; leurs vrais
 binaires répondent aux sondes de version et d'authentification en profils vierges. Le diagnostic
 ne confond plus fichiers présents, connexion et pilote agentique disponible. Le paquet expérimental

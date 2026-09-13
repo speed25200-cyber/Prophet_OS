@@ -325,6 +325,8 @@ fn choisir_et_filtrer_une_mission_preserve_son_identite() {
             debit: 1.0,
             budget_consomme: 0.2,
             etapes: 12,
+            task_state: None,
+            task_revision: 0,
         })
         .collect();
     for _ in 0..3 {
@@ -394,6 +396,8 @@ fn une_petite_fenetre_ouvre_le_contexte_sans_le_cacher_sous_la_liste() {
         debit: 2.0,
         budget_consomme: 0.2,
         etapes: 3,
+        task_state: None,
+        task_revision: 0,
     });
     for _ in 0..3 {
         avec_scene(&mut bureau, &context, &target, &scene, vec![]);

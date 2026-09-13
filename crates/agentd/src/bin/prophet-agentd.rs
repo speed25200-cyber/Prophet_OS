@@ -117,6 +117,23 @@ impl Handler for Agents {
 
             "task.start" => self.start_local(commun::texte(&params, "id")?).await,
 
+            "task.inspect" => {
+                let id = commun::texte(&params, "id")?;
+                let has_worker = self
+                    .jobs
+                    .lock()
+                    .map_err(|_| {
+                        Error::new(ErrorCode::InternalError, "travailleurs indisponibles")
+                    })?
+                    .contains_key(&id);
+                let runtime = self.runtime.lock().await;
+                commun::repondre(
+                    &runtime
+                        .inspect(&id, self.local_endpoint.is_some(), has_worker)
+                        .map_err(runtime_erreur)?,
+                )
+            }
+
             "task.result" => {
                 let id = commun::texte(&params, "id")?;
                 let runtime = self.runtime.lock().await;

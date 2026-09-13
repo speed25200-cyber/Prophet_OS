@@ -181,6 +181,8 @@ mod tests {
                     debit: 12.0,
                     budget_consomme: 0.2,
                     etapes: 7,
+                    task_state: None,
+                    task_revision: 0,
                 })
                 .collect(),
             decision: decision.then(|| Decision {

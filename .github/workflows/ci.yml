@@ -145,7 +145,12 @@ jobs:
           fc-list | head -3
           test "$(fc-list | wc -l)" -gt 0 || { echo "::error::aucune police installée"; exit 1; }
 
+      - name: Construire les services du parcours de supervision
+        run: cargo build --release -p agentd -p capd -p ledger --bins
+
       - name: Exercer la surface
+        env:
+          PROPHET_CAPTURE_DIR: ${{ github.workspace }}
         run: cargo test -p surface --release -- --ignored --test-threads=1 --nocapture
 
       - name: Capturer les états et les tailles de l'espace natif

@@ -234,6 +234,7 @@ fn installer(
     );
     let (contexte, surface) = Contexte::avec_surface(fenetre.clone().into())?;
     let mut bureau = Bureau::nouveau(&contexte, options.endpoint.clone(), options.demonstration);
+    bureau.brancher_missions(crate::reel::Sockets::default().agentd);
     bureau.atelier.mouvement_reduit = options.mouvement_reduit;
     bureau.atelier.page = options.page;
     let mut entrees = egui_winit::State::new(

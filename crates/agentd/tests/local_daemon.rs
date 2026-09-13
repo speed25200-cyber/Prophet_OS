@@ -5,6 +5,35 @@ use serde_json::{Value, json};
 
 const AGENTD: &str = env!("CARGO_BIN_EXE_prophet-agentd");
 
+#[tokio::test]
+async fn l_inspection_retourne_le_plan_sans_exposer_le_jeton() {
+    let chain = Chain::new("http://127.0.0.1:1/v1").await;
+    chain.plan("absent", "Plan à examiner").await;
+    let info = chain
+        .agents
+        .call("task.inspect", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    assert_eq!(info["task"]["id"], "local-test");
+    assert_eq!(info["plan"]["scopes"], json!(["~/docs"]));
+    assert_eq!(info["can_start"], true);
+    assert!(info["result"].is_null());
+    assert!(!info.to_string().contains("signature"));
+    assert!(!info.to_string().contains("jeton"));
+    chain
+        .agents
+        .call("task.cancel", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    let info = chain
+        .agents
+        .call("task.inspect", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    assert_eq!(info["task"]["state"], "cancelled");
+    assert_eq!(info["can_start"], false);
+}
+
 struct Chain {
     dir: tempfile::TempDir,
     _capd: Daemon,
