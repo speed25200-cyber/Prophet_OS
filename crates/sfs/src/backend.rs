@@ -5,7 +5,7 @@ use std::path::Path;
 /// Dorsale disponible pour un chemin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendKind {
-    /// btrfs : sous-volumes et snapshots natifs.
+    /// btrfs détecté ; le moteur actuel utilise encore des copies de fichiers.
     Btrfs,
     /// Repli portable : empreintes et sauvegarde des fichiers touchés.
     Portable,
@@ -21,27 +21,20 @@ pub struct Backend {
 }
 
 impl Backend {
-    /// Vrai si les snapshots sont instantanés (pas de copie).
+    /// Vrai seulement lorsqu'une dorsale de snapshots natifs est effectivement implémentée.
     #[must_use]
     pub const fn has_native_snapshots(&self) -> bool {
-        matches!(self.kind, BackendKind::Btrfs)
+        false
     }
 
     /// Limites connues de la dorsale, à afficher à l'utilisateur.
     #[must_use]
     pub const fn limitations(&self) -> &'static str {
-        match self.kind {
-            BackendKind::Btrfs => "aucune",
-            BackendKind::Portable => {
-                "l'annulation ne couvre que la dernière validation de chaque tâche ; \
-                 l'ouverture d'un espace de travail copie les fichiers du périmètre"
-            }
-        }
+        "l'annulation ne couvre que la dernière validation de chaque tâche et refuse les \
+         modifications ultérieures ; les fichiers sont copiés, même sur btrfs ; \
+         les lots publiés ne sont pas atomiques dans leur ensemble"
     }
 }
-
-/// Magie du superbloc btrfs, telle que rapportée par `statfs`.
-const BTRFS_SUPER_MAGIC: i64 = 0x9123_683E;
 
 /// Détecte la dorsale utilisable pour un chemin.
 ///
@@ -49,11 +42,10 @@ const BTRFS_SUPER_MAGIC: i64 = 0x9123_683E;
 /// binaire externe.
 #[must_use]
 pub fn detect_backend(path: &Path) -> Backend {
-    let _ = BTRFS_SUPER_MAGIC;
     match filesystem_type(path) {
         Some(fs) if fs == "btrfs" => Backend {
             kind: BackendKind::Btrfs,
-            reason: "btrfs détecté : sous-volumes et snapshots natifs".to_owned(),
+            reason: "btrfs détecté : moteur de copies, snapshots natifs non implémentés".to_owned(),
         },
         Some(fs) => Backend {
             kind: BackendKind::Portable,
@@ -112,5 +104,15 @@ mod tests {
     fn chemin_inexistant_ne_panique_pas() {
         let backend = detect_backend(Path::new("/n/existe/pas/du/tout"));
         assert_eq!(backend.kind, BackendKind::Portable);
+    }
+
+    #[test]
+    fn btrfs_ne_promet_pas_une_dorsale_non_implementee() {
+        let backend = Backend {
+            kind: BackendKind::Btrfs,
+            reason: "btrfs détecté".into(),
+        };
+        assert!(!backend.has_native_snapshots());
+        assert_ne!(backend.limitations(), "aucune");
     }
 }

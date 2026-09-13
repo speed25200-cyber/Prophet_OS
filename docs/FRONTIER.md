@@ -124,6 +124,14 @@ La CI de `ddd375b` confirme ensuite le secours, la connexion console, les servic
 réel. Le [nouveau bureau humain](reports/bureau-humain-2026-09-13.md) remplace le kiosque de l'image
 par une connexion PAM et des fenêtres sous l'identité du propriétaire. Le parcours du bureau
 réussit en VM en 188,07 s. La variante sur disque installé s'arrête localement sur une erreur
-KVM/SMM avant les services ; ni son parcours ni la vérification des empreintes ne sont validés.
+KVM/SMM avant les services. La CI de `8ea4c7f` vérifie ensuite le démarrage, les empreintes du
+magasin ext4, la session et le travail humain, puis échoue au relevé du processus bref de
+Claude Code après son diagnostic réseau. Son parcours complet reste donc en échec.
 ChatGPT y est inclus à titre expérimental, avec son contrôle strict toujours rouge.
 Cette intégration ne coche pas le critère des clients authentifiés ni celui de l'interface complète.
+
+La [publication journalisée](reports/publication-2026-09-13.md) ajoute les contrôles des
+versions exactes, les conflits d'application et d'annulation, la conservation des métadonnées
+et la reprise après 18 interruptions réelles de processus. La bibliothèque ne délivre aucune
+approbation ; l'intégration interservices sous l'identité humaine et la résolution graphique
+des conflits restent ouvertes. Cette preuve partielle ne coche pas le critère de durabilité complète.

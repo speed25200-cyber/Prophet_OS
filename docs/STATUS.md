@@ -21,12 +21,30 @@ réel. Le test installé de cette révision prouve le secours et la connexion co
 Le nouveau module de [session humaine](reports/bureau-humain-2026-09-13.md), après `ddd375b`,
 passe le parcours `desktop-session` en 188,07 s : connexion PAM, supervision sous UID du
 propriétaire, fichier et presse-papiers réels, applications officielles, verrouillage et reconnexion.
-La variante sur disque installé construit son image, puis KVM s'arrête en mode SMM sous WSL
-avant les services. Le contrôle d'intégrité ajouté au scénario passe les vérifications du pilote,
-mais son exécution dans l'invité reste à établir. Aucun critère complet de FRONTIER n'est coché.
+La variante sur disque installé échoue localement dans KVM/SMM avant les services. La
+[CI de `8ea4c7f`](https://github.com/speed25200-cyber/Prophet_OS/actions/runs/34748498023)
+réussit ensuite le démarrage systemd-boot, la vérification des empreintes du magasin ext4,
+la session PAM, les sept services, le terminal, Thunar et le presse-papiers. Le parcours
+échoue au relevé du processus Claude Code : sa capture montre le diagnostic `ENOTFOUND`
+suivi de sa fin dans la VM sans réseau. Le parcours installé complet reste rouge.
+Aucun critère complet de FRONTIER n'est coché.
 ChatGPT y est inclus à titre expérimental ; son défaut Fontconfig et son test strict rouge restent ouverts.
 `just check` réussit dans Nix : 633 tests, aucun échec, 29 ignorés, format, clippy,
 construction des binaires et contrôles du dépôt réussis.
+
+La [CI générale de `8ea4c7f`](https://github.com/speed25200-cyber/Prophet_OS/actions/runs/34748498818)
+réussit les contrôles du code, l'isolation, le protocole du moteur, la mission locale réelle
+et la surface d'observation. Elle échoue sur le contrôle strict Fontconfig de ChatGPT.
+
+Jalon de publication après `8ea4c7f` : `commit_review` vérifie les versions exactes et les
+originaux, `undo` refuse les modifications humaines ultérieures, et le journal permet la
+reprise après interruption. Les attributs, ACL, propriétaires et dates sont conservés.
+Les snapshots Btrfs ne sont plus annoncés comme implémentés. Le
+[rapport de publication](reports/publication-2026-09-13.md) précise les preuves et les limites.
+Validation locale : `just check` réussi, 663 tests sans échec, 29 ignorés ; les 61 tests SFS
+sont rejoués sous UID/GID 65534 sans échec, dont les 18 scénarios d'interruption et reprise.
+L'application sous l'UID humain, les droits capd liés à l'index, les dossiers parents concurrents
+et les commandes graphiques restent à livrer ; aucune case complète de FRONTIER n'est cochée.
 
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 

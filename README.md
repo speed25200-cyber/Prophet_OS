@@ -17,8 +17,11 @@ Un système d'exploitation PC conçu pour que des agents IA (Claude, GPT, Gemini
 Prophet OS est **en développement**. L'ISO démarre en machine virtuelle. Une mission saisie dans
 l'interface peut être planifiée, lancée avec Qwen3 et produire un fichier de travail examinable
 avec les vrais services. L'application approuvée des changements, l'undo, le confinement complet
-restent à intégrer. Le parcours du bureau réussit en VM ; sa variante sur disque installé
-reste à valider après un arrêt KVM/SMM sous WSL. Les critères
+restent à intégrer. Le [moteur de publication](docs/reports/publication-2026-09-13.md) possède
+des contrôles de conflits et une reprise journalisée, encore séparés de l'approbation graphique.
+Le parcours du bureau réussit en VM. Sur disque installé, la CI vérifie le démarrage, l'intégrité,
+la session et les fichiers, puis échoue en relevant le processus bref de Claude Code sans réseau.
+Le parcours installé complet et la compatibilité stricte de ChatGPT restent à valider. Les critères
 de la version complète sont suivis dans
 [`docs/FRONTIER.md`](docs/FRONTIER.md).
 

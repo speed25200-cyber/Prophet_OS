@@ -57,11 +57,11 @@ pub struct FileReview {
     pub after: Option<FilePreview>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Entry {
-    path: PathBuf,
-    before: Option<FileFingerprint>,
-    after: Option<FileFingerprint>,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Entry {
+    pub(crate) path: PathBuf,
+    pub(crate) before: Option<FileFingerprint>,
+    pub(crate) after: Option<FileFingerprint>,
 }
 
 impl Entry {
@@ -75,20 +75,20 @@ impl Entry {
 }
 
 /// Index de fin de mission à conserver avec le résultat, hors de l'espace modifiable par l'agent.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReviewIndex {
-    entries: Vec<Entry>,
+    pub(crate) entries: Vec<Entry>,
 }
 
 fn invalid(message: &str) -> io::Error {
     io::Error::other(message)
 }
 
-fn relative(path: &Path) -> bool {
+pub(crate) fn relative(path: &Path) -> bool {
     !path.as_os_str().is_empty() && path.components().all(|p| matches!(p, Component::Normal(_)))
 }
 
-fn open(root: &File, path: &Path, flags: OFlags) -> io::Result<File> {
+pub(crate) fn open(root: &File, path: &Path, flags: OFlags) -> io::Result<File> {
     fs::openat2(
         root,
         path,
@@ -100,7 +100,7 @@ fn open(root: &File, path: &Path, flags: OFlags) -> io::Result<File> {
     .map_err(Into::into)
 }
 
-fn task_root(home: &Path, task: &str) -> io::Result<File> {
+pub(crate) fn task_root(home: &Path, task: &str) -> io::Result<File> {
     if !home.is_absolute()
         || !relative(Path::new(task))
         || Path::new(task).components().count() != 1
@@ -122,7 +122,7 @@ fn task_root(home: &Path, task: &str) -> io::Result<File> {
     )
 }
 
-fn inspect(root: &File, path: &Path) -> io::Result<(FileFingerprint, PreviewContent)> {
+pub(crate) fn inspect(root: &File, path: &Path) -> io::Result<(FileFingerprint, PreviewContent)> {
     let mut file = open(root, path, OFlags::RDONLY | OFlags::NONBLOCK)?;
     let initial = file.metadata()?;
     if !initial.is_file() || initial.nlink() != 1 || initial.len() > MAX_BYTES {

@@ -1,8 +1,9 @@
 # Bureau humain — 13 septembre 2026
 
-Révision de travail après `ddd375b`. Le parcours complet `desktop-session` réussit en VM KVM.
-L'image du parcours installé est construite, mais son démarrage local échoue dans KVM/SMM
-avant les services. Ce jalon ne rend pas l'OS complet.
+Révision `8ea4c7f`, après `ddd375b`. Le parcours complet `desktop-session` réussit en VM KVM.
+Le parcours installé démarre en CI et vérifie l'intégrité et la session humaine, puis échoue
+sur le relevé du processus bref de Claude Code. Son essai local échoue plus tôt dans KVM/SMM.
+Ce jalon ne rend pas l'OS complet.
 
 ## Résultat du parcours
 
@@ -151,14 +152,39 @@ puis continue. Dans le [source LKL épinglé](https://raw.githubusercontent.com/
 Un ancien `errno` pourrait donc produire ces messages : c'est une hypothèse, pas une preuve
 d'intégrité. Le scénario installé exige maintenant un magasin sur le disque ext4 de l'invité
 et `nix-store --verify --check-contents`, sans réparation. Son pilote se construit avec les
-contrôles de types et de style réussis ; cette nouvelle assertion n'a pas encore été exécutée
-dans l'invité. Le test CI conserve l'exigence du parcours installé complet.
+contrôles de types et de style réussis. Son exécution en CI est décrite ci-dessous ; le test
+conserve l'exigence du parcours installé complet.
 
 La construction a également réduit l'espace libre de Windows à environ 600 Mio. Huit Gio
 d'anciens exécutables de tests générés ont été supprimés après vérification des chemins et
 de leur absence d'utilisation, en conservant les exécutables du dernier contrôle réussi.
 Un TRIM du système de fichiers WSL a réussi, sans récupération notable d'espace sur Windows.
 La taille virtuelle libre dans WSL ne représente donc pas la place disponible sur l'hôte.
+
+## Résultat sur le coureur GitHub
+
+Le [run image de `8ea4c7f`](https://github.com/speed25200-cyber/Prophet_OS/actions/runs/34748498023)
+réussit l'installeur, la construction du système et de l'ISO, le démarrage de l'ISO et les
+services. Le test du bureau installé atteint réellement systemd-boot et ses paramètres noyau.
+Il constate le magasin sur ext4 puis réussit `nix-store --verify --check-contents` en 41,66 s,
+sans réparation. Cela établit l'intégrité du contenu vérifié pour cette image précise.
+
+Les sous-tests suivants réussissent : connexion PAM (3,97 s), supervision sous UID 1000 et
+sept services (20,80 s), terminal, fichier réel, Thunar et presse-papiers (6,42 s). Le test
+échoue ensuite après 60 s à attendre le processus Claude. La capture de diagnostic montre
+Claude Code 2.1.266, son erreur `ENOTFOUND` pour `api.anthropic.com` et le terminal conservé
+ouvert après sa fin. Le relevé périodique de `/proc` arrive trop tard pour ce processus bref.
+Il faut conserver une preuve de son exécution effective, de sa filiation et de son identité,
+sans assouplir le test en une simple vérification de fenêtre.
+
+![Diagnostic Claude dans l'image installée, réseau bloqué](../images/bureau-installe-claude-diagnostic.png)
+
+Les quatre captures de l'essai en échec sont présentes dans l'artefact `bureau-installe` du
+run. Les assertions après Claude, dont ChatGPT, le verrouillage et la reconnexion, ne sont
+pas exécutées dans ce parcours installé. La
+[CI générale de cette révision](https://github.com/speed25200-cyber/Prophet_OS/actions/runs/34748498818)
+réussit le code, l'isolation, la mission locale réelle et la surface d'observation ; le test
+ChatGPT séparé échoue toujours sur `Fontconfig error`.
 
 ## Limites
 
