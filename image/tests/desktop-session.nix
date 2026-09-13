@@ -264,7 +264,9 @@ pkgs.testers.runNixOSTest {
 
         with subtest("un agent écrit dans l'éditeur du bureau par son arbre d'accessibilité"):
             # L'adaptateur de la session répond, sur un socket que seul agentd peut appeler.
-            machine.wait_until_succeeds("su - pilot -c 'systemctl --user is-active prophet-supd.service'", timeout=60)
+            # `su -` n'ouvre pas de session utilisateur systemd : on nomme le bus de l'humain.
+            session = "XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
+            machine.wait_until_succeeds("su - pilot -c " + q(session + "systemctl --user is-active prophet-supd.service"), timeout=60)
             machine.wait_until_succeeds("test -S /run/prophet/sup.sock", timeout=30)
             assert machine.succeed("stat -c %G /run/prophet/sup.sock").strip() == "prophet-system"
             machine.fail("su - pilot -c 'prophet task call inexistante ui.apps'")
