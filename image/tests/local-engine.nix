@@ -24,6 +24,36 @@ let
         call('task.change', {'id':sys.argv[2],'path':'Documents/Prophet/note.txt'}, denied=True)
         raise SystemExit(0)
 
+    if len(sys.argv) == 2 and sys.argv[1] == 'web':
+        # Le contexte « Recherche sur le web » du catalogue installé, avec le navigateur que
+        # agentd a sondé sous ses propres contraintes : la page ouverte est un témoin local,
+        # atteint par le relais, egress et capd comme le serait n'importe quel site.
+        browser = None
+        for _ in range(90):
+            options = call('task.options', {})
+            browser = options.get('browser')
+            if browser and browser['detail'] != 'sonde en cours':
+                break
+            time.sleep(2)
+        assert browser and browser['ready'], options
+        web = next(p for p in options['profiles'] if p['id'] == 'web')
+        assert web['web'] and web['models'] == ['qwen3-1.7b'], web
+        ident = 'web-' + uuid.uuid4().hex
+        call('task.prepare', {'id':ident,'profile':'web','model':'qwen3-1.7b',
+            'intent':'Use web.open to open http://127.0.0.1:8099/ then answer Done. /no_think'})
+        call('task.start', {'id':ident})
+        deadline = time.monotonic() + 180
+        while True:
+            state = call('task.status', {'id':ident})
+            if state['state'] in ['done','failed','cancelled']:
+                assert state['state'] == 'done', state
+                break
+            assert time.monotonic() < deadline, state
+            time.sleep(.2)
+        info = call('task.inspect', {'id':ident})
+        print(json.dumps({'id':ident,'browser':browser,'browsing':info.get('browsing'),'result':info.get('result')}), flush=True)
+        raise SystemExit(0)
+
     if len(sys.argv) == 2:
         print(json.dumps({'result':call('task.result', {'id':sys.argv[1]}), 'review':versions(sys.argv[1])}))
         raise SystemExit(0)
@@ -99,6 +129,24 @@ in pkgs.testers.runNixOSTest {
         persisted = json.loads(machine.succeed(f"runuser -u pilot -- python3 /etc/test-mission.py {ident}"))
         assert persisted == {key:proof[key] for key in ['result','review']}, persisted
         machine.succeed(f"python3 /etc/test-mission.py deny {ident}")
+    with subtest("un contexte web du catalogue ouvre une page réelle par le navigateur piloté"):
+        # Un témoin HTTP sur la boucle locale de la machine : la mission doit l'atteindre par le
+        # navigateur de agentd, donc par le relais, egress et capd, sans autre route.
+        machine.succeed("mkdir -p /tmp/temoin")
+        machine.succeed("printf '<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><title>Témoin Prophet</title></head><body><h1>Bienvenue</h1></body></html>' > /tmp/temoin/index.html")
+        machine.execute("(cd /tmp/temoin && python3 -m http.server 8099 --bind 127.0.0.1 > /tmp/temoin.log 2>&1 &)")
+        machine.wait_for_open_port(8099)
+        try:
+            proof = json.loads(machine.succeed("runuser -u pilot -- python3 /etc/test-mission.py web", timeout=420))
+        except Exception:
+            print(machine.succeed("journalctl -u prophet-agentd -u prophet-egress -u prophet-local-engine --no-pager -n 150"))
+            print(machine.succeed("cat /tmp/temoin.log || true"))
+            raise
+        print(json.dumps(proof, ensure_ascii=False, indent=2))
+        assert proof["browser"]["ready"] and "Chrome" in proof["browser"]["detail"], proof["browser"]
+        assert proof["browsing"] and proof["browsing"]["url"].startswith("http://127.0.0.1:8099"), proof
+        assert proof["browsing"]["title"] == "Témoin Prophet", proof["browsing"]
+        machine.succeed("grep -q 'GET / ' /tmp/temoin.log")
     with subtest("l'arrêt du moteur est effectif"):
         machine.succeed("systemctl stop prophet-local-engine")
         machine.fail("curl -fsS http://127.0.0.1:8080/health")

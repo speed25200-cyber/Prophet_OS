@@ -109,8 +109,11 @@ démarrage, sous ses propres contraintes, et `task.options` rend le verdict ; un
 n'est pas préparé sans navigateur qui répond, et la surface le dit dans le cadre de la mission.
 L'image nomme Chromium pour `agentd` (`prophet.navigateur`) et lève pour lui seul deux
 entraves qui tuent un navigateur en silence (`MemoryDenyWriteExecute`, `SIGSYS` sur
-`setrlimit`) ; le test des services vérifie que la sonde répond « prêt » sous l'unité réelle.
-Cette partie de l'image n'a pas été construite localement (pas de Nix) et attend la CI. Voir
+`setrlimit`) ; le test des services vérifie que la sonde répond « prêt » sous l'unité réelle,
+et le test du moteur local lance, depuis le catalogue installé et avec le modèle réel, une
+mission « Recherche sur le web » qui ouvre un témoin HTTP par le navigateur piloté, le relais,
+egress et capd, puis relit où l'agent a navigué. Cette partie de l'image n'a pas été
+construite localement (pas de Nix) et attend la CI. Voir
 l'[ADR 0025](adr/0025-profils-de-mission-web-et-sonde-du-navigateur.md). La CI de `7d19592`
 réussit les sept services sous systemd, l'ISO, son démarrage et l'installeur ; le parcours du
 système installé avec le bureau (Chromium, X) était encore en cours à l'écriture de ces lignes.
