@@ -5,6 +5,7 @@
 pub mod atelier;
 pub mod bureau;
 pub mod depuis;
+mod desk;
 pub mod disposition;
 pub mod fenetre;
 mod file_review;

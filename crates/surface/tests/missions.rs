@@ -459,12 +459,17 @@ fn les_widgets_permettent_l_arret_et_montrent_un_echec_de_moteur() {
         for _ in 0..3 {
             frame(&mut bureau, &mut source, &context, &target, vec![]);
         }
+        // Une mission seule est directement ouverte dans l'inspecteur.
+        // Vérifier l'identité réellement consultable, pas la présence d'une carte de galerie.
+        let events = click(&bureau, &target, "copier-reference");
+        let output = frame(&mut bureau, &mut source, &context, &target, events);
         assert!(
-            bureau
-                .ctx
-                .read_response(egui::Id::new(format!("mission-{ID}")))
-                .is_some()
+            output
+                .commands
+                .iter()
+                .any(|c| matches!(c, egui::OutputCommand::CopyText(value) if value == ID))
         );
+        assert_eq!(bureau.missions().snapshot().unwrap().task.state, expected);
         assert!(!chain.dir.path().join("home/docs/note.txt").exists());
     }
     drop(model.release);
@@ -486,6 +491,16 @@ fn une_intention_saisie_dans_la_surface_devient_une_mission_et_un_fichier_prepar
     for _ in 0..3 {
         frame(&mut bureau, &mut source, &context, &target, vec![]);
     }
+    // Une recherche antérieure ne doit pas masquer le nouveau plan confirmé.
+    let events = click(&bureau, &target, "mission-search");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    frame(
+        &mut bureau,
+        &mut source,
+        &context,
+        &target,
+        vec![Event::Paste("aucune-mission-ne-correspond".into())],
+    );
     let events = click(&bureau, &target, "preparer-mission");
     frame(&mut bureau, &mut source, &context, &target, events);
     let deadline = Instant::now() + Duration::from_secs(10);

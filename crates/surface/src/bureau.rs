@@ -50,7 +50,8 @@ impl Bureau {
                 contexte
                     .configuration_surface
                     .as_ref()
-                    .map_or(FORMAT, |config| config.format),
+                    .map_or(FORMAT, |config| config.format)
+                    .remove_srgb_suffix(),
                 Default::default(),
             ),
         }
@@ -103,6 +104,12 @@ impl Bureau {
     pub fn rendre(&mut self, contexte: &Contexte, cible: &Cible, output: &mut egui::FullOutput) {
         let device = &contexte.device;
         let queue = &contexte.queue;
+        // egui prémultiplie dans l'espace gamma : le mélange doit se faire en Unorm.
+        // La texture autorise cette vue jumelle ; le renderer historique garde sa vue sRGB.
+        let view = cible.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(cible.texture.format().remove_srgb_suffix()),
+            ..Default::default()
+        });
         for (id, deltas) in &output.textures_delta.set {
             for delta in deltas {
                 self.rendu.update_texture(device, queue, *id, delta);
@@ -125,7 +132,7 @@ impl Bureau {
             let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("bureau"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &cible.vue,
+                    view: &view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {

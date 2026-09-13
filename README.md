@@ -14,10 +14,10 @@ Un système d'exploitation PC conçu pour que des agents IA (Claude, GPT, Gemini
 
 ## État du code
 
-Prophet OS est **en développement**. L'ISO démarre en machine virtuelle et les composants ont
-des tests automatisés, mais la chaîne complète interface → agent → outils n'est pas encore
-opérationnelle. Des intégrations restent à écrire : ce ne sont pas uniquement des vérifications
-matérielles manquantes. Les critères de la version complète sont suivis dans
+Prophet OS est **en développement**. L'ISO démarre en machine virtuelle. Une mission saisie dans
+l'interface peut être planifiée, lancée avec Qwen3 et produire un fichier de travail examinable
+avec les vrais services. L'application approuvée des changements, l'undo, le confinement complet
+et le bureau humain restent à intégrer. Les critères de la version complète sont suivis dans
 [`docs/FRONTIER.md`](docs/FRONTIER.md).
 
 Le pilote local parle maintenant à un vrai serveur d'inférence. Une boucle avec Qwen3 sur CPU,
@@ -30,7 +30,10 @@ services. Les conversations restent en mémoire pendant la session ; le cycle de
 et l'exécution agentique complète sont encore en cours d'intégration. Voir le
 [guide de l'espace natif](crates/surface/README.md).
 
-![Espace natif connecté à un modèle local réel](docs/images/espace-local.png)
+Le nouvel [atelier de supervision](docs/reports/atelier-2026-09-13.md) présente une galerie de
+missions et une Focale pour examiner le travail, avec recherche Ctrl+K et navigation compacte.
+
+![Atelier natif — scène de démonstration explicitement identifiée](docs/images/atelier-galerie-1440.png)
 
 Captures, essais Wayland et limites : [rapport de l'espace natif](docs/reports/espace-natif-2026-09-12.md).
 

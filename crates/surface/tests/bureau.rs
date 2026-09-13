@@ -19,6 +19,25 @@ fn scene() -> Scene {
     }
 }
 
+fn capture(context: &Contexte, target: &Cible, name: &str) {
+    if let Ok(dir) = std::env::var("PROPHET_CAPTURE_DIR") {
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = std::fs::File::create(
+            std::path::Path::new(&dir)
+                .join(format!("surface-atelier-{name}-{}.png", target.largeur)),
+        )
+        .unwrap();
+        let mut encoder = png::Encoder::new(file, target.largeur, target.hauteur);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&target.pixels(context).unwrap())
+            .unwrap();
+    }
+}
+
 fn frame(bureau: &mut Bureau, context: &Contexte, target: &Cible, events: Vec<Event>) {
     frame_at(bureau, context, target, events, 8.0);
 }
@@ -69,6 +88,38 @@ fn la_supervision_au_repos_ne_produit_pas_d_animation_decorative() {
     frame_at(&mut bureau, &context, &target, vec![], 48.0);
     let next = target.pixels(&context).unwrap();
     assert_eq!(first, next, "un état inchangé reste visuellement stable");
+}
+
+#[test]
+#[ignore = "needs_gpu: mélange des couleurs prémultipliées du bureau"]
+fn le_blanc_translucide_ne_grise_pas_un_fond_blanc() {
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 128, 128);
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    let mut output = bureau.ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(128., 128.),
+            )),
+            ..Default::default()
+        },
+        |ui| {
+            let r = ui.max_rect();
+            ui.painter().rect_filled(r, 0, egui::Color32::WHITE);
+            ui.painter()
+                .rect_filled(r.shrink(16.), 12, egui::Color32::from_white_alpha(128));
+        },
+    );
+    bureau.rendre(&context, &target, &mut output);
+    let pixels = target.pixels(&context).unwrap();
+    let at = (64 * 128 + 64) * 4;
+    let center = &pixels[at..at + 4];
+    assert!(
+        center[..3].iter().all(|&c| c >= 253),
+        "blanc sur blanc assombri : {center:?}"
+    );
+    assert_eq!(center[3], 255);
 }
 
 fn click(x: f32, y: f32) -> Vec<Event> {
@@ -196,7 +247,14 @@ fn chaque_page_se_rend_aux_tailles_annoncees() {
                 frame(&mut bureau, &context, &target, vec![]);
             }
             if page == Page::Accueil {
-                for id in ["preparer-mission", "filter-all", "filter-attention"] {
+                for id in [
+                    "preparer-mission",
+                    "filter-all",
+                    "filter-attention",
+                    "filter-active",
+                    "filter-done",
+                    "mission-search",
+                ] {
                     let control = bureau
                         .ctx
                         .read_response(egui::Id::new(id))
@@ -208,6 +266,23 @@ fn chaque_page_se_rend_aux_tailles_annoncees() {
                         "contrôle coupé à {width}×{height} : {id}"
                     );
                 }
+            }
+            for id in [
+                "nav-accueil",
+                "nav-conversation",
+                "nav-modeles",
+                "nav-activite",
+            ] {
+                let control = bureau
+                    .ctx
+                    .read_response(egui::Id::new(id))
+                    .expect("navigation présente");
+                assert!(
+                    control
+                        .interact_rect
+                        .contains_rect(control.rect.shrink(1.0)),
+                    "navigation coupée à {width}×{height} : {id}"
+                );
             }
             assert_eq!(
                 target.pixels(&context).unwrap().len(),
@@ -400,6 +475,179 @@ fn choisir_et_filtrer_une_mission_preserve_son_identite() {
             .read_response(egui::Id::new("copier-reference"))
             .is_none(),
         "une mission disparue ne reste pas dans l'inspecteur"
+    );
+}
+
+#[test]
+#[ignore = "needs_gpu: le mode Focale change la composition sans changer la mission"]
+fn la_focale_garde_la_mission_et_le_filtre_retablit_le_panorama() {
+    use surface::scene::{Courant, Etat};
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1440, 1000);
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.figer_transitions();
+    let mut scene = scene();
+    scene.courants = [("a", Etat::Court), ("b", Etat::Bloque)]
+        .into_iter()
+        .map(|(id, etat)| Courant {
+            tache: id.into(),
+            intitule: format!("Mission {id} avec un contexte à préserver"),
+            agent: "local:test".into(),
+            etat,
+            debit: 1.0,
+            budget_consomme: 0.2,
+            etapes: 3,
+            task_state: None,
+            task_revision: 0,
+        })
+        .collect();
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
+    let events = click_widget(&bureau, "mission-a");
+    avec_scene(&mut bureau, &context, &target, &scene, events);
+    let events = click_widget(&bureau, "workspace-focus");
+    avec_scene(&mut bureau, &context, &target, &scene, events);
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
+    capture(&context, &target, "focale");
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("mission-a"))
+            .is_none()
+    );
+    let events = click_widget(&bureau, "copier-reference");
+    let (out, choice) = avec_scene(&mut bureau, &context, &target, &scene, events);
+    assert!(choice.is_none());
+    assert!(
+        out.platform_output
+            .commands
+            .iter()
+            .any(|c| matches!(c, egui::OutputCommand::CopyText(s) if s=="a"))
+    );
+    let events = click_widget(&bureau, "filter-attention");
+    avec_scene(&mut bureau, &context, &target, &scene, events);
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("mission-b"))
+            .is_some()
+    );
+    let events = click_widget(&bureau, "copier-reference");
+    let (out, _) = avec_scene(&mut bureau, &context, &target, &scene, events);
+    assert!(
+        out.platform_output
+            .commands
+            .iter()
+            .any(|c| matches!(c, egui::OutputCommand::CopyText(s) if s=="b"))
+    );
+}
+
+#[test]
+#[ignore = "needs_gpu: galerie bornée et recherche clavier dans mille missions"]
+fn mille_missions_restent_retrouvables_sans_dessiner_toute_la_galerie() {
+    use surface::scene::{Courant, Etat};
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1440, 1000);
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.figer_transitions();
+    let mut scene = scene();
+    scene.courants = (0..1000)
+        .map(|n| Courant {
+            tache: n.to_string(),
+            intitule: format!("Travail {n} à superviser"),
+            agent: "local:test".into(),
+            etat: Etat::Court,
+            debit: 1.,
+            budget_consomme: 0.1,
+            etapes: 2,
+            task_state: None,
+            task_revision: 0,
+        })
+        .collect();
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
+    capture(&context, &target, "mille-missions");
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("mission-0"))
+            .is_some()
+    );
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("mission-999"))
+            .is_none()
+    );
+    let mut samples = Vec::new();
+    for _ in 0..60 {
+        let start = std::time::Instant::now();
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+        samples.push(start.elapsed().as_secs_f64() * 1000.);
+    }
+    samples.sort_by(f64::total_cmp);
+    println!(
+        "1000 missions, composition + soumission : p50={:.3} ms, p95={:.3} ms",
+        samples[30], samples[57]
+    );
+    avec_scene(
+        &mut bureau,
+        &context,
+        &target,
+        &scene,
+        vec![Event::Key {
+            key: egui::Key::K,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::CTRL,
+        }],
+    );
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("mission-search"))
+            .unwrap()
+            .has_focus()
+    );
+    avec_scene(
+        &mut bureau,
+        &context,
+        &target,
+        &scene,
+        vec![Event::Text("750".into())],
+    );
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("mission-750"))
+            .is_some()
+    );
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("mission-0"))
+            .is_none()
+    );
+    capture(&context, &target, "recherche");
+    let events = click_widget(&bureau, "copier-reference");
+    let (out, choice) = avec_scene(&mut bureau, &context, &target, &scene, events);
+    assert!(choice.is_none());
+    assert!(
+        out.platform_output
+            .commands
+            .iter()
+            .any(|c| matches!(c,egui::OutputCommand::CopyText(s) if s=="750"))
     );
 }
 

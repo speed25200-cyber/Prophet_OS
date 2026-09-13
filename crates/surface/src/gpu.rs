@@ -126,6 +126,11 @@ impl Contexte {
                 .ok_or_else(|| ErreurGpu::Surface("aucune configuration compatible".to_owned()))?;
             let formats = surface.get_capabilities(&adapter).formats;
             configuration.format = choisir_format(&formats)?;
+            if configuration.format.is_srgb() {
+                configuration
+                    .view_formats
+                    .push(configuration.format.remove_srgb_suffix());
+            }
             configuration.present_mode = wgpu::PresentMode::AutoVsync;
             Some(configuration)
         } else {
@@ -200,7 +205,7 @@ impl Cible {
             dimension: wgpu::TextureDimension::D2,
             format: FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
+            view_formats: &[FORMAT.remove_srgb_suffix()],
         });
         let vue = texture.create_view(&wgpu::TextureViewDescriptor::default());
         Self {

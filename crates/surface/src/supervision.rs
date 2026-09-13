@@ -4,7 +4,6 @@ use egui::{Align2, Color32, FontId, Frame, RichText, Stroke, pos2, vec2};
 
 use crate::atelier::{Atelier, Page};
 use crate::fenetre::Reponse;
-use crate::glyphes::{Icon, icon};
 use crate::scene::{Courant, Etat, Scene};
 
 pub(crate) const FOND: Color32 = Color32::from_rgb(241, 243, 246);
@@ -28,6 +27,8 @@ pub(crate) struct Supervision {
     filtre: Filtre,
     examen: Option<String>,
     focus_compact: bool,
+    isolate: bool,
+    query: String,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -207,82 +208,17 @@ impl Supervision {
             self.prepared_selection = Some(plan.task);
             self.composing = false;
             self.filtre = Filtre::Toutes;
+            self.query.clear();
             self.focus_compact = true;
+            self.isolate = true;
             atelier.page = Page::Accueil;
         }
         let compact = root.available_width() < 900.0;
         if atelier.mouvement_reduit {
             ctx.all_styles_mut(|s| s.animation_time = 0.0);
         }
-        egui::Panel::top("barre-systeme")
-            .exact_size(if compact { 100.0 } else { 76.0 })
-            .frame(
-                Frame::new()
-                    .fill(FOND)
-                    .inner_margin(if compact { 12 } else { 22 }),
-            )
-            .show(root, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("prophet")
-                            .size(23.0)
-                            .family(egui::FontFamily::Name("Inter600".into())),
-                    );
-                    ui.label(RichText::new("OS").size(10.0).color(DISCRET));
-                    if !compact {
-                        ui.add_space(38.0);
-                        navigation(ui, atelier);
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        petit(ui, format!("{} UTC", scene.heure));
-                        if atelier.demonstration {
-                            petit(ui, "DÉMONSTRATION");
-                        } else if !compact {
-                            pastille(
-                                ui,
-                                if atelier.modeles.is_empty() {
-                                    "Dialogue local déconnecté"
-                                } else {
-                                    "Dialogue local connecté"
-                                },
-                                if atelier.modeles.is_empty() {
-                                    DISCRET
-                                } else {
-                                    VERT
-                                },
-                            );
-                        }
-                    });
-                });
-                if compact {
-                    ui.horizontal(|ui| navigation(ui, atelier));
-                }
-            });
-        egui::Panel::bottom("etat-systeme")
-            .exact_size(34.0)
-            .frame(
-                Frame::new()
-                    .fill(FOND)
-                    .inner_margin(egui::Margin::symmetric(22, 8)),
-            )
-            .show(root, |ui| {
-                ui.horizontal(|ui| {
-                    petit(
-                        ui,
-                        if atelier.demonstration {
-                            "Scène d'exemple · aucune exécution"
-                        } else {
-                            "États reçus des services Prophet"
-                        },
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.checkbox(
-                            &mut atelier.mouvement_reduit,
-                            RichText::new("Mouvement réduit").size(10.0).color(DISCRET),
-                        );
-                    });
-                });
-            });
+        crate::desk::background(root);
+        crate::desk::chrome(root, atelier, scene, compact);
         if scene.decision.is_some() {
             egui::Panel::top("attention-globale")
                 .exact_size(52.0)
@@ -311,7 +247,7 @@ impl Supervision {
                 .resizable(false)
                 .frame(
                     Frame::new()
-                        .fill(FOND)
+                        .fill(Color32::TRANSPARENT)
                         .inner_margin(if compact { 12 } else { 22 }),
                 )
                 .show(root, |ui| largeur(ui, 880.0, |ui| composer(ui, atelier)));
@@ -319,7 +255,7 @@ impl Supervision {
         egui::CentralPanel::default()
             .frame(
                 Frame::new()
-                    .fill(FOND)
+                    .fill(Color32::TRANSPARENT)
                     .inner_margin(if compact { 14 } else { 28 }),
             )
             .show(root, |ui| match atelier.page {
@@ -328,7 +264,7 @@ impl Supervision {
                         self.composing = false;
                     }
                 }),
-                Page::Accueil => largeur(ui, 1400.0, |ui| self.accueil(ui, scene)),
+                Page::Accueil => largeur(ui, 1480.0, |ui| self.accueil(ui, scene)),
                 Page::Conversation => largeur(ui, 880.0, |ui| {
                     if !atelier.generation
                         && (!atelier.brouillon.trim().is_empty() || !atelier.tours.is_empty())
@@ -379,8 +315,8 @@ impl Supervision {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(
-                    RichText::new("L'espace de vos agents")
-                        .size(if compact { 25.0 } else { 34.0 })
+                    RichText::new("Vos missions")
+                        .size(if compact { 23.0 } else { 28.0 })
                         .family(egui::FontFamily::Name("Inter600".into())),
                 );
                 petit(
@@ -395,7 +331,7 @@ impl Supervision {
                 );
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if action(ui, "preparer-mission", "+ Préparer un objectif").clicked() {
+                if action(ui, "preparer-mission", "Nouvel objectif  ↗").clicked() {
                     self.composing = true;
                     if self.preparation.attempted_id().is_some()
                         && self.preparation.error().is_none()
@@ -419,7 +355,42 @@ impl Supervision {
                 if bouton(ui, id, label, self.filtre == filtre).clicked() {
                     self.filtre = filtre;
                     self.focus_compact = false;
+                    self.isolate = false;
                 }
+            }
+            let search_id = egui::Id::new("mission-search");
+            if ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::K)) {
+                ui.memory_mut(|m| m.request_focus(search_id));
+            }
+            let search = ui.add(
+                egui::TextEdit::singleline(&mut self.query)
+                    .id(search_id)
+                    .desired_width(176.0)
+                    .hint_text("Rechercher  ·  Ctrl K")
+                    .char_limit(160),
+            );
+            if search.changed() {
+                self.isolate = false;
+                self.focus_compact = false;
+            }
+            if !compact && scene.courants.len() > 1 {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if bouton(
+                        ui,
+                        "workspace-focus",
+                        if self.isolate {
+                            "Voir les missions"
+                        } else {
+                            "Focale  ↗"
+                        },
+                        self.isolate,
+                    )
+                    .clicked()
+                    {
+                        self.isolate = !self.isolate;
+                        self.focus_compact = self.isolate;
+                    }
+                });
             }
         });
         ui.add_space(12.0);
@@ -435,10 +406,17 @@ impl Supervision {
                 return;
             }
         }
+        let query = self.query.trim().to_lowercase();
         let visibles: Vec<_> = scene
             .courants
             .iter()
-            .filter(|c| self.filtre.inclut(c))
+            .filter(|c| {
+                self.filtre.inclut(c)
+                    && (query.is_empty()
+                        || c.intitule.to_lowercase().contains(&query)
+                        || c.agent.to_lowercase().contains(&query)
+                        || c.tache.to_lowercase().contains(&query))
+            })
             .collect();
         if !visibles
             .iter()
@@ -453,21 +431,9 @@ impl Supervision {
         }
         if scene.courants.is_empty() {
             self.missions.select(None);
-            egui::ScrollArea::vertical().id_salt("supervision-vide").show(ui, |ui| {
-                surface().inner_margin(if compact { 24 } else { 44 }).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    petit(ui, "VOTRE POINT DE VUE");
-                    ui.add_space(12.0);
-                    ui.label(RichText::new("Chaque mission,\nun contexte. Chaque décision,\nvotre choix.").size(if compact { 26.0 } else { 40.0 }).line_height(Some(if compact { 34.0 } else { 49.0 })));
-                    ui.add_space(22.0);
-                    ui.label(RichText::new("Aucune mission reçue pour le moment.").color(DISCRET));
-                    ui.label(RichText::new("Les missions des agents apparaîtront ici avec leur état et les décisions qui vous reviennent.").size(13.0).color(DISCRET));
-                    ui.add_space(16.0);
-                    ui.separator();
-                    ui.add_space(8.0);
-                    petit(ui, "Définissez un objectif, choisissez son contexte et examinez le plan avant de le lancer.");
-                });
-            });
+            egui::ScrollArea::vertical()
+                .id_salt("supervision-vide")
+                .show(ui, |ui| crate::desk::empty(ui, compact));
             return;
         }
         let selection = self.selection.clone();
@@ -489,6 +455,7 @@ impl Supervision {
                         if bouton(ui, "retour-missions", "← Toutes les missions", false).clicked()
                         {
                             self.focus_compact = false;
+                            self.isolate = false;
                         }
                         if let Some(c) = courant {
                             self.inspecteur(ui, c, scene);
@@ -502,150 +469,38 @@ impl Supervision {
                     }
                 });
         } else {
-            let width = ui.available_width();
-            let sidebar = (width * 0.29).clamp(250.0, 360.0);
-            ui.horizontal_top(|ui| {
-                ui.allocate_ui_with_layout(
-                    vec2(sidebar, ui.available_height()),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        egui::ScrollArea::vertical()
-                            .id_salt("missions")
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| self.liste(ui, &visibles));
-                    },
-                );
-                ui.add_space(12.0);
-                ui.allocate_ui_with_layout(
-                    vec2(width - sidebar - 22.0, ui.available_height()),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        egui::ScrollArea::vertical()
-                            .id_salt("contexte")
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                if let Some(c) = courant {
-                                    self.inspecteur(ui, c, scene);
-                                }
-                            });
-                    },
-                );
-            });
+            if !self.isolate && scene.courants.len() > 1 {
+                if let Some(picked) =
+                    crate::desk::gallery(ui, &visibles, self.selection.as_deref(), true)
+                {
+                    self.selection = Some(picked);
+                    self.focus_compact = true;
+                }
+                ui.add_space(18.0);
+            }
+            egui::ScrollArea::vertical()
+                .id_salt("contexte")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    if let Some(c) = courant {
+                        crate::desk::work_surface().show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            self.inspecteur(ui, c, scene);
+                        });
+                    } else {
+                        ui.label("Aucune mission dans cette vue.");
+                    }
+                });
         }
     }
 
     fn liste(&mut self, ui: &mut egui::Ui, courants: &[&Courant]) {
-        if ui.available_width() >= 620.0 {
-            for row in courants.chunks(2) {
-                ui.columns(2, |columns| {
-                    for (column, c) in columns.iter_mut().zip(row) {
-                        if mission_carte(column, c, self.selection.as_deref() == Some(&c.tache)) {
-                            self.selection = Some(c.tache.clone());
-                            self.focus_compact = true;
-                        }
-                    }
-                });
-                ui.add_space(4.0);
-            }
-            return;
-        }
         if courants.is_empty() {
-            surface().show(ui, |ui| {
-                ui.label("Aucune mission dans cette vue.");
-            });
+            ui.label("Aucune mission dans cette vue.");
         }
-        for c in courants {
-            let selected = self.selection.as_deref() == Some(&c.tache);
-            let (_, rect) = ui.allocate_space(vec2(ui.available_width(), 115.0));
-            let response = ui
-                .interact(
-                    rect,
-                    egui::Id::new(format!("mission-{}", c.tache)),
-                    egui::Sense::click(),
-                )
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
-            response.widget_info(|| {
-                egui::WidgetInfo::selected(
-                    egui::WidgetType::SelectableLabel,
-                    true,
-                    selected,
-                    &c.intitule,
-                )
-            });
-            let p = ui.painter_at(rect);
-            p.rect_filled(
-                rect,
-                18,
-                if selected {
-                    BLANC
-                } else if response.hovered() {
-                    Color32::from_rgb(249, 250, 252)
-                } else {
-                    Color32::from_rgb(246, 248, 250)
-                },
-            );
-            p.rect_stroke(
-                rect,
-                18,
-                Stroke::new(
-                    1.0,
-                    if selected || response.has_focus() {
-                        Color32::from_rgb(159, 179, 210)
-                    } else {
-                        TRAIT
-                    },
-                ),
-                egui::StrokeKind::Inside,
-            );
-            if selected {
-                p.rect_filled(
-                    egui::Rect::from_min_size(rect.min + vec2(0.0, 28.0), vec2(3.0, 59.0)),
-                    2,
-                    BLEU,
-                );
-            }
-            let badge = egui::Rect::from_min_size(rect.min + vec2(20.0, 20.0), vec2(32.0, 32.0));
-            p.rect_filled(badge, 10, Color32::from_rgb(232, 237, 244));
-            icon(&p, badge.center(), Icon::Models, 16.0, DISCRET);
-            let mut agent_job = egui::text::LayoutJob::simple(
-                c.agent.clone(),
-                FontId::proportional(11.0),
-                DISCRET,
-                rect.width() - 88.0,
-            );
-            agent_job.wrap.max_rows = 1;
-            let agent = ui.fonts_mut(|fonts| fonts.layout_job(agent_job));
-            p.galley(rect.min + vec2(64.0, 21.0), agent, DISCRET);
-            let mut title_job = egui::text::LayoutJob::simple(
-                c.intitule.clone(),
-                FontId::new(16.0, egui::FontFamily::Name("Inter600".into())),
-                TEXTE,
-                rect.width() - 88.0,
-            );
-            title_job.wrap.max_rows = 2;
-            let title = ui.fonts_mut(|fonts| fonts.layout_job(title_job));
-            p.galley(rect.min + vec2(64.0, 40.0), title, TEXTE);
-            let (label, color) = statut_mission(c);
-            p.circle_filled(rect.min + vec2(24.0, 93.0), 2.5, color);
-            p.text(
-                rect.min + vec2(35.0, 93.0),
-                Align2::LEFT_CENTER,
-                label,
-                FontId::proportional(11.0),
-                color,
-            );
-            p.text(
-                pos2(rect.right() - 20.0, rect.top() + 93.0),
-                Align2::RIGHT_CENTER,
-                format!("{} étapes", c.etapes),
-                FontId::proportional(11.0),
-                DISCRET,
-            );
-            if response.clicked() {
-                self.selection = Some(c.tache.clone());
-                self.focus_compact = true;
-            }
-            ui.add_space(2.0);
+        if let Some(picked) = crate::desk::gallery(ui, courants, self.selection.as_deref(), false) {
+            self.selection = Some(picked);
+            self.focus_compact = true;
         }
     }
 
@@ -661,7 +516,7 @@ impl Supervision {
             }
             return;
         }
-        surface().show(ui, |ui| {
+        Frame::NONE.show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 petit(ui, "MISSION EN FOCALE");
@@ -772,104 +627,6 @@ fn empreinte_decision(scene: &Scene) -> Option<String> {
             d.tache, d.question, d.consequence, d.irreversible
         )
     })
-}
-
-fn mission_carte(ui: &mut egui::Ui, c: &Courant, selected: bool) -> bool {
-    let (_, rect) = ui.allocate_space(vec2(ui.available_width(), 164.0));
-    let response = ui
-        .interact(
-            rect,
-            egui::Id::new(format!("mission-{}", c.tache)),
-            egui::Sense::click(),
-        )
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::SelectableLabel,
-            true,
-            selected,
-            &c.intitule,
-        )
-    });
-    let p = ui.painter_at(rect);
-    p.rect_filled(
-        rect,
-        18,
-        if selected {
-            BLANC
-        } else {
-            Color32::from_rgb(247, 249, 251)
-        },
-    );
-    p.rect_stroke(
-        rect,
-        18,
-        Stroke::new(
-            if selected { 1.5 } else { 1.0 },
-            if selected || response.hovered() || response.has_focus() {
-                Color32::from_rgb(150, 172, 202)
-            } else {
-                Color32::from_rgb(224, 229, 236)
-            },
-        ),
-        egui::StrokeKind::Inside,
-    );
-    let badge = egui::Rect::from_min_size(rect.min + vec2(18.0, 18.0), vec2(26.0, 26.0));
-    p.rect_filled(
-        badge,
-        8,
-        if c.reclame() {
-            Color32::from_rgb(242, 233, 217)
-        } else {
-            Color32::from_rgb(228, 234, 243)
-        },
-    );
-    icon(&p, badge.center(), Icon::Models, 14.0, DISCRET);
-    p.text(
-        rect.min + vec2(54.0, 31.0),
-        Align2::LEFT_CENTER,
-        &c.agent,
-        FontId::proportional(11.0),
-        DISCRET,
-    );
-    let title = p.layout(
-        c.intitule.clone(),
-        FontId::new(17.0, egui::FontFamily::Name("Inter600".into())),
-        TEXTE,
-        rect.width() - 38.0,
-    );
-    p.galley(rect.min + vec2(18.0, 61.0), title, TEXTE);
-    let (label, color) = statut_mission(c);
-    p.circle_filled(rect.min + vec2(21.0, 140.0), 2.5, color);
-    p.text(
-        rect.min + vec2(31.0, 140.0),
-        Align2::LEFT_CENTER,
-        label,
-        FontId::proportional(10.0),
-        color,
-    );
-    p.text(
-        pos2(rect.right() - 18.0, rect.top() + 140.0),
-        Align2::RIGHT_CENTER,
-        format!("{} étapes", c.etapes),
-        FontId::proportional(10.0),
-        DISCRET,
-    );
-    response.clicked()
-}
-
-fn navigation(ui: &mut egui::Ui, atelier: &mut Atelier) {
-    ui.spacing_mut().item_spacing.x = 4.0;
-    for (page, id, label) in [
-        (Page::Accueil, "nav-accueil", "Superviser"),
-        (Page::Conversation, "nav-conversation", "Dialoguer"),
-        (Page::Modeles, "nav-modeles", "Modèles"),
-        (Page::Activite, "nav-activite", "Système"),
-    ] {
-        if bouton(ui, id, label, atelier.page == page).clicked() {
-            atelier.page = page;
-        }
-    }
 }
 
 fn composer(ui: &mut egui::Ui, atelier: &mut Atelier) {

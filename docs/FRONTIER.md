@@ -107,3 +107,10 @@ La CI de `1640e1c` charge le modèle installé puis échoue sur l'interdiction d
 systemd. Le retrait ciblé de `RestrictSUIDSGID` pour agentd corrige la reproduction locale ;
 une nouvelle VM reste nécessaire. L'application approuvée, l'undo, la session humaine complète
 et la refonte graphique restent à livrer. Aucun critère complet n'est coché pour cet examen.
+
+La CI de `d20ef74` réussit ensuite la mission Qwen3 avec les unités NixOS, le modèle sous un
+compte distinct, la lecture des versions et le redémarrage d'agentd. Le test ChatGPT reste en
+échec sur Fontconfig. L'[atelier graphique](reports/atelier-2026-09-13.md) ajoute une galerie,
+la Focale, la recherche clavier et corrige le mélange des transparences. La qualité visuelle
+attendue, la fluidité matérielle et la session humaine complète restent à valider ; aucun
+critère complet n'est coché.

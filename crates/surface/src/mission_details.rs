@@ -49,8 +49,8 @@ fn heading(ui: &mut egui::Ui, text: &str, size: f32) {
 }
 fn sheet() -> Frame {
     Frame::new()
-        .fill(Color32::WHITE)
-        .corner_radius(20)
+        .fill(Color32::from_rgb(247, 249, 249))
+        .corner_radius(16)
         .inner_margin(24)
         .stroke(Stroke::new(1.0, LINE))
 }

@@ -11,6 +11,12 @@ par egui/winit ; wgpu dessine l'interface. L'espace principal rassemble les miss
 leur contexte et les décisions à examiner, dans un thème clair avec Inter embarquée. Les
 compteurs viennent du moteur et des services, et les réponses du modèle sélectionné.
 
+L'atelier présente plusieurs missions dans une galerie horizontale et permet de les rechercher
+par titre, référence ou pilote avec Ctrl+K. Les objets hors de la vue ne sont pas composés.
+La Focale agrandit l'inspecteur ; une mission seule reçoit directement cet espace. Le plan
+nouvellement préparé s'ouvre en Focale et efface la recherche antérieure. Le fond reste statique.
+Voir l'[ADR 0019](../adr/0019-atelier-et-focale.md).
+
 Les filtres et la sélection pilotent l'inspecteur. À petite taille, celui-ci remplace la liste
 avec un retour aux missions. Une décision attend dans une bande persistante ; l'humain ouvre
 son examen, lit les conséquences puis choisit. Les [captures et limites de la supervision](../reports/supervision-2026-09-13.md)

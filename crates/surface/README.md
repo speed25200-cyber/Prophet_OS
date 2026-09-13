@@ -4,8 +4,10 @@ Le binaire `prophet-surface` fournit une interface native Wayland : accueil, sé
 conversation locale en flux, copie du texte, interruption et activité des services. Les tâches
 et décisions viennent d'agentd/capd ; les conversations directes n'utilisent pas d'outils système.
 
-L'accueil est l'espace de supervision : missions sélectionnables, filtres, contexte et examen
-des décisions humaines. Préparer un objectif ouvre un brouillon de mission : intention, contexte
+L'accueil est un atelier de supervision : galerie de missions, filtres, recherche avec Ctrl+K
+et examen des décisions humaines. La Focale agrandit le travail sélectionné ; une mission seule
+dispose directement de l'inspecteur. La navigation graphite devient une barre inférieure à
+petite largeur. Préparer un objectif ouvre un brouillon de mission : intention, contexte
 et modèle effectivement disponible auprès du service. Le plan est préparé sans lancer d'agent.
 Une mission déjà planifiée par agentd peut être examinée puis lancée depuis son plan. Son
 inspecteur affiche les accès, l'état exact, le résultat textuel et les fichiers préparés.
@@ -13,7 +15,7 @@ L'onglet Fichiers compare les versions initiales et proposées, vérifiées par 
 permet de copier le texte exact et d'actualiser l'examen. L'arrêt est explicite et sa confirmation vient du service. Les missions terminées
 restent consultables. Une erreur de commande est affichée sans renvoi automatique.
 Le thème clair utilise Inter 4.1 embarquée sous licence SIL OFL et supprime la sculpture Iris.
-Les [captures et vérifications](../../docs/reports/supervision-2026-09-13.md) proviennent du
+Les [captures et vérifications](../../docs/reports/atelier-2026-09-13.md) proviennent du
 binaire natif ; les scènes d'exemple sont explicitement marquées.
 
 ```sh
@@ -51,4 +53,4 @@ visibles. Les aperçus binaires, trop grands, manquants ou altérés ont des ét
 L'application approuvée des fichiers et le journal détaillé restent à intégrer. Voir les ADR
 [0014](../../docs/adr/0014-inspection-et-commandes-de-mission.md),
 [0015](../../docs/adr/0015-intention-et-profils-de-mission.md) et
-[0018](../../docs/adr/0018-examen-des-versions.md).
+[0018](../../docs/adr/0018-examen-des-versions.md) et [0019](../../docs/adr/0019-atelier-et-focale.md).

@@ -5,8 +5,8 @@
 > sont désormais suivies dans [FRONTIER.md](FRONTIER.md). Le moteur local possède un client HTTP
 > concret, une conversation en flux et des missions via MCP/agentd avec vrais capd/ledger.
 > L'examen des versions est implémenté ; leur application approuvée et le parcours installé
-> complet restent à établir. Voir le [dernier rapport de revue des fichiers](reports/examen-fichiers-2026-09-13.md)
-> et les exigences ouvertes, notamment la refonte graphique et les sessions authentifiées.
+> complet restent à établir. Voir le [dernier rapport de l'atelier](reports/atelier-2026-09-13.md)
+> et les exigences ouvertes, notamment la qualité graphique attendue et les sessions authentifiées.
 
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 
@@ -222,6 +222,32 @@ doit confirmer le parcours complet. ChatGPT échoue toujours au contrôle Fontco
 L'application et l'undo des fichiers, les droits des autres méthodes, le bureau humain complet,
 les clients authentifiés et la direction graphique demandée restent ouverts. Aucun critère
 complet de FRONTIER.md n'est coché pour cet examen.
+
+Atelier du 13 septembre 2026, après `d20ef74`, dans le commit portant le
+[rapport](reports/atelier-2026-09-13.md) : navigation graphite, galerie de missions, Focale et
+recherche Ctrl+K. Une mission seule reçoit directement l'espace d'examen ; les plans préparés
+effacent la recherche précédente. Le mélange des transparences d'egui est corrigé dans une vue
+Unorm compatible ; le test blanc sur blanc reproduisait un gris de 220 avant correction.
+L'[ADR 0019](adr/0019-atelier-et-focale.md) décrit la composition et ses limites.
+
+**`just check` final réussi : 631 tests, aucun échec, 29 ignorés**, avec format, clippy,
+construction des programmes et contrôles du dépôt. La première tentative avait rencontré
+trois délais de commande du navigateur ; les quatre tests concernés passent ensuite sans
+modification du pont, puis la suite complète réussit. Un démarrage d'agentd dépasse aussi le
+délai lors d'un essai graphique ; cet incident reste dans le rapport.
+Les **19 tests graphiques réussissent** au passage final. La galerie de mille missions mesure
+8,592 ms en médiane et 13,785 ms en p95 pour la composition et la soumission, sans attente de
+présentation. Les captures finales sont examinées. La série Qwen3-1.7B reste **à deux réussites
+sur trois** : le premier essai refuse la capture SFS avant l'inférence, avec une cause précise
+non établie ; les deux autres vérifient le fichier exact et l'aperçu natif. Le diagnostic du
+refus reste ouvert, sans assouplissement des droits.
+
+La CI de `d20ef74` réussit composants, surface, isolation, protocole et mission réelle sous
+NixOS : poids sous un compte distinct, contenu exact, examen des versions et relecture après
+redémarrage, avec refus sous l'UID 0. ChatGPT reste en échec sur Fontconfig. La session humaine
+complète, les clients authentifiés, l'application et l'undo, les autres familles et GPU,
+la qualité graphique attendue et les mesures matérielles restent ouverts. Aucun critère
+complet de FRONTIER.md n'est coché.
 
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 
