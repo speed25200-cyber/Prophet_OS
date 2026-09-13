@@ -26,7 +26,9 @@ et services sont exercés par `nix build .#checks.x86_64-linux.services`.
 
 `prophet task options` liste les contextes du service, leurs modèles disponibles et l'état du
 navigateur piloté ; `prophet task prepare --profile <contexte> --model <modèle> "<objectif>"`
-prépare une mission sans manifeste ni droits fournis par la CLI, comme « Nouvel objectif ».
+prépare une mission sans manifeste ni droits fournis par la CLI, comme « Nouvel objectif » ;
+`--client` la destine à un client MCP, sans exiger le moteur local (le modèle du contexte
+suffit, `--model` devient facultatif).
 `prophet task mcp-config <mission>` rend, pour une mission préparée et non lancée par le même
 utilisateur, la configuration qui donne à Claude Code (`claude --mcp-config <fichier>`) ou à
 Codex (`mcp_servers` de sa configuration) les outils de cette mission par le pont `prophet-mcp`.

@@ -317,6 +317,53 @@ async fn avec_un_navigateur_qui_repond_un_contexte_web_est_prepare_sans_executio
     assert!(info["result"].is_null());
 }
 
+#[tokio::test]
+async fn une_mission_pour_un_client_mcp_se_prepare_sans_modele_decouvert() {
+    let chain = Chain::new().await;
+    let options = chain.client.call("task.options", json!({})).await.unwrap();
+    assert_eq!(
+        options["profiles"][0]["preferred"],
+        json!(["modele-controle", "hors-ligne"]),
+        "{options}"
+    );
+    // « hors-ligne » est admis par le profil mais absent du moteur : refusé pour une mission
+    // native, accepté pour un client qui apporte son propre modèle.
+    let refus = chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"native-hors-ligne", "intent":"Rédiger", "profile":"documents", "model":"hors-ligne"}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refus.code, ErrorCode::Conflict);
+    let plan = chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"pour-client", "intent":"Rédiger avec mon client", "profile":"documents", "model":"hors-ligne", "client":true}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(plan["task"], "pour-client");
+    let info = chain
+        .client
+        .call("task.inspect", json!({"id":"pour-client"}))
+        .await
+        .unwrap();
+    assert_eq!(info["task"]["state"], "planned");
+    // Un modèle que le profil n'admet pas reste refusé, client ou non.
+    let refus = chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"pour-client-2", "intent":"Rédiger", "profile":"documents", "model":"non-autorise", "client":true}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refus.code, ErrorCode::PolicyDenied);
+}
+
 #[test]
 fn le_catalogue_refuse_les_profils_hors_perimetre_et_accepte_une_ecriture_plus_etroite() {
     let dir = tempfile::tempdir().unwrap();

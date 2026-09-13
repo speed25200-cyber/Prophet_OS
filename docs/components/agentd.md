@@ -14,7 +14,7 @@
 |---|---|
 | `task.spawn` | Planifie, demande le jeton à capd, persiste et rend le plan |
 | `task.options` | Rend les profils configurés (`web` s'ils exigent le navigateur), leurs modèles réellement disponibles et l'état du navigateur piloté |
-| `task.prepare` | Prépare une intention avec un profil du service, sans génération ni exécution ; refuse un contexte web sans navigateur qui répond |
+| `task.prepare` | Prépare une intention avec un profil du service, sans génération ni exécution ; refuse un contexte web sans navigateur qui répond ; `client: true` dispense du moteur local pour une mission destinée à un client MCP |
 | `task.start` | Lance en arrière-plan une mission locale native de niveau 0 |
 | `task.list` | Rend les tâches et leurs budgets observés |
 | `task.status` | Rend une tâche par identifiant |

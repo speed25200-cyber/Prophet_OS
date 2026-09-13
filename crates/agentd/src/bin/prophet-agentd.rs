@@ -135,13 +135,24 @@ impl Handler for Agents {
                         "Cette référence existe déjà. Relisez son plan.",
                     ));
                 }
-                let models = self.local_models().await?;
-                if !models.contains(&request.model) {
+                // Pour un client MCP, le modèle est celui du client : le moteur local peut
+                // être absent, et le modèle du profil n'a pas à y être découvert.
+                let models = if request.client {
+                    self.local_models().await.unwrap_or_default()
+                } else {
+                    self.local_models().await?
+                };
+                if !request.client && !models.contains(&request.model) {
                     return Err(Error::new(
                         ErrorCode::Conflict,
                         "Le modèle choisi n'est plus disponible.",
                     ));
                 }
+                let models = if request.client && !models.contains(&request.model) {
+                    vec![request.model.clone()]
+                } else {
+                    models
+                };
                 let mut manifest = profile.manifest.clone();
                 manifest.model.preferred = vec![reference];
                 let grants = profile

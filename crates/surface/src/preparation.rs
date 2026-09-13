@@ -225,6 +225,7 @@ impl Preparation {
             intent: self.intent.trim().to_owned(),
             profile: self.profile.clone(),
             model: self.model.clone(),
+            client: false,
         };
         request.validate()?;
         self.attempt = Some(request.clone());
@@ -286,6 +287,7 @@ mod tests {
                 intent: "Objectif humain".into(),
                 profile: "docs".into(),
                 model: "local".into(),
+                client: false,
             }),
             pending: true,
             ..Default::default()
@@ -332,6 +334,7 @@ mod tests {
                 intent: "Objectif".into(),
                 profile: "docs".into(),
                 model: "envoye".into(),
+                client: false,
             }),
             options: Some(Options {
                 profiles: vec![ProfileView {
@@ -339,6 +342,7 @@ mod tests {
                     name: "Docs".into(),
                     description: String::new(),
                     models: vec!["nouveau".into()],
+                    preferred: vec![],
                     scopes: vec![],
                     grants: vec![],
                     limits: Default::default(),

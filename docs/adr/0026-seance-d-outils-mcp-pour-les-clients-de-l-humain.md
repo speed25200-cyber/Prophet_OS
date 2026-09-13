@@ -35,6 +35,12 @@ tient aucun jeton, n'ouvre aucun fichier et n'exécute aucun outil. `prophet tas
 <mission>` rend la configuration à donner au client (`--mcp-config` de Claude Code ;
 `mcp_servers` de Codex). Le paramètre `PROPHET_TASK_AUTH_FILE` disparaît.
 
+**Le client apporte son modèle.** `task.prepare` accepte `client: true` : le modèle doit rester
+admis par le profil, mais n'a pas à être découvert auprès du moteur local, qui peut être absent.
+Une machine sans poids locaux prépare donc une mission pour Claude Code ou Codex. Pour une
+mission native, rien ne change : le modèle doit être découvert. `task.options` rend aussi, par
+profil, les modèles admis (`preferred`), pour que la CLI choisisse sans le moteur.
+
 **Ce que le client voit.** Seuls les outils que le jeton couvre lui sont proposés ; un appel
 hors périmètre est refusé par le registre, avec le motif, sans que le contenu visé n'apparaisse ;
 une écriture va dans le travail de la mission, jamais dans le home ; une action externe ou

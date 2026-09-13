@@ -42,6 +42,9 @@ pub struct ProfileView {
     pub description: String,
     /// Modèles du profil effectivement découverts auprès du moteur du service.
     pub models: Vec<String>,
+    /// Modèles que le profil admet, découverts ou non : un client MCP n'a pas besoin du moteur.
+    #[serde(default)]
+    pub preferred: Vec<String>,
     /// Contexte fichiers fixé par le profil.
     pub scopes: Vec<String>,
     /// Droits demandés à capd, avant son contrôle.
@@ -101,6 +104,10 @@ pub struct Request {
     pub profile: String,
     /// Modèle exact découvert et admis par le profil.
     pub model: String,
+    /// La mission accueillera un client MCP de l'humain (ADR 0026) : le modèle doit rester
+    /// admis par le profil, mais n'a pas à être découvert, et le moteur peut être absent.
+    #[serde(default)]
+    pub client: bool,
 }
 
 impl Request {
@@ -153,6 +160,14 @@ impl Profile {
                 .iter()
                 .filter_map(|r| r.strip_prefix("local:"))
                 .filter(|m| models.iter().any(|v| v == m))
+                .map(str::to_owned)
+                .collect(),
+            preferred: self
+                .manifest
+                .model
+                .preferred
+                .iter()
+                .filter_map(|r| r.strip_prefix("local:"))
                 .map(str::to_owned)
                 .collect(),
             scopes: self.scopes.clone(),

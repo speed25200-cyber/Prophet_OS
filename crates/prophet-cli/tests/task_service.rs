@@ -188,6 +188,30 @@ fn les_contextes_du_service_se_lisent_et_une_mission_se_prepare_sans_manifeste_f
         serde_json::from_str::<Value>(&rendu).unwrap()["task"],
         "essai-cli"
     );
+
+    // Pour un client MCP, le service apprend que le moteur local n'est pas requis.
+    let rendu = success(invoke(
+        &[
+            "--json",
+            "task",
+            "prepare",
+            "--client",
+            "--profile",
+            "web",
+            "--model",
+            "qwen3-1.7b",
+            "--id",
+            "essai-client",
+            "Travailler avec Claude Code",
+        ],
+        "task.prepare",
+        json!({"id":"essai-client","intent":"Travailler avec Claude Code","profile":"web","model":"qwen3-1.7b","client":true}),
+        json!({"task":"essai-client"}),
+    ));
+    assert_eq!(
+        serde_json::from_str::<Value>(&rendu).unwrap()["task"],
+        "essai-client"
+    );
 }
 
 #[test]

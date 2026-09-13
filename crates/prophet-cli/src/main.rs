@@ -96,9 +96,13 @@ enum TaskAction {
         /// Contexte du catalogue du service (voir `prophet task options`).
         #[arg(long)]
         profile: String,
-        /// Modèle admis par ce contexte.
+        /// Modèle admis par ce contexte ; avec `--client`, le premier modèle du contexte sinon.
         #[arg(long)]
-        model: String,
+        model: Option<String>,
+        /// La mission accueillera un client MCP (Claude Code, Codex) : le moteur local n'est
+        /// pas requis.
+        #[arg(long)]
+        client: bool,
         /// Référence à conserver ; générée sinon.
         #[arg(long)]
         id: Option<String>,
@@ -811,17 +815,43 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
         TaskAction::Prepare {
             profile,
             model,
+            client,
             id,
             intent,
         } => {
             let id = id
                 .clone()
                 .unwrap_or_else(|| format!("mission-{}", ulid::Ulid::new()));
-            let result = task_rpc(
-                &socket_agentd(),
-                "task.prepare",
-                serde_json::json!({"id":id, "intent":intent, "profile":profile, "model":model}),
-            )?;
+            let model = match model {
+                Some(model) => model.clone(),
+                None if *client => {
+                    // Le client apporte son modèle ; le contexte doit seulement en admettre un.
+                    let options: agentd::preparation::Options = serde_json::from_value(task_rpc(
+                        &socket_agentd(),
+                        "task.options",
+                        serde_json::json!({}),
+                    )?)?;
+                    options
+                        .profiles
+                        .iter()
+                        .find(|p| p.id == *profile)
+                        .and_then(|p| p.preferred.first().cloned())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "contexte {profile} inconnu ou sans modèle admis ; voir `prophet task options`"
+                            )
+                        })?
+                }
+                None => anyhow::bail!(
+                    "--model est requis sans --client ; les modèles disponibles sont dans `prophet task options`"
+                ),
+            };
+            let mut params =
+                serde_json::json!({"id":id, "intent":intent, "profile":profile, "model":model});
+            if *client {
+                params["client"] = serde_json::json!(true);
+            }
+            let result = task_rpc(&socket_agentd(), "task.prepare", params)?;
             if as_json {
                 return Ok(format!("{}\n", serde_json::to_string_pretty(&result)?));
             }
