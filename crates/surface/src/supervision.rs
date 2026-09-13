@@ -1,6 +1,6 @@
 //! Espace de supervision : les missions reçues, leur contexte et les décisions humaines.
 
-use egui::{Color32, FontId, Frame, RichText, Stroke, pos2, vec2};
+use egui::{Align2, Color32, FontId, Frame, RichText, Stroke, pos2, vec2};
 
 use crate::atelier::{Atelier, Page};
 use crate::fenetre::Reponse;
@@ -697,6 +697,7 @@ impl Supervision {
                 plaque(ui, 28, |ui| {
                     ui.set_width(ui.available_width());
                     etiquette(ui, "ISOLATION DISPONIBLE");
+                    crate::instruments::echelle_isolation(ui, scene.isolation.niveau_max, scene.isolation.manque.as_deref());
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         let (r, _) = ui.allocate_exact_size(vec2(120.0, 120.0), egui::Sense::hover());
@@ -704,14 +705,14 @@ impl Supervision {
                             ui.painter(),
                             r.center(),
                             56.0,
-                            f32::from(scene.isolation.niveau_max) / 3.0,
+                            f32::from(scene.isolation.niveau_max) / 2.0,
                             accent.vif,
                             &accent,
                             (&scene.isolation.niveau_max.to_string(), "NIVEAU"),
                         );
                         ui.add_space(12.0);
                         ui.vertical(|ui| {
-                            ui.label(titre(format!("Niveau {} sur 3", scene.isolation.niveau_max), 26.0));
+                            ui.label(titre(format!("Niveau {} sur 2", scene.isolation.niveau_max), 26.0));
                             if let Some(manque) = &scene.isolation.manque {
                                 ui.label(RichText::new(manque).color(DISCRET));
                             }
@@ -1001,14 +1002,14 @@ fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
         for card in &atelier.clients {
             let (rect, _) = ui.allocate_exact_size(vec2(tile, 118.0), egui::Sense::hover());
             let p = ui.painter();
-            p.rect_filled(rect, 14, crate::instruments::TUILE);
+            p.rect_filled(rect, 14, VERRE_HAUT);
             crate::instruments::monogramme(p, rect.min + vec2(30.0, 30.0), &card.driver, 24.0);
             p.text(
                 rect.min + vec2(52.0, 22.0),
                 Align2::LEFT_CENTER,
                 &card.driver,
                 FontId::new(16.0, egui::FontFamily::Name("Inter600".into())),
-                crate::instruments::ENCRE,
+                ENCRE,
             );
             p.text(
                 rect.min + vec2(52.0, 40.0),
@@ -1020,9 +1021,9 @@ fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
                 DISCRET,
             );
             let (dot, label) = if card.connected {
-                (VERT, "Session ouverte")
+                (ACCOMPLI, "Session ouverte")
             } else if card.present {
-                (AMBRE, "Installé, connexion requise")
+                (ATTENTE, "Installé, connexion requise")
             } else {
                 (DISCRET, "Absent de cette machine")
             };
@@ -1056,9 +1057,9 @@ fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
                     button,
                     8,
                     if response.hovered() {
-                        Color32::from_rgb(230, 234, 240)
+                        VERRE_HAUT
                     } else {
-                        BLANC
+                        CREUX
                     },
                 );
                 p.rect_stroke(button, 8, Stroke::new(1.0, TRAIT), egui::StrokeKind::Inside);
@@ -1067,7 +1068,7 @@ fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
                     Align2::CENTER_CENTER,
                     "Ouvrir",
                     FontId::proportional(12.0),
-                    TEXTE,
+                    ENCRE,
                 );
                 if response
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -1095,7 +1096,7 @@ fn modeles(ui: &mut egui::Ui, atelier: &mut Atelier) {
                 clients_officiels(ui, atelier);
             });
             ui.add_space(14.0);
-            surface().show(ui, |ui| {
+            plaque(ui, 28, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal_wrapped(|ui| {
                     ui.label(

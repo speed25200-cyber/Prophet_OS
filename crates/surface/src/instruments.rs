@@ -6,7 +6,7 @@
 
 use crate::hud;
 use crate::theme::Accent;
-use crate::theme::palette::{ENCRE, TRAIT};
+use crate::theme::palette::{DISCRET, ENCRE, TRAIT, VERRE_HAUT};
 use egui::{Align2, Color32, FontId, Rect, Stroke, pos2, vec2};
 
 /// Trace un arc de cercle par une ligne brisée, de midi dans le sens horaire.
@@ -154,7 +154,7 @@ pub(crate) fn echelle_isolation(ui: &mut egui::Ui, niveau_max: u8, manque: Optio
         (
             "NIVEAU 0",
             "Confiné",
-            "Espaces de noms, Landlock, seccomp. Outils système de confiance.",
+            "Espaces de noms et seccomp. Landlock reste à implémenter.",
         ),
         (
             "NIVEAU 1",
@@ -167,14 +167,14 @@ pub(crate) fn echelle_isolation(ui: &mut egui::Ui, niveau_max: u8, manque: Optio
             "Firecracker sur KVM. Toute exécution de code arbitraire.",
         ),
     ];
-    let accent = Color32::from_rgb(38, 112, 92);
+    let accent = Accent::de(ui.ctx()).vif;
     for (i, (label, name, detail)) in niveaux.iter().enumerate() {
         let reached = i as u8 <= niveau_max;
         let r = Rect::from_min_size(
             row.min + vec2(i as f32 * (tile_width + gap), 0.0),
             vec2(tile_width, height),
         );
-        painter.rect_filled(r, 14, TUILE);
+        painter.rect_filled(r, 3, VERRE_HAUT);
         if reached {
             painter.rect_filled(
                 Rect::from_min_size(r.min + vec2(0.0, 18.0), vec2(3.0, height - 36.0)),
