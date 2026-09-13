@@ -40,8 +40,10 @@ et l'exécution agentique complète sont encore en cours d'intégration. Voir le
 Une mission peut maintenant [lire le web et naviguer](docs/reports/navigateur-2026-09-13.md) :
 `http.fetch` passe par egress sous le jeton de la tâche, et `web.open`, `web.tree`, `web.act`
 pilotent un Chromium par son arbre sémantique, sans capture d'écran, quand le service en nomme
-un. Le bureau ouvre un navigateur à profil Prophet (Super+N) et X en fenêtre dédiée (Super+X) ;
-cette partie de l'image reste à vérifier par la CI.
+un ; tout le trafic de ce navigateur passe lui aussi par egress, par un relais local. L'humain
+voit où l'agent navigue et ce qu'il a touché, et peut y aller avec son propre navigateur. Le
+bureau ouvre un navigateur à profil Prophet (Super+N) et X en fenêtre dédiée (Super+X) ; l'image
+qui les contient se construit et démarre en CI, le parcours complet du bureau reste à confirmer.
 
 Le nouvel [atelier de supervision](docs/reports/atelier-2026-09-13.md) présente une galerie de
 missions et une Focale pour examiner le travail, avec recherche Ctrl+K et navigation compacte.
