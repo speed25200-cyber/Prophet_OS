@@ -138,6 +138,11 @@ désormais cet ordre ; un test le fixe. Le temps processeur de l'activité est c
 rastériseur logiciel qui trace 12 000 particules par image : sur une carte graphique, ce
 travail quitte le processeur.
 
+Le travail « Surface d'observation » de l'intégration continue exécute désormais ces deux
+commandes à chaque révision et publie leurs résultats dans le résumé du travail et l'artefact
+`surface`, avec les captures de chaque accent : les chiffres existent sans qu'un humain les
+demande, sur le rastériseur logiciel du coureur.
+
 Ces chiffres mesurent un processeur qui rastérise, pas une carte graphique : 35 800 particules
 et une interface egui sont, pour n'importe quelle carte de la dernière décennie, une fraction
 de milliseconde. La fluidité sur écran physique reste à établir avec la même commande.
