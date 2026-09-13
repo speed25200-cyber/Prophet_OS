@@ -154,6 +154,10 @@ L'[ADR 0025](adr/0025-profils-de-mission-web-et-sonde-du-navigateur.md) ouvre en
 catalogue de « Nouvel objectif » au web relayé : un contexte « Recherche sur le web » dans
 l'exemple et dans l'image, le navigateur piloté nommé pour `agentd` et sondé au démarrage sous
 ses contraintes réelles, le verdict rendu par `task.options` et vérifié par le test des services.
+L'[ADR 0026](adr/0026-seance-d-outils-mcp-pour-les-clients-de-l-humain.md) donne ensuite aux
+clients MCP de l'humain (Claude Code, Codex) une séance d'outils tenue par `agentd` dans une
+mission préparée, par le pont `prophet-mcp` ; le client n'est pas confiné, et le pilote
+lancé par le service (M8-T4) reste à livrer.
 
 Les [instruments de l'atelier](reports/instruments-2026-09-13.md) donnent ensuite à la surface
 une identité qui se lit sans mots : anneaux, monogrammes, bandes d'état, rail éclairé, sans
