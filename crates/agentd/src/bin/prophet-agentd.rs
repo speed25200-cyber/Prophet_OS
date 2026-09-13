@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use agentd::runtime::PlanRequest;
-use agentd::{EtatPersistant, Runtime};
+use agentd::{EtatPersistant, Publication, Runtime};
 use prophet_daemon as commun;
 use prophet_ipc::{Client, Error, ErrorCode, Handler, PeerIdentity, Server};
 use prophet_types::cap::{Grant, Token};
@@ -34,6 +34,9 @@ struct Agents {
     profiles: Vec<agentd::preparation::Profile>,
     preparing: Mutex<()>,
     reviews: Arc<tokio::sync::Semaphore>,
+    /// Une seule publication ou annulation à la fois : SFS verrouille le home, et un second
+    /// appel doit recevoir une réponse claire plutôt qu'un refus de verrou.
+    publications: Arc<tokio::sync::Semaphore>,
     capd: std::path::PathBuf,
     ledger: std::path::PathBuf,
     /// Où l'état est écrit entre deux démarrages.
@@ -240,12 +243,53 @@ impl Handler for Agents {
                         Error::new(ErrorCode::InternalError, "travailleurs indisponibles")
                     })?
                     .contains_key(&id);
-                let runtime = self.runtime.lock().await;
-                commun::repondre(
-                    &runtime
+                let (inspection, owner, home) = {
+                    let runtime = self.runtime.lock().await;
+                    let inspection = runtime
                         .inspect(&id, self.local_endpoint.is_some(), has_worker)
-                        .map_err(runtime_erreur)?,
+                        .map_err(runtime_erreur)?;
+                    (
+                        inspection,
+                        runtime.is_owner(&id, pair.uid),
+                        runtime.home().to_path_buf(),
+                    )
+                };
+                // L'état de publication vit dans SFS, pas dans le service : il est relu hors
+                // du verrou, seulement pour une mission qui possède des versions conservées.
+                let publication = if inspection
+                    .result
+                    .as_ref()
+                    .is_some_and(|result| result.get("review").is_some())
+                {
+                    let task = id.clone();
+                    tokio::task::spawn_blocking(move || {
+                        sfs::Workspace::open(&home, &task)
+                            .ok()
+                            .map(|workspace| workspace.state())
+                    })
+                    .await
+                    .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?
+                } else {
+                    None
+                };
+                commun::repondre(&inspection.with_publication(owner, publication))
+            }
+
+            // Le créateur publie l'index exact qu'il a examiné, ou annule cette publication.
+            // La bibliothèque SFS relit les versions et refuse les conflits ; le service ne
+            // fait qu'exiger l'identité, sérialiser les appels et consigner ce qui a eu lieu.
+            "task.apply" => {
+                self.publish(
+                    commun::texte(&params, "id")?,
+                    pair.uid,
+                    Publication::Applied,
                 )
+                .await
+            }
+
+            "task.undo" => {
+                self.publish(commun::texte(&params, "id")?, pair.uid, Publication::Undone)
+                    .await
             }
 
             "task.result" => {
@@ -342,6 +386,72 @@ impl Agents {
             .models()
             .await
             .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))
+    }
+
+    /// Applique ou annule les versions examinées d'une mission, sous l'identité du créateur.
+    ///
+    /// Une publication ou une annulation interrompue laisse SFS en `applying` ou `undoing` ;
+    /// la même commande reprend alors l'intention journalisée au lieu d'en créer une autre.
+    async fn publish(&self, id: String, uid: u32, outcome: Publication) -> Result<Value, Error> {
+        if id.len() > 160 {
+            return Err(Error::new(
+                ErrorCode::InvalidParams,
+                "Référence trop longue.",
+            ));
+        }
+        let (home, review, provenance) = self
+            .runtime
+            .lock()
+            .await
+            .publication_context(&id, uid)
+            .map_err(|e| Error::new(ErrorCode::PolicyDenied, e))?;
+        let permit = self.publications.clone().try_acquire_owned().map_err(|_| {
+            Error::new(
+                ErrorCode::Conflict,
+                "Une publication est déjà en cours. Réessayez dans un instant.",
+            )
+        })?;
+        let task = id.clone();
+        let diff = tokio::task::spawn_blocking(move || {
+            use sfs::WorkspaceState as W;
+            let _permit = permit;
+            let mut workspace = sfs::Workspace::open(&home, &task)?;
+            let now = OffsetDateTime::now_utc();
+            match (outcome, workspace.state()) {
+                (Publication::Applied, W::Open) => {
+                    workspace.commit_review(&review, now, Some(&provenance))
+                }
+                (Publication::Applied, W::Applying) | (Publication::Undone, W::Undoing) => {
+                    workspace.recover_publication()
+                }
+                (Publication::Undone, W::Committed) => workspace.undo(),
+                (_, state) => Err(sfs::SfsError::BadState { state }),
+            }
+        })
+        .await
+        .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?
+        .map_err(|e| publication_refusee(outcome, e))?;
+        let maintenant = OffsetDateTime::now_utc();
+        {
+            let mut runtime = self.runtime.lock().await;
+            runtime
+                .record_publication(&id, outcome, &diff, maintenant)
+                .map_err(runtime_erreur)?;
+        }
+        self.enregistrer().await?;
+        self.vider_le_journal().await;
+        let (added, modified, deleted) = diff.counts();
+        let counts = json!({"added":added,"modified":modified,"deleted":deleted});
+        match outcome {
+            Publication::Applied => {
+                tracing::info!(tache = %id, "versions publiées");
+                Ok(json!({"applied":id,"changes":counts}))
+            }
+            Publication::Undone => {
+                tracing::info!(tache = %id, "publication annulée");
+                Ok(json!({"undone":id,"state":"rolled_back","changes":counts}))
+            }
+        }
     }
 
     async fn start_local(&self, id: String) -> Result<Value, Error> {
@@ -614,6 +724,41 @@ fn runtime_erreur(erreur: agentd::RuntimeError) -> Error {
     Error::new(code, erreur.to_string())
 }
 
+/// Un refus de SFS, dit dans les termes de la commande demandée.
+///
+/// L'état de l'espace de travail explique ce qui bloque : déjà publié, jamais publié, conflit
+/// conservé. Les autres erreurs — version altérée, document retouché, lien — portent déjà
+/// leur message et restent des conflits, jamais des erreurs internes.
+fn publication_refusee(outcome: Publication, erreur: sfs::SfsError) -> Error {
+    use sfs::WorkspaceState as W;
+    let message = match (&erreur, outcome) {
+        (sfs::SfsError::BadState { state: W::Committed }, Publication::Applied) => {
+            "Les versions de cette mission sont déjà publiées.".to_owned()
+        }
+        (sfs::SfsError::BadState { state: W::Open }, Publication::Undone) => {
+            "Cette mission n'a pas encore été publiée.".to_owned()
+        }
+        (sfs::SfsError::BadState { state: W::RolledBack }, _) => {
+            "Cette publication a déjà été annulée.".to_owned()
+        }
+        (sfs::SfsError::BadState { state: W::Conflict }, _) => {
+            "Une publication interrompue sur un conflit conserve ses fichiers déplacés ; elle demande une résolution explicite.".to_owned()
+        }
+        (sfs::SfsError::BadState { state }, _) => {
+            format!("Commande impossible dans l'état de publication {state:?}.")
+        }
+        (sfs::SfsError::UnknownTask(_), _) => {
+            "Les versions de cette mission ne sont plus disponibles.".to_owned()
+        }
+        _ => erreur.to_string(),
+    };
+    let code = match erreur {
+        sfs::SfsError::UnknownTask(_) => ErrorCode::NotFound,
+        _ => ErrorCode::Conflict,
+    };
+    Error::new(code, message)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     commun::journaliser();
@@ -669,6 +814,7 @@ async fn main() -> anyhow::Result<()> {
             profiles,
             preparing: Mutex::new(()),
             reviews: Arc::new(tokio::sync::Semaphore::new(2)),
+            publications: Arc::new(tokio::sync::Semaphore::new(1)),
             capd,
             ledger,
             etat: fichier_etat,

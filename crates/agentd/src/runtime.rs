@@ -148,6 +148,41 @@ pub struct Inspection {
     pub can_cancel: bool,
     /// Pourquoi un plan ne peut pas être lancé ici.
     pub start_reason: Option<String>,
+    /// État de publication des versions, lu dans SFS ; absent sans versions conservées.
+    #[serde(default)]
+    pub publication: Option<sfs::WorkspaceState>,
+    /// Le créateur peut publier les versions examinées dans ses documents.
+    #[serde(default)]
+    pub can_apply: bool,
+    /// Le créateur peut annuler une publication effectuée.
+    #[serde(default)]
+    pub can_undo: bool,
+}
+
+impl Inspection {
+    /// Complète la vue avec l'état de publication lu hors du verrou du service.
+    ///
+    /// Les commandes ne sont offertes qu'au créateur constaté de la mission : la publication
+    /// touche ses documents, et l'état SFS seul ne dit pas qui a le droit de la demander.
+    /// Une publication ou une annulation interrompue se reprend par la même commande.
+    #[must_use]
+    pub fn with_publication(mut self, owner: bool, state: Option<sfs::WorkspaceState>) -> Self {
+        use sfs::WorkspaceState as W;
+        self.publication = state;
+        let done = self.task.state == State::Done;
+        self.can_apply = owner && done && matches!(state, Some(W::Open | W::Applying));
+        self.can_undo = owner && done && matches!(state, Some(W::Committed | W::Undoing));
+        self
+    }
+}
+
+/// Ce que la publication a fait, pour le journal et l'état de la tâche.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Publication {
+    /// Les versions examinées ont atteint les documents.
+    Applied,
+    /// Les documents publiés ont retrouvé leurs versions initiales.
+    Undone,
 }
 
 impl TaskPlan {
@@ -429,7 +464,100 @@ impl Runtime {
             plan,
             result: self.results.get(id).cloned(),
             start_reason,
+            publication: None,
+            can_apply: false,
+            can_undo: false,
         })
+    }
+
+    /// Répertoire personnel dont le service tient les captures.
+    #[must_use]
+    pub fn home(&self) -> &std::path::Path {
+        &self.home
+    }
+
+    /// Vrai si ce pair est le créateur persisté de la mission.
+    #[must_use]
+    pub fn is_owner(&self, id: &str, uid: u32) -> bool {
+        self.owners.get(id) == Some(&uid)
+    }
+
+    /// Donne au créateur l'index exact de ses versions et la provenance à poser, pour une
+    /// publication ou une annulation hors du verrou du runtime.
+    ///
+    /// # Errors
+    /// Identité absente ou différente, mission non terminée, versions indisponibles.
+    pub fn publication_context(
+        &self,
+        id: &str,
+        uid: u32,
+    ) -> Result<(PathBuf, sfs::ReviewIndex, sfs::Provenance), String> {
+        if self.owners.get(id) == Some(&uid)
+            && self
+                .tasks
+                .get(id)
+                .is_some_and(|task| task.state == State::RolledBack)
+        {
+            return Err("Cette publication a déjà été annulée ; la mission est close.".into());
+        }
+        let (home, index) = self.review_context(id, uid)?;
+        let task = self.tasks.get(id).ok_or("Mission inconnue.")?;
+        let model = task
+            .driver
+            .clone()
+            .or_else(|| self.plans.get(id).map(|plan| plan.choice.reference.clone()))
+            .unwrap_or_default();
+        let provenance = sfs::Provenance {
+            task: task.id.clone(),
+            agent: task.agent.clone(),
+            step: task.budget.spent.steps,
+            model,
+        };
+        Ok((home, index, provenance))
+    }
+
+    /// Consigne une publication effectuée par le créateur, après son succès sur le disque.
+    ///
+    /// Une annulation rend la tâche `rolled_back` : c'est la promesse de réversibilité, et
+    /// l'état de la tâche doit le dire sans obliger à relire SFS.
+    ///
+    /// # Errors
+    /// Tâche inconnue ou transition interdite.
+    pub fn record_publication(
+        &mut self,
+        id: &str,
+        outcome: Publication,
+        diff: &sfs::Diff,
+        now: OffsetDateTime,
+    ) -> Result<(), RuntimeError> {
+        let (added, modified, deleted) = diff.counts();
+        let counts = json!({"added":added,"modified":modified,"deleted":deleted});
+        if !self.tasks.contains_key(id) {
+            return Err(RuntimeError::Unknown(id.into()));
+        }
+        match outcome {
+            Publication::Applied => {
+                self.record(id, EventKind::FsCommit, Actor::user(), counts, now);
+            }
+            Publication::Undone => {
+                self.tasks
+                    .get_mut(id)
+                    .ok_or_else(|| RuntimeError::Unknown(id.into()))?
+                    .transition(
+                        State::RolledBack,
+                        Some("versions annulées par l'utilisateur".into()),
+                    )?;
+                self.record(id, EventKind::FsUndo, Actor::user(), counts, now);
+                self.record(
+                    id,
+                    EventKind::TaskRolledBack,
+                    Actor::user(),
+                    json!({"reason":"versions annulées par l'utilisateur"}),
+                    now,
+                );
+            }
+        }
+        Ok(())
     }
 
     /// Annule une tâche qui n'a pas de travailleur lancé.

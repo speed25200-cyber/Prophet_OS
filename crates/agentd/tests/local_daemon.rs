@@ -668,3 +668,199 @@ async fn une_mission_interrompue_par_redemarrage_ne_reste_pas_en_cours() {
     assert!(!chain.dir.path().join("home/docs/note.txt").exists());
     model.worker.abort();
 }
+
+#[tokio::test]
+async fn le_createur_publie_les_versions_examinees_puis_les_annule() {
+    let model = controlled_model().await;
+    let mut chain = Chain::new(&model.endpoint).await;
+    chain.plan("controlled", "Écris une note").await;
+    // Rien à publier avant la fin : le refus est une question d'autorisation, pas d'état SFS.
+    let refused = chain
+        .agents
+        .call("task.apply", json!({"id":"local-test"}))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, prophet_ipc::ErrorCode::PolicyDenied);
+    chain
+        .agents
+        .call("task.start", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    model.received.await.unwrap();
+    model.release.send(()).unwrap();
+    let status = chain.wait_terminal().await;
+    assert_eq!(status["state"], "done", "{status}");
+    let note = chain.dir.path().join("home/docs/note.txt");
+    assert!(!note.exists(), "la fin d'une mission ne publie rien");
+
+    let info = inspect(&chain).await;
+    assert_eq!(info["publication"], "open", "{info}");
+    assert_eq!(info["can_apply"], true);
+    assert_eq!(info["can_undo"], false);
+
+    let applied = chain
+        .agents
+        .call("task.apply", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    assert_eq!(applied["applied"], "local-test", "{applied}");
+    assert_eq!(applied["changes"]["added"], 1);
+    assert_eq!(std::fs::read_to_string(&note).unwrap(), "preuve");
+    let info = inspect(&chain).await;
+    assert_eq!(info["task"]["state"], "done");
+    assert_eq!(info["publication"], "committed", "{info}");
+    assert_eq!(info["can_apply"], false);
+    assert_eq!(info["can_undo"], true);
+    let again = chain
+        .agents
+        .call("task.apply", json!({"id":"local-test"}))
+        .await
+        .unwrap_err();
+    assert_eq!(again.code, prophet_ipc::ErrorCode::Conflict);
+    assert!(again.message.contains("déjà publiées"), "{}", again.message);
+
+    let undone = chain
+        .agents
+        .call("task.undo", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    assert_eq!(undone["undone"], "local-test", "{undone}");
+    assert_eq!(undone["state"], "rolled_back");
+    assert!(!note.exists(), "l'ajout publié doit être retiré");
+    let info = inspect(&chain).await;
+    assert_eq!(info["task"]["state"], "rolled_back", "{info}");
+    assert_eq!(info["publication"], "rolled_back");
+    assert_eq!(info["can_apply"], false);
+    assert_eq!(info["can_undo"], false);
+    let refused = chain
+        .agents
+        .call("task.apply", json!({"id":"local-test"}))
+        .await
+        .unwrap_err();
+    assert!(
+        refused.message.contains("annulée"),
+        "un état terminal doit être nommé : {}",
+        refused.message
+    );
+
+    let events = chain
+        .journal
+        .call("ledger.query", json!({"task":"local-test"}))
+        .await
+        .unwrap();
+    let events = events.as_array().unwrap();
+    for kind in ["fs.commit", "fs.undo", "task.rolled_back"] {
+        let event = events
+            .iter()
+            .find(|e| e["kind"] == kind)
+            .unwrap_or_else(|| panic!("{kind} absent du journal : {events:?}"));
+        assert_eq!(event["actor"], "user", "{event}");
+    }
+    assert!(
+        !events.iter().any(|e| e.to_string().contains("preuve")),
+        "le contenu publié n'entre pas dans le journal"
+    );
+
+    // L'état survit au redémarrage : la tâche reste annulée, sans nouvelle commande possible.
+    restart(&mut chain).await;
+    let info = inspect(&chain).await;
+    assert_eq!(info["task"]["state"], "rolled_back");
+    assert_eq!(info["publication"], "rolled_back");
+}
+
+#[tokio::test]
+async fn une_retouche_humaine_apres_publication_interdit_l_annulation() {
+    let model = controlled_model().await;
+    let chain = Chain::new(&model.endpoint).await;
+    chain.plan("controlled", "Écris une note").await;
+    chain
+        .agents
+        .call("task.start", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    model.received.await.unwrap();
+    model.release.send(()).unwrap();
+    assert_eq!(chain.wait_terminal().await["state"], "done");
+    chain
+        .agents
+        .call("task.apply", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    let note = chain.dir.path().join("home/docs/note.txt");
+    assert_eq!(std::fs::read_to_string(&note).unwrap(), "preuve");
+
+    // Le document a été repris par l'humain : l'annulation le laisse tel quel et le dit.
+    std::fs::write(&note, "retouche humaine").unwrap();
+    let refused = chain
+        .agents
+        .call("task.undo", json!({"id":"local-test"}))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        refused.code,
+        prophet_ipc::ErrorCode::Conflict,
+        "{refused:?}"
+    );
+    assert_eq!(std::fs::read_to_string(&note).unwrap(), "retouche humaine");
+    let info = inspect(&chain).await;
+    assert_eq!(info["task"]["state"], "done", "{info}");
+    assert_eq!(info["publication"], "committed", "{info}");
+    let events = chain
+        .journal
+        .call("ledger.query", json!({"task":"local-test"}))
+        .await
+        .unwrap();
+    assert!(
+        !events
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "fs.undo"),
+        "un refus ne s'inscrit pas comme une annulation : {events}"
+    );
+}
+
+#[tokio::test]
+async fn la_cli_publie_et_annule_par_le_service() {
+    let model = controlled_model().await;
+    let chain = Chain::new(&model.endpoint).await;
+    chain.plan("controlled", "Écris une note").await;
+    chain
+        .agents
+        .call("task.start", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    model.received.await.unwrap();
+    model.release.send(()).unwrap();
+    assert_eq!(chain.wait_terminal().await["state"], "done");
+    let note = chain.dir.path().join("home/docs/note.txt");
+
+    let show = cli(&chain, &["task", "show", "local-test"]).await;
+    let show = String::from_utf8(show.stdout).unwrap();
+    assert!(show.contains("non appliquées"), "{show}");
+    assert!(show.contains("prophet task apply local-test"), "{show}");
+
+    let apply = cli(&chain, &["task", "apply", "local-test"]).await;
+    let apply = String::from_utf8(apply.stdout).unwrap();
+    assert!(apply.contains("versions publiées"), "{apply}");
+    assert!(apply.contains("1 ajout(s)"), "{apply}");
+    assert_eq!(std::fs::read_to_string(&note).unwrap(), "preuve");
+
+    let show = cli(&chain, &["task", "show", "local-test"]).await;
+    let show = String::from_utf8(show.stdout).unwrap();
+    assert!(show.contains("Publication : versions publiées"), "{show}");
+    assert!(show.contains("prophet task undo local-test"), "{show}");
+
+    let undo = cli(&chain, &["--json", "task", "undo", "local-test"]).await;
+    let undo: Value = serde_json::from_slice(&undo.stdout).unwrap();
+    assert_eq!(undo["undone"], "local-test", "{undo}");
+    assert!(!note.exists());
+}
+
+async fn inspect(chain: &Chain) -> Value {
+    chain
+        .agents
+        .call("task.inspect", json!({"id":"local-test"}))
+        .await
+        .unwrap()
+}
