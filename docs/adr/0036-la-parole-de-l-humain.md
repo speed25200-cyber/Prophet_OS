@@ -21,7 +21,9 @@ distant ; et la parole ne donne aucun droit, elle produit un texte que l'humain 
    enregistre le micro ; `--language` impose la langue ; `--prepare <contexte>` prépare une
    mission avec le texte transcrit pour objectif, par le même chemin que `prophet task
    prepare` : le plan est rendu, l'humain le lance séparément. Le son enregistré est effacé
-   après la transcription ; `--json` rend `{transcript, plan}`.
+   après la transcription ; `--json` rend `{transcript, plan, reply}`. Avec `--reply`, l'OS
+   répond à voix haute : ce qu'il a compris, la mission préparée et où l'examiner, ou pourquoi
+   rien n'est préparé ; c'est la boucle « je parle, l'OS prépare, l'OS répond ».
 3. **L'image.** Le module `voice.nix` installe whisper.cpp et PipeWire dans la session et pose
    les variables ; la configuration de référence télécharge à l'installation le modèle
    `ggml-base` (multilingue, 148 Mo, empreinte publiée par Hugging Face), comme les modèles de

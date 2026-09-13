@@ -80,8 +80,12 @@ enum Command {
         /// d'écouter.
         #[arg(long, conflicts_with_all = ["file", "prepare"])]
         say: Option<String>,
-        /// Avec `--say` : écrire le son dans ce fichier WAV au lieu de le jouer.
-        #[arg(long, requires = "say")]
+        /// Répondre à voix haute : ce qui a été compris et, avec `--prepare`, la mission
+        /// préparée ; ou pourquoi rien n'a été préparé.
+        #[arg(long, conflicts_with = "say")]
+        reply: bool,
+        /// Avec `--say` ou `--reply` : écrire la réponse dans ce fichier WAV au lieu de la jouer.
+        #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
 }
@@ -340,6 +344,7 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
             prepare,
             model,
             say,
+            reply,
             out,
         } => match say {
             Some(text) => speak(text, out.as_deref(), cli.json),
@@ -349,6 +354,7 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
                 language.as_deref(),
                 prepare.as_deref(),
                 model.clone(),
+                if *reply { Some(out.as_deref()) } else { None },
                 cli.json,
             ),
         },
@@ -415,6 +421,7 @@ fn voice(
     language: Option<&str>,
     prepare: Option<&str>,
     model: Option<String>,
+    reply: Option<Option<&std::path::Path>>,
     as_json: bool,
 ) -> anyhow::Result<String> {
     let tools = voice::Tools::from_env()?;
@@ -435,21 +442,53 @@ fn voice(
         let _ = std::fs::remove_file(audio);
     }
     let transcript = transcript?;
+    // La réponse parlée, si elle est demandée : dite tout de suite, ou écrite dans `--out`.
+    let repondre = |texte: String| -> anyhow::Result<Option<voice::Speech>> {
+        match reply {
+            None => Ok(None),
+            Some(out) => reply_aloud(&tools, &texte, out).map(Some),
+        }
+    };
     if transcript.text.is_empty() {
+        repondre("Je n'ai rien compris. Rien n'est préparé.".into())?;
         anyhow::bail!("rien n'a été compris ; rien n'est préparé");
     }
-    let plan = match prepare {
-        Some(profile) => Some(task(
-            &TaskAction::Prepare {
-                profile: profile.to_owned(),
-                model,
-                client: false,
-                id: None,
-                intent: transcript.text.clone(),
-            },
-            as_json,
-        )?),
-        None => None,
+    let (plan, spoken) = match prepare {
+        Some(profile) => {
+            let id = format!("mission-{}", ulid::Ulid::new());
+            let prepared = task(
+                &TaskAction::Prepare {
+                    profile: profile.to_owned(),
+                    model,
+                    client: false,
+                    id: Some(id.clone()),
+                    intent: transcript.text.clone(),
+                },
+                as_json,
+            );
+            match prepared {
+                Ok(plan) => {
+                    // L'identifiant n'est pas dit : épelé, un ULID n'aide personne ; il est
+                    // écrit dans la réponse et dans l'atelier.
+                    let spoken = repondre(format!(
+                        "J'ai compris : {}. La mission est préparée dans le contexte {}. Examinez son plan dans l'atelier, puis lancez-la.",
+                        transcript.text, profile
+                    ))?;
+                    (Some(plan), spoken)
+                }
+                Err(error) => {
+                    repondre(format!(
+                        "J'ai compris : {}. Mais je n'ai pas pu préparer la mission.",
+                        transcript.text
+                    ))?;
+                    return Err(error);
+                }
+            }
+        }
+        None => (
+            None,
+            repondre(format!("J'ai compris : {}", transcript.text))?,
+        ),
     };
     if as_json {
         let plan: Option<serde_json::Value> =
@@ -457,7 +496,7 @@ fn voice(
         return Ok(format!(
             "{}\n",
             serde_json::to_string_pretty(
-                &serde_json::json!({"transcript": transcript, "plan": plan})
+                &serde_json::json!({"transcript": transcript, "plan": plan, "reply": spoken})
             )?
         ));
     }
@@ -471,7 +510,31 @@ fn voice(
     if let Some(plan) = plan {
         out.push_str(&plan);
     }
+    if let Some(spoken) = spoken {
+        out.push_str(&format!("Réponse dite ({} ms).\n", spoken.duration_ms));
+    }
     Ok(out)
+}
+
+/// Dit `texte` sur la sortie audio de la session, ou l'écrit dans `out`.
+fn reply_aloud(
+    tools: &voice::Tools,
+    texte: &str,
+    out: Option<&std::path::Path>,
+) -> anyhow::Result<voice::Speech> {
+    match out {
+        Some(path) => Ok(tools.speak(texte, path)?),
+        None => {
+            let dir = std::env::var_os("XDG_RUNTIME_DIR")
+                .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+            let wav = dir.join(format!("prophet-reponse-{}.wav", std::process::id()));
+            let speech = tools.speak(texte, &wav)?;
+            let played = tools.play(&wav);
+            let _ = std::fs::remove_file(&wav);
+            played?;
+            Ok(speech)
+        }
+    }
 }
 
 fn freeze(socket: &std::path::Path, as_json: bool) -> anyhow::Result<String> {

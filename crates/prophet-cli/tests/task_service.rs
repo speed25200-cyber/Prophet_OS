@@ -7,6 +7,14 @@ use std::process::{Command, Output};
 use serde_json::{Value, json};
 
 fn invoke(args: &[&str], method: &str, params: Value, result: Value) -> Output {
+    let (output, request) = invoke_with(args, method, result);
+    assert_eq!(request["params"], params);
+    output
+}
+
+/// Comme [`invoke`], mais rend la requête reçue par le service simulé au lieu d'en imposer les
+/// paramètres : utile quand une partie de la requête vient d'une transcription.
+fn invoke_with(args: &[&str], method: &str, result: Value) -> (Output, Value) {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");
     std::fs::create_dir_all(home.join(".prophet")).unwrap();
@@ -50,12 +58,77 @@ fn invoke(args: &[&str], method: &str, params: Value, result: Value) -> Output {
         .unwrap();
     let request = server.join().unwrap();
     assert_eq!(request["method"], method);
-    assert_eq!(request["params"], params);
     assert_eq!(
         std::fs::read_to_string(home.join(".prophet/tasks")).unwrap(),
         "capture privée du service"
     );
-    output
+    (output, request)
+}
+
+/// Parler à l'OS, de bout en bout : une phrase française de synthèse, transcrite en local,
+/// devient une mission préparée auprès du service (simulé ici), et l'OS répond à voix haute ;
+/// sa réponse est réécoutée par Whisper. Exige les programmes des essais du crate `voice`.
+#[test]
+#[ignore = "needs_voice_stack: PROPHET_WHISPER_MODEL, PROPHET_WHISPER, PROPHET_PIPER, PROPHET_PIPER_VOICE, PROPHET_TEST_ESPEAK"]
+fn une_phrase_dite_devient_une_mission_et_l_os_repond() {
+    let espeak = std::env::var("PROPHET_TEST_ESPEAK").unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let phrase = temp.path().join("phrase.wav");
+    assert!(
+        Command::new(&espeak)
+            .args(["-v", "fr", "-s", "150", "-w"])
+            .arg(&phrase)
+            .arg("Écris une note de réunion dans mes documents.")
+            .status()
+            .unwrap()
+            .success()
+    );
+    let reponse = temp.path().join("reponse.wav");
+    let plan = json!({
+        "task": "mission-x", "intent": "…",
+        "choice": {"reference": "local:m", "reason": "essai"},
+        "sandbox_level": 0, "grants": [], "limits": agentd::Limits::default(),
+        "scopes": ["~/docs"]
+    });
+    let (output, request) = invoke_with(
+        &[
+            "voice",
+            "--file",
+            phrase.to_str().unwrap(),
+            "--language",
+            "fr",
+            "--prepare",
+            "docs",
+            "--model",
+            "m",
+            "--reply",
+            "--out",
+            reponse.to_str().unwrap(),
+        ],
+        "task.prepare",
+        plan,
+    );
+    let out = success(output);
+    let intent = request["params"]["intent"].as_str().unwrap().to_lowercase();
+    assert!(
+        intent.contains("note") && intent.contains("documents"),
+        "{intent}"
+    );
+    assert_eq!(request["params"]["profile"], "docs");
+    assert_eq!(request["params"]["model"], "m");
+    assert!(
+        request["params"]["id"]
+            .as_str()
+            .unwrap()
+            .starts_with("mission-")
+    );
+    assert!(out.contains("Réponse dite"), "{out}");
+    let tools = voice::Tools::from_env().unwrap();
+    let heard = tools.transcribe(&reponse, Some("fr")).unwrap();
+    eprintln!("réponse de l'OS réécoutée : « {} »", heard.text);
+    let heard = heard.text.to_lowercase();
+    assert!(heard.contains("prépar"), "{heard}");
+    assert!(heard.contains("compris"), "{heard}");
 }
 
 fn success(output: Output) -> String {

@@ -24,6 +24,7 @@ prophet voice --seconds 8 --prepare documents
 prophet --json voice --file phrase.wav
 prophet voice --say "La note est écrite. Voulez-vous la publier ?"
 prophet voice --say "Bonjour" --out bonjour.wav
+prophet voice --prepare documents --reply     # écoute, prépare la mission, répond à voix haute
 ```
 
 ## Validation

@@ -315,8 +315,11 @@ sous l'objectif, présent seulement avec un modèle de parole, qui écoute et tr
 graphique et ajoute le texte à l'objectif que l'humain relit ; son contrôleur est testé avec des
 dictées simulées. L'OS parle aussi : `prophet voice --say` synthétise en local par Piper avec la
 voix française « siwis » (installée par la configuration de référence) et joue par `pw-play` ;
-preuve en boucle fermée, l'OS dit une phrase et Whisper la réécoute presque mot pour mot. Ni
-voix humaine mesurée, ni lecture vérifiée sur une vraie sortie audio, ni mot d'activation : voir
+preuve en boucle fermée, l'OS dit une phrase et Whisper la réécoute presque mot pour mot. La
+boucle complète existe : `prophet voice --prepare <contexte> --reply` transcrit la phrase dite,
+prépare la mission auprès d'agentd et répond à voix haute ce qu'il a compris et où examiner le
+plan ; un test de la CLI avec service simulé le prouve, réponse réécoutée par Whisper. Ni voix
+humaine mesurée, ni lecture vérifiée sur une vraie sortie audio, ni mot d'activation : voir
 l'[ADR 0036](adr/0036-la-parole-de-l-humain.md) et le [rapport](reports/parole-2026-09-13.md).
 
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
