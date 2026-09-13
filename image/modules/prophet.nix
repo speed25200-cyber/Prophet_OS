@@ -305,7 +305,7 @@ in
           # les médias, tesseract pour le texte des images. Absents, l'outil le dirait ; ils sont
           # là pour que l'agent lise ce que l'humain lui confie.
           path = [
-            pkgs.poppler_utils
+            pkgs.poppler-utils
             pkgs.ffmpeg-headless
             (pkgs.tesseract.override { enableLanguages = [ "eng" "fra" ]; })
           ];
