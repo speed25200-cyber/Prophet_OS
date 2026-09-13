@@ -207,5 +207,17 @@ synthèse transcrite avec ses mots-clés par le vrai modèle, et un bouton « Di
 l'atelier dont le contrôleur est testé avec des dictées simulées. Le critère d'interface (espace
 de commande, conversations) progresse sans être coché : la voix humaine n'est pas mesurée sur
 un vrai micro. L'OS parle aussi, en local par Piper (`prophet voice --say`), prouvé en boucle
-fermée avec Whisper ; la lecture sur une vraie sortie audio et le mot d'activation restent
-à vérifier.
+fermée avec Whisper ; la lecture sur une vraie sortie audio reste à vérifier.
+
+Le 14 septembre, la boucle se ferme sans clavier : « Prophète, … » est le mot d'activation de
+l'écoute continue (`prophet voice --listen`, et « Écouter « Prophète » » dans l'atelier) ; une
+phrase dite devient une mission préparée, « Prophète, lance la mission » la lance (l'approbation
+de l'humain, dite), « Prophète, résultat » fait dire son résultat, et l'atelier dit de lui-même
+la fin d'une mission qu'on regarde courir. Preuves avec la vraie chaîne (Whisper, Piper, voix
+française) : trois ordres à la suite sur un service simulé, dernière réponse réécoutée
+« mission terminée. la note de réunion est écrite dans vos documents. un changement est à
+examiner. » ; la CI apporte cette chaîne (`nix build .#chaine-vocale`) et rejoue ces essais à
+chaque poussée. Côté relais, un rôle `review` fait relire un travail rendu par un autre regard
+— dans l'atelier des agents, Claude Code relit ce que Codex a codé — au prix d'une lecture, sans
+droit nouveau. Restent : la voix humaine sur un vrai micro, la sortie audio réelle, et
+l'exécution des vrais clients connectés par l'humain.

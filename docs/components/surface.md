@@ -82,6 +82,15 @@ restent à raccorder. Voir l'ADR 0008 et les exigences FRONTIER.
 Une seule décision est montrée à la fois, la plus ancienne. Faire patienter quelqu'un est déjà
 désagréable ; changer d'avis sur ce qu'on lui demande pendant qu'il patiente le serait davantage.
 
+La parole (ADR 0036), si la machine a un modèle de whisper.cpp : « Dicter (6 s) » sous
+l'objectif écoute le micro puis transcrit en local, le texte rejoint l'objectif que l'humain
+relit ; « Écouter « Prophète » » écoute en continu par tranches, et seule une phrase qui commence
+par le mot d'activation compte : une intention rejoint l'objectif, « prépare » l'envoie, « lance
+la mission » lance la mission choisie, « résultat » fait dire où elle en est. Si Piper et une
+voix sont là, la fin d'une mission qu'on regarde courir est dite, une fois ; « Voix : lue /
+muette » dans la barre des missions coupe cette lecture. Tout est local ; chaque tranche
+enregistrée est effacée après transcription.
+
 ## Pourquoi elle appartient à `prophet-system`
 
 `/run/prophet` est en 0770 pour ce groupe et les sockets en 0660 : sans lui, la surface ne
