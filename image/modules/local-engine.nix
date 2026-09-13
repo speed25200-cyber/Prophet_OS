@@ -99,7 +99,7 @@ in {
     weights = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
-      description = "Fichier GGUF local sous /var/lib/prophet/models ou /nix/store. null laisse le moteur non configuré ; aucun poids n'est téléchargé automatiquement.";
+      description = "Fichier GGUF local sous /var/lib/prophet/models ou /nix/store. null laisse le moteur non configuré. Ce module ne télécharge rien ; la configuration de référence du flake pointe le modèle par défaut, téléchargé par l'installation (ADR 0033), et la variante d'intégration continue reste sans poids.";
     };
     model = lib.mkOption {
       type = lib.types.strMatching "[A-Za-z0-9][A-Za-z0-9._-]{0,127}";

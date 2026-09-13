@@ -14,7 +14,9 @@ effaçant son disque doit annoncer ses manques avant, pas après.
 - Une clé USB d'au moins 2 Gio, dont le contenu sera effacé.
 - Un PC x86-64, avec **UEFI** (tout PC livré avec Windows 10 ou 11 en a un) **ou un simple
   BIOS** (un PC de 2012 démarre aussi : l'installeur y pose GRUB au lieu de systemd-boot),
-  **80 Gio** de disque au minimum, et une connexion réseau au moment de l'installation.
+  **80 Gio** de disque au minimum, **8 Gio** de mémoire, et une connexion réseau au moment de
+  l'installation, qui télécharge aussi le modèle local par défaut (Qwen3-1.7B, 1,83 Go, depuis
+  huggingface.co).
 - Le fichier `prophet-os-installeur-*.iso`, produit par le travail « Support d'amorçage » de
   l'intégration continue. Il se télécharge depuis l'onglet *Actions* du dépôt, dans les artefacts
   de la dernière exécution réussie — artefact `prophet-os-iso`, environ 1,4 Gio, accompagné de son
@@ -118,8 +120,10 @@ Le mot de passe n'est écrit nulle part en clair : seul son haché est posé sur
 en `0600`. Ce dépôt est public, et un mot de passe écrit dans une configuration versionnée est un
 mot de passe connu.
 
-Comptez vingt minutes à une heure : le système est téléchargé depuis `cache.nixos.org` et
-assemblé sur place.
+Comptez vingt minutes à une heure : le système est téléchargé depuis `cache.nixos.org`, le
+modèle local depuis `huggingface.co`, et le tout est assemblé sur place. Au premier démarrage,
+l'agent local répond sans compte ni clé d'API ; un abonnement Claude Code, Codex ou Gemini s'y
+ajoute par `prophet provider login`.
 
 Pour voir la disposition qu'il produirait sans rien installer :
 

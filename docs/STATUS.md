@@ -147,6 +147,11 @@ test du daemon a montré qu'un `sleep` survivait au délai avant cela. Tests du 
 règles, refus) sans sandboxd ; exécution réelle prouvée par `sandbox.run` sur cette machine.
 Voir l'[ADR 0031](adr/0031-execution-de-programmes-sous-sandboxd.md).
 
+Modèle local par défaut, 13 septembre 2026, dans le commit portant ce rapport : la configuration
+de référence pointe Qwen3-1.7B-Q8_0 (1,83 Go), téléchargé à l'installation ; l'installeur vérifie
+huggingface.co avant d'effacer le disque ; `prophet-ci` et l'ISO restent sans poids. Une machine
+installée a un agent sans compte ni clé. Voir l'[ADR 0033](adr/0033-un-modele-local-par-defaut.md).
+
 Matériel ordinaire, 13 septembre 2026, dans le commit portant ce rapport : le système installé
 n'avait aucun micrologiciel redistribuable (écran noir sur une Radeon une fois posé sur le
 disque), ignorait ce que `nixos-generate-config` détectait, et l'installeur refusait toute

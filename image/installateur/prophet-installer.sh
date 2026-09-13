@@ -112,10 +112,19 @@ if [ "$JUSQU_AU_MONTAGE" = "0" ] && ! ping -c1 -W3 cache.nixos.org >/dev/null 2>
   info "(par câble, ou avec « nmtui » pour le Wi-Fi) puis relancez."
   exit 1
 fi
+# Le modèle local par défaut (1,83 Go) vient de huggingface.co, à l'installation : sans lui, la
+# machine installée n'aurait d'agent qu'avec un compte ou une clé (ADR 0033). On le vérifie
+# avant d'effacer quoi que ce soit, comme le cache.
+if [ "$JUSQU_AU_MONTAGE" = "0" ] && ! curl -sSI --max-time 15 https://huggingface.co/ >/dev/null 2>&1; then
+  rouge "huggingface.co est injoignable."
+  info "Le modèle local par défaut s'y télécharge pendant l'installation. Vérifiez la"
+  info "connexion, ou un pare-feu qui bloquerait ce site, puis relancez."
+  exit 1
+fi
 # Un « test && commande » en fin de ligne sortirait du script quand le test est faux, puisque la
 # ligne rend alors 1 et que `set -e` veille. La forme longue dit la même chose sans ce piège.
 if [ "$JUSQU_AU_MONTAGE" = "0" ]; then
-  vert "✓ réseau et cache Nix joignables"
+  vert "✓ réseau, cache Nix et huggingface.co joignables"
 fi
 
 # --- 2. Ce qui va être détruit, et la confirmation ---
@@ -286,8 +295,9 @@ if [ "$JUSQU_AU_MONTAGE" = "1" ]; then
 fi
 
 titre "Installation du système"
-info "Le système est téléchargé depuis cache.nixos.org et assemblé. Comptez vingt minutes à"
-info "une heure selon la connexion et la machine."
+info "Le système est téléchargé depuis cache.nixos.org et assemblé, avec le modèle local par"
+info "défaut (Qwen3-1.7B, 1,83 Go). Comptez vingt minutes à une heure selon la connexion et"
+info "la machine."
 echo
 
 mkdir -p "$CIBLE/etc/prophet"
@@ -358,7 +368,8 @@ info "Au premier démarrage :"
 info "  • la phrase de passe vous sera demandée pour ouvrir les volumes chiffrés ;"
 info "  • ouvrez une session avec l'identifiant « prophet » et le mot de passe choisi ;"
 info "  • « prophet status » dira ce que cette machine sait isoler ;"
-info "  • « prophet provider login claude-code » connectera votre abonnement."
+info "  • le modèle local Qwen3-1.7B est prêt : les missions tournent sans compte ni clé ;"
+info "  • « prophet provider login claude-code » connectera votre abonnement, si vous en avez un."
 echo
 if [ "$CHIFFRER" = "1" ]; then
   info "Pour ne plus taper la phrase à chaque démarrage, enrôlez-la dans le TPM :"

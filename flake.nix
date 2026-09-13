@@ -39,6 +39,15 @@
 
       # Modules réutilisables, indépendants du système hôte.
       nixosModules.prophet = import ./image/modules/prophet.nix;
+
+      # Le modèle local par défaut : Qwen3-1.7B en Q8_0, 1,83 Go, celui qui réussit les missions
+      # réelles du dépôt sur un processeur seul. La configuration de référence le télécharge à
+      # l'installation, pour qu'une machine installée ait un agent sans clé d'API ni compte ;
+      # la variante d'intégration continue et le support d'amorçage ne le portent pas (ADR 0033).
+      modeleParDefaut = {
+        url = "https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/90862c4b9d2787eaed51d12237eafdfe7c5f6077/Qwen3-1.7B-Q8_0.gguf";
+        sha256 = "061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a";
+      };
     in
     {
       inherit nixosModules;
@@ -57,17 +66,18 @@
           # d'amorçage. Vides dans le dépôt (ADR 0032).
           ./image/machine/hardware-configuration.nix
           ./image/machine/amorcage.nix
-          {
+          ({ pkgs, ... }: {
             prophet.enable = true;
+            prophet.localEngine.weights = pkgs.fetchurl modeleParDefaut;
             nixpkgs.config.allowUnfreePredicate = autoriserLesClients;
-          }
+          })
         ];
       };
 
       # La même configuration sans la suite d'applications de l'humain (LibreOffice, GIMP,
-      # Blender, FreeCAD…) : ce que l'intégration continue construit et démarre, parce qu'elle
-      # paie chaque gigaoctet et n'ouvre aucune application ; ce que l'installeur pose reste
-      # `prophet`, suite comprise.
+      # Blender, FreeCAD…) ni le modèle local par défaut : ce que l'intégration continue construit
+      # et démarre, parce qu'elle paie chaque gigaoctet et n'ouvre aucune application ; ce que
+      # l'installeur pose reste `prophet`, suite et modèle compris.
       nixosConfigurations.prophet-ci = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
         modules = [
@@ -193,10 +203,7 @@
           local-engine-vm = import ./image/tests/local-engine.nix {
             inherit pkgs;
             module = nixosModules.prophet;
-            weights = pkgs.fetchurl {
-              url = "https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/90862c4b9d2787eaed51d12237eafdfe7c5f6077/Qwen3-1.7B-Q8_0.gguf";
-              sha256 = "061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a";
-            };
+            weights = pkgs.fetchurl modeleParDefaut;
           };
           chatgpt-linux = pkgs.callPackage ./image/packages/chatgpt-linux.nix { };
           iso = self.nixosConfigurations.prophet-iso.config.system.build.isoImage;
