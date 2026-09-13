@@ -155,14 +155,23 @@ Déconnexion'
   };
   session = pkgs.writeShellApplication {
     name = "prophet-session";
-    runtimeInputs = [ compositor ];
+    runtimeInputs = [ compositor pkgs.systemd ];
     text = ''
       if [ "$(id -un)" != ${lib.escapeShellArg human} ]; then
         echo "Cette session appartient au propriétaire configuré de la machine." >&2
         exit 1
       fi
       umask 077
-      exec sway --config /etc/prophet/sway.conf
+      # Le gestionnaire d'utilisateur survit à la session graphique. Sans ces deux lignes, la
+      # cible `sway-session.target` restait active après une déconnexion, la supervision mourait
+      # trois fois de suite faute de compositeur, atteignait sa limite de redémarrages, et la
+      # session suivante s'ouvrait sans elle (constaté par le test du bureau le 13 septembre
+      # 2026). Chaque session repart donc d'une cible arrêtée et d'un compteur remis à zéro.
+      systemctl --user stop sway-session.target 2>/dev/null || true
+      systemctl --user reset-failed prophet-supervision.service 2>/dev/null || true
+      sway --config /etc/prophet/sway.conf
+      # À la sortie du compositeur, ce qui en dépendait s'arrête au lieu de tourner à vide.
+      systemctl --user stop sway-session.target 2>/dev/null || true
     '';
   };
   sessionEntry = pkgs.runCommand "prophet-desktop-session" {

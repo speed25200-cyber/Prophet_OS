@@ -75,6 +75,14 @@ impl Browser {
         proxy: Option<&str>,
     ) -> Result<Self, CdpError> {
         std::fs::create_dir_all(profile_dir).map_err(|e| CdpError::Launch(e.to_string()))?;
+        // Le navigateur reçoit un foyer à lui, sous son profil. Chromium range ses rapports de
+        // plantage, son cache de polices et sa base de certificats sous `$HOME`, jamais sous
+        // `--user-data-dir` ; lancé par un service dont le foyer est `/var/empty`, il ne peut
+        // pas y créer `Crash Reports`, son gestionnaire de plantage (crashpad) s'arrête faute de
+        // base, et Chromium s'arrête net (CHECK) avant d'ouvrir son point d'écoute. C'est ce
+        // que la sonde d'agentd a constaté sous l'unité durcie le 13 septembre 2026.
+        let home = profile_dir.join("home");
+        std::fs::create_dir_all(&home).map_err(|e| CdpError::Launch(e.to_string()))?;
         let proxy_args: Vec<String> = match proxy {
             Some(address) => vec![
                 format!("--proxy-server=http://{address}"),
@@ -112,6 +120,10 @@ impl Browser {
             ])
             .args(&proxy_args)
             .arg("about:blank")
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", home.join(".config"))
+            .env("XDG_CACHE_HOME", home.join(".cache"))
+            .env("XDG_DATA_HOME", home.join(".local/share"))
             .env_remove("HTTP_PROXY")
             .env_remove("HTTPS_PROXY")
             .env_remove("http_proxy")
@@ -119,7 +131,9 @@ impl Browser {
             .env_remove("ALL_PROXY")
             .env_remove("all_proxy")
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            // La sortie d'erreur reste celle du service : c'est le seul endroit où un
+            // navigateur qui refuse de démarrer sur une machine dit pourquoi.
+            .stderr(Stdio::inherit())
             .spawn()
             .map_err(|e| CdpError::Launch(format!("{program} : {e}")))?;
 

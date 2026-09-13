@@ -120,7 +120,17 @@ système installé échoue de nouveau au relevé du processus Claude Code, avant
 lanceur (Chromium, X). Cause lue dans le journal : le client natif quitte en moins d'une seconde
 sans réseau, et le relevé commençait après l'apparition de sa fenêtre. Le test échantillonne
 désormais les processus du paquet à 50 ms avant d'ouvrir l'application ; `prophet status` dit
-en outre si le navigateur piloté répond. Cette révision attend la CI.
+en outre si le navigateur piloté répond. La CI de `4a6d811` a rendu son verdict : `check`,
+isolation, surface, moteur local, ISO, démarrage et installeur réussissent ; le test des
+services échoue parce que Chromium, lancé par agentd, s'arrête net (CHECK) dans
+l'initialisation de crashpad : son foyer est `/var/empty`, il n'y crée pas `Crash Reports`, le
+gestionnaire de plantage sort faute de base, et le navigateur avec lui. Le pont donne désormais
+au navigateur un foyer sous son profil, et sa sortie d'erreur reste dans le journal du service.
+Le parcours du système installé passe enfin le relevé de Claude Code et le lanceur, puis échoue
+après la déconnexion : la cible `sway-session.target` restait active, la supervision mourait
+trois fois sans compositeur et atteignait sa limite de redémarrages, et la session suivante
+s'ouvrait sans elle. La session arrête maintenant la cible à sa sortie et remet le compteur à
+zéro à son entrée. Ces deux correctifs attendent la CI.
 Aucune case complète de FRONTIER n'est cochée.
 
 Séance d'outils MCP du 13 septembre 2026, dans le commit portant ce rapport : un client MCP de
