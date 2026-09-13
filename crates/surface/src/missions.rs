@@ -431,6 +431,50 @@ mod tests {
     }
 
     #[test]
+    fn publier_et_annuler_exigent_les_droits_recus_et_un_acquittement_nominatif() {
+        let mut missions = Missions::default();
+        missions.select(Some("a"));
+        let mut done = inspection("a", State::Done);
+        assert!(missions.command(Action::Apply).is_err(), "détail absent");
+        missions.snapshot = Some(done.clone());
+        assert!(
+            missions.command(Action::Apply).is_err(),
+            "sans can_apply, aucune publication n'est envoyée"
+        );
+        done.can_apply = true;
+        done.publication = Some(agentd::WorkspaceState::Open);
+        missions.snapshot = Some(done);
+        // Sans socket, la commande est refusée avant tout envoi ; l'acquittement se vérifie seul.
+        assert!(missions.command(Action::Apply).is_err());
+        missions
+            .tx
+            .send(Reply::Action(
+                "a".into(),
+                Action::Apply,
+                Ok(json!({"applied":"b","changes":{"added":1}})),
+            ))
+            .unwrap();
+        missions.update();
+        let notice = missions.notice().unwrap();
+        assert!(
+            notice.error,
+            "un acquittement pour une autre mission ne vaut rien"
+        );
+        missions
+            .tx
+            .send(Reply::Action(
+                "a".into(),
+                Action::Undo,
+                Ok(json!({"undone":"a","state":"rolled_back"})),
+            ))
+            .unwrap();
+        missions.update();
+        let notice = missions.notice().unwrap();
+        assert!(!notice.error, "{}", notice.text);
+        assert!(notice.text.contains("annulée"), "{}", notice.text);
+    }
+
+    #[test]
     fn une_commande_invalide_et_sa_relecture_ancienne_ne_confirment_rien() {
         let mut missions = Missions::default();
         missions.select(Some("a"));
