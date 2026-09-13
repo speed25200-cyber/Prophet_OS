@@ -52,6 +52,7 @@
           ./image/modules/hardware.nix
           ./image/modules/immutable.nix
           ./image/modules/surface.nix
+          ./image/modules/desktop.nix
           {
             prophet.enable = true;
             nixpkgs.config.allowUnfreePredicate = autoriserLesClients;
@@ -110,6 +111,10 @@
 
         # Ce que `nix flake check` exerce : une vraie machine, avec de vrais services.
         checks = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          desktop-session = import ./image/tests/desktop-session.nix {
+            inherit pkgs;
+            module = nixosModules.prophet;
+          };
           surface-rescue = import ./image/tests/surface-rescue.nix {
             inherit pkgs;
             module = nixosModules.prophet;

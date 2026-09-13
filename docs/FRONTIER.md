@@ -119,3 +119,11 @@ Le [correctif d'accès humain](reports/acces-humain-2026-09-13.md) permet ensuit
 consulter agentd malgré les captures privées. Une VM KVM vérifie que le secours graphique
 ne masque plus l'invite et n'interrompt pas la connexion. Cette preuve de secours ne livre
 pas le bureau humain ; le test installé complet de la nouvelle révision reste à vérifier.
+
+La CI de `ddd375b` confirme ensuite le secours, la connexion console, les services et le modèle
+réel. Le [nouveau bureau humain](reports/bureau-humain-2026-09-13.md) remplace le kiosque de l'image
+par une connexion PAM et des fenêtres sous l'identité du propriétaire. Le parcours du bureau
+réussit en VM en 188,07 s. La variante sur disque installé s'arrête localement sur une erreur
+KVM/SMM avant les services ; ni son parcours ni la vérification des empreintes ne sont validés.
+ChatGPT y est inclus à titre expérimental, avec son contrôle strict toujours rouge.
+Cette intégration ne coche pas le critère des clients authentifiés ni celui de l'interface complète.

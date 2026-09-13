@@ -16,7 +16,15 @@ le mot de passe, puis dans la session ouverte (34,98 s). Le test installé compl
 mais son résultat sur cette nouvelle révision reste à établir. Les échecs de services et de
 connexion de `d20ef74` ne sont donc plus attribués à une cause inconnue. Voir le
 [rapport d'accès humain](reports/acces-humain-2026-09-13.md) et l'[ADR 0020](adr/0020-consultation-et-secours-humains.md).
-Le bureau avec plusieurs applications et le défaut Fontconfig de ChatGPT restent ouverts.
+La CI de `ddd375b` réussit depuis les services, le démarrage installé et la mission avec modèle
+réel. Le test installé de cette révision prouve le secours et la connexion console, pas un bureau.
+Le nouveau module de [session humaine](reports/bureau-humain-2026-09-13.md), après `ddd375b`,
+passe le parcours `desktop-session` en 188,07 s : connexion PAM, supervision sous UID du
+propriétaire, fichier et presse-papiers réels, applications officielles, verrouillage et reconnexion.
+La variante sur disque installé construit son image, puis KVM s'arrête en mode SMM sous WSL
+avant les services. Le contrôle d'intégrité ajouté au scénario passe les vérifications du pilote,
+mais son exécution dans l'invité reste à établir. Aucun critère complet de FRONTIER n'est coché.
+ChatGPT y est inclus à titre expérimental ; son défaut Fontconfig et son test strict rouge restent ouverts.
 `just check` réussit dans Nix : 633 tests, aucun échec, 29 ignorés, format, clippy,
 construction des binaires et contrôles du dépôt réussis.
 

@@ -73,6 +73,10 @@ test-local-engine:
 test-local-engine-vm:
     nix build .#local-engine-vm --print-build-logs
 
+# KVM, 4 Go de RAM pour la VM : connexion et applications de la session humaine.
+test-desktop:
+    nix build .#checks.x86_64-linux.desktop-session --print-build-logs
+
 # Démarre l'image dans QEMU.
 vm:
     @echo "pas encore disponible (M9)" && exit 2

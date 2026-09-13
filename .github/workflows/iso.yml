@@ -367,7 +367,7 @@ jobs:
         # Ce que cette étape ne vérifie donc PAS, et qu'il ne faut pas croire vérifié ici :
         # les comptes, `/etc`, et l'ouverture de session. C'est le travail « Le système installé
         # démarre » qui en répond — il démarre la configuration, tape un mot de passe à l'invite et
-        # lit `getent shadow prophet`. Ce qui se vérifie ici est l'autre moitié, que lui ne voit
+        # vérifie la session PAM sous l'identité humaine. Ce qui se vérifie ici est l'autre moitié, que lui ne voit
         # pas : que `nixos-install` sait écrire cette fermeture sur la disposition que l'installeur
         # crée, chiffrement et sous-volumes compris.
         run: |
@@ -599,8 +599,8 @@ jobs:
   # --- Le système installé, démarré pour de vrai ---
   #
   # Le travail `systeme` ci-dessus le *construit*. Construire ne dit rien de ce qui se passe au
-  # démarrage, et c'est là que `immutable.nix` ajoute une racine en lecture seule, un chargeur sans
-  # éditeur et un noyau verrouillé. Jusqu'ici, seul le support d'amorçage avait jamais démarré.
+  # démarrage. Ce parcours exerce le chargeur, les paramètres de durcissement et la session humaine.
+  # Le cadre de test conserve une racine en lecture-écriture ; il ne prouve pas son immuabilité.
   installe:
     name: Le système installé démarre
     runs-on: ubuntu-latest
@@ -635,7 +635,23 @@ jobs:
       - name: Démarrer la configuration installée
         run: |
           nix build .#checks.x86_64-linux.surface-rescue --print-build-logs
-          nix build .#checks.x86_64-linux.installe --print-build-logs
+          mkdir -p bureau-diagnostics
+          test_output=$(nix eval --raw .#checks.x86_64-linux.installe.outPath)
+          status=0
+          nix build .#checks.x86_64-linux.installe --print-build-logs --keep-failed || status=$?
+          if [ -d "$test_output" ]; then
+            find "$test_output" -maxdepth 1 -name 'bureau-*.png' -exec cp -- {} bureau-diagnostics/ \;
+          fi
+          exit "$status"
+
+      - name: Publier les captures du bureau de test
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bureau-installe
+          path: bureau-diagnostics/*.png
+          if-no-files-found: warn
+          retention-days: 14
 
   # --- Une question ouverte, qui ne barre pas la route ---
   #

@@ -222,6 +222,11 @@ fn installer(
         .with_title("Prophet OS")
         .with_min_inner_size(winit::dpi::LogicalSize::new(640.0, 480.0))
         .with_inner_size(winit::dpi::LogicalSize::new(1440.0, 900.0));
+    #[cfg(target_os = "linux")]
+    {
+        use winit::platform::wayland::WindowAttributesExtWayland as _;
+        attributs = attributs.with_name("org.prophet.Supervision", "prophet-surface");
+    }
     if !options.fenetree {
         attributs = attributs
             .with_decorations(false)

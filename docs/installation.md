@@ -1,5 +1,10 @@
 # Installer Prophet OS sur un PC
 
+**Version de développement.** Le bureau passe son parcours en VM ; la variante installée reste
+à valider après une erreur KVM/SMM locale. ChatGPT conserve
+un échec de compatibilité connu. Les résultats d'une ancienne révision ne valident pas l'image
+courante. Consultez [STATUS.md](STATUS.md) et [FRONTIER.md](FRONTIER.md) avant tout essai.
+
 Ce document suppose que vous partez d'un PC sous Windows dont vous acceptez de perdre tout le
 contenu. Il dit aussi, à la fin, ce qui ne marche pas encore : un système qu'on installe en
 effaçant son disque doit annoncer ses manques avant, pas après.
@@ -34,12 +39,16 @@ produite et vérifiez que **tous** ses travaux sont verts, à la seule exception
 | Construire le système installé | chacun des sept services pointe vers un programme qui existe, **et** `nixos-install` pose réellement ce système sur la disposition que l'installeur crée |
 | Voir l'image démarrer | la clé USB démarre jusqu'à l'invite |
 | Les sept services sous systemd | les daemons tournent sous leur utilisateur, avec leur durcissement, et `sandboxd` isole vraiment |
-| **Le système installé démarre** | secours graphique sans interruption de la connexion, puis démarrage du système : chargeur d'amorçage, paramètres du noyau, compte ouvrable, session sur `tty1`, et les sept services vus par le propriétaire depuis sa session |
+| **Le système installé démarre** | secours du kiosque historique, puis session du nouveau bureau : systemd-boot, paramètres du noyau, connexion PAM, supervision sous le compte humain, sept services, fenêtres des clients, fichiers, presse-papiers et reprise après verrouillage |
 | Question ouverte : la racine en lecture seule | rien — c'est une **question**, pas une garantie, et elle ne part plus qu'à la demande. Sa réponse est « non » depuis le 12 septembre 2026 : voir `image/tests/racine-en-lecture-seule.nix`. Pour la reposer, déclenchez le workflow à la main en cochant « Rejouer l'expérience de la racine en lecture seule » |
 
 Les six premiers partent à chaque poussée et doivent être verts. Le septième ne part qu'à la
 demande : sa réponse est connue, et un rouge permanent dans un tableau qu'on demande de lire avant
 de graver une image n'apprend rien — il entraîne à ignorer le rouge.
+
+Le workflow des composants comporte en plus le test **ChatGPT sous NixOS (compatibilité)**.
+Son erreur Fontconfig reste bloquante pour annoncer ChatGPT pleinement compatible, même si
+le client affiche son écran de connexion dans le test du bureau.
 
 Le sixième est le seul qui réponde à ce qui compte une fois le disque effacé : ce que la clé
 installe démarre-t-il ? Une image produite par une exécution où ce travail manque ou échoue n'a
@@ -135,18 +144,48 @@ noyau démarre avec `lsm=landlock,yama,bpf`, où `lockdown` ne figure pas, et
 le croire posé est pire que de savoir qu'il ne l'est pas. C'est écrit dans `docs/STATUS.md` ; ce
 n'est pas un défaut de démarrage, c'est un durcissement annoncé qui n'a pas lieu.
 
-Ce qui **est** tenu : les deux emplacements A/B avec bascule automatique, le chiffrement LUKS2 des
-données et de l'état, Landlock et seccomp, les sept services durcis sous leur propre compte, et
-`egress` qui refuse toute requête sans jeton.
+Les deux emplacements A/B existent, mais la mise à jour suivie d'un retour automatique après
+échec reste à exercer. L'installeur teste le formatage et le montage LUKS2 sur disque factice ;
+le parcours complet de déverrouillage au redémarrage reste distinct. Les tests des services
+exercent les comptes, le durcissement et certains chemins d'isolation. Ces preuves ne couvrent
+pas encore toutes les méthodes IPC ni tout programme lancé comme agent.
 
 ## 4. Premier démarrage
 
 Retirez la clé, redémarrez. La phrase de passe vous est demandée pour ouvrir les volumes chiffrés,
-puis une invite de connexion apparaît.
+puis l'écran de connexion **Prophet OS** est prévu sur le premier terminal virtuel.
 
 Identifiant : **`prophet`**. Mot de passe : celui que vous avez choisi à l'installation. Ce compte
 appartient à `wheel` — donc `sudo` — et à `prophet-system`, ce qui lui permet de parler aux sept
-daemons.
+daemons. La session Wayland ouvre la supervision et permet d'utiliser plusieurs applications.
+Le [choix de session](adr/0021-session-humaine-wayland.md) est implémenté et son parcours réussit
+en VM. Le [rapport](reports/bureau-humain-2026-09-13.md) distingue ce résultat de la validation
+encore ouverte sur disque installé.
+
+| Action | Accès |
+|---|---|
+| Ouvrir une application | **Super + Espace**, ou « Prophet » dans la barre |
+| Terminal dans votre répertoire personnel | **Super + Entrée** |
+| Fichiers du projet documentaire | **Super + E** |
+| Supervision, atelier, dialogue, recherche | **Super + 1**, **2**, **3**, **4** |
+| Déplacer une fenêtre vers un espace | **Super + Maj + 1**, **2**, **3**, **4** |
+| Présenter l'espace en onglets / côte à côte | **Super + W** / **Super + B** |
+| Fermer la fenêtre active | **Super + Maj + Q** |
+| Verrouiller la session | **Super + L**, ou « Verrouiller » dans la barre |
+| Fermer la session avec confirmation | **Super + Maj + E** |
+| Console de secours | **Ctrl + Alt + F2** ; retour à l'écran graphique avec **Ctrl + Alt + F1** |
+
+Le lanceur propose **ChatGPT**, **Claude Code**, **Codex**, les fichiers et le navigateur.
+Claude Code et Codex s'ouvrent dans `~/Documents/Prophet`, avec des profils privés propres
+au pilote et au propriétaire. Leur espace passe en onglets pour conserver une largeur lisible.
+Le terminal reste ouvert après l'arrêt du client afin de garder son diagnostic à l'écran ;
+fermez cette fenêtre avant de relancer le client. Connectez-vous dans leurs interfaces officielles. Prophet
+n'inspecte pas leurs fichiers d'identifiants. Le lancement interactif n'est pas encore une
+intégration d'agent contrôlée par capd et sandboxd.
+
+La supervision utilise les services sous votre identité. Fermer sa fenêtre ne supprime pas
+les missions du service ; « Supervision » dans le lanceur la rouvre. Le modèle local nécessite
+des poids installés : consultez le [guide du moteur](../crates/providers/README.md).
 
 ```sh
 prophet status                        # les services, l'isolation, les limites de la machine
@@ -154,25 +193,16 @@ prophet provider ls                   # quels clients sont là, et lesquels sont
 prophet provider login claude-code    # connecter votre abonnement
 ```
 
-`prophet provider ls` d'abord : il dit quels clients officiels sont **réellement présents** sur
-cette machine. L'image embarque Claude Code et Gemini CLI tels quels, quand nixpkgs les fournit —
-un client peut y être renommé ou en disparaître, et l'image se construit alors sans lui plutôt que
-de refuser. La liste dit la vérité dans les deux cas ; `prophet provider login` vous enverrait
-sinon lancer une commande qui n'existe pas.
-
-Codex CLI n'y est pas encore : son nom dans nixpkgs est un mot générique, et livrer un binaire
-étranger sous un nom auquel l'OS fait confiance serait pire que de ne rien livrer. Vous pouvez
-l'installer vous-même ; `prophet provider ls` le verra.
+`prophet provider ls` distingue clients présents, connexion et exécution agentique disponible.
+Codex et Claude Code sont des dépendances obligatoires du nixpkgs épinglé. Gemini CLI est
+également fourni lorsque ce nixpkgs le propose. Les sondes utilisent les commandes des clients,
+sans déduire une connexion de la présence d'un fichier. Voir le [guide des pilotes](components/providers.md).
 
 Claude Code est distribué sous les conditions de son éditeur — nixpkgs le marque « unfree ».
-L'image l'autorise **nommément**, et non par un `allowUnfree` global qui laisserait entrer
-n'importe quel paquet propriétaire sans que personne ne s'en aperçoive. La liste est dans
-`image/modules/prophet.nix` et se lit en une ligne ; la retirer donne une image sans aucun paquet
-propriétaire, où `provider ls` dira simplement que le client est absent.
-
-Prophet OS ne lit jamais les fichiers d'identifiants de ces clients. Il monte leur répertoire de
-session dans leur sandbox, et c'est tout — vous vous connectez avec `claude login` comme sur
-n'importe quelle machine.
+L'image l'autorise nommément dans sa liste de paquets propriétaires. Le paquet ChatGPT Linux
+provient du `.deb` officiel, avec un environnement de compatibilité FHS. Son écran de connexion
+a été observé en VM ; son renderer secondaire conserve une erreur Fontconfig. L'application
+est expérimentale dans ce bureau et aucune session ChatGPT authentifiée n'est encore validée.
 
 `prophet status` commence par la liste des sept services et dit lesquels répondent. C'est la
 première chose à regarder : un système dont `capd` est muet affiche une isolation parfaite et un
@@ -193,25 +223,20 @@ Dit franchement, parce que vous aurez effacé un disque pour l'essayer.
 
 - **Pas de Secure Boot.** Le chargeur n'est pas signé ; il faut désactiver Secure Boot dans le
   micrologiciel. Cela réduit la garantie que ce qui démarre est bien ce qui a été installé.
-- **La surface montre le système, mais peu de choses au début.** L'environnement graphique démarre
-  seul sur le premier écran : un champ de courants où chaque tâche est un filament, sans bureau ni
-  fenêtres. Il lit les tâches réelles, les décisions en attente et ce que la machine sait isoler.
-  Tant que vous n'avez lancé aucune tâche, le champ est donc vide — c'est normal, et c'est
-  préférable à une démonstration qui ressemblerait à un système en marche.
-- **Les sept services démarrent pour la première fois sur votre machine.** Jusqu'au 12 septembre
-  au soir, ils étaient déclarés sans exister : l'image installée aurait démarré avec sept unités en
-  échec. Ils existent désormais, chacun avec un test qui lance le programme et lui parle. Ils n'ont
-  jamais tourné ensemble ailleurs que dans ces tests.
+- **La supervision reste incomplète.** L'atelier présente les missions réelles, leur résultat
+  et les versions des fichiers proposées. L'application approuvée de ces changements et leur
+  annulation robuste ne sont pas encore raccordées. Les conversations restent en mémoire.
+- **Le parcours sur disque installé reste à valider.** Le test du bureau réussit la connexion,
+  les fenêtres, le verrouillage et la reconnexion. Sa variante installée s'arrête localement
+  sur une erreur KVM/SMM avant les services. Aucun client cloud authentifié n'est validé.
 - **La bascule A/B n'est pas exercée.** Les deux racines sont créées et le système sait démarrer
   sur la première ; le service de mise à jour qui écrit dans la seconde est une esquisse.
 - **Le niveau 2 d'isolation exige des images d'invité** qui ne sont pas dans l'image installée.
-  `prophet status` dira ce qui manque. Les niveaux 0 et 1 fonctionnent, et ont été vérifiés sur
-  du matériel réel.
-- **Cette image démarre — cela a été vu, pas supposé.** L'intégration continue la démarre en
-  machine virtuelle UEFI à chaque construction : le micrologiciel la trouve, le noyau part,
-  l'espace utilisateur monte, et l'écran d'accueil qui dit quoi taper apparaît. Ce qu'elle ne dit
-  pas : si *votre* carte graphique, *votre* carte réseau et *votre* micrologiciel s'entendent avec
-  elle. C'est la seule inconnue qui reste, et elle ne peut être levée que chez vous.
+  `prophet status` dira quels niveaux sont disponibles et ce qui manque. Le niveau annoncé
+  dépend des exécutables, des images et des mécanismes réellement accessibles sur la machine.
+- **La matrice matérielle reste à établir.** Les démarrages UEFI en VM ne valident pas votre
+  carte graphique, votre réseau ni votre micrologiciel. Les performances d'inférence GPU et
+  les comparaisons avec les distributions prises en charge restent également à mesurer.
 
 Ce dernier point mérite d'être pesé. Si vous voulez réduire le risque : essayez d'abord l'ISO dans
 une machine virtuelle (VirtualBox, VMware ou Hyper-V, avec l'UEFI activé et un disque de 80 Gio),

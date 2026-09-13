@@ -2,9 +2,9 @@
 
 Un système d'exploitation PC conçu pour que des agents IA (Claude, GPT, Gemini, LLM locaux…) l'utilisent de façon rapide, sûre, observable et réversible, avec l'humain aux commandes.
 
-**Pourquoi ?** Les OS actuels sont faits pour un humain avec des yeux et une souris. Un agent y travaille en aveugle : captures d'écran, clics aux coordonnées, permissions tout-ou-rien, aucun retour arrière. Prophet OS fait de l'agent un utilisateur de première classe : interface sémantique au lieu de pixels, capacités fines au lieu d'identité empruntée, snapshots et undo global, journal d'audit signé, routage vers n'importe quel modèle.
+**Objectif.** Donner aux agents une interface sémantique, des capacités limitées, des versions de fichiers réversibles, un journal d'audit et un choix de modèles, avec une supervision humaine explicite. Ces capacités sont à des stades d'intégration différents ; l'état vérifié figure ci-dessous.
 
-**Comment ?** Noyau Linux LTS durci et configuré sur mesure ; tout l'espace utilisateur repensé de zéro (runtime d'agents, broker de capacités, sandbox graduée, système de fichiers sémantique, protocole d'UI sémantique, routeur de modèles, mémoire, ledger).
+**Architecture.** Linux et NixOS, services natifs Rust pour les agents, les capacités, l'isolation, les fichiers et le journal, surface de supervision native et session humaine Wayland avec SwayFX.
 
 📄 **[Plan complet](docs/PLAN.md)** : diagnostic, principes, architecture, spécification des composants, sécurité, feuille de route, équipe, métriques, risques, MVP.
 
@@ -17,7 +17,9 @@ Un système d'exploitation PC conçu pour que des agents IA (Claude, GPT, Gemini
 Prophet OS est **en développement**. L'ISO démarre en machine virtuelle. Une mission saisie dans
 l'interface peut être planifiée, lancée avec Qwen3 et produire un fichier de travail examinable
 avec les vrais services. L'application approuvée des changements, l'undo, le confinement complet
-et le bureau humain restent à intégrer. Les critères de la version complète sont suivis dans
+restent à intégrer. Le parcours du bureau réussit en VM ; sa variante sur disque installé
+reste à valider après un arrêt KVM/SMM sous WSL. Les critères
+de la version complète sont suivis dans
 [`docs/FRONTIER.md`](docs/FRONTIER.md).
 
 Le pilote local parle maintenant à un vrai serveur d'inférence. Une boucle avec Qwen3 sur CPU,
@@ -32,6 +34,12 @@ et l'exécution agentique complète sont encore en cours d'intégration. Voir le
 
 Le nouvel [atelier de supervision](docs/reports/atelier-2026-09-13.md) présente une galerie de
 missions et une Focale pour examiner le travail, avec recherche Ctrl+K et navigation compacte.
+
+Une [session humaine avec plusieurs applications](docs/reports/bureau-humain-2026-09-13.md) est
+intégrée dans la configuration d'image : connexion PAM, supervision, ChatGPT, Claude Code et Codex,
+terminal et fichiers. Le test du bureau vérifie aussi le verrouillage et la reconnexion.
+ChatGPT conserve un défaut de compatibilité bloquant ; ce bureau
+expérimental ne constitue pas encore une version entièrement fonctionnelle.
 
 ![Atelier natif — scène de démonstration explicitement identifiée](docs/images/atelier-galerie-1440.png)
 
