@@ -85,6 +85,57 @@ pub struct Spent {
     pub quota_pct: f64,
 }
 
+/// Ce qu'un modèle a coûté dans une mission : ses tours et ses tokens, pour dire ensuite ce
+/// que le relais entre modèles a réellement économisé (ADR 0034).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ModelUsage {
+    /// Tours de modèle.
+    pub turns: u32,
+    /// Tokens en entrée, cumulés.
+    pub tokens_in: u64,
+    /// Tokens en sortie, cumulés.
+    pub tokens_out: u64,
+}
+
+impl ModelUsage {
+    /// Tokens cumulés, entrée et sortie.
+    #[must_use]
+    pub const fn tokens(&self) -> u64 {
+        self.tokens_in.saturating_add(self.tokens_out)
+    }
+
+    /// Ajoute un tour.
+    pub fn add(&mut self, tokens_in: u64, tokens_out: u64) {
+        self.turns = self.turns.saturating_add(1);
+        self.tokens_in = self.tokens_in.saturating_add(tokens_in);
+        self.tokens_out = self.tokens_out.saturating_add(tokens_out);
+    }
+
+    /// Impute la consommation d'une sous-mission sur le même modèle.
+    pub fn absorb(&mut self, other: &Self) {
+        self.turns = self.turns.saturating_add(other.turns);
+        self.tokens_in = self.tokens_in.saturating_add(other.tokens_in);
+        self.tokens_out = self.tokens_out.saturating_add(other.tokens_out);
+    }
+}
+
+/// Consommation par modèle, dans l'ordre des noms.
+pub type UsageByModel = std::collections::BTreeMap<String, ModelUsage>;
+
+/// Part des tokens, en pour cent, que d'autres modèles que `reference` ont pris en charge.
+///
+/// C'est la mesure honnête de l'économie d'un relais : ce qui n'a pas coûté un tour du
+/// modèle de réflexion. `None` tant qu'aucun token n'est compté.
+#[must_use]
+pub fn share_outside(usage: &UsageByModel, reference: &str) -> Option<u8> {
+    let total: u64 = usage.values().map(ModelUsage::tokens).sum();
+    if total == 0 {
+        return None;
+    }
+    let own = usage.get(reference).map_or(0, ModelUsage::tokens);
+    Some(u8::try_from(total.saturating_sub(own) * 100 / total).unwrap_or(100))
+}
+
 /// Budget d'une tâche : plafonds, consommation, et arithmétique de partage.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Budget {

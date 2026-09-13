@@ -63,6 +63,10 @@ pub struct ProfileView {
     /// Modèles que le profil admet, découverts ou non : un client MCP n'a pas besoin du moteur.
     #[serde(default)]
     pub preferred: Vec<String>,
+    /// Rôles du relais (`reflect`, `execute`, `code`) et, pour chacun, les modèles admis
+    /// effectivement découverts ; vide sans relais (ADR 0034).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub roles: std::collections::BTreeMap<String, Vec<String>>,
     /// Contexte fichiers fixé par le profil.
     pub scopes: Vec<String>,
     /// Droits demandés à capd, avant son contrôle.
@@ -188,6 +192,22 @@ impl Profile {
                 .filter_map(|r| r.strip_prefix("local:"))
                 .map(str::to_owned)
                 .collect(),
+            roles: self
+                .manifest
+                .model
+                .roles
+                .iter()
+                .map(|(role, refs)| {
+                    (
+                        role.clone(),
+                        refs.iter()
+                            .filter_map(|r| r.strip_prefix("local:"))
+                            .filter(|m| models.iter().any(|v| v == m))
+                            .map(str::to_owned)
+                            .collect(),
+                    )
+                })
+                .collect(),
             scopes: self.scopes.clone(),
             grants: self
                 .grants()
@@ -218,6 +238,19 @@ impl Profile {
 
     fn validate(&self) -> Result<(), String> {
         self.manifest.validate().map_err(|e| e.to_string())?;
+        // Un rôle ne peut nommer qu'un modèle du plafond : le relais choisit parmi ce que le
+        // profil admet déjà, il n'y ajoute rien.
+        for (role, models) in &self.manifest.model.roles {
+            if let Some(model) = models
+                .iter()
+                .find(|m| !self.manifest.model.preferred.contains(m))
+            {
+                return Err(format!(
+                    "Le rôle {role} du profil {} nomme {model}, absent de model.preferred.",
+                    self.id
+                ));
+            }
+        }
         if self.id.is_empty()
             || self.id.len() > 80
             || !self

@@ -304,6 +304,15 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
                 ui,
                 format!("· {} tokens comptés", info.task.budget.spent.tokens),
             );
+            // Le relais de modèles, en une mention : quelle part du travail n'a pas coûté un
+            // tour du modèle de la mission (ADR 0034).
+            if let Some(share) = agentd::budget::share_outside(
+                &info.task.usage,
+                info.task.driver.as_deref().unwrap_or_default(),
+            ) && info.task.usage.len() > 1
+            {
+                small(ui, format!("· {share} % confiés à d'autres modèles"));
+            }
             small(
                 ui,
                 format!("· {} s observées", info.task.budget.spent.wall_time_s),

@@ -6,7 +6,7 @@
 - Dépendances du lancement local : capd, ledger, home autorisé et moteur HTTP local configuré
 - Sortie réseau des outils : le socket d'egress (`PROPHET_EGRESS_SOCKET`, `/run/prophet/egress.sock` par défaut)
 - Navigateur piloté : absent sauf `PROPHET_BROWSER` ; profils par tâche sous l'état du service ;
-`PROPHET_SUP_SOCKET` nomme le socket de l'adaptateur d'accessibilité de la session (ADR 0027) ; sans lui, aucun outil `ui.*`. `doc.read` lit tout format sous `fs.read` et emploie `pdftotext`, `pdfinfo`, `ffprobe` et `tesseract` s'ils sont sur le chemin du service (ADR 0028). `task.delegate` crée, lance et attend une sous-mission sous un jeton délégué par capd, pour un profil qui accorde `task.spawn` sur un contexte nommé (ADR 0029).
+`PROPHET_SUP_SOCKET` nomme le socket de l'adaptateur d'accessibilité de la session (ADR 0027) ; sans lui, aucun outil `ui.*`. `doc.read` lit tout format sous `fs.read` et emploie `pdftotext`, `pdfinfo`, `ffprobe` et `tesseract` s'ils sont sur le chemin du service (ADR 0028). `task.delegate` crée, lance et attend une sous-mission sous un jeton délégué par capd, pour un profil qui accorde `task.spawn` sur un contexte nommé (ADR 0029). Avec un rôle (`role` : `reflect`, `execute`, `code`), le service choisit le modèle que le contexte visé admet pour ce rôle parmi ceux que le moteur sert, briefe chaque mission sur son rôle, condense les anciens résultats d'outils avant chaque envoi, et compte les tokens par modèle (ADR 0034).
   sondé une fois au démarrage, verdict rendu par `task.options` (`browser`)
 
 ## Méthodes
@@ -79,6 +79,15 @@ sans compteurs, sa consommation partielle n'est pas connue. Le plafond de géné
 actuellement de 2 048 tokens par tour ; le budget total peut donc être dépassé par le tour
 en cours, mais l'action suivante est refusée. La réservation prédictive de contexte et de
 tokens reste à implémenter.
+
+Chaque tour est aussi compté au nom du modèle qui l'a joué (`task.usage`, dans `task.inspect`,
+`task.result` et `task.list`, et `by_model` dans l'événement final du journal) ; une sous-mission
+terminée impute son compte à son parent, modèle par modèle. C'est la mesure du relais (ADR 0034) :
+`prophet task show` dit la part des tokens prise en charge hors du modèle de la mission. Les
+tours d'un client MCP sont comptés sous `client:<nom>`, sans tokens, le client ne rendant pas
+ses compteurs au service. Avant chaque envoi au moteur, les résultats d'outils plus anciens que
+les deux derniers et plus longs que 1 024 octets sont condensés (taille, empreinte, début) ;
+l'historique conservé par la boucle ne change pas.
 
 Le statut d'annulation final confirme la sortie du travailleur. Les fichiers déjà préparés
 restent dans le travail SFS. `result` expose le diff à une fin normale, sans appliquer les

@@ -60,7 +60,20 @@ pub enum ManifestError {
     /// Durée mal formée.
     #[error("durée invalide : {0}")]
     BadDuration(String),
+    /// Rôle de modèle inconnu, mal nommé ou sans modèle.
+    #[error(
+        "rôle de modèle invalide : {0} (attendu : reflect, execute ou code, avec au moins un modèle)"
+    )]
+    BadRole(String),
 }
+
+/// Rôles de modèles qu'un manifeste peut distribuer (ADR 0034).
+///
+/// Un rôle dit *pourquoi* un modèle est appelé, pas *lequel* : la réflexion profonde qui
+/// découpe et vérifie, l'exécution économe qui applique une étape simple, le code qui exige
+/// un modèle entraîné pour cela. Un profil associe à chaque rôle ses modèles admis, par ordre
+/// de préférence ; tous doivent figurer dans `model.preferred`, le plafond du manifeste.
+pub const MODEL_ROLES: [&str; 3] = ["reflect", "execute", "code"];
 
 /// Politique de confidentialité du choix de fournisseur.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -115,6 +128,24 @@ pub struct ModelSection {
     /// Capacité minimale attendue du modèle.
     #[serde(default = "default_capability")]
     pub min_capability: String,
+    /// Modèles admis par rôle (`reflect`, `execute`, `code`), chacun ⊆ `preferred`.
+    ///
+    /// Vide : un seul modèle fait tout. Renseigné : la mission peut confier ses étapes au
+    /// modèle du rôle voulu, et le comptage des tokens dit ce que chacun a coûté (ADR 0034).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub roles: BTreeMap<String, Vec<String>>,
+}
+
+impl ModelSection {
+    /// Rôle joué par une référence de modèle dans ce manifeste : le premier rôle qui la nomme.
+    #[must_use]
+    pub fn role_of(&self, reference: &str) -> Option<&str> {
+        MODEL_ROLES.into_iter().find(|role| {
+            self.roles
+                .get(*role)
+                .is_some_and(|models| models.iter().any(|m| m == reference))
+        })
+    }
 }
 
 fn default_capability() -> String {
@@ -336,6 +367,17 @@ impl Manifest {
         for reference in &self.model.preferred {
             validate_model_ref(reference)?;
         }
+        // L'appartenance des modèles de rôle à `preferred` se vérifie au chargement du
+        // catalogue (agentd), pas ici : une mission planifiée resserre `preferred` sur le
+        // modèle retenu et garde ses rôles pour le relais.
+        for (role, models) in &self.model.roles {
+            if !MODEL_ROLES.contains(&role.as_str()) || models.is_empty() {
+                return Err(ManifestError::BadRole(role.clone()));
+            }
+            for reference in models {
+                validate_model_ref(reference)?;
+            }
+        }
 
         if self.capabilities.max.is_empty() {
             return Err(ManifestError::NoCapabilities);
@@ -544,6 +586,42 @@ spaces = ["work"]
     fn identifiant_invalide() {
         let err = invalide(&[("org.exemple.analyste-ventes", "SansPoint")]).unwrap_err();
         assert!(err.contains("identifiant d'agent invalide"), "{err}");
+    }
+
+    #[test]
+    fn les_roles_de_modeles_sont_nommes_et_references_correctement() {
+        // Sans rôle : rien ne change, et aucune référence n'a de rôle.
+        let sans = Manifest::from_toml(VALIDE).unwrap();
+        assert!(sans.model.roles.is_empty());
+        assert_eq!(sans.model.role_of("local:qwen3-14b"), None);
+
+        let avec = invalide(&[(
+            r#"privacy = "local-preferred""#,
+            "privacy = \"local-preferred\"\n[model.roles]\nreflect = [\"driver:claude-code\"]\nexecute = [\"local:qwen3-14b\"]\ncode = [\"driver:claude-code\", \"local:qwen3-14b\"]",
+        )])
+        .unwrap();
+        assert_eq!(avec.model.role_of("driver:claude-code"), Some("reflect"));
+        assert_eq!(avec.model.role_of("local:qwen3-14b"), Some("execute"));
+        assert_eq!(avec.model.role_of("local:autre"), None);
+
+        let err = invalide(&[(
+            r#"privacy = "local-preferred""#,
+            "privacy = \"local-preferred\"\n[model.roles]\nmuse = [\"local:qwen3-14b\"]",
+        )])
+        .unwrap_err();
+        assert!(err.contains("rôle de modèle invalide : muse"), "{err}");
+        let err = invalide(&[(
+            r#"privacy = "local-preferred""#,
+            "privacy = \"local-preferred\"\n[model.roles]\nexecute = []",
+        )])
+        .unwrap_err();
+        assert!(err.contains("rôle de modèle invalide : execute"), "{err}");
+        let err = invalide(&[(
+            r#"privacy = "local-preferred""#,
+            "privacy = \"local-preferred\"\n[model.roles]\nexecute = [\"nulle-part\"]",
+        )])
+        .unwrap_err();
+        assert!(err.contains("référence de modèle invalide"), "{err}");
     }
 
     #[test]

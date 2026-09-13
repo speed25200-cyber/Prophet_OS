@@ -12,7 +12,7 @@ use mcp_system::services::Services;
 use prophet_types::cap::{Act, Decision, DenyReason, Res, Token};
 use prophet_types::driver::{DriverEvent, Limits, RunStatus, SandboxRequest, StartRequest};
 use prophet_types::ledger::{Actor, Draft, EventKind};
-use providers::local::AsyncLocalModel;
+use providers::local::{AsyncLocalModel, Condensation};
 use providers::native::{ModelClient, ModelTurn, NativeDriver, Usage};
 use providers::{Driver, DriverError};
 use serde_json::{Value, json};
@@ -34,6 +34,11 @@ pub struct Delegation {
     /// Modèle local demandé ; celui du parent sinon.
     #[serde(default)]
     pub model: Option<String>,
+    /// Rôle demandé (`reflect`, `execute`, `code`) : le service choisit le modèle que le
+    /// contexte visé admet pour ce rôle, parmi ceux que le moteur sert (ADR 0034). Un modèle
+    /// nommé explicitement l'emporte.
+    #[serde(default)]
+    pub role: Option<String>,
 }
 
 /// Ce que le service fait d'une délégation : créer la sous-mission sous un jeton délégué par
@@ -72,6 +77,9 @@ pub struct Mission {
     pub delegate: Option<Delegate>,
     /// Socket de sandboxd, par lequel `proc.exec` exécute une commande confinée.
     pub sandboxd: PathBuf,
+    /// Consigne de système du relais de modèles, si la mission y participe (ADR 0034) ; le
+    /// service la compose à partir du rôle de la mission et des contextes qu'elle peut confier.
+    pub briefing: Option<String>,
     /// Signal d'annulation. Le résultat final confirme l'arrêt.
     pub stop: Arc<AtomicBool>,
 }
@@ -108,12 +116,13 @@ impl Control {
         }
         Ok(())
     }
-    fn charge(&self, usage: Usage) -> Result<(), String> {
+    fn charge(&self, usage: Usage, model: &str) -> Result<(), String> {
         let mut task = self
             .task
             .lock()
             .map_err(|_| "état de mission indisponible")?;
         task.budget.spent.steps = task.budget.spent.steps.saturating_add(1);
+        task.charge_model(model, usage.tokens_in, usage.tokens_out);
         task.budget.spent.tokens = task
             .budget
             .spent
@@ -129,6 +138,36 @@ impl Control {
         }
         self.check_live()
     }
+    /// Impute à cette mission ce qu'une sous-mission a consommé, budget global et compte par
+    /// modèle, d'après le résultat qu'elle a rendu ; sans compteurs, rien n'est imputé.
+    fn absorb(&self, result: &Value) {
+        let spent: Option<crate::Spent> =
+            serde_json::from_value(result["budget"]["spent"].clone()).ok();
+        let usage: Option<crate::UsageByModel> =
+            serde_json::from_value(result["usage"].clone()).ok();
+        if spent.is_none() && usage.is_none() {
+            return;
+        }
+        let Ok(mut task) = self.task.lock() else {
+            return;
+        };
+        if let Some(spent) = spent {
+            let child = crate::Budget {
+                limits: task.budget.limits,
+                spent,
+            };
+            task.budget.absorb(&child);
+        }
+        if let Some(usage) = usage {
+            task.absorb_usage(&usage);
+        }
+        let updated = task.clone();
+        drop(task);
+        if let Err(error) = (self.publish)(updated, None) {
+            tracing::warn!(%error, "consommation de la sous-mission non persistée");
+        }
+    }
+
     fn append(&self, kind: EventKind, payload: Value) -> Result<(), String> {
         let task = self.current();
         self.services.append(
@@ -202,7 +241,7 @@ impl ModelClient for Model {
             }
         })?;
         self.control
-            .charge(result.usage)
+            .charge(result.usage, &self.name)
             .map_err(DriverError::BudgetExceeded)?;
         result.turn.map(|turn| (turn, result.usage))
     }
@@ -257,6 +296,7 @@ impl Mission {
                 context,
                 workspace,
                 calls: 0,
+                client: format!("client:{}", client.trim().to_lowercase()),
             }),
             Err(error) => {
                 self.conclude(&control, Err(error.clone()));
@@ -316,7 +356,7 @@ impl Mission {
         if let Err(error) = control
             .append(
                 kind,
-                json!({"stats":task.budget.spent,"reason":task.reason}),
+                json!({"stats":task.budget.spent,"by_model":task.usage,"role":task.role,"reason":task.reason}),
             )
             .and_then(|()| {
                 control.append(EventKind::ProviderStopped, json!({"driver":task.driver}))
@@ -329,6 +369,9 @@ impl Mission {
         data["state"] = json!(task.state);
         data["reason"] = json!(task.reason);
         data["budget"] = json!(task.budget);
+        data["usage"] = json!(task.usage);
+        data["role"] = json!(task.role);
+        data["driver"] = json!(task.driver);
         if let Err(error) = (control.publish)(task, Some(data)) {
             tracing::error!(%error,"résultat de mission non persisté");
         }
@@ -395,8 +438,17 @@ impl Mission {
         }
         // Un agent en fait travailler un autre : sous-mission à droits inclus, autre contexte ou
         // autre modèle, résultat rendu ici. capd tranche `task.spawn` sur le contexte visé.
+        // Ce que l'enfant a consommé est imputé ici, dans l'état que ce fil publie : le service
+        // l'impute aussi dans le sien, mais c'est cette copie qui écrit la suivante.
         if let Some(delegate) = &self.delegate {
-            registry.register(Arc::new(crate::delegate::Tool::new(delegate.clone())));
+            let delegate = delegate.clone();
+            let absorbing = control.clone();
+            let counted: Delegate = Arc::new(move |task, token, request| {
+                let value = delegate(task, token, request)?;
+                absorbing.absorb(&value["result"]);
+                Ok(value)
+            });
+            registry.register(Arc::new(crate::delegate::Tool::new(counted)));
         }
         registry
     }
@@ -430,6 +482,9 @@ impl Mission {
             .reference
             .strip_prefix("local:")
             .ok_or("pilote non local")?;
+        // La consigne du relais, s'il y en a une, précède l'intention ; les anciens résultats
+        // d'outils sont condensés avant chaque envoi : le modèle relit un résumé, pas des
+        // kilo-octets déjà vus, et peut relancer l'outil s'il lui faut le détail (ADR 0034).
         let client = AsyncLocalModel::new(
             &self.endpoint,
             model,
@@ -437,7 +492,9 @@ impl Mission {
             Duration::from_secs(120),
             2048,
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .with_system(self.briefing.clone())
+        .with_condensation(Condensation::default());
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -522,6 +579,9 @@ pub struct Seance {
     context: ToolContext,
     workspace: sfs::Workspace,
     calls: u32,
+    /// Nom sous lequel les tours du client sont comptés (`client:<nom>`), sans tokens : le
+    /// client officiel de l'humain ne rend pas ses compteurs au service.
+    client: String,
 }
 
 impl Seance {
@@ -548,10 +608,13 @@ impl Seance {
         if task.budget.spent.steps >= task.budget.limits.steps {
             return Err("plafond d'étapes atteint".into());
         }
-        self.control.charge(Usage {
-            tokens_in: 0,
-            tokens_out: 0,
-        })?;
+        self.control.charge(
+            Usage {
+                tokens_in: 0,
+                tokens_out: 0,
+            },
+            &self.client,
+        )?;
         self.calls = self.calls.saturating_add(1);
         self.context.step = self.context.step.saturating_add(1);
         Ok(self

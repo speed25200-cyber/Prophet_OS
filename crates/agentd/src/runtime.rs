@@ -450,14 +450,49 @@ impl Runtime {
         Ok(())
     }
 
-    /// Impute au parent ce que la sous-mission a consommé.
+    /// Impute au parent ce que la sous-mission a consommé, budget global et compte par modèle.
     pub fn absorb_child(&mut self, child: &str, parent: &str) {
-        let Some(spent) = self.tasks.get(child).map(|t| t.budget) else {
+        let Some((spent, usage)) = self.tasks.get(child).map(|t| (t.budget, t.usage.clone()))
+        else {
             return;
         };
         if let Some(parent_task) = self.tasks.get_mut(parent) {
             parent_task.budget.absorb(&spent);
+            parent_task.absorb_usage(&usage);
         }
+    }
+
+    /// Les rôles de modèles du manifeste conservé pour une mission, vides sans relais.
+    #[must_use]
+    pub fn roles_of(&self, id: &str) -> BTreeMap<String, Vec<String>> {
+        self.manifests
+            .get(id)
+            .map(|m| m.model.roles.clone())
+            .unwrap_or_default()
+    }
+
+    /// Fixe le rôle qu'une mission joue dans un relais, s'il est connu.
+    pub fn set_role(&mut self, id: &str, role: Option<String>) {
+        if let Some(task) = self.tasks.get_mut(id) {
+            task.role = role;
+        }
+    }
+
+    /// Les contextes qu'une mission peut confier : les cibles `task.spawn` de son manifeste
+    /// conservé, dans l'ordre du plafond.
+    #[must_use]
+    pub fn spawn_targets(&self, id: &str) -> Vec<String> {
+        self.manifests
+            .get(id)
+            .and_then(|m| m.ceiling().ok())
+            .map(|grants| {
+                grants
+                    .into_iter()
+                    .filter(|g| g.res == Res::Task && g.act == Act::Spawn)
+                    .map(|g| g.pattern)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Les sous-missions d'une mission, dans l'ordre de création.

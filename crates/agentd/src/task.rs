@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::budget::{Budget, Dimension};
+use crate::budget::{Budget, Dimension, UsageByModel};
 
 /// État d'une tâche.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -124,6 +124,13 @@ pub struct Task {
     pub reason: Option<String>,
     /// Historique des états traversés.
     pub history: Vec<State>,
+    /// Rôle que le modèle de cette mission joue dans un relais (`reflect`, `execute`, `code`),
+    /// s'il en a un (ADR 0034).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    /// Tokens et tours par modèle, sous-missions comprises une fois imputées.
+    #[serde(default, skip_serializing_if = "UsageByModel::is_empty")]
+    pub usage: UsageByModel,
 }
 
 /// Profondeur maximale de sous-tâches.
@@ -154,6 +161,23 @@ impl Task {
             created,
             reason: None,
             history: vec![State::Pending],
+            role: None,
+            usage: UsageByModel::new(),
+        }
+    }
+
+    /// Compte un tour de `model` : ses tokens rejoignent le budget global et son propre compte.
+    pub fn charge_model(&mut self, model: &str, tokens_in: u64, tokens_out: u64) {
+        self.usage
+            .entry(model.to_owned())
+            .or_default()
+            .add(tokens_in, tokens_out);
+    }
+
+    /// Impute la consommation par modèle d'une sous-mission.
+    pub fn absorb_usage(&mut self, child: &UsageByModel) {
+        for (model, usage) in child {
+            self.usage.entry(model.clone()).or_default().absorb(usage);
         }
     }
 

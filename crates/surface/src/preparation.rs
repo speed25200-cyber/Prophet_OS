@@ -343,6 +343,7 @@ mod tests {
                     description: String::new(),
                     models: vec!["nouveau".into()],
                     preferred: vec![],
+                    roles: Default::default(),
                     scopes: vec![],
                     grants: vec![],
                     limits: Default::default(),

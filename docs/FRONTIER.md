@@ -176,3 +176,14 @@ missions à 1920 × 1080 coûtent 24,44 ms en médiane (champ allégé pour rast
 inchangé n'est plus redessiné, et `--repos` mesure ce repos : trois images et 2 % d'un cœur en
 dix secondes. Les mêmes mesures sur un écran physique avec carte graphique,
 et la consommation au repos, restent à établir pour cocher le critère d'interface.
+
+Le [relais de modèles par rôle](reports/relais-2026-09-13.md) (ADR 0034) fait ensuite avancer
+plusieurs modèles ensemble sur une mission : rôles `reflect`, `execute`, `code` dans les profils,
+délégation par rôle vers le modèle réellement servi, consigne par rôle, condensation des anciens
+résultats d'outils, et compte des tokens par modèle jusqu'au parent. Trois essais réels sur
+trois avec Qwen3-1.7B en réflexion et Qwen3-0.6B en exécution sur un llama-server en mode
+routeur (41,9 s à froid, puis 18,2 s et 17,9 s ; 31 % des tokens hors du modèle de réflexion).
+Cela fait progresser le critère des moteurs locaux (budgets de contexte et de tokens,
+concurrence de deux modèles) sans le cocher : le moteur de l'image sert un modèle, la matrice
+GPU et le cycle de vie des poids restent ouverts, et les clients officiels ne sont pas encore
+des cibles de rôle que le service lance.

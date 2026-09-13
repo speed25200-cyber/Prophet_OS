@@ -199,6 +199,13 @@ impl Handler for Agents {
                     runtime
                         .bind_owner(&request.id, pair.uid)
                         .map_err(|e| Error::new(ErrorCode::InternalError, e))?;
+                    // Le rôle que ce modèle joue dans le relais du profil, s'il en a un : la
+                    // mission le sait, le briefing et le compte par modèle s'y réfèrent.
+                    let role = manifest
+                        .model
+                        .role_of(&plan.choice.reference)
+                        .map(str::to_owned);
+                    runtime.set_role(&request.id, role);
                     ecrire(&self.etat, &runtime.etat()).map_err(|e| {
                         Error::new(
                             ErrorCode::InternalError,
@@ -647,6 +654,9 @@ impl Agents {
             sup_socket: self.sup_socket.clone(),
             delegate: Some(self.delegator()),
             sandboxd: self.sandboxd.clone(),
+            // Une séance n'a pas de modèle côté service : la consigne n'aurait personne à qui
+            // parler, le client de l'humain lit la description des outils.
+            briefing: None,
             stop,
         };
         let opened =
@@ -897,6 +907,10 @@ impl Agents {
         let job_id = id.clone();
         let failure_task = task.clone();
         let failure_publish = publish.clone();
+        let briefing = {
+            let runtime = self.runtime.lock().await;
+            briefing_pour(&runtime, &id, &self.profiles)
+        };
         let mission = agentd::local::Mission {
             task,
             token,
@@ -910,6 +924,7 @@ impl Agents {
             sup_socket: self.sup_socket.clone(),
             delegate: Some(self.delegator()),
             sandboxd: self.sandboxd.clone(),
+            briefing,
             stop,
         };
         if let Err(error) = std::thread::Builder::new()
@@ -1101,6 +1116,47 @@ fn delegation_fn(ctx: Arc<DelegationContext>) -> agentd::local::Delegate {
     Arc::new(move |parent, token, request| deleguer(&ctx, parent, token, request))
 }
 
+/// La consigne du relais pour une mission qui se lance : son rôle et les contextes qu'elle
+/// peut confier, avec les rôles qu'ils savent jouer (ADR 0034). `None` sans relais : la boucle
+/// native reste alors ce qu'elle était.
+fn briefing_pour(
+    runtime: &Runtime,
+    id: &str,
+    profiles: &[agentd::preparation::Profile],
+) -> Option<String> {
+    let role = runtime.task(id).and_then(|t| t.role.clone());
+    let contexts: Vec<agentd::relay::Context> = runtime
+        .spawn_targets(id)
+        .iter()
+        .filter_map(|target| profiles.iter().find(|p| &p.id == target))
+        .map(|p| agentd::relay::Context {
+            profile: p.id.clone(),
+            roles: p.manifest.model.roles.clone(),
+        })
+        .collect();
+    agentd::relay::briefing(role.as_deref(), &contexts)
+}
+
+/// Les modèles que le moteur sert en ce moment, depuis un fil sans exécuteur.
+fn modeles_servis(
+    endpoint: &str,
+) -> Result<Vec<String>, (mcp_system::protocol::ErrorCode, String)> {
+    use mcp_system::protocol::ErrorCode as Code;
+    let endpoint = endpoint.to_owned();
+    bloquer(async move {
+        providers::stream::ChatClient::new(&endpoint, std::time::Duration::from_secs(3))
+            .map_err(|e| (Code::SandboxError, e.to_string()))?
+            .models()
+            .await
+            .map_err(|e| {
+                (
+                    Code::SandboxError,
+                    format!("moteur local injoignable : {e}"),
+                )
+            })
+    })
+}
+
 /// Une sous-mission, du jeton délégué au résultat rendu (ADR 0029).
 ///
 /// Tourne dans le fil de la mission parente (ou de la séance), qui attend : le parent ne fait
@@ -1142,21 +1198,80 @@ fn deleguer(
                 .map(str::to_owned),
         )
     };
-    let model = request.model.clone().or(parent_model).ok_or_else(|| {
+    // Un rôle demandé désigne le modèle que le contexte visé admet pour ce rôle, parmi ceux que
+    // le moteur sert en ce moment ; un modèle nommé explicitement l'emporte s'il est admis.
+    // Un nom que le contexte n'admet pas est une erreur d'argument que le modèle peut corriger
+    // (en nommant un rôle), pas un refus de politique qui arrête la mission (ADR 0034).
+    let admitted = |m: &str| {
+        profile
+            .manifest
+            .model
+            .preferred
+            .contains(&format!("local:{m}"))
+    };
+    let explication = || {
+        format!(
+            "modèles admis : {} ; rôles : {}",
+            profile
+                .manifest
+                .model
+                .preferred
+                .iter()
+                .filter_map(|r| r.strip_prefix("local:"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            profile
+                .manifest
+                .model
+                .roles
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let explicit = request.model.clone().filter(|m| admitted(m));
+    if let Some(model) = &request.model
+        && explicit.is_none()
+        && request.role.is_none()
+    {
+        return Err((
+            Code::Invalid,
+            format!(
+                "Le contexte {} n'admet pas le modèle {model} ; {}.",
+                profile.id,
+                explication()
+            ),
+        ));
+    }
+    let role_model = match (&explicit, &request.role) {
+        (None, Some(role)) => {
+            let served = modeles_servis(&endpoint)?;
+            let reference = agentd::relay::resolve(&profile.manifest.model.roles, role, &served)
+                .map_err(|e| (Code::Invalid, format!("Rôle {role} : {e}.")))?;
+            reference.strip_prefix("local:").map(str::to_owned)
+        }
+        _ => None,
+    };
+    let model = explicit.or(role_model).or(parent_model).ok_or_else(|| {
         (
             Code::Invalid,
             "aucun modèle local pour la sous-mission".to_owned(),
         )
     })?;
     let reference = format!("local:{model}");
-    if !profile.manifest.model.preferred.contains(&reference) {
+    if !admitted(&model) {
         return Err((
-            Code::PolicyDenied,
-            format!("Le contexte {} n'admet pas le modèle {model}.", profile.id),
+            Code::Invalid,
+            format!(
+                "Le contexte {} n'admet pas le modèle {model} de votre mission ; {}.",
+                profile.id,
+                explication()
+            ),
         ));
     }
     let mut manifest = profile.manifest.clone();
-    manifest.model.preferred = vec![reference];
+    manifest.model.preferred = vec![reference.clone()];
     let grants = profile.grants().map_err(|e| (Code::SandboxError, e))?;
     let ttl = i64::try_from(manifest.wall_time_seconds().unwrap_or(1200)).unwrap_or(1200);
     // Le jeton de l'enfant est délégué par capd : un sous-ensemble de celui du parent, jamais
@@ -1206,6 +1321,13 @@ fn deleguer(
         runtime
             .link_child(&child_id, parent_id, 0.5)
             .map_err(|e| (Code::PolicyDenied, e.to_string()))?;
+        // Le rôle de l'enfant : celui demandé, sinon celui que son contexte donne à ce modèle.
+        let role = request
+            .role
+            .as_deref()
+            .map(|r| r.trim().to_lowercase())
+            .or_else(|| manifest.model.role_of(&reference).map(str::to_owned));
+        runtime.set_role(&child_id, role);
         if let Some(uid) = owner {
             runtime
                 .bind_owner(&child_id, uid)
@@ -1246,6 +1368,10 @@ fn deleguer(
         })
     };
     let failure_task = task.clone();
+    let briefing = {
+        let runtime = ctx.runtime.blocking_lock();
+        briefing_pour(&runtime, &child_id, &ctx.profiles)
+    };
     let mission = agentd::local::Mission {
         task,
         token,
@@ -1259,6 +1385,7 @@ fn deleguer(
         sup_socket: ctx.sup_socket.clone(),
         delegate: Some(delegation_fn(ctx.clone())),
         sandboxd: ctx.sandboxd.clone(),
+        briefing,
         stop,
     };
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

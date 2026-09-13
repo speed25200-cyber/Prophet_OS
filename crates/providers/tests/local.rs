@@ -252,3 +252,108 @@ fn une_reponse_demensuree_est_refusee() {
     );
     server.join().unwrap();
 }
+
+/// Un historique de mission : intention, deux appels d'outil et leurs résultats, dont un
+/// long, puis un appel récent.
+fn historique(long: &str) -> Vec<Value> {
+    vec![
+        json!({"role":"user","content":"Objectif"}),
+        json!({"role":"assistant","tool_call":{"tool":"fs.read","arguments":{"path":"a"}}}),
+        json!({"role":"tool","ok":true,"result":{"content":long}}),
+        json!({"role":"assistant","tool_call":{"tool":"fs.read","arguments":{"path":"b"}}}),
+        json!({"role":"tool","ok":true,"result":{"content":"court"}}),
+        json!({"role":"assistant","tool_call":{"tool":"fs.list","arguments":{"path":"c"}}}),
+        json!({"role":"tool","ok":true,"result":{"entries":["c/1"]}}),
+    ]
+}
+
+#[test]
+fn la_condensation_allege_les_anciens_resultats_sans_toucher_aux_recents() {
+    use providers::local::{AsyncLocalModel, Condensation, condense};
+    let long = "x".repeat(4000);
+    let model = AsyncLocalModel::new(
+        "http://127.0.0.1:9/v1",
+        "m",
+        Vec::new(),
+        Duration::from_secs(1),
+        16,
+    )
+    .unwrap();
+    // Sans politique, tout part intact.
+    let intact = model.outgoing(&historique(&long)).unwrap();
+    assert_eq!(intact.len(), 7);
+    assert!(intact[2]["content"].as_str().unwrap().len() > 4000);
+
+    let model = model.with_condensation(Condensation {
+        keep_last: 2,
+        max_bytes: 512,
+    });
+    let envoye = model.outgoing(&historique(&long)).unwrap();
+    assert_eq!(envoye.len(), 7, "aucun message n'est retiré");
+    let condense_ = envoye[2]["content"].as_str().unwrap();
+    assert!(condense_.len() < 600, "{}", condense_.len());
+    let resume: Value = serde_json::from_str(condense_).unwrap();
+    assert_eq!(resume["condensed"], true);
+    assert_eq!(resume["ok"], true);
+    assert!(resume["bytes"].as_u64().unwrap() > 4000);
+    assert!(resume["digest"].as_str().unwrap().starts_with("blake3:"));
+    assert_eq!(resume["head"].as_str().unwrap().len(), 160);
+    // Les deux derniers résultats restent tels quels, et les appels ne changent pas.
+    assert!(envoye[4]["content"].as_str().unwrap().contains("court"));
+    assert!(envoye[6]["content"].as_str().unwrap().contains("c/1"));
+    assert_eq!(envoye[1]["tool_calls"][0]["function"]["name"], "fs.read");
+    // Un résultat ancien mais court n'est pas condensé ; la politique est déterministe.
+    let mut messages = model.outgoing(&historique("bref")).unwrap();
+    assert!(messages[2]["content"].as_str().unwrap().contains("bref"));
+    assert_eq!(
+        condense(
+            &mut messages,
+            Condensation {
+                keep_last: 0,
+                max_bytes: 0
+            }
+        ),
+        0,
+        "rien de plus court que zéro octet… mais rien à épargner non plus"
+    );
+    let mut deux = model.outgoing(&historique(&long)).unwrap();
+    let mut encore = deux.clone();
+    assert_eq!(
+        condense(&mut deux, Condensation::default()),
+        condense(&mut encore, Condensation::default())
+    );
+    assert_eq!(deux, encore);
+}
+
+#[test]
+fn la_consigne_de_systeme_precede_l_intention_a_chaque_tour() {
+    use providers::local::AsyncLocalModel;
+    let model = AsyncLocalModel::new(
+        "http://127.0.0.1:9/v1",
+        "m",
+        Vec::new(),
+        Duration::from_secs(1),
+        16,
+    )
+    .unwrap()
+    .with_system(Some("Votre rôle est l'exécution.".into()));
+    let envoye = model.outgoing(&historique("bref")).unwrap();
+    assert_eq!(envoye.len(), 8);
+    assert_eq!(envoye[0]["role"], "system");
+    assert_eq!(envoye[0]["content"], "Votre rôle est l'exécution.");
+    assert_eq!(envoye[1]["role"], "user");
+    // Une consigne vide n'en pose aucune.
+    let muet = AsyncLocalModel::new(
+        "http://127.0.0.1:9/v1",
+        "m",
+        Vec::new(),
+        Duration::from_secs(1),
+        16,
+    )
+    .unwrap()
+    .with_system(Some("   ".into()));
+    assert_eq!(
+        muet.outgoing(&historique("bref")).unwrap()[0]["role"],
+        "user"
+    );
+}

@@ -15,9 +15,14 @@
       },
       "model": {
         "preferred": [
+          "local:qwen3-1.7b",
           "local:qwen3-0.6b"
         ],
-        "privacy": "local-only"
+        "privacy": "local-only",
+        "roles": {
+          "reflect": ["local:qwen3-1.7b"],
+          "execute": ["local:qwen3-0.6b", "local:qwen3-1.7b"]
+        }
       },
       "sandbox": {
         "min_level": 0
@@ -68,9 +73,14 @@
       },
       "model": {
         "preferred": [
+          "local:qwen3-1.7b",
           "local:qwen3-0.6b"
         ],
-        "privacy": "local-only"
+        "privacy": "local-only",
+        "roles": {
+          "reflect": ["local:qwen3-1.7b"],
+          "execute": ["local:qwen3-0.6b", "local:qwen3-1.7b"]
+        }
       },
       "sandbox": {
         "min_level": 0

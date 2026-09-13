@@ -614,6 +614,24 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                 out.push_str(reason);
                 out.push('\n');
             }
+            // Ce que chaque modèle a coûté, et la part prise en charge hors du modèle de la
+            // mission : la mesure du relais (ADR 0034).
+            if let Ok(usage) = serde_json::from_value::<agentd::UsageByModel>(
+                result
+                    .get("usage")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+            ) && !usage.is_empty()
+            {
+                let reference = result["driver"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| usage.keys().next().cloned().unwrap_or_default());
+                out.push_str(&format!(
+                    "Tokens par modèle : {}\n",
+                    agentd::relay::render_usage(&usage, &reference)
+                ));
+            }
             if let Some(diff) = result.get("diff") {
                 let diff: sfs::Diff = serde_json::from_value(diff.clone())?;
                 out.push_str(&diff.render());
@@ -742,6 +760,16 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
             }
             if let Some(reason) = inspection.task.reason {
                 out.push_str(&format!("{reason}\n"));
+            }
+            if let Some(role) = &inspection.task.role {
+                out.push_str(&format!("Rôle dans le relais : {role}\n"));
+            }
+            if !inspection.task.usage.is_empty() {
+                let reference = inspection.task.driver.clone().unwrap_or_default();
+                out.push_str(&format!(
+                    "Tokens par modèle : {}\n",
+                    agentd::relay::render_usage(&inspection.task.usage, &reference)
+                ));
             }
             if let Some(result) = inspection.result
                 && let Some(text) = result["text"].as_str()

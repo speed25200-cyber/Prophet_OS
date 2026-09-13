@@ -242,6 +242,24 @@ empreinte sensible à l'ordre des courants. Validation locale sans Nix, rendu ll
 et l'[ADR 0025](adr/0025-direction-visuelle-reacteur.md). La fluidité et la consommation sur une
 carte graphique réelle restent à mesurer ; aucune case complète de FRONTIER n'est cochée.
 
+Relais de modèles par rôle, 13 septembre 2026, dans le commit portant ce rapport : un profil de
+mission distribue des rôles (`model.roles` : `reflect`, `execute`, `code`, chacun ⊆ `preferred`) ;
+`task.delegate {role}` fait choisir au service le modèle que le contexte visé admet pour ce rôle
+parmi ceux que le moteur sert ; chaque mission connaît son rôle et reçoit à chaque tour la consigne
+de son rôle et des contextes qu'elle peut confier ; les tokens sont comptés par modèle (tours,
+entrée, sortie) jusqu'au parent, exposés par `task.inspect`, `task.result`, le journal (`by_model`),
+`prophet task show` et l'atelier ; les anciens résultats d'outils sont condensés avant chaque envoi
+au moteur. Preuves : deux nouveaux scénarios avec les vrais capd, ledger et agentd et un moteur
+simulé (rôle résolu en passant un modèle non servi, consignes reçues, compte exact imputé au
+parent ; rôle absent refusé sans sous-mission), condensation et consigne vérifiées dans providers,
+rôles du manifeste dans prophet-types. **Preuve réelle : trois essais sur trois**, Qwen3-1.7B en
+réflexion et Qwen3-0.6B en exécution sur un llama-server en mode routeur (deux modèles, un port) :
+41,9 s à froid puis 18,2 s et 17,9 s, fichier exact écrit par la sous-mission, 31 % des tokens pris
+en charge hors du modèle de réflexion. Le moteur de l'image reste à un modèle, et les clients
+officiels ne sont pas encore des cibles de rôle exécutables par le service. Voir le
+[rapport du relais](reports/relais-2026-09-13.md) et l'[ADR 0034](adr/0034-relais-de-modeles-par-role.md).
+Aucune case complète de FRONTIER n'est cochée.
+
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 
 - `c3b0c08` — moteur local réel, CLI et gel d'un processus possédé par sandboxd.
@@ -573,7 +591,7 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 - [x] M8-T4 — Pilote `claude-code` (2026-09-12, 24b8338) — ligne de commande, environnement, détection de session
 - [x] M8-T5 — Pilote `codex` (2026-09-12, 24b8338) — pilote Codex CLI
 - [x] M8-T6 — Pilote `gemini` (2026-09-12, 24b8338) — pilote Gemini CLI
-- [ ] M8-T7 — Moteurs locaux — client HTTP, flux annulable, interface de conversation et essai Qwen3/CPU réalisés ; restent le service de modèles, le raccordement à agentd, les budgets de tokens/VRAM et la matrice GPU/modèles
+- [ ] M8-T7 — Moteurs locaux — client HTTP, flux annulable, interface de conversation et essai Qwen3/CPU réalisés ; le 13 septembre, budgets de tokens par modèle, condensation du contexte et deux modèles servis par un llama-server en mode routeur, prouvés en relais réel (ADR 0034) ; restent le service de modèles dans l'image (routeur, second poids), les budgets VRAM et la matrice GPU/modèles
 - [x] M8-T8 — Pilote `prophet-agent` (2026-09-12, 24b8338) — boucle native : points de reprise, fork, rejeu
 - [x] M8-T9 — Sélection de pilote (2026-09-12, 24b8338) — sélection expliquée, confidentialité locale respectée
 - [x] M8-T10 — CLI (2026-09-12, 24b8338) — `prophet provider ls|login`

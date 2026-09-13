@@ -39,6 +39,15 @@ Le catalogue est une configuration de confiance de l'administrateur. Il ne doit 
 modifiable par un agent. Une configuration invalide bloque le démarrage avec une erreur ;
 son absence rend une liste de profils vide. La limite est de 32 profils et 1 Mio.
 
+Un profil peut distribuer des rôles (`model.roles` : `reflect`, `execute`, `code`), chacun
+avec ses modèles admis parmi `preferred`. L'exemple fait réfléchir `qwen3-1.7b` et exécuter
+`qwen3-0.6b` : la mission de réflexion confie ses étapes par `task.delegate {role: "execute"}`
+sans nommer de modèle, chaque mission reçoit la consigne de son rôle, et `prophet task show`
+dit ensuite ce que chaque modèle a coûté et la part prise en charge hors du modèle de la
+mission (ADR 0034). Pour servir deux modèles sur le même port, llama-server sait fonctionner
+en routeur : `llama-server --models-dir <dossier des GGUF> --port 8080`, chaque fichier étant
+alors un modèle nommé par son nom de fichier sans extension.
+
 La surface lit `task.options`, choisit un profil et un modèle effectivement présent, puis
 envoie `task.prepare {id, intent, profile, model}`. Le service fixe l'identité à partir du pair
 Unix et obtient le jeton auprès de capd. Les autres champs sont refusés. La préparation ne

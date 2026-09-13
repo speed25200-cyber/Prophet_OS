@@ -26,6 +26,11 @@ preferred = ["local:qwen3-14b", "driver:claude-code", "driver:codex"]
 privacy = "local-preferred"              # local-only | local-preferred | any
 min_capability = "standard"              # small | standard | frontier
 
+[model.roles]                            # facultatif : le relais de modèles (ADR 0034)
+reflect = ["driver:claude-code"]         # réflexion profonde, découpage, vérification
+code    = ["driver:codex", "local:qwen3-14b"]
+execute = ["local:qwen3-14b"]            # étapes simples, au modèle le moins coûteux
+
 [capabilities.max]
 "fs.read"  = ["~/ventes/**", "~/modeles/**"]
 "fs.write" = ["~/ventes/out/**"]
@@ -56,7 +61,7 @@ spaces = ["work"]
 1. `agent.id` : 3 à 128 caractères, DNS inversé, au moins deux segments.
 2. `agent.version` : semver strict.
 3. `publisher_key` : préfixe `ed25519:`, 32 octets en base64.
-4. `model.preferred` : au moins un élément ; chaque élément est `local:<nom>`, `driver:<pilote>` ou `api:<fournisseur>:<modèle>`.
+4. `model.preferred` : au moins un élément ; chaque élément est `local:<nom>`, `driver:<pilote>` ou `api:<fournisseur>:<modèle>`. `model.roles`, facultatif, n'admet que les clés `reflect`, `execute` et `code`, chacune avec au moins une référence valide ; un catalogue de missions (agentd) exige de plus que chaque référence de rôle figure dans `preferred`, le rôle ne pouvant qu'y choisir.
 5. `capabilities.max` : au moins une clé. Les chemins commencent par `~/` ou `/`. Les globs suivent `globset`. `**` n'est autorisé qu'en fin de segment.
 6. `net.egress` : éléments de la forme `domaine`, `*.domaine`, `domaine:port` ou `driver:<pilote>` (signifie « les domaines que ce pilote a besoin de joindre, gérés par l'OS »). Jamais d'adresse IP en v0.
 7. `sandbox.min_level` ∈ {0, 1, 2}. Si `capabilities.max."proc.exec"` est non vide, `code_execution` doit être `microvm`.

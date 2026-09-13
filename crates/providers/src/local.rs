@@ -326,6 +326,77 @@ pub struct AsyncLocalModel {
     model: String,
     tools: Vec<LocalTool>,
     max_tokens: u32,
+    /// Consigne de système placée avant l'intention, si la mission en a une (ADR 0034).
+    system: Option<String>,
+    /// Condensation des anciens résultats d'outils avant envoi, si demandée.
+    condensation: Option<Condensation>,
+}
+
+/// Comment condenser l'historique envoyé au moteur : les résultats d'outils plus anciens que
+/// les `keep_last` derniers, et plus longs que `max_bytes`, sont remplacés par un résumé qui en
+/// donne la taille, l'empreinte et le début. L'historique conservé par la boucle ne change pas ;
+/// seul ce qui part vers le modèle est allégé, à chaque tour, de façon déterministe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Condensation {
+    /// Nombre de résultats d'outils récents envoyés intacts.
+    pub keep_last: usize,
+    /// Taille au-delà de laquelle un ancien résultat est condensé.
+    pub max_bytes: usize,
+}
+
+impl Default for Condensation {
+    fn default() -> Self {
+        Self {
+            keep_last: 2,
+            max_bytes: 1024,
+        }
+    }
+}
+
+/// Condense sur place les anciens résultats d'outils d'une liste de messages Chat Completions
+/// et rend le nombre d'octets épargnés.
+///
+/// Un résultat condensé garde `ok`, annonce `condensed: true`, la taille d'origine, une
+/// empreinte blake3 et les 160 premiers caractères : le modèle sait qu'il a lu ce résultat, ce
+/// qu'il contenait en substance, et qu'il peut le relire par un nouvel appel s'il en a besoin.
+#[must_use]
+pub fn condense(messages: &mut [Value], policy: Condensation) -> usize {
+    let tool_indexes: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m["role"] == "tool")
+        .map(|(i, _)| i)
+        .collect();
+    let old = tool_indexes.len().saturating_sub(policy.keep_last);
+    let mut saved = 0;
+    for index in tool_indexes.into_iter().take(old) {
+        let Some(content) = messages[index]["content"].as_str() else {
+            continue;
+        };
+        if content.len() <= policy.max_bytes {
+            continue;
+        }
+        let ok = serde_json::from_str::<Value>(content)
+            .ok()
+            .and_then(|v| v["ok"].as_bool())
+            .unwrap_or(true);
+        let mut head_end = 160.min(content.len());
+        while !content.is_char_boundary(head_end) {
+            head_end -= 1;
+        }
+        let summary = json!({
+            "ok": ok,
+            "condensed": true,
+            "bytes": content.len(),
+            "digest": format!("blake3:{}", blake3::hash(content.as_bytes()).to_hex()),
+            "head": &content[..head_end],
+            "note": "résultat ancien condensé par Prophet OS ; relancez l'outil pour le relire en entier"
+        })
+        .to_string();
+        saved += content.len().saturating_sub(summary.len());
+        messages[index]["content"] = Value::String(summary);
+    }
+    saved
 }
 
 /// Réponse dont les compteurs restent exploitables même si le tour est invalide.
@@ -383,7 +454,39 @@ impl AsyncLocalModel {
             model: model.into(),
             tools,
             max_tokens,
+            system: None,
+            condensation: None,
         })
+    }
+
+    /// Place une consigne de système avant l'intention, à chaque tour. Une consigne vide
+    /// n'en pose aucune.
+    #[must_use]
+    pub fn with_system(mut self, system: Option<String>) -> Self {
+        self.system = system.filter(|s| !s.trim().is_empty());
+        self
+    }
+
+    /// Condense les anciens résultats d'outils avant chaque envoi.
+    #[must_use]
+    pub const fn with_condensation(mut self, policy: Condensation) -> Self {
+        self.condensation = Some(policy);
+        self
+    }
+
+    /// Messages tels qu'ils partent vers le moteur : consigne, historique condensé s'il y a lieu.
+    ///
+    /// # Errors
+    /// Historique incohérent.
+    pub fn outgoing(&self, history: &[Value]) -> Result<Vec<Value>, DriverError> {
+        let mut messages = messages(history)?;
+        if let Some(policy) = self.condensation {
+            let _ = condense(&mut messages, policy);
+        }
+        if let Some(system) = &self.system {
+            messages.insert(0, json!({"role":"system","content":system}));
+        }
+        Ok(messages)
     }
 
     /// Produit un tour ; son futur peut être abandonné pour interrompre l'inférence HTTP.
@@ -391,7 +494,7 @@ impl AsyncLocalModel {
     /// # Errors
     /// Moteur indisponible, réponse trop grande, incohérente ou incomplète.
     pub async fn next_turn(&self, history: &[Value]) -> Result<LocalReply, DriverError> {
-        let mut body = json!({"model":self.model,"messages":messages(history)?,"stream":false,"max_tokens":self.max_tokens});
+        let mut body = json!({"model":self.model,"messages":self.outgoing(history)?,"stream":false,"max_tokens":self.max_tokens});
         if !self.tools.is_empty() {
             body["tools"] = json!(
                 self.tools
