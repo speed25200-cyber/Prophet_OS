@@ -27,6 +27,10 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
 
+/// Une séance par mission ; `None` le temps qu'un retrait la conclue.
+type Seances =
+    Arc<std::sync::Mutex<BTreeMap<String, Arc<std::sync::Mutex<Option<agentd::local::Seance>>>>>>;
+
 struct Agents {
     runtime: Arc<Mutex<Runtime>>,
     jobs: Arc<std::sync::Mutex<BTreeMap<String, Arc<AtomicBool>>>>,
@@ -46,6 +50,8 @@ struct Agents {
     browser_state: Arc<std::sync::RwLock<Option<agentd::preparation::BrowserState>>>,
     /// Profils de navigation, un par tâche, dans l'état privé du service.
     browser_root: std::path::PathBuf,
+    /// Séances d'outils ouvertes pour des clients MCP, une par mission attachée.
+    seances: Seances,
     /// Où l'état est écrit entre deux démarrages.
     etat: std::path::PathBuf,
     pairs: commun::Pairs,
@@ -377,6 +383,81 @@ impl Handler for Agents {
 
             // Une mission active accuse réception de la demande ; son travailleur confirme
             // ensuite l'arrêt dans l'état final, après interruption de la requête au modèle.
+            // Un client MCP de l'humain (Claude Code, Codex…) travaille dans une mission
+            // préparée : le service tient le jeton, le registre, le travail SFS et le journal ;
+            // le client ne reçoit que la liste des outils et leurs résultats.
+            "task.attach" => {
+                let id = commun::texte(&params, "id")?;
+                let client = params
+                    .get("client")
+                    .and_then(Value::as_str)
+                    .unwrap_or("client MCP")
+                    .chars()
+                    .take(120)
+                    .collect::<String>();
+                self.attach(id, client, pair.uid).await
+            }
+            "task.tools" => {
+                let id = commun::texte(&params, "id")?;
+                let seance = self.seance(&id, pair.uid).await?;
+                let tools = hors_tokio("seance-outils", move || {
+                    let guard = seance.lock().map_err(|_| seance_indisponible())?;
+                    guard
+                        .as_ref()
+                        .map(agentd::local::Seance::tools)
+                        .ok_or_else(seance_terminee)
+                })
+                .await??;
+                Ok(json!({ "tools": tools }))
+            }
+            "task.call" => {
+                let id = commun::texte(&params, "id")?;
+                let name = commun::texte(&params, "name")?;
+                let args = params
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                if !args.is_object() {
+                    return Err(Error::new(
+                        ErrorCode::InvalidParams,
+                        "arguments : objet attendu",
+                    ));
+                }
+                let seance = self.seance(&id, pair.uid).await?;
+                let result = hors_tokio("seance-appel", move || {
+                    let mut guard = seance.lock().map_err(|_| seance_indisponible())?;
+                    guard
+                        .as_mut()
+                        .ok_or_else(seance_terminee)?
+                        .call(&name, &args)
+                        .map_err(|raison| Error::new(ErrorCode::Conflict, raison))
+                })
+                .await??;
+                commun::repondre(&result)
+            }
+            "task.detach" => {
+                let id = commun::texte(&params, "id")?;
+                let text = params
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(|t| t.chars().take(16_384).collect::<String>());
+                let seance = self.seance(&id, pair.uid).await?;
+                self.retirer(&id);
+                hors_tokio("seance-retrait", move || {
+                    let taken = seance
+                        .lock()
+                        .map_err(|_| seance_indisponible())?
+                        .take()
+                        .ok_or_else(seance_terminee)?;
+                    taken.finish(text);
+                    Ok::<(), Error>(())
+                })
+                .await??;
+                self.vider_le_journal().await;
+                tracing::info!(tache = %id, "séance d'outils conclue");
+                Ok(json!({ "detached": id }))
+            }
+
             "task.cancel" => {
                 let id = commun::texte(&params, "id")?;
                 let stop = self
@@ -389,6 +470,19 @@ impl Handler for Agents {
                     .cloned();
                 if let Some(stop) = stop {
                     stop.store(true, Ordering::Release);
+                    // Une séance d'outils n'a pas de boucle qui verrait l'arrêt : le service la
+                    // conclut lui-même, et le client apprend l'annulation à son prochain appel.
+                    if let Some(seance) = self.retirer(&id) {
+                        hors_tokio("seance-annulation", move || {
+                            if let Ok(mut guard) = seance.lock()
+                                && let Some(taken) = guard.take()
+                            {
+                                taken.abort("annulation demandée");
+                            }
+                        })
+                        .await?;
+                        self.vider_le_journal().await;
+                    }
                     return Ok(json!({"cancel_requested":id}));
                 }
                 let maintenant = OffsetDateTime::now_utc();
@@ -409,7 +503,154 @@ impl Handler for Agents {
     }
 }
 
+/// Exécute sur un thread propre, hors de Tokio : les services synchrones du registre (capd,
+/// ledger) refusent de tourner sur un travailleur bloquant du runtime, comme une mission.
+async fn hors_tokio<T: Send + 'static>(
+    nom: &str,
+    travail: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, Error> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name(nom.to_owned())
+        .spawn(move || {
+            let _ = tx.send(travail());
+        })
+        .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?;
+    rx.await
+        .map_err(|_| Error::new(ErrorCode::InternalError, "travailleur de séance interrompu"))
+}
+
+fn seance_indisponible() -> Error {
+    Error::new(ErrorCode::InternalError, "séance d'outils indisponible")
+}
+
+fn seance_terminee() -> Error {
+    Error::new(ErrorCode::Conflict, "cette séance d'outils est terminée")
+}
+
 impl Agents {
+    /// La séance d'une mission, pour son créateur seulement.
+    async fn seance(
+        &self,
+        id: &str,
+        uid: u32,
+    ) -> Result<Arc<std::sync::Mutex<Option<agentd::local::Seance>>>, Error> {
+        if !self.runtime.lock().await.is_owner(id, uid) {
+            return Err(Error::new(
+                ErrorCode::Unauthorized,
+                "Seul le créateur de la mission dispose de sa séance d'outils.",
+            ));
+        }
+        self.seances
+            .lock()
+            .map_err(|_| seance_indisponible())?
+            .get(id)
+            .cloned()
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorCode::NotFound,
+                    "Aucune séance d'outils ouverte pour cette mission.",
+                )
+            })
+    }
+
+    /// Retire la séance et son travailleur ; ce qui reste à conclure l'est par l'appelant.
+    fn retirer(&self, id: &str) -> Option<Arc<std::sync::Mutex<Option<agentd::local::Seance>>>> {
+        let seance = self.seances.lock().ok()?.remove(id);
+        if let Ok(mut jobs) = self.jobs.lock() {
+            jobs.remove(id);
+        }
+        seance
+    }
+
+    /// Ouvre une séance d'outils sur une mission préparée par ce créateur.
+    async fn attach(&self, id: String, client: String, uid: u32) -> Result<Value, Error> {
+        if !self.runtime.lock().await.is_owner(&id, uid) {
+            return Err(Error::new(
+                ErrorCode::Unauthorized,
+                "Seul le créateur d'une mission préparée peut y attacher un client.",
+            ));
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        {
+            let mut jobs = self
+                .jobs
+                .lock()
+                .map_err(|_| Error::new(ErrorCode::InternalError, "travailleurs indisponibles"))?;
+            if jobs.len() >= 2 || jobs.contains_key(&id) {
+                return Err(Error::new(
+                    ErrorCode::Conflict,
+                    "mission déjà lancée ou capacité de travail atteinte",
+                ));
+            }
+            jobs.insert(id.clone(), stop.clone());
+        }
+        let launch = {
+            let mut runtime = self.runtime.lock().await;
+            match runtime.begin_local(&id) {
+                Ok(launch) => match ecrire(&self.etat, &runtime.etat()) {
+                    Ok(()) => Ok(launch),
+                    Err(error) => {
+                        let mut task = launch.0;
+                        task.state = agentd::State::Failed;
+                        task.reason = Some("lancement non persisté".into());
+                        task.history.push(agentd::State::Failed);
+                        runtime.publish_local(task, None);
+                        Err(Error::new(
+                            ErrorCode::InternalError,
+                            format!("lancement non persisté : {error}"),
+                        ))
+                    }
+                },
+                Err(error) => Err(runtime_erreur(error)),
+            }
+        };
+        let (task, token, plan, home) = match launch {
+            Ok(value) => value,
+            Err(error) => {
+                self.retirer(&id);
+                return Err(error);
+            }
+        };
+        let state = self.runtime.clone();
+        let path = self.etat.clone();
+        let publish: agentd::local::Publish = Arc::new(move |task, result| {
+            let mut runtime = state.blocking_lock();
+            runtime.publish_local(task, result);
+            ecrire(&path, &runtime.etat()).map_err(|e| format!("état non enregistré : {e}"))
+        });
+        let mission = agentd::local::Mission {
+            task,
+            token,
+            plan,
+            home,
+            endpoint: self.local_endpoint.clone().unwrap_or_default(),
+            services: mcp_system::services::Services::new(self.capd.clone(), self.ledger.clone()),
+            egress: self.egress.clone(),
+            browser: self.browser.clone(),
+            browser_root: self.browser_root.clone(),
+            stop,
+        };
+        let opened =
+            hors_tokio("seance-ouverture", move || mission.attach(publish, &client)).await?;
+        self.vider_le_journal().await;
+        match opened {
+            Ok(seance) => {
+                let tools = seance.tools().len();
+                self.seances
+                    .lock()
+                    .map_err(|_| seance_indisponible())?
+                    .insert(id.clone(), Arc::new(std::sync::Mutex::new(Some(seance))));
+                tracing::info!(tache = %id, outils = tools, "séance d'outils ouverte");
+                Ok(json!({ "attached": id, "tools": tools }))
+            }
+            Err(error) => {
+                self.retirer(&id);
+                Err(Error::new(ErrorCode::Conflict, error))
+            }
+        }
+    }
+
     /// Dernier état connu du navigateur piloté, sans bloquer sur une sonde en cours.
     fn browser_state(&self) -> Option<agentd::preparation::BrowserState> {
         self.browser_state.read().ok().and_then(|s| s.clone())
@@ -998,6 +1239,7 @@ async fn main() -> anyhow::Result<()> {
             browser,
             browser_state,
             browser_root,
+            seances: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
             etat: fichier_etat,
             pairs: commun::Pairs::detecter()?,
         }))

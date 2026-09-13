@@ -89,6 +89,12 @@ enum TaskAction {
         /// Identifiant.
         id: String,
     },
+    /// Rend la configuration MCP qui donne à un client (Claude Code, Codex) les outils d'une
+    /// mission préparée, par le pont `prophet-mcp`.
+    McpConfig {
+        /// Identifiant de la mission préparée.
+        id: String,
+    },
     /// Annule une tâche en cours.
     Cancel {
         /// Identifiant.
@@ -735,6 +741,33 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                     "Mission {id} : publication annulée : {a} ajout(s) retiré(s), {m} modification(s) rétablie(s), {s} suppression(s) rétablie(s)\n"
                 )
             })
+        }
+        TaskAction::McpConfig { id } => {
+            // La mission doit exister pour ce créateur ; le pont ne fait que la servir.
+            let etat = task_rpc(
+                &socket_agentd(),
+                "task.inspect",
+                serde_json::json!({"id":id}),
+            )?;
+            if etat["task"]["state"] != "planned" {
+                anyhow::bail!(
+                    "la mission {id} est {} ; seule une mission préparée et non lancée accueille un client",
+                    etat["task"]["state"]
+                        .as_str()
+                        .unwrap_or("dans un état inconnu")
+                );
+            }
+            let pont = std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|d| d.join("prophet-mcp")))
+                .filter(|p| p.is_file())
+                .map_or_else(|| "prophet-mcp".to_owned(), |p| p.display().to_string());
+            let config = serde_json::json!({
+                "mcpServers": {
+                    "prophet": {"command": pont, "args": [], "env": {"PROPHET_TASK": id}}
+                }
+            });
+            Ok(format!("{}\n", serde_json::to_string_pretty(&config)?))
         }
         TaskAction::Cancel { id } => {
             let result = task_rpc(

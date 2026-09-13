@@ -24,6 +24,10 @@
 | `task.cancel` | Demande l'arrêt d'une mission active ou annule un plan non lancé |
 | `task.apply` | Publie dans le home l'index exact examiné, pour le créateur d'une mission `done` |
 | `task.undo` | Annule cette publication si les documents n'ont pas changé depuis |
+| `task.attach` | Ouvre pour le créateur une séance d'outils sur une mission préparée : jeton, travail SFS, registre, journal, sans modèle (`{id, client?}`) |
+| `task.tools` | Rend les outils que le jeton de la séance couvre |
+| `task.call` | Exécute un outil de la séance, compté comme une étape (`{id, name, arguments}`) |
+| `task.detach` | Retire le client, scelle les versions et conclut la mission en `done` (`{id, text?}`) |
 
 `task.start`, `task.status`, `task.inspect`, `task.result`, `task.cancel`, `task.apply` et
 `task.undo` prennent `{"id":"…"}`.
@@ -36,7 +40,9 @@ socket ; la nouvelle méthode `task.change` exige en plus l'UID créateur persis
 identités déclarées. Deux lectures simultanées sont admises. Les autres méthodes conservent
 leur contrôle global et restent à traiter individuellement.
 
-`task.apply` et `task.undo` exigent le même UID créateur et la même mission `done`. La
+`task.attach`, `task.tools`, `task.call` et `task.detach` exigent l'UID créateur persisté ; le
+pont `prophet-mcp` les relaie pour un client d'éditeur (ADR 0026). Une annulation pendant la
+séance la conclut en `cancelled`. `task.apply` et `task.undo` exigent le même UID créateur et la même mission `done`. La
 bibliothèque SFS relit l'index et les originaux avant la première mutation et refuse un
 document retouché ; le service n'ajoute que l'identité, la sérialisation (une publication à la
 fois) et le journal : `fs.commit`, ou `fs.undo` puis `task.rolled_back`, sous l'acteur `user`.

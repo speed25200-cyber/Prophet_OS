@@ -123,6 +123,18 @@ désormais les processus du paquet à 50 ms avant d'ouvrir l'application ; `prop
 en outre si le navigateur piloté répond. Cette révision attend la CI.
 Aucune case complète de FRONTIER n'est cochée.
 
+Séance d'outils MCP du 13 septembre 2026, dans le commit portant ce rapport : un client MCP de
+l'humain (Claude Code, Codex…) travaille dans une mission préparée, tenue par `agentd` avec le
+même jeton, le même travail SFS, le même registre et le même journal qu'une mission native,
+sans modèle (`task.attach`, `task.tools`, `task.call`, `task.detach`). `prophet-mcp` devient
+le pont stdio qui relaie ces appels et ne tient aucun jeton ; `prophet task mcp-config` rend la
+configuration à donner au client. Trois tests avec les vrais capd, ledger, agentd et le vrai
+pont prouvent la séance de bout en bout : outils limités au jeton, écriture dans le travail et
+non dans le home, refus hors périmètre sans fuite du contenu, retrait qui scelle les versions,
+examen puis publication par le créateur ; annulation pendant la séance ; mission inconnue
+refusée. Voir l'[ADR 0026](adr/0026-seance-d-outils-mcp-pour-les-clients-de-l-humain.md).
+Le client n'est pas confiné par la séance ; le bureau ne l'ouvre pas encore de lui-même.
+
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 
 - `c3b0c08` — moteur local réel, CLI et gel d'un processus possédé par sandboxd.

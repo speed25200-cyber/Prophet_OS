@@ -113,11 +113,15 @@ sans egress, le navigateur n'a aucune route. Voir l'[ADR 0024](../adr/0024-navig
 ```jsonc
 {
   "mcpServers": {
-    "prophet-fs":   { "command": "/run/current-system/sw/bin/prophet-mcp", "args": ["fs"],   "env": { "PROPHET_TASK_AUTH_FILE": "/run/prophet/tasks/<ulid>/auth" } },
-    "prophet-proc": { "command": "/run/current-system/sw/bin/prophet-mcp", "args": ["proc"], "env": { "PROPHET_TASK_AUTH_FILE": "/run/prophet/tasks/<ulid>/auth" } }
-    // … un serveur par domaine
+    "prophet": { "command": "/run/current-system/sw/bin/prophet-mcp", "args": [], "env": { "PROPHET_TASK": "<mission>" } }
   }
 }
 ```
 
-Le fichier est généré par tâche par `agentd` (M8) avec le chemin du jeton de cette tâche, et consommé tel quel par les clients d'éditeurs.
+`prophet task mcp-config <mission>` rend ce fichier pour une mission préparée par le même
+utilisateur ; il est consommé tel quel par les clients d'éditeurs (`--mcp-config` de Claude
+Code, `mcp_servers` de Codex). Le pont `prophet-mcp` ne tient aucun jeton : `initialize`
+attache la mission (`task.attach`), `tools/list` et `tools/call` sont relayés à `agentd`
+(`task.tools`, `task.call`) qui exécute les outils avec le jeton, le travail SFS et le journal
+de la mission, et la fin de l'entrée retire le client (`task.detach`), ce qui scelle les
+versions pour l'examen du créateur. Voir l'[ADR 0026](../adr/0026-seance-d-outils-mcp-pour-les-clients-de-l-humain.md).

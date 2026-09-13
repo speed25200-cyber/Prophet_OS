@@ -1,9 +1,14 @@
 # Outils MCP système
 
 La bibliothèque fournit le registre, le contrôle des capacités, les outils et une session MCP
-sur des flux délimités par des sauts de ligne. Le binaire `prophet-mcp` n'est pas encore raccordé
-aux daemons : il refuse explicitement de servir. La présence d'un outil dans la bibliothèque
-ne prouve pas que son service est intégré ; plusieurs outils renvoient encore une indisponibilité.
+sur des flux délimités par des sauts de ligne. Le binaire `prophet-mcp` est un pont : lancé par
+un client d'éditeur avec `PROPHET_TASK=<mission>`, il attache la mission à `initialize`
+(`task.attach`), relaie `tools/list` et `tools/call` à `agentd` (`task.tools`, `task.call`) qui
+exécute les outils avec le jeton, le travail SFS et le journal de la mission, et retire le
+client à la fin de son entrée (`task.detach`). Il ne tient aucun jeton et n'exécute rien
+lui-même. `prophet task mcp-config <mission>` rend la configuration à donner au client
+(ADR 0026). La présence d'un outil dans la bibliothèque ne prouve pas que son service est
+intégré ; plusieurs outils renvoient encore une indisponibilité.
 
 Chaque appel du registre vérifie le droit `tool.call`, puis la capacité sur la ressource concrète.
 Une exigence inconnue, une cible de ressource absente, un niveau de sandbox inférieur au minimum
@@ -68,9 +73,10 @@ Ces garanties supposent des racines fournies et protégées par le lanceur de co
 ne remplacent pas une identité de service authentifiée, des espaces de noms privés, ni le
 durcissement des commits/undo SFS face aux modifications concurrentes. Un descripteur reste
 attaché à son répertoire même si un acteur privilégié déplace celui-ci. Le contrôleur et le
-journal de cet essai MCP isolé sont en processus ; son journal n'est pas durable. Le nouveau
-parcours agentd utilise les vrais services ; leur autorisation fine et la reprise durable
-restent à réaliser avant d'activer `prophet-mcp` et le lancement depuis l'interface.
+journal de cet essai MCP isolé sont en processus ; son journal n'est pas durable. Le
+parcours agentd utilise les vrais services, pour les missions natives comme pour les séances
+d'outils des clients MCP (`crates/agentd/tests/mcp_client.rs`, avec le vrai pont) ; leur
+autorisation fine et la reprise durable restent à réaliser.
 Voir l'[ADR 0012](../../docs/adr/0012-acces-fichiers-mcp.md)
 et le [rapport de vérification](../../docs/reports/mcp-fichiers-2026-09-13.md).
 

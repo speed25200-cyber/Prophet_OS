@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use capd::CheckRequest;
 use mcp_system::native::RegistryExecutor;
+use mcp_system::protocol::CallResult;
 use mcp_system::registry::{Authority, Journal, Registry, ToolContext};
 use mcp_system::services::Services;
 use prophet_types::cap::{Act, Decision, DenyReason, Res, Token};
@@ -181,11 +182,66 @@ impl ModelClient for Model {
 impl Mission {
     /// Exécute et publie un résultat. À appeler sur un thread dédié, hors de Tokio.
     pub fn run(self, publish: Publish) {
+        let control = self.control(publish);
+        let result = self.execute(&control);
+        self.conclude(&control, result);
+    }
+
+    /// Ouvre une séance d'outils pour un client MCP de l'humain : même jeton, même registre,
+    /// même travail SFS et même journal qu'une mission native, mais aucun modèle. Le client
+    /// appelle les outils un à un ; la mission se conclut quand il se retire.
+    ///
+    /// À appeler hors de Tokio : le journal et le travail SFS sont ouverts ici. Un échec est
+    /// déjà conclu (mission en échec, journal écrit) quand l'erreur est rendue.
+    ///
+    /// # Errors
+    /// Journal injoignable, travail SFS refusé ou budget nul.
+    pub fn attach(self, publish: Publish, client: &str) -> Result<Seance, String> {
+        let control = self.control(publish);
+        let prepared = (|| {
+            control.check_live()?;
+            if self.task.budget.limits.steps == 0 {
+                return Err("budget de mission nul".to_owned());
+            }
+            control.append(
+                EventKind::ProviderStarted,
+                json!({"driver":"mcp-client","client":client}),
+            )?;
+            control.append(EventKind::TaskStarted, json!({"execution":"mcp-client"}))?;
+            let workspace = self.open_workspace(&control)?;
+            let registry = Arc::new(self.registry(&control));
+            let context = ToolContext {
+                token: self.token.clone(),
+                task: self.task.id.clone(),
+                home: self.home.display().to_string(),
+                workdir: workspace.workdir().display().to_string(),
+                sandbox_level: 0,
+                step: 1,
+            };
+            Ok((workspace, registry, context))
+        })();
+        match prepared {
+            Ok((workspace, registry, context)) => Ok(Seance {
+                mission: self,
+                control,
+                registry,
+                context,
+                workspace,
+                calls: 0,
+            }),
+            Err(error) => {
+                self.conclude(&control, Err(error.clone()));
+                Err(error)
+            }
+        }
+    }
+
+    fn control(&self, publish: Publish) -> Arc<Control> {
         let started = Instant::now();
         let until = started
             .checked_add(Duration::from_secs(self.task.budget.limits.wall_time_s))
             .unwrap_or(started);
-        let control = Arc::new(Control {
+        Arc::new(Control {
             task: Mutex::new(self.task.clone()),
             stop: self.stop.clone(),
             services: self.services.clone(),
@@ -203,10 +259,13 @@ impl Mission {
                         .map_or_else(|| self.home.join(scope), |rest| self.home.join(rest))
                 })
                 .collect(),
-        });
-        let result = self.execute(&control);
+        })
+    }
+
+    /// Conclut la mission : état final, journal, résultat publié.
+    fn conclude(&self, control: &Arc<Control>, result: Result<Value, String>) {
         let mut task = control.current();
-        task.budget.spent.wall_time_s = started.elapsed().as_secs();
+        task.budget.spent.wall_time_s = control.started.elapsed().as_secs();
         let (state, reason, mut data) = match result {
             Ok(data) => (State::Done, None, data),
             Err(error) if self.stop.load(Ordering::Acquire) => {
@@ -246,17 +305,9 @@ impl Mission {
         }
     }
 
-    fn execute(&self, control: &Arc<Control>) -> Result<Value, String> {
-        control.check_live()?;
-        if self.task.budget.limits.tokens == 0 || self.task.budget.limits.steps == 0 {
-            return Err("budget de mission nul".into());
-        }
-        control.append(
-            EventKind::ProviderStarted,
-            json!({"driver":self.plan.choice.reference}),
-        )?;
-        control.append(EventKind::TaskStarted, json!({"execution":"native-tools"}))?;
-        let workspace = sfs::Workspace::begin_authorized(
+    /// Capture les périmètres dans le travail SFS, chaque lecture étant tranchée par capd.
+    fn open_workspace(&self, control: &Arc<Control>) -> Result<sfs::Workspace, String> {
+        sfs::Workspace::begin_authorized(
             &self.home,
             &self.task.id,
             &self.plan.scopes,
@@ -272,7 +323,11 @@ impl Mission {
                     .is_allow()
             },
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
+    }
+
+    /// Les outils d'une mission, tous sous le contrôle et le journal de `control`.
+    fn registry(&self, control: &Arc<Control>) -> Registry {
         let mut registry = Registry::with_authority(control.clone(), control.clone());
         registry.register(Arc::new(mcp_system::tools::Read));
         registry.register(Arc::new(mcp_system::tools::Write));
@@ -294,6 +349,21 @@ impl Mission {
                 registry.register(tool);
             }
         }
+        registry
+    }
+
+    fn execute(&self, control: &Arc<Control>) -> Result<Value, String> {
+        control.check_live()?;
+        if self.task.budget.limits.tokens == 0 || self.task.budget.limits.steps == 0 {
+            return Err("budget de mission nul".into());
+        }
+        control.append(
+            EventKind::ProviderStarted,
+            json!({"driver":self.plan.choice.reference}),
+        )?;
+        control.append(EventKind::TaskStarted, json!({"execution":"native-tools"}))?;
+        let workspace = self.open_workspace(control)?;
+        let registry = self.registry(control);
         let executor = RegistryExecutor::new(
             Arc::new(registry),
             ToolContext {
@@ -388,5 +458,76 @@ impl Mission {
                 }
             }
         }
+    }
+}
+
+/// Les outils d'une mission tenus par le service pour un client MCP de l'humain.
+///
+/// Rien n'est délégué au client : le jeton reste dans le service, chaque appel passe par le
+/// registre (droits, journal, approbations) et le travail SFS reçoit les écritures, que le
+/// créateur examine puis publie comme pour une mission native.
+pub struct Seance {
+    mission: Mission,
+    control: Arc<Control>,
+    registry: Arc<Registry>,
+    context: ToolContext,
+    workspace: sfs::Workspace,
+    calls: u32,
+}
+
+impl Seance {
+    /// Mission servie.
+    #[must_use]
+    pub fn task(&self) -> &str {
+        &self.mission.task.id
+    }
+
+    /// Outils que le jeton de la mission rend visibles.
+    #[must_use]
+    pub fn tools(&self) -> Vec<mcp_system::protocol::ToolSpec> {
+        self.registry.visible_for(&self.context.token)
+    }
+
+    /// Un appel d'outil, compté comme une étape de la mission.
+    ///
+    /// # Errors
+    /// Mission annulée, durée ou plafond d'étapes atteint ; l'erreur d'un outil est rendue
+    /// dans le résultat, pas ici.
+    pub fn call(&mut self, name: &str, args: &Value) -> Result<CallResult, String> {
+        self.control.check_live()?;
+        let task = self.control.current();
+        if task.budget.spent.steps >= task.budget.limits.steps {
+            return Err("plafond d'étapes atteint".into());
+        }
+        self.control.charge(Usage {
+            tokens_in: 0,
+            tokens_out: 0,
+        })?;
+        self.calls = self.calls.saturating_add(1);
+        self.context.step = self.context.step.saturating_add(1);
+        Ok(self
+            .registry
+            .call(name, args, &self.context, OffsetDateTime::now_utc()))
+    }
+
+    /// Le client se retire : les versions sont scellées et la mission conclue.
+    pub fn finish(self, text: Option<String>) {
+        let result = self.control.check_live().and_then(|()| {
+            let review = self.workspace.seal_review().map_err(|e| e.to_string())?;
+            let diff = review.diff();
+            Ok(json!({
+                "text": text.unwrap_or_default(),
+                "tool_calls": self.calls,
+                "diff": diff,
+                "review": review,
+                "execution": "mcp-client",
+            }))
+        });
+        self.mission.conclude(&self.control, result);
+    }
+
+    /// La séance est interrompue par le service : la mission se conclut sur cette raison.
+    pub fn abort(self, reason: &str) {
+        self.mission.conclude(&self.control, Err(reason.to_owned()));
     }
 }
