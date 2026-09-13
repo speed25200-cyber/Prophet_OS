@@ -1,16 +1,18 @@
 //! Le travail et son plan occupent la surface principale ; les compteurs restent secondaires.
+use crate::hud;
 use crate::missions::{Action, Missions};
 use crate::scene::Courant;
 use crate::supervision::bouton;
+use crate::theme::Accent;
+use crate::theme::palette::{ACCOMPLI, ATTENTE, ATTENTE_VOILE, DISCRET, ENCRE, TRAIT, VERRE_HAUT};
 use agentd::{Inspection, State, WorkspaceState};
 use egui::{Color32, Frame, RichText, Stroke};
 
-const INK: Color32 = Color32::from_rgb(28, 35, 44);
-const MUTED: Color32 = Color32::from_rgb(103, 113, 127);
-const LINE: Color32 = Color32::from_rgb(226, 231, 237);
-const BLUE: Color32 = Color32::from_rgb(47, 91, 169);
-const GREEN: Color32 = Color32::from_rgb(38, 112, 92);
-const RED: Color32 = Color32::from_rgb(168, 64, 57);
+const INK: Color32 = ENCRE;
+const MUTED: Color32 = DISCRET;
+const LINE: Color32 = TRAIT;
+const GREEN: Color32 = ACCOMPLI;
+const RED: Color32 = ATTENTE;
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Tab {
@@ -22,12 +24,12 @@ pub(crate) enum Tab {
     Files,
 }
 
-pub(crate) fn status(state: State) -> (&'static str, Color32) {
+pub(crate) fn status(state: State, accent: &Accent) -> (&'static str, Color32) {
     match state {
         State::Pending => ("À préparer", MUTED),
-        State::Planned => ("Plan à examiner", BLUE),
-        State::Running => ("En cours", GREEN),
-        State::WaitingApproval => ("Votre décision", Color32::from_rgb(160, 102, 35)),
+        State::Planned => ("Plan à examiner", accent.sourd),
+        State::Running => ("En cours", accent.vif),
+        State::WaitingApproval => ("Votre décision", ATTENTE),
         State::Paused => ("En pause", MUTED),
         State::Done => ("Exécution terminée", GREEN),
         State::Failed => ("Échec", RED),
@@ -60,20 +62,29 @@ pub(crate) fn publication(state: WorkspaceState) -> &'static str {
 fn small(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.label(RichText::new(text).size(12.0).color(MUTED));
 }
-fn heading(ui: &mut egui::Ui, text: &str, size: f32) {
-    ui.label(
-        RichText::new(text)
-            .size(size)
-            .family(egui::FontFamily::Name("Inter600".into()))
-            .color(INK),
-    );
+/// Une étiquette en capitales espacées : les rubriques d'une carte.
+fn label(ui: &mut egui::Ui, text: &str) {
+    crate::supervision::etiquette(ui, text);
 }
-fn sheet() -> Frame {
+/// Un titre : en serif d'affichage dès qu'il nomme, en Inter quand il rubrique.
+fn heading(ui: &mut egui::Ui, text: &str, size: f32) {
+    if size >= 19.0 {
+        ui.label(crate::supervision::titre(text, size));
+    } else {
+        ui.label(
+            RichText::new(text)
+                .size(size)
+                .family(hud::fort())
+                .color(INK),
+        );
+    }
+}
+fn sheet(ui: &egui::Ui) -> Frame {
     Frame::new()
-        .fill(Color32::from_rgb(247, 249, 249))
-        .corner_radius(16)
+        .fill(VERRE_HAUT)
+        .corner_radius(3)
         .inner_margin(24)
-        .stroke(Stroke::new(1.0, LINE))
+        .stroke(Stroke::new(1.0, Accent::de(ui.ctx()).fil))
 }
 fn limited(text: &str, limit: usize) -> String {
     let mut value: String = text.chars().take(limit).collect();
@@ -86,16 +97,17 @@ fn limited(text: &str, limit: usize) -> String {
 pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab: &mut Tab) {
     ui.spacing_mut().item_spacing.y = 6.0;
     let reviewing = *tab == Tab::Files;
+    let accent = Accent::de(ui.ctx());
     if !reviewing {
         ui.horizontal(|ui| {
-            small(ui, "ESPACE DE MISSION");
+            label(ui, "ESPACE DE MISSION");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if bouton(ui, "copier-reference", "Copier la référence", false).clicked() {
                     ui.ctx().copy_text(c.tache.clone());
                 }
             });
         });
-        ui.add_space(10.0);
+        ui.add_space(6.0);
     }
     heading(
         ui,
@@ -113,15 +125,15 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
         } else if ui.available_width() < 540.0 {
             24.0
         } else {
-            32.0
+            30.0
         },
     );
-    ui.add_space(8.0);
+    ui.add_space(6.0);
     let mut command = None;
     let mut refresh = false;
     let mut file_requested = None;
     if let Some(info) = missions.snapshot() {
-        let (label, color) = status(info.task.state);
+        let (label, color) = status(info.task.state, &accent);
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(label).color(color).size(13.0));
             small(
@@ -194,7 +206,7 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
             small(ui, publication(state));
         }
         if !reviewing {
-            ui.add_space(10.0);
+            ui.add_space(6.0);
             phases(ui, info);
         }
         // Les instruments n'ont de sens qu'une fois le travail commencé : un plan à examiner
@@ -221,7 +233,7 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
                 if info.task.state == State::Done {
                     GREEN
                 } else {
-                    BLUE
+                    accent.vif
                 },
                 true,
             );
@@ -248,9 +260,9 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
                 }
             }
         });
-        ui.add_space(14.0);
-        sheet()
-            .inner_margin(if reviewing { 16 } else { 24 })
+        ui.add_space(10.0);
+        sheet(ui)
+            .inner_margin(if reviewing { 16 } else { 20 })
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 match current {
@@ -276,7 +288,7 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
         });
     } else {
         ui.add_space(20.0);
-        sheet().show(ui, |ui| {
+        sheet(ui).show(ui, |ui| {
             heading(
                 ui,
                 if missions.error().is_some() {
@@ -326,6 +338,7 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
 }
 
 fn phases(ui: &mut egui::Ui, info: &Inspection) {
+    let accent = Accent::de(ui.ctx());
     let reached = [
         info.plan.is_some(),
         info.task.history.contains(&State::Running),
@@ -339,14 +352,18 @@ fn phases(ui: &mut egui::Ui, info: &Inspection) {
             if index > 0 {
                 ui.label(RichText::new("—").color(LINE));
             }
-            let color = if reached[index] { BLUE } else { MUTED };
+            let color = if reached[index] { accent.vif } else { MUTED };
             Frame::new()
                 .fill(if reached[index] {
-                    Color32::from_rgb(230, 237, 248)
+                    hud::voile(accent.vif, 36)
                 } else {
-                    Color32::from_rgb(235, 238, 242)
+                    VERRE_HAUT
                 })
-                .corner_radius(8)
+                .stroke(Stroke::new(
+                    1.0,
+                    if reached[index] { accent.fil_vif } else { LINE },
+                ))
+                .corner_radius(3)
                 .inner_margin(egui::Margin::symmetric(10, 6))
                 .show(ui, |ui| {
                     ui.label(
@@ -370,7 +387,7 @@ fn plan(ui: &mut egui::Ui, info: &Inspection, busy: bool, command: &mut Option<A
         return;
     };
     let scopes = |ui: &mut egui::Ui| {
-        small(ui, "PÉRIMÈTRE");
+        label(ui, "PÉRIMÈTRE");
         if plan.scopes.is_empty() {
             ui.label("Aucun accès fichier.");
         }
@@ -379,7 +396,7 @@ fn plan(ui: &mut egui::Ui, info: &Inspection, busy: bool, command: &mut Option<A
         }
     };
     let grants = |ui: &mut egui::Ui| {
-        small(ui, "ACCÈS ACCORDÉS");
+        label(ui, "ACCÈS ACCORDÉS");
         for grant in &plan.grants {
             ui.label(RichText::new(limited(grant, 1000)).size(13.0));
         }
@@ -437,14 +454,22 @@ fn result(ui: &mut egui::Ui, info: &Inspection, file_requested: &mut Option<Stri
     if let Some(reason) = &info.task.reason {
         Frame::new()
             .fill(if state == State::Failed {
-                Color32::from_rgb(251, 239, 236)
+                ATTENTE_VOILE
             } else {
-                Color32::from_rgb(239, 242, 246)
+                VERRE_HAUT
             })
-            .corner_radius(10)
+            .stroke(Stroke::new(
+                1.0,
+                if state == State::Failed {
+                    hud::voile(ATTENTE, 150)
+                } else {
+                    LINE
+                },
+            ))
+            .corner_radius(3)
             .inner_margin(14)
             .show(ui, |ui| {
-                heading(ui, status(state).0, 19.0);
+                heading(ui, status(state, &Accent::de(ui.ctx())).0, 19.0);
                 ui.label(
                     RichText::new(limited(reason, 4000))
                         .size(13.0)
@@ -475,7 +500,7 @@ fn result(ui: &mut egui::Ui, info: &Inspection, file_requested: &mut Option<Stri
         return;
     };
     ui.horizontal(|ui| {
-        heading(ui, "Proposition de l'agent", 23.0);
+        heading(ui, "Proposition de l'agent", 22.0);
         if let Some(text) = value["text"].as_str()
             && bouton(ui, "mission-copy-result", "Copier", false).clicked()
         {
@@ -499,11 +524,11 @@ fn result(ui: &mut egui::Ui, info: &Inspection, file_requested: &mut Option<Stri
     } else {
         small(ui, "Aucun texte final conservé pour cette mission.");
     }
-    ui.add_space(22.0);
+    ui.add_space(14.0);
     ui.separator();
-    ui.add_space(18.0);
+    ui.add_space(12.0);
     heading(ui, "Changements préparés", 19.0);
-    ui.add_space(8.0);
+    ui.add_space(4.0);
     if let Some(changes) = value["diff"]["changes"].as_array() {
         if changes.is_empty() {
             small(ui, "Le résultat ne contient aucun changement de fichier.");
@@ -511,7 +536,7 @@ fn result(ui: &mut egui::Ui, info: &Inspection, file_requested: &mut Option<Stri
         for change in changes.iter().take(200) {
             let (symbol, color, label) = match change["kind"].as_str() {
                 Some("added") => ("+", GREEN, "Ajout"),
-                Some("modified") => ("~", BLUE, "Modification"),
+                Some("modified") => ("~", Accent::de(ui.ctx()).vif, "Modification"),
                 Some("deleted") => ("−", RED, "Suppression"),
                 _ => ("?", MUTED, "Type inconnu"),
             };
@@ -574,11 +599,12 @@ fn result(ui: &mut egui::Ui, info: &Inspection, file_requested: &mut Option<Stri
 }
 
 fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::TrailEntry]) {
+    let accent = Accent::de(ui.ctx());
     use crate::missions::Outcome;
     heading(ui, "Parcours observé", 23.0);
     ui.add_space(14.0);
     for (n, state) in info.task.history.iter().enumerate() {
-        let (label, color) = status(*state);
+        let (label, color) = status(*state, &accent);
         ui.horizontal(|ui| {
             small(ui, format!("{:02}", n + 1));
             ui.label(RichText::new(label).color(color));
@@ -609,7 +635,12 @@ fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::Trail
                     .map_or_else(|| "  ".to_owned(), |s| format!("{s:02}")),
             );
             ui.label(RichText::new(mark).color(color).size(13.0));
-            ui.label(RichText::new(&entry.tool).size(13.0).monospace());
+            ui.label(
+                RichText::new(&entry.tool)
+                    .size(13.0)
+                    .monospace()
+                    .color(accent.sourd),
+            );
             if let Some(target) = &entry.target {
                 ui.label(RichText::new(limited(target, 120)).size(13.0).color(MUTED));
                 // Un hôte visité par l'agent s'ouvre dans le navigateur de l'humain, par la

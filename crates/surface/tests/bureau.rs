@@ -175,6 +175,7 @@ fn la_navigation_et_la_saisie_unicode_fonctionnent_dans_les_widgets_rendus() {
             .read_response(egui::Id::new("mission-intent"))
             .is_some()
     );
+    capture(&context, &target, "preparation");
     let events = click_widget(&bureau, "mission-prepare-back");
     frame(&mut bureau, &context, &target, events);
     let events = click_widget(&bureau, "nav-conversation");
@@ -711,4 +712,185 @@ fn une_petite_fenetre_ouvre_le_contexte_sans_le_cacher_sous_la_liste() {
             .read_response(egui::Id::new("mission-a"))
             .is_some()
     );
+}
+
+#[test]
+#[ignore = "needs_gpu: le champ avance avec une mission active et se fige au repos"]
+fn le_champ_avance_avec_une_mission_active_et_se_fige_au_repos_ou_sous_mouvement_reduit() {
+    use surface::scene::{Courant, Etat};
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1280, 720);
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.figer_transitions();
+    let mission = |etat, debit| Courant {
+        tache: "a".into(),
+        intitule: "Une mission qui avance".into(),
+        agent: "local".into(),
+        etat,
+        debit,
+        budget_consomme: 0.2,
+        etapes: 12,
+        task_state: None,
+        task_revision: 0,
+    };
+    let rendre = |bureau: &mut Bureau, scene: &Scene, time: f64| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280., 720.),
+            )),
+            time: Some(time),
+            focused: true,
+            ..Default::default()
+        };
+        let (mut output, _) = bureau.composer(input, scene);
+        bureau.rendre(&context, &target, &mut output);
+        target.pixels(&context).unwrap()
+    };
+    let mut scene = scene();
+    scene.courants.push(mission(Etat::Court, 20.0));
+    for _ in 0..3 {
+        rendre(&mut bureau, &scene, 8.0);
+    }
+    assert!(
+        bureau.champ_vivant(),
+        "une mission en cours fait vivre le champ"
+    );
+    let tot = rendre(&mut bureau, &scene, 8.0);
+    let tard = rendre(&mut bureau, &scene, 9.0);
+    assert_ne!(
+        tot, tard,
+        "le ruban d'une mission en cours avance avec le temps"
+    );
+    capture(&context, &target, "champ");
+
+    bureau.atelier.mouvement_reduit = true;
+    let un = rendre(&mut bureau, &scene, 8.0);
+    let deux = rendre(&mut bureau, &scene, 9.0);
+    assert!(!bureau.champ_vivant(), "le mouvement réduit fige le champ");
+    assert_eq!(un, deux, "sous mouvement réduit, rien n'avance");
+
+    bureau.atelier.mouvement_reduit = false;
+    scene.courants[0] = mission(Etat::Bloque, 0.0);
+    let un = rendre(&mut bureau, &scene, 8.0);
+    let deux = rendre(&mut bureau, &scene, 9.0);
+    assert!(
+        !bureau.champ_vivant(),
+        "une mission arrêtée ne fait rien bouger"
+    );
+    assert_eq!(
+        un, deux,
+        "un ruban arrêté est immobile : l'arrêt se voit, il ne se lit pas"
+    );
+}
+
+/// Teinte d'un pixel en degrés, et sa saturation de 0 à 1.
+fn teinte(p: &[u8]) -> (f32, f32) {
+    let (r, g, b) = (
+        f32::from(p[0]) / 255.0,
+        f32::from(p[1]) / 255.0,
+        f32::from(p[2]) / 255.0,
+    );
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let d = max - min;
+    if d < 1e-6 {
+        return (0.0, 0.0);
+    }
+    let h = if max == r {
+        60.0 * (((g - b) / d) % 6.0)
+    } else if max == g {
+        60.0 * ((b - r) / d + 2.0)
+    } else {
+        60.0 * ((r - g) / d + 4.0)
+    };
+    ((h + 360.0) % 360.0, d / max)
+}
+
+fn ecart_de_teinte(a: f32, b: f32) -> f32 {
+    let d = (a - b).abs() % 360.0;
+    d.min(360.0 - d)
+}
+
+#[test]
+#[ignore = "needs_gpu: la nuit, et la lumière dans la couleur de l'accent choisi"]
+fn l_atelier_est_une_nuit_dont_la_lumiere_prend_la_couleur_de_l_accent() {
+    use surface::scene::{Courant, Etat};
+    use surface::theme::{Accent, palette};
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1440, 1000);
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.figer_transitions();
+    let mut scene = scene();
+    scene.courants = [
+        ("a", Etat::Court, 30.0),
+        ("b", Etat::Court, 6.0),
+        ("c", Etat::Fini, 0.0),
+    ]
+    .into_iter()
+    .map(|(id, etat, debit)| Courant {
+        tache: id.into(),
+        intitule: format!("Mission {id}"),
+        agent: "local:test".into(),
+        etat,
+        debit,
+        budget_consomme: 0.3,
+        etapes: 9,
+        task_state: None,
+        task_revision: 0,
+    })
+    .collect();
+    let (alerte, _) = teinte(&[
+        palette::ATTENTE.r(),
+        palette::ATTENTE.g(),
+        palette::ATTENTE.b(),
+    ]);
+    let mut images = Vec::new();
+    for nom in ["arc", "or"] {
+        let accent = Accent::par_nom(nom).unwrap();
+        bureau.choisir_accent(accent);
+        for _ in 0..3 {
+            avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+        }
+        capture(&context, &target, &format!("nuit-{nom}"));
+        let pixels = target.pixels(&context).unwrap();
+        let (attendu, _) = teinte(&[accent.vif.r(), accent.vif.g(), accent.vif.b()]);
+        let mut sombres = 0usize;
+        let mut colores = 0usize;
+        let mut fideles = 0usize;
+        for p in pixels.chunks_exact(4) {
+            let max = p[0].max(p[1]).max(p[2]);
+            if max < 40 {
+                sombres += 1;
+            }
+            if max > 90 {
+                let (h, sat) = teinte(p);
+                if sat > 0.3 {
+                    colores += 1;
+                    if ecart_de_teinte(h, attendu) < 35.0 || ecart_de_teinte(h, alerte) < 25.0 {
+                        fideles += 1;
+                    }
+                }
+            }
+        }
+        let total = pixels.len() / 4;
+        assert!(
+            sombres as f32 / total as f32 > 0.6,
+            "{nom} : le fond est une nuit, {:.0} % de pixels sombres seulement",
+            sombres as f32 / total as f32 * 100.0
+        );
+        assert!(colores > 0, "{nom} : aucun pixel coloré");
+        assert!(
+            fideles as f32 / colores as f32 > 0.7,
+            "{nom} : seulement {:.0} % des pixels colorés sont de l'accent ou de l'alerte",
+            fideles as f32 / colores as f32 * 100.0
+        );
+        let coin = &pixels[(2 * 1440 + 2) * 4..(2 * 1440 + 2) * 4 + 3];
+        assert!(
+            coin.iter().all(|&c| c > 0) && coin.iter().all(|&c| c < 40),
+            "{nom} : le coin de l'écran est une nuit sans être un noir absolu : {coin:?}"
+        );
+        images.push(pixels);
+    }
+    assert_ne!(images[0], images[1], "changer d'accent change l'écran");
 }

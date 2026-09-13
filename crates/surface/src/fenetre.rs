@@ -44,6 +44,8 @@ pub struct Options {
     pub mouvement_reduit: bool,
     /// Page initiale.
     pub page: Page,
+    /// Accent imposé pour cette session, sinon celui configuré.
+    pub accent: Option<crate::theme::Accent>,
 }
 
 impl Default for Options {
@@ -55,6 +57,7 @@ impl Default for Options {
             fenetree: false,
             mouvement_reduit: false,
             page: Page::Accueil,
+            accent: None,
         }
     }
 }
@@ -242,6 +245,9 @@ fn installer(
     bureau.brancher_missions(crate::reel::Sockets::default().agentd);
     bureau.atelier.mouvement_reduit = options.mouvement_reduit;
     bureau.atelier.page = options.page;
+    if let Some(accent) = options.accent {
+        bureau.choisir_accent(accent);
+    }
     let mut entrees = egui_winit::State::new(
         bureau.ctx.clone(),
         egui::ViewportId::ROOT,
