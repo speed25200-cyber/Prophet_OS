@@ -46,12 +46,22 @@ refusé avant tout lancement ; la page est ouverte et son titre lu ; un champ es
 relu à `Paris` ; `submit` est refusé `ApprovalRequired` ; un identifiant absent donne
 `NotFound` ; le journal ne contient pas le texte de la page.
 
+## Le navigateur piloté ne sort que par egress
+
+Un relais local, propre à la session de navigation, écoute sur l'adresse de bouclage et remet
+chaque requête et chaque tunnel du navigateur au socket d'egress, avec le jeton de la tâche
+dans l'en-tête interne que le proxy retire. Chromium est lancé avec ce mandataire, sans
+exception pour le bouclage et sans QUIC. Deux tests avec les vrais capd, ledger, egress, agentd
+et un vrai Chromium le prouvent : la page demandée par `web.open` arrive au serveur témoin
+par le proxy, sans le jeton, avec `web.open` journalisé sur l'hôte contrôlé ; sans egress,
+aucune requête n'atteint le serveur. Trois tests unitaires couvrent la réécriture de la tête,
+le refus sans egress et le refus sans jeton.
+
 ## Limites de cette preuve
 
-La sortie réseau propre du navigateur piloté (sous-ressources, scripts) n'est pas relayée par
-egress : Chromium n'accepte pas un proxy sur socket Unix. Les outils web restent donc désactivés
-par défaut et l'image ne les configure pas. Le navigateur tourne sous l'identité du service,
-pas au niveau 2 attendu par M10-T3. L'humain ne voit pas en direct l'arbre que l'agent observe ;
+Le navigateur tourne sous l'identité du service, pas au niveau 2 attendu par M10-T3, et le
+relais est une route de bouclage joignable par tout processus du même hôte, bornée par le jeton
+de la tâche ; les outils web restent donc désactivés par défaut. WebRTC n'est pas exercé. L'humain ne voit pas en direct l'arbre que l'agent observe ;
 il lit ses appels au journal. X et le navigateur partagé sont vérifiés par la liste du lanceur
 et la présence du binaire, sans session sur x.com. Les tests tournent sous un seul UID, sans VM.
 Aucun critère de FRONTIER n'est coché.

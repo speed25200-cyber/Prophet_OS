@@ -12,8 +12,9 @@ processus pourrait prendre entre-temps. Plusieurs navigateurs peuvent donc déma
 Aucune télémétrie, aucune synchronisation, aucun proxy hérité de l'environnement.
 
 Les outils `web.open`, `web.tree` et `web.act` de `mcp-system` s'appuient sur ce pont, sous
-le contrôle de capd. Ce que le pont ne fait pas : relayer la sortie réseau du navigateur par
-egress ni le confiner au niveau 2 ; voir l'[ADR 0024](../../docs/adr/0024-navigateur-integre-et-applications-web.md).
+le contrôle de capd ; `launch_with` accepte un mandataire HTTP local, par lequel le service
+fait passer tout le trafic vers egress. Ce que le pont ne fait pas : confiner le navigateur au
+niveau 2 ; voir l'[ADR 0024](../../docs/adr/0024-navigateur-integre-et-applications-web.md).
 
 ```sh
 # Les tests se taisent sans navigateur ; exiger sa présence pour qu'un vert veuille dire vrai.

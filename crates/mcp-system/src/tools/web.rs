@@ -24,6 +24,11 @@ use crate::tools::http::host_of;
 pub struct Browsing {
     program: PathBuf,
     profile_root: PathBuf,
+    /// Socket d'egress ; quand il est donné, tout le trafic du navigateur y est relayé.
+    egress: Option<PathBuf>,
+    /// Le jeton de la tâche, encodé pour l'en-tête interne du proxy, posé au premier `web.open`.
+    token: Arc<Mutex<Option<String>>>,
+    relay: Mutex<Option<crate::tools::web_relay::Relay>>,
     live: Mutex<Option<Live>>,
 }
 
@@ -49,8 +54,43 @@ impl Browsing {
         Arc::new(Self {
             program,
             profile_root,
+            egress: None,
+            token: Arc::new(Mutex::new(None)),
+            relay: Mutex::new(None),
             live: Mutex::new(None),
         })
+    }
+
+    /// Une session dont tout le trafic du navigateur passe par le socket d'egress, sous le
+    /// jeton de la tâche : c'est la forme que le service emploie. Sans egress joignable, le
+    /// navigateur n'a aucune route.
+    #[must_use]
+    pub fn via_egress(program: PathBuf, profile_root: PathBuf, egress: PathBuf) -> Arc<Self> {
+        Arc::new(Self {
+            program,
+            profile_root,
+            egress: Some(egress),
+            token: Arc::new(Mutex::new(None)),
+            relay: Mutex::new(None),
+            live: Mutex::new(None),
+        })
+    }
+
+    /// Vrai si le navigateur est relayé par egress.
+    #[must_use]
+    pub fn relayed(&self) -> bool {
+        self.egress.is_some()
+    }
+
+    fn bind_token(&self, token: &prophet_types::cap::Token) -> Result<(), String> {
+        use base64::Engine as _;
+        let json = serde_json::to_string(token).map_err(|e| e.to_string())?;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(json);
+        *self
+            .token
+            .lock()
+            .map_err(|_| "jeton de navigation indisponible".to_owned())? = Some(encoded);
+        Ok(())
     }
 
     /// Les trois outils de cette session.
@@ -121,8 +161,24 @@ impl Browsing {
             .map_err(|e| e.to_string())?;
         let profile = self.profile_root.join(task).join("browser");
         let program = self.program.display().to_string();
+        let proxy = match &self.egress {
+            Some(egress) => {
+                let mut relay = self
+                    .relay
+                    .lock()
+                    .map_err(|_| "relais indisponible".to_owned())?;
+                if relay.is_none() {
+                    *relay = Some(
+                        crate::tools::web_relay::Relay::start(egress.clone(), self.token.clone())
+                            .map_err(|e| format!("relais vers egress impossible : {e}"))?,
+                    );
+                }
+                relay.as_ref().map(|r| r.address())
+            }
+            None => None,
+        };
         let (browser, page) = runtime.block_on(async {
-            let browser = Browser::launch_auto(&program, &profile)
+            let browser = Browser::launch_auto_with(&program, &profile, proxy.as_deref())
                 .await
                 .map_err(|e| e.to_string())?;
             let endpoint = browser.page_endpoint().await.map_err(|e| e.to_string())?;
@@ -205,6 +261,9 @@ impl Tool for Open {
             Ok(d) => d,
             Err(e) => return e,
         };
+        if let Err(e) = self.0.bind_token(&context.token) {
+            return CallResult::error(ErrorCode::Internal, e);
+        }
         let url = url.to_owned();
         let result = self.0.with_live(&context.task, true, |live| {
             let target = url.clone();

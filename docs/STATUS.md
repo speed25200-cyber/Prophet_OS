@@ -75,9 +75,11 @@ nommée d'un identifiant absent et l'absence du contenu de la page au journal. L
 désormais à chaque outil les effets de l'appel précis. Le bureau ajoute Chromium à profil Prophet
 et X en fenêtre d'application, avec `prophet-ouvrir --liste` vérifié par le test du bureau ;
 cette partie n'a pas été construite localement (pas de Nix) et attend la CI. Voir l'[ADR 0024](adr/0024-navigateur-integre-et-applications-web.md)
-et le [rapport](reports/navigateur-2026-09-13.md). La sortie réseau propre du navigateur piloté
-n'est pas relayée par egress et son confinement au niveau 2 n'est pas livré : les outils web
-restent désactivés par défaut. Aucune case complète de FRONTIER n'est cochée.
+et le [rapport](reports/navigateur-2026-09-13.md). Le même jour, tout le trafic du navigateur
+piloté passe par un relais local vers egress sous le jeton de la tâche ; deux tests avec les
+vrais services et un vrai Chromium prouvent que la page arrive par le proxy sans le jeton et
+que rien ne sort sans egress. Le confinement du navigateur au niveau 2 n'est pas livré : les
+outils web restent désactivés par défaut. Aucune case complète de FRONTIER n'est cochée.
 
 Instruments de l'atelier du 13 septembre 2026, dans le commit portant ce rapport : rail éclairé
 avec emblème cerclé de la part de missions actives, bandes d'état, anneaux de budget et

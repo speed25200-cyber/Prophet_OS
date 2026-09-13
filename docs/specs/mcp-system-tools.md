@@ -104,8 +104,9 @@ rend l'arbre SUP de la page ; `web.tree {detail?}` exige `ui.read browser` ; `we
 node?, value?}` exige `ui.act browser`, avec `click`, `set_field` et `submit` ; seul `submit`
 est externe et demande une décision. Le profil du navigateur est propre à la tâche, dans l'état
 privé du service, où les outils déposent aussi l'observation courante (adresse, titre, nombre
-de nœuds) que `task.inspect` rend à la supervision. La sortie réseau propre du navigateur (sous-ressources) n'est pas relayée par
-egress : voir l'[ADR 0024](../adr/0024-navigateur-integre-et-applications-web.md).
+de nœuds) que `task.inspect` rend à la supervision. Dans le service, tout le trafic du
+navigateur passe par un relais local vers le socket d'egress, sous le jeton de la tâche ;
+sans egress, le navigateur n'a aucune route. Voir l'[ADR 0024](../adr/0024-navigateur-integre-et-applications-web.md).
 
 ## Fichier de registre
 

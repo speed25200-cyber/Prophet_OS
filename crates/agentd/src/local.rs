@@ -285,8 +285,11 @@ impl Mission {
         // La navigation n'existe que si l'administrateur a nommé un navigateur : la page est
         // observée par son arbre, jamais par des pixels, et l'hôte ouvert passe par capd.
         if let Some(program) = &self.browser {
-            let browsing =
-                mcp_system::tools::Browsing::new(program.clone(), self.browser_root.clone());
+            let browsing = mcp_system::tools::Browsing::via_egress(
+                program.clone(),
+                self.browser_root.clone(),
+                self.egress.clone(),
+            );
             for tool in browsing.tools() {
                 registry.register(tool);
             }

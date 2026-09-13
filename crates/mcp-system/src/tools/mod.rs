@@ -11,6 +11,7 @@ mod http;
 mod system;
 mod task;
 mod web;
+mod web_relay;
 
 pub use clock::Now;
 pub use fs::{List, Read, Search, Stat, Write};

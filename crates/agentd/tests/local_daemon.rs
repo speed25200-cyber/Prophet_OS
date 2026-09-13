@@ -55,6 +55,11 @@ struct Chain {
 
 impl Chain {
     async fn new(endpoint: &str) -> Self {
+        Self::with_env(endpoint, &[]).await
+    }
+
+    /// Comme [`Chain::new`], avec des variables supplémentaires pour agentd (navigateur…).
+    async fn with_env(endpoint: &str, extra: &[(&str, &str)]) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
         std::fs::create_dir_all(home.join("docs")).unwrap();
@@ -73,20 +78,20 @@ impl Chain {
             &dir.path().join("ledger-state"),
         );
         let journal = ledger.joindre().await;
+        let egress_socket = dir.path().join("egress.sock");
+        let mut env: Vec<(&str, &str)> = vec![
+            ("PROPHET_HOME", home.to_str().unwrap()),
+            ("PROPHET_CAPD_SOCKET", cap_socket.to_str().unwrap()),
+            ("PROPHET_LEDGER_SOCKET", ledger_socket.to_str().unwrap()),
+            ("PROPHET_EGRESS_SOCKET", egress_socket.to_str().unwrap()),
+            ("PROPHET_LOCAL_ENDPOINT", endpoint),
+        ];
+        env.extend_from_slice(extra);
         let agentd = Daemon::lancer_avec(
             AGENTD,
             &dir.path().join("agents.sock"),
             &dir.path().join("agent-state"),
-            &[
-                ("PROPHET_HOME", home.to_str().unwrap()),
-                ("PROPHET_CAPD_SOCKET", cap_socket.to_str().unwrap()),
-                ("PROPHET_LEDGER_SOCKET", ledger_socket.to_str().unwrap()),
-                (
-                    "PROPHET_EGRESS_SOCKET",
-                    dir.path().join("egress.sock").to_str().unwrap(),
-                ),
-                ("PROPHET_LOCAL_ENDPOINT", endpoint),
-            ],
+            &env,
         );
         let agents = agentd.joindre().await;
         Self {
@@ -127,10 +132,10 @@ impl Chain {
                 "agent":{"id":"org.prophet.local-test","version":"1.0.0","name":"Test local","publisher_key":"ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
                 "model":{"preferred":[format!("local:{model}")]},
                 "sandbox":{"min_level":0},
-                "capabilities":{"max":{"fs.read":["~/docs/**"],"fs.write":["~/docs/**"],"net.egress":[host],"tool.call":["fs.read","fs.write","http.fetch"]}},
+                "capabilities":{"max":{"fs.read":["~/docs/**"],"fs.write":["~/docs/**"],"net.egress":[host],"ui.read":["browser"],"ui.act":["browser"],"tool.call":["fs.read","fs.write","http.fetch","web.open","web.tree","web.act"]}},
                 "budget":{"default":{"tokens":20000,"wall_time":"90s","approvals":3}}
             },
-            "requested":[{"res":"fs","act":"read","match":"~/docs/**"},{"res":"fs","act":"write","match":"~/docs/**"},{"res":"net","act":"egress","match":host},{"res":"tool","act":"call","match":"fs.read"},{"res":"tool","act":"call","match":"fs.write"},{"res":"tool","act":"call","match":"http.fetch"}],
+            "requested":[{"res":"fs","act":"read","match":"~/docs/**"},{"res":"fs","act":"write","match":"~/docs/**"},{"res":"net","act":"egress","match":host},{"res":"ui","act":"read","match":"browser"},{"res":"ui","act":"act","match":"browser"},{"res":"tool","act":"call","match":"fs.read"},{"res":"tool","act":"call","match":"fs.write"},{"res":"tool","act":"call","match":"http.fetch"},{"res":"tool","act":"call","match":"web.open"},{"res":"tool","act":"call","match":"web.tree"},{"res":"tool","act":"call","match":"web.act"}],
             "scopes":["~/docs"],"availability":{"local_models":[model]}
         })).await.unwrap();
     }
@@ -1075,4 +1080,128 @@ async fn sans_proxy_de_sortie_aucune_requete_ne_part() {
         .cloned()
         .unwrap_or_else(|| panic!("résultat de http.fetch absent : {events}"));
     assert_eq!(result["payload"]["ok"], false, "{result}");
+}
+
+/// Le navigateur des essais, s'il y en a un ; `PROPHET_EXIGER_NAVIGATEUR=1` rend son absence
+/// fatale, pour qu'un vert veuille dire vrai en intégration continue.
+fn navigateur_des_essais() -> Option<String> {
+    for candidat in [
+        "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/google-chrome",
+    ] {
+        if std::path::Path::new(candidat).is_file() {
+            return Some(candidat.to_owned());
+        }
+    }
+    let depuis_environnement = std::env::var("PROPHET_BROWSER").ok();
+    assert!(
+        !(depuis_environnement.is_none()
+            && std::env::var("PROPHET_EXIGER_NAVIGATEUR").as_deref() == Ok("1")),
+        "aucun navigateur trouvé alors que PROPHET_EXIGER_NAVIGATEUR=1"
+    );
+    depuis_environnement
+}
+
+fn reponse_web_open(url: &str) -> Value {
+    json!({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"type":"function","id":"call_1","function":{"name":"web.open","arguments":json!({"url":url}).to_string()}}]}}],"usage":{"prompt_tokens":12,"completion_tokens":8}})
+}
+
+#[tokio::test]
+async fn le_navigateur_pilote_ne_sort_que_par_egress() {
+    let Some(navigateur) = navigateur_des_essais() else {
+        eprintln!("aucun navigateur : test sans effet");
+        return;
+    };
+    let recu = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let port = temoin_web(recu.clone()).await;
+    let url = format!("http://127.0.0.1:{port}/page");
+    let model = controlled_reply(Some(reponse_web_open(&url))).await;
+    let chain = Chain::with_env(&model.endpoint, &[("PROPHET_BROWSER", &navigateur)]).await;
+    let egress = Daemon::lancer_avec(
+        binaire_voisin("prophet-egress").to_str().unwrap(),
+        &chain.dir.path().join("egress.sock"),
+        &chain.dir.path().join("egress-state"),
+        &[(
+            "PROPHET_CAPD_SOCKET",
+            chain.dir.path().join("cap.sock").to_str().unwrap(),
+        )],
+    );
+    egress
+        .attendre_reponse(b"GET http://sonde.invalide/ HTTP/1.1\r\nHost: sonde.invalide\r\n\r\n")
+        .await;
+    chain
+        .plan_web("controlled", "Ouvre la page témoin", "127.0.0.1")
+        .await;
+    chain
+        .agents
+        .call("task.start", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    model.received.await.unwrap();
+    model.release.send(()).unwrap();
+    let status = chain.wait_terminal().await;
+    assert_eq!(status["state"], "done", "{status}");
+
+    let requests = recu.lock().unwrap().clone();
+    assert!(
+        requests
+            .iter()
+            .any(|head| head.to_ascii_lowercase().starts_with("get /page http/1.1")),
+        "la page doit avoir été demandée par le proxy : {requests:?}"
+    );
+    for head in &requests {
+        assert!(
+            !head.to_ascii_lowercase().contains("proxy-authorization"),
+            "le jeton ne sort jamais : {head}"
+        );
+    }
+    let events = chain
+        .journal
+        .call("ledger.query", json!({"task":"local-test"}))
+        .await
+        .unwrap();
+    let events = events.as_array().unwrap();
+    let call = events
+        .iter()
+        .find(|e| e["kind"] == "tool.call" && e["payload"]["tool"] == "web.open")
+        .unwrap_or_else(|| panic!("appel web.open absent : {events:?}"));
+    assert_eq!(call["payload"]["target"], "127.0.0.1", "{call}");
+    let result = events
+        .iter()
+        .find(|e| e["kind"] == "tool.result" && e["payload"]["tool"] == "web.open")
+        .unwrap();
+    assert_eq!(result["payload"]["ok"], true, "{result}");
+    drop(egress);
+}
+
+#[tokio::test]
+async fn sans_egress_le_navigateur_pilote_n_a_aucune_route() {
+    let Some(navigateur) = navigateur_des_essais() else {
+        eprintln!("aucun navigateur : test sans effet");
+        return;
+    };
+    let recu = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let port = temoin_web(recu.clone()).await;
+    let url = format!("http://127.0.0.1:{port}/page");
+    let model = controlled_reply(Some(reponse_web_open(&url))).await;
+    let chain = Chain::with_env(&model.endpoint, &[("PROPHET_BROWSER", &navigateur)]).await;
+    chain
+        .plan_web("controlled", "Ouvre la page témoin", "127.0.0.1")
+        .await;
+    chain
+        .agents
+        .call("task.start", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    model.received.await.unwrap();
+    model.release.send(()).unwrap();
+    let status = chain.wait_terminal().await;
+    assert!(status["state"].as_str().is_some(), "{status}");
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(
+        recu.lock().unwrap().is_empty(),
+        "sans proxy de sortie, le navigateur ne doit trouver aucune route directe"
+    );
 }

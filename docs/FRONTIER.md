@@ -147,9 +147,9 @@ propriétaire n'est pas livré. Le critère d'exécution locale complète reste 
 Le [navigateur et le web](reports/navigateur-2026-09-13.md) arrivent ensuite : `http.fetch`
 réel par egress, `web.open`/`web.tree`/`web.act` par l'arbre d'un Chromium piloté, X et un
 navigateur à profil Prophet dans le bureau. Les preuves sont des tests avec les vrais services
-et un vrai navigateur, sous un seul UID, sans VM. La sortie réseau propre du navigateur n'est pas
-relayée par egress et son confinement n'est pas livré ; le critère « MCP livré opérationnel »
-progresse sans être coché.
+et un vrai navigateur, sous un seul UID, sans VM. Tout le trafic du navigateur piloté passe
+ensuite par egress via un relais local, prouvé par deux tests réels ; son confinement au niveau 2
+n'est pas livré, et le critère « MCP livré opérationnel » progresse sans être coché.
 
 Les [instruments de l'atelier](reports/instruments-2026-09-13.md) donnent ensuite à la surface
 une identité qui se lit sans mots : anneaux, monogrammes, bandes d'état, rail éclairé, sans

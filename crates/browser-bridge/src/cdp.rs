@@ -55,7 +55,36 @@ impl Browser {
         profile_dir: &std::path::Path,
         port: u16,
     ) -> Result<Self, CdpError> {
+        Self::launch_with(program, profile_dir, port, None).await
+    }
+
+    /// Comme [`Self::launch`], en dirigeant toute la sortie réseau du navigateur vers un
+    /// mandataire HTTP local (`hôte:port`), y compris les adresses de bouclage.
+    ///
+    /// C'est ainsi que le navigateur d'une tâche ne sort que par le proxy de Prophet OS : le
+    /// relais local reçoit chaque requête et chaque tunnel, y ajoute le jeton de la tâche et
+    /// les remet au socket d'egress, qui fait trancher capd sur l'hôte. QUIC est désactivé,
+    /// parce qu'il contournerait un mandataire HTTP.
+    ///
+    /// # Errors
+    /// Si le binaire est absent ou si le point d'écoute ne répond pas.
+    pub async fn launch_with(
+        program: &str,
+        profile_dir: &std::path::Path,
+        port: u16,
+        proxy: Option<&str>,
+    ) -> Result<Self, CdpError> {
         std::fs::create_dir_all(profile_dir).map_err(|e| CdpError::Launch(e.to_string()))?;
+        let proxy_args: Vec<String> = match proxy {
+            Some(address) => vec![
+                format!("--proxy-server=http://{address}"),
+                "--proxy-bypass-list=<-loopback>".to_owned(),
+                "--disable-quic".to_owned(),
+            ],
+            // Aucun proxy hérité de l'environnement : la seule sortie réseau d'une tâche est
+            // le proxy de Prophet OS, jamais celui qui traînait dans les variables du shell.
+            None => vec!["--no-proxy-server".to_owned()],
+        };
         // Un port 0 laisse le navigateur choisir lui-même un port libre et l'écrire dans
         // `DevToolsActivePort` ; un fichier laissé par un lancement précédent dirait un port
         // qui n'est plus le sien, on le retire avant de lancer.
@@ -78,13 +107,11 @@ impl Browser {
                 "--no-first-run",
                 "--no-default-browser-check",
                 "--disable-extensions",
-                // Aucun proxy hérité de l'environnement : la seule sortie réseau d'une tâche est
-                // le proxy de Prophet OS, jamais celui qui traînait dans les variables du shell.
-                "--no-proxy-server",
                 &format!("--remote-debugging-port={port}"),
                 &format!("--user-data-dir={}", profile_dir.display()),
-                "about:blank",
             ])
+            .args(&proxy_args)
+            .arg("about:blank")
             .env_remove("HTTP_PROXY")
             .env_remove("HTTPS_PROXY")
             .env_remove("http_proxy")
@@ -213,6 +240,18 @@ impl Browser {
         program: &str,
         profile_dir: &std::path::Path,
     ) -> Result<Self, CdpError> {
+        Self::launch_auto_with(program, profile_dir, None).await
+    }
+
+    /// Comme [`Self::launch_auto`], avec un mandataire HTTP local (voir [`Self::launch_with`]).
+    ///
+    /// # Errors
+    /// Si aucune tentative n'aboutit, l'erreur de la dernière est rendue.
+    pub async fn launch_auto_with(
+        program: &str,
+        profile_dir: &std::path::Path,
+        proxy: Option<&str>,
+    ) -> Result<Self, CdpError> {
         let mut derniere = None;
         for tentative in 0..TENTATIVES_DE_LANCEMENT {
             // Le navigateur choisit et lie lui-même son port (port 0) : plus de course. Les
@@ -226,7 +265,7 @@ impl Browser {
                 };
                 port
             };
-            match Self::launch(program, profile_dir, port).await {
+            match Self::launch_with(program, profile_dir, port, proxy).await {
                 Ok(navigateur) => return Ok(navigateur),
                 // Le navigateur lancé en vain est tué par `Drop` avant la tentative suivante.
                 Err(erreur) => derniere = Some(erreur),

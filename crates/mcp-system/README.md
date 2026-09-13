@@ -40,6 +40,8 @@ un délai maximal pour un appel noyau bloqué. Voir les [bornes exactes](../../d
 jeton de la tâche dans l'en-tête interne que le proxy retire ; sans socket, il échoue sans rien
 émettre. Les outils `web.*` (`tools::Browsing`) lancent un navigateur par tâche, à profil
 privé, et exposent la page comme un arbre SUP ; ils exigent un programme nommé par le lanceur.
+`Browsing::via_egress` relaie tout le trafic du navigateur vers le socket d'egress sous le
+jeton de la tâche (`tools::web_relay`) ; c'est la forme que le service emploie.
 Le test `tests/web.rs` les exerce avec un vrai Chromium et se tait s'il n'en trouve aucun
 (`PROPHET_EXIGER_NAVIGATEUR=1` transforme cette absence en échec).
 
