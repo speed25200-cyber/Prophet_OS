@@ -4,7 +4,15 @@
 rustPlatform.buildRustPackage {
   pname = "prophet-os";
   version = "0.1.0";
-  src = ../..;
+  # Une capture ou un rapport ne doit pas reconstruire tous les binaires de la distribution.
+  # Les ressources embarquées restent dans crates ; les exemples servent aux tests Rust.
+  src = lib.fileset.toSource {
+    root = ../..;
+    fileset = lib.fileset.unions [
+      ../../Cargo.toml ../../Cargo.lock ../../rust-toolchain.toml ../../rustfmt.toml
+      ../../crates ../../examples ../../policies
+    ];
+  };
   cargoLock.lockFile = ../../Cargo.lock;
 
   nativeBuildInputs = [ pkg-config makeWrapper ];

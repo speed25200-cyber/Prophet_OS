@@ -52,6 +52,9 @@ in
     users.groups.surface = { };
 
     systemd.services.prophet-surface = {
+      environment = lib.optionalAttrs config.prophet.localEngine.enable {
+        PROPHET_MODEL_ENDPOINT = "http://127.0.0.1:${toString config.prophet.localEngine.port}/v1";
+      };
       description = "Prophet OS — surface d'observation";
       # Un écran qui ne peut pas s'allumer ne doit pas réessayer toutes les deux secondes jusqu'à
       # la fin des temps : cinq tentatives en une minute, puis l'unité s'arrête en échec et le

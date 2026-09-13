@@ -148,6 +148,15 @@
         # pas produire serait la même faute que promettre une isolation qu'on ne sait pas mettre
         # en place. Absent vaut mieux que présent et cassé.
         // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          # Essai explicite : télécharge 1,83 Go de poids si absents du store. Hors checks sans poids.
+          local-engine-vm = import ./image/tests/local-engine.nix {
+            inherit pkgs;
+            module = nixosModules.prophet;
+            weights = pkgs.fetchurl {
+              url = "https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/90862c4b9d2787eaed51d12237eafdfe7c5f6077/Qwen3-1.7B-Q8_0.gguf";
+              sha256 = "061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a";
+            };
+          };
           chatgpt-linux = pkgs.callPackage ./image/packages/chatgpt-linux.nix { };
           iso = self.nixosConfigurations.prophet-iso.config.system.build.isoImage;
         };

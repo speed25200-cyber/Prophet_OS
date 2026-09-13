@@ -114,6 +114,12 @@ struct Chain {
 
 impl Chain {
     fn new(endpoint: &str) -> Self {
+        let chain = Self::with_model(endpoint, "modele-controle");
+        chain.seed();
+        chain
+    }
+
+    fn with_model(endpoint: &str, model: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
         std::fs::create_dir_all(home.join("docs")).unwrap();
@@ -127,7 +133,7 @@ impl Chain {
         let mut example: Value =
             serde_json::from_str(include_str!("../../../examples/missions/note-locale.json"))
                 .unwrap();
-        example["manifest"]["model"]["preferred"] = json!(["local:modele-controle"]);
+        example["manifest"]["model"]["preferred"] = json!([format!("local:{model}")]);
         example["manifest"]["capabilities"]["max"]["fs.read"] = json!(["~/docs/**"]);
         example["manifest"]["capabilities"]["max"]["fs.write"] = json!(["~/docs/**"]);
         std::fs::write(&profile,json!([{"id":"documents","name":"Documents de travail","description":"Rédiger et préparer des fichiers dans votre espace documentaire.","manifest":example["manifest"],"scopes":["~/docs"]}]).to_string()).unwrap();
@@ -163,17 +169,19 @@ impl Chain {
             drop(ledger.joindre().await);
             agentd.joindre().await
         });
-        let chain = Self {
+        Self {
             dir,
             sockets,
             _daemons: vec![agentd, ledger, capd],
             runtime,
             agents,
-        };
-        chain.call("task.spawn", json!({"id":ID,"intent":"Essai d'intégration — Préparer une note sur la supervision humaine","user":"prophet",
+        }
+    }
+
+    fn seed(&self) {
+        self.call("task.spawn", json!({"id":ID,"intent":"Essai d'intégration — Préparer une note sur la supervision humaine","user":"prophet",
             "manifest":{"agent":{"id":"org.prophet.surface-test","version":"1.0.0","name":"Essai de supervision","publisher_key":"ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},"model":{"preferred":["local:modele-controle"]},"sandbox":{"min_level":0},"capabilities":{"max":{"fs.read":["~/docs/**"],"fs.write":["~/docs/**"],"tool.call":["fs.write"]}},"budget":{"default":{"tokens":2000,"wall_time":"60s","approvals":3}}},
             "requested":[{"res":"fs","act":"read","match":"~/docs/**"},{"res":"fs","act":"write","match":"~/docs/**"},{"res":"tool","act":"call","match":"fs.write"}],"scopes":["~/docs"],"availability":{"local_models":["modele-controle"]}}));
-        chain
     }
     fn call(&self, method: &str, params: Value) -> Value {
         self.runtime
@@ -587,5 +595,153 @@ fn une_intention_saisie_dans_la_surface_devient_une_mission_et_un_fichier_prepar
     assert!(
         bureau.preparation().attempted_id().is_none(),
         "la nouvelle demande ne reprend pas la mission précédente"
+    );
+}
+
+/// Même interface et mêmes services que le parcours contrôlé, avec un moteur externe réel.
+/// La feature évite de confondre cet essai avec les captures sans poids de la CI.
+#[cfg(feature = "real-model-tests")]
+#[test]
+#[ignore = "needs_gpu, needs_local_model: moteur et modèle explicitement requis"]
+fn une_intention_graphique_est_executee_par_un_modele_reel() {
+    let endpoint = std::env::var("PROPHET_TEST_ENDPOINT").expect("PROPHET_TEST_ENDPOINT requis");
+    let model = std::env::var("PROPHET_TEST_MODEL").expect("PROPHET_TEST_MODEL requis");
+    let chain = Chain::with_model(&endpoint, &model);
+    let context = Contexte::hors_ecran().unwrap();
+    let mut source = Reel::demarrer(chain.sockets.clone());
+    let mut bureau = Bureau::nouveau(&context, endpoint, false);
+    bureau.brancher_missions(chain.sockets.agentd.clone());
+    bureau.atelier.decouvrir(&bureau.ctx);
+    bureau.figer_transitions();
+    let target = Cible::nouvelle(&context, 1440, 1000);
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    let events = click(&bureau, &target, "preparer-mission");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while bureau.preparation().options().is_none() {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        assert!(
+            Instant::now() < deadline,
+            "catalogue absent : {:?}",
+            bureau.preparation().error()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        bureau.preparation().options().unwrap().profiles[0].models,
+        vec![model.clone()]
+    );
+    assert_eq!(bureau.atelier.modeles, vec![model.clone()]);
+    let expected = format!("mission-{}", ulid::Ulid::new().random() as u32);
+    let intent = format!(
+        "Use fs.write to save exactly {expected} into ~/docs/note.txt. After staged=true, answer Done. /no_think"
+    );
+    let events = click(&bureau, &target, "mission-intent");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    frame(
+        &mut bureau,
+        &mut source,
+        &context,
+        &target,
+        vec![Event::Paste(intent.clone())],
+    );
+    assert_eq!(bureau.preparation().intent, intent);
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    capture(&context, &target, "reel-objectif");
+    let events = click(&bureau, &target, "mission-prepare-submit");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    let id = bureau.preparation().attempted_id().unwrap().to_owned();
+    let deadline = Instant::now() + Duration::from_secs(12);
+    loop {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        if bureau
+            .missions()
+            .snapshot()
+            .is_some_and(|s| s.task.id == id && s.task.state == State::Planned)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "plan absent : {:?}",
+            bureau.preparation().error()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        !chain
+            .dir
+            .path()
+            .join(format!("home/.prophet/tasks/{id}"))
+            .exists(),
+        "la préparation ne doit pas créer le travail"
+    );
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    capture(&context, &target, "reel-plan");
+    let events = click(&bureau, &target, "mission-start");
+    let started = Instant::now();
+    frame(&mut bureau, &mut source, &context, &target, events);
+    let mut running_frames = 0;
+    loop {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        if let Some(snapshot) = bureau.missions().snapshot() {
+            if snapshot.task.state.is_terminal() {
+                assert_eq!(
+                    snapshot.task.state,
+                    State::Done,
+                    "échec du modèle : {:?}",
+                    snapshot.task.reason
+                );
+                break;
+            }
+            if snapshot.task.state == State::Running {
+                running_frames += 1;
+                if running_frames == 3 {
+                    capture(&context, &target, "reel-execution");
+                }
+            }
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(120),
+            "résultat absent"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let snapshot = bureau.missions().snapshot().unwrap();
+    let result = snapshot
+        .result
+        .as_ref()
+        .expect("résultat reçu par l'interface");
+    assert_eq!(snapshot.task.intent, intent);
+    assert_eq!(result["diff"]["changes"][0]["path"], "docs/note.txt");
+    assert!(snapshot.task.budget.spent.tokens > 0);
+    assert!(
+        running_frames > 0,
+        "l'interface doit composer pendant l'inférence"
+    );
+    assert_eq!(
+        std::fs::read_to_string(
+            chain
+                .dir
+                .path()
+                .join(format!("home/.prophet/tasks/{id}/work/docs/note.txt"))
+        )
+        .unwrap(),
+        expected
+    );
+    assert!(!chain.dir.path().join("home/docs/note.txt").exists());
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    capture(&context, &target, "reel-resultat");
+    println!(
+        "modèle={model}, mission={id}, contenu={expected}, durée={:?}, images pendant exécution={running_frames}",
+        started.elapsed()
     );
 }

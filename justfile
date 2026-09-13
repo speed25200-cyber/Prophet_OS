@@ -69,6 +69,10 @@ test-vm:
 test-local-engine:
     nix build .#checks.x86_64-linux.llama-tool-grammar --print-build-logs
 
+# KVM, 4 Go de RAM pour la VM et 1,83 Go de poids : services installés et mission réelle.
+test-local-engine-vm:
+    nix build .#local-engine-vm --print-build-logs
+
 # Démarre l'image dans QEMU.
 vm:
     @echo "pas encore disponible (M9)" && exit 2

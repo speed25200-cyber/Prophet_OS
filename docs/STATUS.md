@@ -179,6 +179,25 @@ ne sont pas encore provisionnés dans la session installée. GPU, autres famille
 vérifiés, graphisme et sessions authentifiées restent ouverts. Aucun critère complet de
 FRONTIER.md n'est coché.
 
+Raccordement du 13 septembre 2026, après `395ecbb` : le module système installe le moteur
+corrigé, un profil `Documents Prophet` et des paramètres communs au dialogue et à agentd.
+Les poids restent un choix de configuration explicite. capd et agentd utilisent le home du
+propriétaire configuré ; le contexte partagé et les travaux privés reçoivent des permissions
+distinctes. **Trois essais graphiques réels sur trois réussissent avec Qwen3-1.7B**, après un
+premier essai également réussi : widgets natifs, vrais services, contenu exact et originaux
+intacts. **`just check` réussi : 622 tests, aucun échec, 25 ignorés** ; le test graphique réel
+reste séparé sous une feature explicite. Le test NixOS avec poids réels est ajouté à la CI.
+Les 15 tests graphiques contrôlés passent aussi après ce raccordement.
+Son exécution et la construction du nouveau paquet restent à confirmer ; l'évaluation Nix
+réussit. La construction locale a été interrompue avec seulement 6 Go libres sur le disque
+hôte. Le cache incrémental Linux a été réduit d'environ 15 Go, sans gain physique confirmé
+sur Windows. Voir le [rapport](reports/moteur-installe-2026-09-13.md) et l'[ADR 0017](adr/0017-moteur-installe-et-contexte-partage.md).
+
+La CI de `395ecbb` réussit le protocole du moteur, les composants, l'isolation et la surface ;
+ChatGPT demeure en échec. Le kiosque, la gestion graphique des poids, le contenu des diffs,
+leur validation, les clients authentifiés et la refonte visuelle demandée restent ouverts.
+Aucun critère complet de FRONTIER.md n'est coché pour ce raccordement.
+
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 
 Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'environnement de construction** ; le détail est dans `docs/reports/phase0.md` section 5.

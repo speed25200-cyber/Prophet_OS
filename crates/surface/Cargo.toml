@@ -7,6 +7,10 @@ repository.workspace = true
 rust-version.workspace = true
 description = "La surface d'observation de Prophet OS : ce que l'humain voit pendant que les agents travaillent"
 
+[features]
+# Essais explicites avec poids et moteur fournis ; absents du rendu contrôlé de la CI.
+real-model-tests = []
+
 [dependencies]
 serde_json = { workspace = true }
 clap = { workspace = true }

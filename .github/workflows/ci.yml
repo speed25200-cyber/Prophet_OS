@@ -17,6 +17,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  local-engine-system:
+    name: Mission locale sous NixOS (modèle réel)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Préparer KVM
+        run: |
+          PROPHET_AUTORISER_KVM=1 sudo -E ./tools/install-isolation.sh kvm
+          python3 -c "open('/dev/kvm', 'r+b').close()"
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+            max-jobs = 1
+            cores = 2
+      - name: Charger Qwen3 et exercer les services installés
+        run: nix build .#local-engine-vm --print-build-logs
+
   local-engine:
     name: Moteur local (protocole)
     runs-on: ubuntu-latest

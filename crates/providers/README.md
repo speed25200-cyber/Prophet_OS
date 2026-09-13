@@ -34,3 +34,30 @@ L'[ADR 0016](../../docs/adr/0016-grammaire-du-moteur-local.md) décrit le correc
 préserve la cardinalité demandée et interdit les répétitions vides d'appels.
 Le [rapport](../../docs/reports/grammaire-locale-2026-09-13.md) distingue cette preuve
 de la qualité des générations et du parcours réel agentd.
+
+## Moteur de l'image
+
+Le module NixOS `prophet.localEngine` installe le paquet corrigé de llama.cpp et expose un
+premier profil documentaire dans la supervision. Le fichier de poids reste un choix explicite :
+
+```nix
+prophet.localEngine = {
+  weights = "/var/lib/prophet/models/Qwen3-1.7B-Q8_0.gguf";
+  model = "qwen3-1.7b";
+  threads = 4;
+};
+```
+
+Après avoir appliqué cette configuration, poser le GGUF vérifié dans ce répertoire avec un
+mode `0644`, puis démarrer `prophet-local-engine.service`. Le modèle doit être compatible avec
+les paramètres du service ; cette première configuration est exercée avec Qwen3 sur CPU.
+Elle ne télécharge aucun modèle au démarrage. Sans `weights`, aucun moteur n'est lancé.
+
+La surface et agentd partagent le port configuré, `8080` par défaut, sur `127.0.0.1` seulement.
+Le contexte `Documents Prophet` prépare les fichiers dans un espace de travail privé sous le
+home du propriétaire ; les originaux de `~/Documents/Prophet` restent à examiner et appliquer.
+Le choix des poids depuis l'interface et l'accélération GPU restent à intégrer.
+
+`just test-local-engine-vm` exerce les services installés avec les vrais poids. Le script
+`tools/verifier-moteur-local.py --surface` exerce séparément le parcours graphique natif.
+Voir le [rapport](../../docs/reports/moteur-installe-2026-09-13.md) pour les preuves et limites.

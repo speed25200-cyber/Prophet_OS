@@ -70,6 +70,8 @@ let
   ];
 in
 {
+  imports = [ ./local-engine.nix ];
+
   options.prophet = {
     enable = lib.mkEnableOption "les services de Prophet OS";
 
@@ -158,6 +160,7 @@ in
         user = "capd";
         description = "Prophet OS — broker de capacités";
         extra.before = [ "prophet-agentd.service" "prophet-sandboxd.service" ];
+        extra.environment.PROPHET_HOME = config.users.users.${cfg.user}.home;
       };
 
       prophet-ledger = daemon {
@@ -286,9 +289,10 @@ in
         description = "Prophet OS — runtime d'agents";
         extra = {
           after = [ "prophet-capd.service" "prophet-ledger.service" "prophet-sandboxd.service" ];
+          environment.PROPHET_HOME = config.users.users.${cfg.user}.home;
           requires = [ "prophet-capd.service" "prophet-ledger.service" ];
           serviceConfig = {
-            ReadWritePaths = [ "/home/${cfg.user}" "/var/lib/prophet" ];
+            ReadWritePaths = [ config.users.users.${cfg.user}.home "/var/lib/prophet" ];
             # `ProtectHome = true`, hérité du modèle commun, rend `/home` inaccessible et **vide**
             # dans l'espace de montage du service. Il l'emporte sur `ReadWritePaths` : le test des
             # services, interrogeant depuis l'intérieur de cet espace, a rendu

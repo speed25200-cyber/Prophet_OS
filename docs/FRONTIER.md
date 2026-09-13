@@ -92,3 +92,10 @@ ne confond plus fichiers présents, connexion et pilote agentique disponible. Le
 ChatGPT affiche son écran de connexion sous NixOS/XWayland, mais une erreur de polices secondaire
 maintient son test strict en échec et le paquet reste hors de l'image installée. Le bureau humain
 et les exécutions authentifiées restent à intégrer et à vérifier.
+
+Le [raccordement système suivant](reports/moteur-installe-2026-09-13.md) configure le moteur,
+le profil documentaire et le home du propriétaire. Trois essais avec la surface native et
+Qwen3-1.7B réels réussissent : intention, préparation, lancement et contenu exact du travail.
+Le test des unités installées avec poids réels est ajouté à la CI, mais son résultat reste
+à établir. La session humaine graphique complète, la direction visuelle attendue, les
+performances matérielles et les exigences de sécurité et de durabilité restent ouvertes.
