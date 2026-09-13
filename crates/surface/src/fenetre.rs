@@ -65,6 +65,14 @@ impl Default for Options {
     }
 }
 
+/// Faut-il redessiner ? Oui si l'interface l'a demandé (champ vivant, saisie, transition) ou
+/// si la scène ne ressemble plus à la dernière image. Sinon, l'écran reste tel quel et le GPU
+/// dort : c'est toute la consommation au repos.
+#[must_use]
+pub fn doit_redessiner(repeindre: bool, derniere: Option<u64>, scene: &Scene) -> bool {
+    repeindre || derniere != Some(scene.empreinte())
+}
+
 /// Ouvre l'espace natif avec la configuration habituelle.
 ///
 /// # Errors
@@ -221,8 +229,9 @@ impl ApplicationHandler<Evenement> for Application {
                     maintenant + Duration::from_millis(if etat.cachee { 1000 } else { 250 });
                 // Un écran au repos n'est pas redessiné : on relit les services, et si rien
                 // de visible n'a changé et que l'interface ne demande rien, le GPU dort.
-                let change = self.empreinte != Some(self.source.scene().empreinte());
-                if !etat.cachee && (self.repeindre || change) {
+                if !etat.cachee
+                    && doit_redessiner(self.repeindre, self.empreinte, &self.source.scene())
+                {
                     etat.fenetre.request_redraw();
                 }
             }
@@ -341,4 +350,54 @@ fn dessiner(etat: &mut Etat, scene: &Scene) -> Option<Reponse> {
         etat.premiere_image = true;
     }
     decision
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scene::{Courant, Etat, Isolation};
+
+    fn scene(etapes: u32) -> Scene {
+        Scene {
+            heure: "14:37".to_owned(),
+            date: "jeudi".to_owned(),
+            courants: vec![Courant {
+                tache: "t1".to_owned(),
+                intitule: "quelque chose".to_owned(),
+                agent: "local".to_owned(),
+                etat: Etat::Court,
+                debit: 3.0,
+                budget_consomme: 0.1,
+                etapes,
+                task_state: None,
+                task_revision: 0,
+            }],
+            decision: None,
+            isolation: Isolation {
+                niveau_max: 1,
+                manque: None,
+            },
+        }
+    }
+
+    #[test]
+    fn un_ecran_inchange_n_est_pas_redessine_mais_une_etape_ou_une_demande_le_sont() {
+        let derniere = Some(scene(4).empreinte());
+        assert!(
+            !doit_redessiner(false, derniere, &scene(4)),
+            "rien n'a changé"
+        );
+        assert!(
+            doit_redessiner(false, derniere, &scene(5)),
+            "une étape s'est franchie"
+        );
+        assert!(
+            doit_redessiner(true, derniere, &scene(4)),
+            "l'interface l'a demandé"
+        );
+        assert!(
+            doit_redessiner(false, None, &scene(4)),
+            "la première image se dessine"
+        );
+    }
 }

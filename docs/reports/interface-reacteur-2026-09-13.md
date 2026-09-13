@@ -118,6 +118,26 @@ l'empreinte de la scène à celle de la dernière image, et ne soumet rien au GP
 visible n'a changé et si l'interface n'a rien demandé. Au repos, la consommation du rendu est
 donc nulle ; elle ne se mesure pas ici, faute d'écran et de compteur d'énergie.
 
+**La consommation au repos se mesure aussi.** `prophet-surface --repos N` rejoue pendant N
+secondes la politique de la fenêtre — relecture des services quatre fois par seconde, redessin
+seulement si l'empreinte de la scène a changé ou si l'interface l'a demandé — et compte les
+images réellement rendues et le temps processeur consommé. Même machine, même build :
+
+| Situation, 1920 × 1080, 10 s | Images rendues | Temps processeur | Mémoire résidente |
+| --- | ---: | ---: | ---: |
+| Aucune mission, services absents | 3 (0,3 par seconde) | 0,19 s, soit 1,9 % d'un cœur | 148,1 Mio |
+| 5 missions de démonstration, mouvement réduit | 3 (0,3 par seconde) | 0,32 s, soit 3,2 % d'un cœur | 153,7 Mio |
+| 5 missions de démonstration, champ vivant allégé | 244 (24,4 par seconde) | 15,56 s, soit 155 % d'un cœur | 154,1 Mio |
+
+Les trois images du repos sont la première et deux redessins demandés par l'interface au
+démarrage (résultat de la découverte des modèles, style) ; ensuite, plus rien n'est soumis. La
+première mesure de cette politique en a révélé un défaut : l'empreinte tenait compte de l'ordre
+des courants, que la fenêtre ordonne avant de dessiner mais pas avant de comparer, et un écran
+immobile était redessiné quatre fois par seconde pour 29 % d'un cœur. L'empreinte ignore
+désormais cet ordre ; un test le fixe. Le temps processeur de l'activité est celui d'un
+rastériseur logiciel qui trace 12 000 particules par image : sur une carte graphique, ce
+travail quitte le processeur.
+
 Ces chiffres mesurent un processeur qui rastérise, pas une carte graphique : 35 800 particules
 et une interface egui sont, pour n'importe quelle carte de la dernière décennie, une fraction
 de milliseconde. La fluidité sur écran physique reste à établir avec la même commande.
