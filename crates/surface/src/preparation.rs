@@ -11,6 +11,8 @@ enum Reply {
     Plan(Result<Box<TaskPlan>, String>),
     /// Une dictée : le texte transcrit en local, ou ce qui a manqué (ADR 0036).
     Dictation(Result<String, String>),
+    /// Le fil d'écoute permanente s'est arrêté (`false`), sur demande ou sur erreur.
+    Listening(bool),
 }
 
 /// Préparation séparée du dialogue : aucun modèle ne décide du profil ou des droits.
@@ -30,6 +32,10 @@ pub struct Preparation {
     error: Option<String>,
     /// Une dictée est en cours : le micro écoute puis whisper transcrit, hors du fil graphique.
     dictating: bool,
+    /// Écoute permanente en cours : le drapeau qui l'arrête, tenu par son fil.
+    listening: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Mot d'activation de l'écoute permanente.
+    wake: String,
     tx: Sender<Reply>,
     rx: Receiver<Reply>,
 }
@@ -49,6 +55,8 @@ impl Default for Preparation {
             prepared: None,
             error: None,
             dictating: false,
+            listening: None,
+            wake: "prophète".into(),
             tx,
             rx,
         }
@@ -154,6 +162,11 @@ impl Preparation {
                         Err(error) => self.error = Some(format!("Dictée impossible : {error}")),
                     }
                 }
+                Reply::Listening(active) => {
+                    if !active {
+                        self.listening = None;
+                    }
+                }
             }
         }
     }
@@ -187,6 +200,74 @@ impl Preparation {
     #[must_use]
     pub const fn dictating(&self) -> bool {
         self.dictating
+    }
+
+    /// Bascule l'écoute permanente : un fil écoute le micro par tranches et ne retient qu'une
+    /// phrase qui commence par le mot d'activation ; le reste rejoint l'objectif comme une
+    /// dictée (ADR 0036). Un second appel arrête l'écoute à la fin de la tranche en cours.
+    pub fn listen_toggle(&mut self, ctx: &egui::Context) {
+        if let Some(stop) = self.listening.take() {
+            stop.store(true, std::sync::atomic::Ordering::Release);
+            return;
+        }
+        match voice::Tools::from_env() {
+            Ok(tools) => self.listen_with(ctx, tools, 6),
+            Err(e) => self.error = Some(format!("Écoute impossible : {e}")),
+        }
+    }
+
+    /// Comme [`Self::listen_toggle`], avec des outils et une durée de tranche donnés (essais).
+    pub fn listen_with(&mut self, ctx: &egui::Context, tools: voice::Tools, seconds: u32) {
+        if self.listening.is_some() {
+            return;
+        }
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.listening = Some(stop.clone());
+        self.error = None;
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        let wake = self.wake.clone();
+        std::thread::spawn(move || {
+            while !stop.load(std::sync::atomic::Ordering::Acquire) {
+                let wav = std::env::temp_dir().join(format!(
+                    "prophet-ecoute-{}-{}.wav",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |d| d.as_millis())
+                ));
+                let heard = tools
+                    .record(seconds, &wav)
+                    .and_then(|()| tools.transcribe(&wav, None));
+                let _ = std::fs::remove_file(&wav);
+                match heard {
+                    Ok(transcript) => {
+                        if let Some(intent) = voice::after_wake_word(&transcript.text, &wake) {
+                            let _ = tx.send(Reply::Dictation(Ok(intent)));
+                            ctx.request_repaint();
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Reply::Dictation(Err(e.to_string())));
+                        break;
+                    }
+                }
+            }
+            let _ = tx.send(Reply::Listening(false));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Écoute permanente en cours.
+    #[must_use]
+    pub fn listening(&self) -> bool {
+        self.listening.is_some()
+    }
+
+    /// Mot d'activation de l'écoute permanente.
+    #[must_use]
+    pub fn wake(&self) -> &str {
+        &self.wake
     }
 
     /// Conserve un choix présent ; ne reprend pas un modèle d'un autre profil par accident.
@@ -464,5 +545,73 @@ mod tests {
         preparation.pending = true;
         preparation.dictate(&egui::Context::default(), 3);
         assert!(!preparation.dictating());
+    }
+
+    /// L'écoute permanente, avec le vrai Whisper et la voix de Piper : un faux enregistreur
+    /// livre « Il fait beau » puis « Prophète, écris une note dans mes documents » ; seule la
+    /// seconde rejoint l'objectif, et l'écoute s'arrête sur demande.
+    #[test]
+    #[ignore = "needs_voice_stack: PROPHET_WHISPER_MODEL, PROPHET_WHISPER, PROPHET_PIPER, PROPHET_PIPER_VOICE"]
+    fn l_ecoute_permanente_ne_retient_que_la_phrase_qui_commence_par_le_mot() {
+        let mut tools = voice::Tools::from_env().unwrap();
+        assert!(tools.can_speak(), "{tools:?}");
+        let temp = tempfile::tempdir().unwrap();
+        let bruit = temp.path().join("bruit.wav");
+        let ordre = temp.path().join("ordre.wav");
+        tools.speak("Il fait beau aujourd'hui.", &bruit).unwrap();
+        tools
+            .speak("Prophète, écris une note dans mes documents.", &ordre)
+            .unwrap();
+        let compteur = temp.path().join("appels");
+        let script = temp.path().join("faux-pw-record.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nset -e\nn=0; [ -f {c} ] && n=$(cat {c}); n=$((n+1)); echo $n > {c}\n\
+                 for last; do :; done\n\
+                 if [ \"$n\" = 1 ]; then cp {b} \"$last\"; else cp {o} \"$last\"; fi\n",
+                c = compteur.display(),
+                b = bruit.display(),
+                o = ordre.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        tools.recorder = Some(voice::Recorder::PipeWire(script));
+        let mut preparation = Preparation {
+            intent: "Objectif :".into(),
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        preparation.listen_with(&ctx, tools, 1);
+        assert!(preparation.listening());
+        let debut = std::time::Instant::now();
+        while debut.elapsed() < std::time::Duration::from_secs(60) {
+            preparation.update();
+            if preparation.intent.to_lowercase().contains("note") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        let intent = preparation.intent.to_lowercase();
+        assert!(
+            intent.contains("note") && intent.contains("documents"),
+            "{intent}"
+        );
+        assert!(!intent.contains("beau"), "{intent}");
+        assert!(!intent.contains("proph"), "{intent}");
+        assert!(intent.starts_with("objectif :"), "{intent}");
+        // Arrêt sur demande : le fil termine sa tranche et le dit.
+        preparation.listen_toggle(&ctx);
+        let debut = std::time::Instant::now();
+        while preparation.listening() && debut.elapsed() < std::time::Duration::from_secs(30) {
+            preparation.update();
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        assert!(!preparation.listening());
     }
 }

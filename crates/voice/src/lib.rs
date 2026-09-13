@@ -440,7 +440,11 @@ fn close_enough(heard: &str, wanted: &str) -> bool {
     if a.len() == b.len() {
         return a.iter().zip(&b).filter(|(x, y)| x != y).count() <= 1;
     }
-    let (short, long) = if a.len() < b.len() { (&a, &b) } else { (&b, &a) };
+    let (short, long) = if a.len() < b.len() {
+        (&a, &b)
+    } else {
+        (&b, &a)
+    };
     long.len() == short.len() + 1 && long[..short.len()] == short[..]
 }
 

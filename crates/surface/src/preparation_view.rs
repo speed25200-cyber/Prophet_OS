@@ -137,11 +137,19 @@ fn form(ui: &mut egui::Ui, preparation: &mut Preparation, compact: bool) {
         if crate::preparation::voice_ready() {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.add_enabled_ui(!locked && !preparation.dictating(),|ui| {
+                ui.add_enabled_ui(!locked && !preparation.dictating() && !preparation.listening(),|ui| {
                     if bouton(ui,"mission-dictate",if preparation.dictating(){"Écoute…"}else{"Dicter (6 s)"},false).clicked(){preparation.dictate(&ctx,6);}
+                });
+                // L'écoute permanente : l'atelier n'agit que sur « Prophète, … » ; un second
+                // clic l'arrête à la fin de la tranche en cours.
+                ui.add_enabled_ui(!locked && !preparation.dictating(),|ui| {
+                    let label = if preparation.listening() { "Arrêter l'écoute" } else { "Écouter « Prophète »" };
+                    if bouton(ui,"mission-listen",label,preparation.listening()).clicked(){preparation.listen_toggle(&ctx);}
                 });
                 if preparation.dictating() {
                     ui.label(RichText::new("Parlez ; le texte s'ajoutera à votre objectif.").color(MUTED));
+                } else if preparation.listening() {
+                    ui.label(RichText::new(format!("À l'écoute : dites « {}, … » puis votre demande.", preparation.wake())).color(MUTED));
                 }
             });
         }

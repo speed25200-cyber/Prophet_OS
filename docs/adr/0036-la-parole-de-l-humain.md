@@ -47,6 +47,9 @@ distant ; et la parole ne donne aucun droit, elle produit un texte que l'humain 
    pas de détection acoustique séparée, donc un coût de transcription par tranche, et aucun
    déclenchement au milieu d'une phrase. La voix d'espeak est trop mécanique pour que Whisper y
    attrape le mot ; les essais parlent avec la voix de Piper, et le vrai micro reste à mesurer.
+   L'atelier a le même geste : « Écouter « Prophète » » sous l'objectif lance un fil d'écoute
+   hors du fil graphique, chaque phrase qui commence par le mot rejoint l'objectif que l'humain
+   relit, un second clic arrête l'écoute à la fin de la tranche en cours.
 
 ## Conséquences
 

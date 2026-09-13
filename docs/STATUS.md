@@ -322,7 +322,10 @@ plan ; un test de la CLI avec service simulé le prouve, réponse réécoutée p
 d'activation existe : `prophet voice --listen` écoute par tranches et n'agit que sur « Prophète,
 … », comparé avec tolérance à ce que Whisper entend ; un test avec un faux enregistreur prouve
 qu'une tranche sans le mot est ignorée et que la suivante devient une mission avec réponse
-parlée. Ni voix humaine mesurée, ni lecture vérifiée sur une vraie sortie audio : voir
+parlée. L'atelier a le même geste, « Écouter « Prophète » » ; son test de contrôleur avec le vrai
+Whisper est écrit mais n'a pas pu être exercé (la machine WSL de la session tombe à la
+compilation du binaire de test de la surface ; clippy passe). Ni voix humaine mesurée, ni lecture
+vérifiée sur une vraie sortie audio : voir
 l'[ADR 0036](adr/0036-la-parole-de-l-humain.md) et le [rapport](reports/parole-2026-09-13.md).
 
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
