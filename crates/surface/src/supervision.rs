@@ -199,6 +199,27 @@ impl Supervision {
     ) {
         let ctx = root.ctx().clone();
         self.preparation.update();
+        // Les ordres dits pendant l'écoute : préparer l'objectif relu, lancer la mission choisie
+        // (l'approbation de l'humain, dite), entendre son résultat. Un refus se lit sous le
+        // brouillon, comme une erreur de préparation.
+        while let Some(ordre) = self.preparation.take_order() {
+            match ordre {
+                voice::Ordre::Preparer => {
+                    if let Err(error) = self.preparation.submit(&ctx) {
+                        self.preparation
+                            .report_error(format!("« prépare » : {error}"));
+                    }
+                }
+                voice::Ordre::Lancer => {
+                    if let Err(error) = self.missions.command(crate::missions::Action::Start) {
+                        self.preparation
+                            .report_error(format!("« lance la mission » : {error}"));
+                    }
+                }
+                voice::Ordre::Resultat => self.missions.announce_now(),
+                voice::Ordre::Intention => {}
+            }
+        }
         if let Some(plan) = self.preparation.take_prepared() {
             self.prepared_selection = Some(plan.task);
             self.composing = false;

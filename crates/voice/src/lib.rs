@@ -590,9 +590,120 @@ pub fn resume_du_resultat(result: &serde_json::Value) -> String {
     phrase
 }
 
+/// Ce que l'humain demande après le mot d'activation : une intention à préparer (le cas
+/// ordinaire), ou l'un de trois ordres brefs qui portent sur la mission en cours de
+/// préparation ou dernièrement préparée : la préparer (l'atelier, où l'humain relit l'objectif
+/// avant de l'envoyer), la lancer (son approbation, dite), entendre son résultat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ordre {
+    /// Une intention : le texte devient un objectif.
+    Intention,
+    /// « prépare », « envoie » : préparer l'objectif tel qu'il est.
+    Preparer,
+    /// « lance la mission », « démarre », « vas-y » : lancer la mission préparée.
+    Lancer,
+    /// « résultat », « où en est » : entendre le résultat.
+    Resultat,
+}
+
+/// Reconnaît un ordre bref en tête de phrase, tel que Whisper l'écrit (casse, accents et
+/// ponctuation finale indifférents) ; tout le reste est une intention. Un ordre est court,
+/// quatre mots au plus : une phrase longue qui commence par le même verbe (« lance une
+/// recherche sur… ») reste une intention.
+#[must_use]
+pub fn ordre_vocal(intent: &str) -> Ordre {
+    let texte: String = intent
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'à' | 'â' => 'a',
+            'ù' | 'û' => 'u',
+            'ô' => 'o',
+            'î' | 'ï' => 'i',
+            'ç' => 'c',
+            '-' | '\'' | '\u{2019}' => ' ',
+            c => c,
+        })
+        .collect();
+    let texte = texte
+        .trim_end_matches(['.', '!', '?', ' '])
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    const PREPARER: [&str; 6] = [
+        "prepare",
+        "prepare la mission",
+        "envoie",
+        "envoie la mission",
+        "valide",
+        "prepare la",
+    ];
+    const LANCER: [&str; 8] = [
+        "lance", "demarre", "execute", "vas y", "go", "commence", "lancer", "lance la",
+    ];
+    const RESULTAT: [&str; 7] = [
+        "resultat",
+        "le resultat",
+        "lis le resultat",
+        "dis le resultat",
+        "ou en est",
+        "c est fini",
+        "qu est ce que ca donne",
+    ];
+    let commence = |motifs: &[&str]| {
+        motifs
+            .iter()
+            .any(|p| texte == *p || texte.starts_with(&format!("{p} ")))
+    };
+    let mots = texte.split(' ').count();
+    if mots <= 4 && commence(&LANCER) {
+        Ordre::Lancer
+    } else if mots <= 4 && commence(&PREPARER) {
+        Ordre::Preparer
+    } else if mots <= 5 && commence(&RESULTAT) {
+        Ordre::Resultat
+    } else {
+        Ordre::Intention
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn un_ordre_bref_est_reconnu_et_une_intention_reste_une_intention() {
+        for lancer in [
+            "Lance la mission.",
+            "lance-la !",
+            "Démarre.",
+            "Vas-y",
+            "Exécute la mission",
+        ] {
+            assert_eq!(ordre_vocal(lancer), Ordre::Lancer, "{lancer}");
+        }
+        for preparer in ["Prépare.", "Prépare la mission.", "Envoie !", "Valide"] {
+            assert_eq!(ordre_vocal(preparer), Ordre::Preparer, "{preparer}");
+        }
+        for resultat in [
+            "Résultat.",
+            "Le résultat ?",
+            "Où en est la mission ?",
+            "C'est fini ?",
+        ] {
+            assert_eq!(ordre_vocal(resultat), Ordre::Resultat, "{resultat}");
+        }
+        for intention in [
+            "Écris une note de réunion dans mes documents.",
+            "Lance une recherche sur les tarifs de l'électricité en 2026 et résume-la.",
+            "Prépare une note de réunion pour demain matin avec les trois points.",
+            "Résume le résultat de la réunion dans une note.",
+        ] {
+            assert_eq!(ordre_vocal(intention), Ordre::Intention, "{intention}");
+        }
+    }
 
     #[test]
     fn le_resume_d_un_resultat_est_court_sans_mise_en_forme_et_compte_les_changements() {

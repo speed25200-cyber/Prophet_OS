@@ -13,6 +13,8 @@ enum Reply {
     Dictation(Result<String, String>),
     /// Le fil d'écoute permanente s'est arrêté (`false`), sur demande ou sur erreur.
     Listening(bool),
+    /// Un ordre bref dit après le mot d'activation : préparer, lancer, entendre le résultat.
+    Order(voice::Ordre),
 }
 
 /// Préparation séparée du dialogue : aucun modèle ne décide du profil ou des droits.
@@ -36,6 +38,8 @@ pub struct Preparation {
     listening: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Mot d'activation de l'écoute permanente.
     wake: String,
+    /// Ordres dits pendant l'écoute, pris par la supervision dans l'ordre.
+    orders: std::collections::VecDeque<voice::Ordre>,
     tx: Sender<Reply>,
     rx: Receiver<Reply>,
 }
@@ -57,6 +61,7 @@ impl Default for Preparation {
             dictating: false,
             listening: None,
             wake: "prophète".into(),
+            orders: std::collections::VecDeque::new(),
             tx,
             rx,
         }
@@ -173,6 +178,7 @@ impl Preparation {
                         self.listening = None;
                     }
                 }
+                Reply::Order(ordre) => self.orders.push_back(ordre),
             }
         }
     }
@@ -249,7 +255,12 @@ impl Preparation {
                 match heard {
                     Ok(transcript) => {
                         if let Some(intent) = voice::after_wake_word(&transcript.text, &wake) {
-                            let _ = tx.send(Reply::Dictation(Ok(intent)));
+                            // Un ordre bref (préparer, lancer, résultat) va à la supervision ;
+                            // tout le reste rejoint l'objectif que l'humain relit.
+                            let _ = match voice::ordre_vocal(&intent) {
+                                voice::Ordre::Intention => tx.send(Reply::Dictation(Ok(intent))),
+                                ordre => tx.send(Reply::Order(ordre)),
+                            };
                             ctx.request_repaint();
                         }
                     }
@@ -274,6 +285,11 @@ impl Preparation {
     #[must_use]
     pub fn wake(&self) -> &str {
         &self.wake
+    }
+
+    /// Le prochain ordre dit pendant l'écoute, s'il y en a un ; chacun n'est rendu qu'une fois.
+    pub fn take_order(&mut self) -> Option<voice::Ordre> {
+        self.orders.pop_front()
     }
 
     /// Conserve un choix présent ; ne reprend pas un modèle d'un autre profil par accident.
@@ -553,6 +569,30 @@ mod tests {
         assert!(!preparation.dictating());
     }
 
+    /// Les ordres dits pendant l'écoute sont rendus une fois, dans l'ordre, sans toucher à
+    /// l'objectif.
+    #[test]
+    fn les_ordres_dits_sont_rendus_une_fois_dans_l_ordre() {
+        let mut preparation = Preparation {
+            intent: "Objectif".into(),
+            ..Default::default()
+        };
+        assert!(preparation.take_order().is_none());
+        for ordre in [
+            voice::Ordre::Preparer,
+            voice::Ordre::Lancer,
+            voice::Ordre::Resultat,
+        ] {
+            preparation.tx.send(Reply::Order(ordre)).unwrap();
+        }
+        preparation.update();
+        assert_eq!(preparation.take_order(), Some(voice::Ordre::Preparer));
+        assert_eq!(preparation.take_order(), Some(voice::Ordre::Lancer));
+        assert_eq!(preparation.take_order(), Some(voice::Ordre::Resultat));
+        assert!(preparation.take_order().is_none());
+        assert_eq!(preparation.intent, "Objectif");
+    }
+
     /// L'écoute permanente, avec le vrai Whisper et la voix de Piper : un faux enregistreur
     /// livre « Il fait beau » puis « Prophète, écris une note dans mes documents » ; seule la
     /// seconde rejoint l'objectif, et l'écoute s'arrête sur demande.
@@ -565,10 +605,12 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let bruit = temp.path().join("bruit.wav");
         let ordre = temp.path().join("ordre.wav");
+        let lance = temp.path().join("lance.wav");
         tools.speak("Il fait beau aujourd'hui.", &bruit).unwrap();
         tools
             .speak("Prophète, écris une note dans mes documents.", &ordre)
             .unwrap();
+        tools.speak("Prophète, lance la mission.", &lance).unwrap();
         let compteur = temp.path().join("appels");
         let script = temp.path().join("faux-pw-record.sh");
         std::fs::write(
@@ -576,10 +618,11 @@ mod tests {
             format!(
                 "#!/bin/sh\nset -e\nn=0; [ -f {c} ] && n=$(cat {c}); n=$((n+1)); echo $n > {c}\n\
                  for last; do :; done\n\
-                 if [ \"$n\" = 1 ]; then cp {b} \"$last\"; else cp {o} \"$last\"; fi\n",
+                 case \"$n\" in 1) cp {b} \"$last\";; 2) cp {o} \"$last\";; *) cp {l} \"$last\";; esac\n",
                 c = compteur.display(),
                 b = bruit.display(),
-                o = ordre.display()
+                o = ordre.display(),
+                l = lance.display()
             ),
         )
         .unwrap();
@@ -612,6 +655,16 @@ mod tests {
         assert!(!intent.contains("beau"), "{intent}");
         assert!(!intent.contains("proph"), "{intent}");
         assert!(intent.starts_with("objectif :"), "{intent}");
+        // La tranche suivante est un ordre : il va à la supervision, pas à l'objectif.
+        let debut = std::time::Instant::now();
+        let mut ordre_recu = None;
+        while ordre_recu.is_none() && debut.elapsed() < std::time::Duration::from_secs(60) {
+            preparation.update();
+            ordre_recu = preparation.take_order();
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        assert_eq!(ordre_recu, Some(voice::Ordre::Lancer));
+        assert_eq!(preparation.intent.to_lowercase(), intent);
         // Arrêt sur demande : le fil termine sa tranche et le dit.
         preparation.listen_toggle(&ctx);
         let debut = std::time::Instant::now();

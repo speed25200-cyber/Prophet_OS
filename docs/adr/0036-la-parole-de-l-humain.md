@@ -65,10 +65,14 @@ distant ; et la parole ne donne aucun droit, elle produit un texte que l'humain 
 - Le résultat d'une mission se dit sur demande : `prophet task result <id> --say` en fait une
   phrase courte (état, début du texte ou raison, changements à examiner, sans mise en forme,
   coupée à la phrase avant 360 caractères) que Piper lit ; le dit est aussi écrit.
-- En écoute continue, deux ordres brefs après le mot d'activation portent sur la dernière
-  mission préparée dans cette écoute : « lance la mission » la lance (l'approbation de
-  l'humain, dite) et « résultat » fait dire son résultat ; toute autre phrase est une intention
-  à préparer, y compris une phrase longue qui commence par « lance ».
+- En écoute continue, des ordres brefs après le mot d'activation (`voice::ordre_vocal`, quatre
+  mots au plus) portent sur la mission en cours : « lance la mission » la lance (l'approbation
+  de l'humain, dite), « résultat » fait dire son résultat, et dans l'atelier « prépare »
+  envoie l'objectif que l'humain a relu ; toute autre phrase est une intention, y compris une
+  phrase longue qui commence par « lance ». En ligne de commande, l'intention est préparée
+  aussitôt ; dans l'atelier, elle rejoint l'objectif, et les ordres vont à la supervision, qui
+  prépare le brouillon, lance la mission choisie ou fait dire où elle en est. Un refus (rien
+  de préparé, mission non lançable) se lit sous le brouillon.
 - L'atelier dit la fin d'une mission qu'on regarde courir : quand la mission choisie passe à
   un état final, son résultat est résumé (`voice::resume_du_resultat`, le même texte que la
   CLI) et dit hors du fil graphique, une fois ; une mission déjà finie quand on la choisit

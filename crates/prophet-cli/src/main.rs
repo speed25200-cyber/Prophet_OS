@@ -541,8 +541,8 @@ fn listen(
             text: intent,
             ..transcript
         };
-        let resultat = match ordre_vocal(&transcript.text) {
-            Ordre::Preparer => {
+        let resultat = match voice::ordre_vocal(&transcript.text) {
+            voice::Ordre::Intention => {
                 let id = prepare.map(|_| format!("mission-{}", ulid::Ulid::new()));
                 let fait = agir(
                     &tools,
@@ -558,8 +558,16 @@ fn listen(
                 }
                 fait
             }
-            Ordre::Lancer => lancer_par_la_voix(&tools, derniere.as_deref(), reply, as_json),
-            Ordre::Resultat => dire_le_resultat(&tools, derniere.as_deref(), reply, as_json),
+            // En ligne de commande, une intention est préparée aussitôt : « prépare » seul
+            // n'a rien à préparer.
+            voice::Ordre::Preparer => dire_si_demande(
+                &tools,
+                reply,
+                "Dites votre demande : je la prépare aussitôt.",
+            )
+            .map(|_| "« prépare » : dites votre demande, elle est préparée aussitôt.\n".to_owned()),
+            voice::Ordre::Lancer => lancer_par_la_voix(&tools, derniere.as_deref(), reply, as_json),
+            voice::Ordre::Resultat => dire_le_resultat(&tools, derniere.as_deref(), reply, as_json),
         };
         match resultat {
             Ok(text) => out.push_str(&text),
@@ -570,70 +578,6 @@ fn listen(
         }
     }
     Ok(out)
-}
-
-/// Ce que l'humain demande après le mot d'activation : préparer une mission avec ce qu'il dit
-/// (le cas ordinaire), lancer la dernière mission préparée, ou entendre son résultat.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Ordre {
-    Preparer,
-    Lancer,
-    Resultat,
-}
-
-/// Reconnaît un ordre bref en tête de phrase, tel que Whisper l'écrit (casse, accents et
-/// ponctuation finale indifférents) ; tout le reste est une intention à préparer.
-fn ordre_vocal(intent: &str) -> Ordre {
-    let texte: String = intent
-        .trim()
-        .to_lowercase()
-        .chars()
-        .map(|c| match c {
-            'é' | 'è' | 'ê' | 'ë' => 'e',
-            'à' | 'â' => 'a',
-            'ù' | 'û' => 'u',
-            'ô' => 'o',
-            'î' | 'ï' => 'i',
-            'ç' => 'c',
-            '-' | '\'' | '’' => ' ',
-            c => c,
-        })
-        .collect();
-    let texte = texte
-        .trim_end_matches(['.', '!', '?', ' '])
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    const LANCER: [&str; 8] = [
-        "lance", "demarre", "execute", "vas y", "go", "commence", "lancer", "lance la",
-    ];
-    const RESULTAT: [&str; 7] = [
-        "resultat",
-        "le resultat",
-        "lis le resultat",
-        "dis le resultat",
-        "ou en est",
-        "c est fini",
-        "qu est ce que ca donne",
-    ];
-    // Un ordre est court : au plus quatre mots, sinon c'est une intention qui commence par
-    // un verbe ordinaire (« lance une recherche sur… » prépare une mission).
-    let mots = texte.split(' ').count();
-    if mots <= 4
-        && LANCER
-            .iter()
-            .any(|p| texte == *p || texte.starts_with(&format!("{p} ")))
-    {
-        Ordre::Lancer
-    } else if mots <= 5
-        && RESULTAT
-            .iter()
-            .any(|p| texte == *p || texte.starts_with(&format!("{p} ")))
-    {
-        Ordre::Resultat
-    } else {
-        Ordre::Preparer
-    }
 }
 
 /// Dit `texte` si une réponse parlée est demandée.
@@ -2162,34 +2106,6 @@ mod tests {
     #[test]
     fn la_ligne_de_commande_est_coherente() {
         Cli::command().debug_assert();
-    }
-
-    #[test]
-    fn un_ordre_bref_est_reconnu_et_une_intention_est_preparee() {
-        for lancer in [
-            "Lance la mission.",
-            "lance-la !",
-            "Démarre.",
-            "Vas-y",
-            "Exécute la mission",
-        ] {
-            assert_eq!(ordre_vocal(lancer), Ordre::Lancer, "{lancer}");
-        }
-        for resultat in [
-            "Résultat.",
-            "Le résultat ?",
-            "Où en est la mission ?",
-            "C'est fini ?",
-        ] {
-            assert_eq!(ordre_vocal(resultat), Ordre::Resultat, "{resultat}");
-        }
-        for intention in [
-            "Écris une note de réunion dans mes documents.",
-            "Lance une recherche sur les tarifs de l'électricité en 2026 et résume-la.",
-            "Résume le résultat de la réunion dans une note.",
-        ] {
-            assert_eq!(ordre_vocal(intention), Ordre::Preparer, "{intention}");
-        }
     }
 
     #[test]

@@ -393,6 +393,18 @@ impl Missions {
         self.announcement.take()
     }
 
+    /// « Résultat » : dire maintenant où en est la mission choisie, même si la lecture des
+    /// fins est coupée — c'est une demande explicite.
+    pub fn announce_now(&mut self) {
+        self.announcement = Some(match &self.snapshot {
+            None => "Aucune mission n'est choisie.".to_owned(),
+            Some(info) => match &info.result {
+                Some(result) if info.task.state.is_terminal() => voice::resume_du_resultat(result),
+                _ => voice::resume_du_resultat(&json!({"state": info.task.state})),
+            },
+        });
+    }
+
     /// Ouvre une version conservée d'un changement reçu dans le résultat de cette mission.
     ///
     /// # Errors
@@ -652,6 +664,14 @@ mod tests {
             .unwrap();
         missions.update();
         assert!(missions.take_announcement().is_none());
+        // « Résultat », demandé : la mission choisie est dite, même finie avant le choix.
+        missions.announce_now();
+        assert_eq!(
+            missions.take_announcement().as_deref(),
+            Some(
+                "Mission terminée. La note de réunion est écrite dans vos documents. Un changement est à examiner."
+            )
+        );
         // Écoute coupée : une fin regardée reste muette.
         missions.set_announce(false);
         missions.select(Some("c"));
@@ -665,6 +685,18 @@ mod tests {
             missions.update();
         }
         assert!(missions.take_announcement().is_none());
+        // Mais « résultat » répond toujours : ici, une mission en cours.
+        missions.announce_now();
+        assert_eq!(
+            missions.take_announcement().as_deref(),
+            Some("Mission échouée. budget épuisé.")
+        );
+        missions.select(None);
+        missions.announce_now();
+        assert_eq!(
+            missions.take_announcement().as_deref(),
+            Some("Aucune mission n'est choisie.")
+        );
     }
 
     #[test]
