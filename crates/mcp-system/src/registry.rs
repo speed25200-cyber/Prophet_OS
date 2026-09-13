@@ -48,6 +48,13 @@ pub trait Tool: Send + Sync {
     /// Exécute l'appel. N'est appelé qu'après autorisation.
     fn call(&self, args: &Value, context: &ToolContext) -> CallResult;
 
+    /// Effets de cet appel précis — `(irréversible, externe)` — quand ils dépendent des
+    /// arguments : lire une page n'engage pas la même décision qu'y poster. Par défaut, ceux
+    /// que la description annonce, qui restent le pire cas.
+    fn effects(&self, _args: &Value, meta: &ToolMeta) -> (bool, bool) {
+        (meta.irreversible, meta.external)
+    }
+
     /// Exécute en pouvant recontrôler les ressources découvertes pendant l'appel.
     fn call_checked(
         &self,
@@ -359,13 +366,18 @@ impl Registry {
             return Decision::deny(DenyReason::PolicyDenied);
         }
 
+        let Some(tool) = self.tools.get(name) else {
+            return Decision::deny(DenyReason::PolicyDenied);
+        };
+        let (irreversible, external) = tool.effects(args, meta);
+
         // Premier contrôle : le droit d'appeler cet outil.
         let mut call_request =
             CheckRequest::new(Res::Tool, Act::Call, name).sandbox_level(context.sandbox_level);
-        if meta.irreversible {
+        if irreversible {
             call_request = call_request.irreversible();
         }
-        if meta.external {
+        if external {
             call_request = call_request.external();
         }
         let decision = self.authority.check(&context.token, &call_request, now);
@@ -378,9 +390,6 @@ impl Registry {
         if res == Res::Tool {
             return decision;
         }
-        let Some(tool) = self.tools.get(name) else {
-            return Decision::deny(DenyReason::PolicyDenied);
-        };
         let Some(target) = tool.target(args, context) else {
             return Decision::deny(DenyReason::PolicyDenied);
         };
@@ -388,10 +397,10 @@ impl Registry {
             return Decision::deny(DenyReason::PolicyDenied);
         }
         let mut request = CheckRequest::new(res, act, target).sandbox_level(context.sandbox_level);
-        if meta.irreversible {
+        if irreversible {
             request = request.irreversible();
         }
-        if meta.external {
+        if external {
             request = request.external();
         }
         self.authority.check(&context.token, &request, now)

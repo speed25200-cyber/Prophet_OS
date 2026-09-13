@@ -30,6 +30,9 @@ tracing = { workspace = true }
 ed25519-dalek = { workspace = true }
 rand = { workspace = true }
 rustix = { workspace = true }
+base64 = { workspace = true }
+browser-bridge = { workspace = true }
+sup = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -2844,7 +2844,9 @@ dependencies = [
 name = "mcp-system"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "blake3",
+ "browser-bridge",
  "capd",
  "ed25519-dalek",
  "egress",
@@ -2858,6 +2860,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sfs",
+ "sup",
  "tempfile",
  "thiserror 2.0.20",
  "time",
