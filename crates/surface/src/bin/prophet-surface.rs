@@ -118,6 +118,7 @@ fn executer(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         let mut bureau = Bureau::nouveau(&context, options.endpoint, args.demonstration);
         bureau.brancher_missions(surface::reel::Sockets::default().agentd);
+        bureau.brancher_journal(surface::reel::socket_du_journal());
         bureau.figer_transitions();
         bureau.atelier.mouvement_reduit = args.mouvement_reduit;
         bureau.atelier.decouvrir(&bureau.ctx);

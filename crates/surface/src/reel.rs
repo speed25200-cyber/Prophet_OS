@@ -69,6 +69,12 @@ fn chemin(variable: &str, daemon: &str) -> PathBuf {
     std::env::var(variable).map_or_else(|_| prophet_ipc::socket_path(daemon), PathBuf::from)
 }
 
+/// Le journal, pour lire où une mission est allée ; `PROPHET_LEDGER_SOCKET` sinon le défaut.
+#[must_use]
+pub fn socket_du_journal() -> PathBuf {
+    chemin("PROPHET_LEDGER_SOCKET", "ledger")
+}
+
 /// La source qui lit le système.
 pub struct Reel {
     partage: Arc<Mutex<Partage>>,

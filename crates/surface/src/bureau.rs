@@ -71,6 +71,14 @@ impl Bureau {
         }
     }
 
+    /// Raccorde la lecture du journal : les appels d'outils de la mission sélectionnée, avec
+    /// leur cible contrôlée et leur issue, jamais leur contenu.
+    pub fn brancher_journal(&mut self, socket: std::path::PathBuf) {
+        if !self.atelier.demonstration {
+            self.supervision.missions.brancher_journal(socket);
+        }
+    }
+
     /// Contrôleur de la mission sélectionnée, pour l'intégration native et ses essais.
     pub fn missions(&mut self) -> &mut crate::missions::Missions {
         &mut self.supervision.missions

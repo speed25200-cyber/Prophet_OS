@@ -326,6 +326,7 @@ fn les_widgets_lancent_la_mission_et_permettent_de_lire_son_resultat() {
     let mut source = Reel::demarrer(chain.sockets.clone());
     let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
     bureau.brancher_missions(chain.sockets.agentd.clone());
+    bureau.brancher_journal(chain.dir.path().join("ledger.sock"));
     bureau.figer_transitions();
     let target = Cible::nouvelle(&context, 1440, 1000);
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -373,6 +374,27 @@ fn les_widgets_lancent_la_mission_et_permettent_de_lire_son_resultat() {
             .join("home/.prophet/tasks/mission-supervision/work/docs/note.txt")
             .exists()
     );
+    // Le parcours relu dans le journal dit quel fichier l'agent a touché, et que l'appel a
+    // réussi ; il ne dit pas ce qu'il y a écrit.
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        let trail = bureau.missions().trail();
+        if trail.iter().any(|e| {
+            e.tool == "fs.write"
+                && e.target
+                    .as_deref()
+                    .is_some_and(|t| t.ends_with("/docs/note.txt"))
+                && e.outcome == surface::missions::Outcome::Ok
+        }) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "parcours sans l'appel fs.write : {trail:?}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
     for (width, height) in [(1440, 1000), (1920, 1080), (1280, 800), (640, 900)] {
         let target = Cible::nouvelle(&context, width, height);
         for _ in 0..3 {

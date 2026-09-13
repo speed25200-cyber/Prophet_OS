@@ -255,7 +255,7 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
                 ui.set_width(ui.available_width());
                 match current {
                     Tab::Plan => plan(ui, info, missions.busy(), &mut command),
-                    Tab::History => history(ui, info),
+                    Tab::History => history(ui, info, missions.trail()),
                     Tab::Files => {
                         file_requested = crate::file_review_view::draw(ui, info, &missions.files)
                     }
@@ -573,7 +573,8 @@ fn result(ui: &mut egui::Ui, info: &Inspection, file_requested: &mut Option<Stri
     );
 }
 
-fn history(ui: &mut egui::Ui, info: &Inspection) {
+fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::TrailEntry]) {
+    use crate::missions::Outcome;
     heading(ui, "Parcours observé", 23.0);
     ui.add_space(14.0);
     for (n, state) in info.task.history.iter().enumerate() {
@@ -584,9 +585,51 @@ fn history(ui: &mut egui::Ui, info: &Inspection) {
         });
         ui.add_space(6.0);
     }
+    ui.add_space(16.0);
+    heading(ui, "Ce que l'agent a touché", 16.0);
+    ui.add_space(8.0);
+    if trail.is_empty() {
+        small(
+            ui,
+            "Aucun appel d'outil journalisé pour cette mission. Le journal ne contient jamais le contenu lu ou écrit.",
+        );
+    }
+    for entry in trail.iter().take(200) {
+        let (mark, color, note) = match &entry.outcome {
+            Outcome::Pending => ("·", MUTED, String::new()),
+            Outcome::Ok => ("✓", GREEN, String::new()),
+            Outcome::Error(code) => ("✕", RED, code.clone()),
+            Outcome::Denied(reason) => ("⊘", RED, reason.clone()),
+        };
+        ui.horizontal_wrapped(|ui| {
+            small(
+                ui,
+                entry
+                    .step
+                    .map_or_else(|| "  ".to_owned(), |s| format!("{s:02}")),
+            );
+            ui.label(RichText::new(mark).color(color).size(13.0));
+            ui.label(RichText::new(&entry.tool).size(13.0).monospace());
+            if let Some(target) = &entry.target {
+                ui.label(RichText::new(limited(target, 120)).size(13.0).color(MUTED));
+            }
+            if !note.is_empty() {
+                ui.label(RichText::new(note).size(12.0).color(RED));
+            }
+        });
+    }
+    if trail.len() > 200 {
+        small(
+            ui,
+            format!(
+                "200 appels affichés sur {}. Le journal complet se lit avec `prophet log tail`.",
+                trail.len()
+            ),
+        );
+    }
     ui.add_space(12.0);
     small(
         ui,
-        "États conservés par le service. Le journal détaillé des actions n'est pas encore affiché ici.",
+        "États conservés par le service ; appels relus dans le journal, avec leur cible contrôlée et leur issue.",
     );
 }

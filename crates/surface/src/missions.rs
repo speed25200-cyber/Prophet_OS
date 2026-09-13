@@ -22,6 +22,105 @@ pub enum Action {
 enum Reply {
     Inspect(u64, Result<Box<Inspection>, String>),
     Action(String, Action, Result<Value, String>),
+    Trail(u64, Result<Vec<TrailEntry>, String>),
+}
+
+/// L'issue d'un appel d'outil, telle que le journal la raconte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outcome {
+    /// Appel journalisé, résultat pas encore lu.
+    Pending,
+    /// Résultat confirmé.
+    Ok,
+    /// Résultat en erreur, avec son code.
+    Error(String),
+    /// Refus de politique, avec son motif.
+    Denied(String),
+}
+
+/// Une étape du parcours réel d'une mission : un outil, sa cible contrôlée, son issue.
+///
+/// Rien de ce que l'agent a lu ou écrit n'y figure : le journal ne porte que la cible que
+/// capd a contrôlée et une empreinte des arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrailEntry {
+    /// Numéro de séquence du journal.
+    pub seq: u64,
+    /// Étape de la boucle agentique, si connue.
+    pub step: Option<u32>,
+    /// Nom de l'outil, ou de l'acte (`publication`, `annulation`).
+    pub tool: String,
+    /// Hôte, chemin absolu ou fenêtre visés.
+    pub target: Option<String>,
+    /// Ce qu'il en est advenu.
+    pub outcome: Outcome,
+}
+
+/// Reconstruit le parcours à partir des événements du journal, dans l'ordre.
+#[must_use]
+pub fn trail_from(events: &[Value]) -> Vec<TrailEntry> {
+    let mut trail: Vec<TrailEntry> = Vec::new();
+    for event in events {
+        let seq = event["seq"].as_u64().unwrap_or(0);
+        let step = event["step"].as_u64().and_then(|s| u32::try_from(s).ok());
+        let payload = &event["payload"];
+        match event["kind"].as_str() {
+            Some("tool.call") => trail.push(TrailEntry {
+                seq,
+                step,
+                tool: payload["tool"].as_str().unwrap_or("outil").to_owned(),
+                target: payload["target"].as_str().map(str::to_owned),
+                outcome: Outcome::Pending,
+            }),
+            Some("tool.result") => {
+                let tool = payload["tool"].as_str().unwrap_or_default();
+                if let Some(entry) = trail
+                    .iter_mut()
+                    .rev()
+                    .find(|e| e.tool == tool && e.outcome == Outcome::Pending)
+                {
+                    entry.outcome = if payload["ok"].as_bool().unwrap_or(false) {
+                        Outcome::Ok
+                    } else {
+                        Outcome::Error(
+                            payload["error_code"]
+                                .as_str()
+                                .unwrap_or("Erreur")
+                                .to_owned(),
+                        )
+                    };
+                }
+            }
+            Some("policy.deny") => trail.push(TrailEntry {
+                seq,
+                step,
+                tool: "refus".into(),
+                target: payload["path"]
+                    .as_str()
+                    .or_else(|| payload["target"].as_str())
+                    .map(str::to_owned),
+                outcome: Outcome::Denied(
+                    payload["reason"].as_str().unwrap_or("politique").to_owned(),
+                ),
+            }),
+            Some("fs.commit") => trail.push(TrailEntry {
+                seq,
+                step,
+                tool: "publication".into(),
+                target: None,
+                outcome: Outcome::Ok,
+            }),
+            Some("fs.undo") => trail.push(TrailEntry {
+                seq,
+                step,
+                tool: "annulation".into(),
+                target: None,
+                outcome: Outcome::Ok,
+            }),
+            _ => {}
+        }
+    }
+    trail
 }
 
 /// Accusé de réception ou erreur, lié à l'identité de la mission commandée.
@@ -39,6 +138,10 @@ pub struct Notice {
 pub struct Missions {
     pub(crate) files: crate::file_review::Review,
     socket: Option<PathBuf>,
+    ledger: Option<PathBuf>,
+    trail: Vec<TrailEntry>,
+    trail_reading: bool,
+    trail_next: Instant,
     selected: Option<String>,
     revision: u64,
     next_read: Instant,
@@ -58,6 +161,10 @@ impl Default for Missions {
         Self {
             files: crate::file_review::Review::default(),
             socket: None,
+            ledger: None,
+            trail: Vec::new(),
+            trail_reading: false,
+            trail_next: Instant::now(),
             selected: None,
             revision: 0,
             next_read: Instant::now(),
@@ -83,6 +190,18 @@ impl Missions {
         }
     }
 
+    /// Raccorde la lecture du journal, fournie par l'application, jamais par le modèle.
+    pub fn brancher_journal(&mut self, socket: PathBuf) {
+        self.ledger = Some(socket);
+        self.trail_next = Instant::now();
+    }
+
+    /// Le parcours réel de la mission sélectionnée, tel que le journal le raconte.
+    #[must_use]
+    pub fn trail(&self) -> &[TrailEntry] {
+        &self.trail
+    }
+
     /// Observe une sélection. Les réponses d'une ancienne sélection ne remplacent pas la vue.
     pub fn select(&mut self, id: Option<&str>) {
         self.files.select(id);
@@ -90,8 +209,10 @@ impl Missions {
             self.revision = self.revision.wrapping_add(1);
             self.selected = id.map(str::to_owned);
             self.snapshot = None;
+            self.trail.clear();
             self.error = None;
             self.next_read = Instant::now();
+            self.trail_next = Instant::now();
         }
     }
 
@@ -122,6 +243,14 @@ impl Missions {
                                 self.error = Some(error);
                             }
                         }
+                    }
+                }
+                Reply::Trail(revision, result) => {
+                    self.trail_reading = false;
+                    if revision == self.revision
+                        && let Ok(trail) = result
+                    {
+                        self.trail = trail;
                     }
                 }
                 Reply::Action(id, action, result) => {
@@ -191,6 +320,24 @@ impl Missions {
                     Ok(Box::new(info))
                 });
                 let _ = tx.send(Reply::Inspect(revision, result));
+            });
+        }
+        if !self.trail_reading
+            && Instant::now() >= self.trail_next
+            && let (Some(ledger), Some(id)) = (self.ledger.clone(), self.selected.clone())
+        {
+            self.trail_reading = true;
+            self.trail_next = Instant::now() + Duration::from_secs(2);
+            let tx = self.tx.clone();
+            let revision = self.revision;
+            std::thread::spawn(move || {
+                let result = rpc(ledger, "ledger.query", json!({"task": id, "limit": 400}))
+                    .and_then(|v| {
+                        v.as_array()
+                            .map(|events| trail_from(events))
+                            .ok_or_else(|| "Journal illisible.".to_owned())
+                    });
+                let _ = tx.send(Reply::Trail(revision, result));
             });
         }
     }
@@ -428,6 +575,26 @@ mod tests {
         assert_eq!(missions.snapshot().unwrap().task.state, State::Cancelled);
         assert!(!missions.busy());
         assert!(missions.notice().is_none());
+    }
+
+    #[test]
+    fn le_parcours_relie_chaque_appel_a_son_issue_sans_le_contenu() {
+        let events = vec![
+            json!({"seq":1,"step":1,"kind":"tool.call","payload":{"tool":"web.open","target":"exemple.fr","args_digest":"blake3:x"}}),
+            json!({"seq":2,"step":1,"kind":"tool.result","payload":{"tool":"web.open","ok":true}}),
+            json!({"seq":3,"step":2,"kind":"tool.call","payload":{"tool":"fs.write","target":"docs/note.txt"}}),
+            json!({"seq":4,"step":2,"kind":"tool.result","payload":{"tool":"fs.write","ok":false,"error_code":"PolicyDenied"}}),
+            json!({"seq":5,"kind":"policy.deny","payload":{"stage":"publish","path":"docs/note.txt","reason":"RevokedParent"}}),
+            json!({"seq":6,"kind":"fs.commit","payload":{"added":1}}),
+        ];
+        let trail = trail_from(&events);
+        assert_eq!(trail.len(), 4);
+        assert_eq!(trail[0].tool, "web.open");
+        assert_eq!(trail[0].target.as_deref(), Some("exemple.fr"));
+        assert_eq!(trail[0].outcome, Outcome::Ok);
+        assert_eq!(trail[1].outcome, Outcome::Error("PolicyDenied".into()));
+        assert_eq!(trail[2].outcome, Outcome::Denied("RevokedParent".into()));
+        assert_eq!(trail[3].tool, "publication");
     }
 
     #[test]

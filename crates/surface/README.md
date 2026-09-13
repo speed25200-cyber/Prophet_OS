@@ -53,7 +53,7 @@ incertaine conserve sa référence et peut être retrouvée par lecture, sans no
 Les brouillons restent en mémoire ; les plans confirmés sont persistants dans le service.
 La comparaison ligne par ligne est calculée en arrière-plan et son rendu est limité aux lignes
 visibles. Les aperçus binaires, trop grands, manquants ou altérés ont des états explicites.
-L'application approuvée des fichiers et le journal détaillé restent à intégrer. Voir les ADR
+L'onglet Parcours relit dans le journal ce que l'agent a touché : chaque appel d'outil avec sa cible contrôlée et son issue, jamais le contenu. Voir les ADR
 [0014](../../docs/adr/0014-inspection-et-commandes-de-mission.md),
 [0015](../../docs/adr/0015-intention-et-profils-de-mission.md) et
 [0018](../../docs/adr/0018-examen-des-versions.md) et [0019](../../docs/adr/0019-atelier-et-focale.md).
