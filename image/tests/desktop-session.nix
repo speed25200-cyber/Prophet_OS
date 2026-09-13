@@ -271,8 +271,12 @@ pkgs.testers.runNixOSTest {
             assert machine.succeed("stat -c %G /run/prophet/sup.sock").strip() == "prophet-system"
             machine.fail("su - pilot -c 'prophet task call inexistante ui.apps'")
             # Un document nommé, ouvert dans l'éditeur ; l'agent écrit, enregistre, et le fichier le dit.
-            machine.succeed("install -d -m 0700 -o pilot -g users /home/pilot/Documents/Prophet")
-            machine.succeed("install -m 0600 -o pilot -g users /dev/null /home/pilot/Documents/Prophet/bonjour.txt")
+            # Le document est créé par l'humain lui-même, sous l'ACL par défaut que tmpfiles pose sur
+            # Documents/Prophet pour agentd : un `install -m 0600` explicite réduirait le masque de
+            # l'ACL et rendrait le document illisible au service, qui refuserait alors la capture
+            # (« erreur d'entrée-sortie : Permission denied », vu en CI le 13 septembre).
+            machine.succeed("su - pilot -c 'mkdir -p /home/pilot/Documents/Prophet && touch /home/pilot/Documents/Prophet/bonjour.txt'")
+            machine.succeed("runuser -u agentd -- cat /home/pilot/Documents/Prophet/bonjour.txt")
             machine.succeed("su - pilot -c " + q("swaymsg exec " + q("prophet-ouvrir editeur /home/pilot/Documents/Prophet/bonjour.txt")))
             window("org.xfce.mousepad")
             prophet = "su - pilot -c " + q("prophet --json task ")

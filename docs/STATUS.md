@@ -280,6 +280,17 @@ appartient à l'humain : leur exécution réelle reste un essai `needs_claude_lo
 `needs_chatgpt_login`. Voir l'[ADR 0035](adr/0035-clients-officiels-comme-roles-par-le-lanceur-de-session.md)
 et le [composant](components/pilotd.md). Aucune case complète de FRONTIER n'est cochée.
 
+La CI de `ddf6e89` (relais et lanceur de pilotes) réussit `check`, l'isolation, le protocole du
+moteur, la surface, les sept services sous systemd, l'installeur, l'ISO et son démarrage, la
+construction du système installé et son démarrage sans UEFI ; ChatGPT reste rouge sur Fontconfig.
+Le parcours du système installé sous UEFI échoue à l'attache de la séance du scénario du bureau
+(« erreur d'entrée-sortie : Permission denied ») : le test créait le document par
+`install -m 0600`, ce qui réduit le masque de l'ACL posée par tmpfiles pour agentd et rend le
+document illisible au service au moment de la capture ; ce scénario n'avait jamais atteint ce
+point en CI (le sélecteur Mousepad le faisait échouer avant). Le test crée désormais le document
+sous l'identité de l'humain et vérifie qu'agentd le lit avant d'attacher ; correction dans le
+commit portant ce rapport, à confirmer par la CI.
+
 Deux modèles dans l'image, 13 septembre 2026, dans le commit portant ce rapport :
 `prophet.localEngine.executeWeights` ajoute le modèle d'exécution du relais (Qwen3-0.6B Q8_0,
 640 Mo, empreinte vérifiée sur Hugging Face, téléchargé à l'installation comme le 1.7B) ; le
