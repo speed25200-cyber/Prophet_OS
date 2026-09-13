@@ -11,20 +11,36 @@ in {
       default = null;
       description = "Modèle ggml de whisper.cpp (ggml-base.bin, multilingue, 148 Mo). null laisse la parole non configurée : `prophet voice` le dit. La configuration de référence du flake le télécharge à l'installation, comme les modèles de langue ; la variante d'intégration continue reste sans modèle.";
     };
+    speaker = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = "Voix de Piper (`*.onnx`, son `.onnx.json` à côté) : l'OS parle en local par `prophet voice --say`. null : l'OS écoute mais ne parle pas. La configuration de référence installe la voix française « siwis » (medium, 63 Mo).";
+    };
   };
 
   config = lib.mkIf (config.prophet.enable && cfg.enable) {
-    assertions = [{
-      assertion = cfg.model == null || lib.hasPrefix "/nix/store/" (toString cfg.model)
-        || lib.hasPrefix "/var/lib/prophet/models/" (toString cfg.model);
-      message = "Le modèle de parole doit être placé dans /nix/store ou /var/lib/prophet/models.";
-    }];
-    environment.systemPackages = [ pkgs.whisper-cpp pkgs.pipewire ];
+    assertions = [
+      {
+        assertion = cfg.model == null || lib.hasPrefix "/nix/store/" (toString cfg.model)
+          || lib.hasPrefix "/var/lib/prophet/models/" (toString cfg.model);
+        message = "Le modèle de parole doit être placé dans /nix/store ou /var/lib/prophet/models.";
+      }
+      {
+        assertion = cfg.speaker == null || lib.hasPrefix "/nix/store/" (toString cfg.speaker)
+          || lib.hasPrefix "/var/lib/prophet/models/" (toString cfg.speaker);
+        message = "La voix de Piper doit être placée dans /nix/store ou /var/lib/prophet/models.";
+      }
+    ];
+    environment.systemPackages = [ pkgs.whisper-cpp pkgs.pipewire pkgs.piper-tts ];
     environment.sessionVariables = {
       PROPHET_WHISPER = "${pkgs.whisper-cpp}/bin/whisper-cli";
       PROPHET_RECORDER = "${pkgs.pipewire}/bin/pw-record";
+      PROPHET_PLAYER = "${pkgs.pipewire}/bin/pw-play";
+      PROPHET_PIPER = "${pkgs.piper-tts}/bin/piper";
     } // lib.optionalAttrs (cfg.model != null) {
       PROPHET_WHISPER_MODEL = toString cfg.model;
+    } // lib.optionalAttrs (cfg.speaker != null) {
+      PROPHET_PIPER_VOICE = toString cfg.speaker;
     };
   };
 }

@@ -27,6 +27,13 @@ distant ; et la parole ne donne aucun droit, elle produit un texte que l'humain 
    `ggml-base` (multilingue, 148 Mo, empreinte publiée par Hugging Face), comme les modèles de
    langue ; la variante d'intégration continue reste sans modèle.
 
+4. **L'OS parle, en local aussi.** `Tools::speak(texte, wav)` synthétise par Piper avec une
+   voix `.onnx` locale (`PROPHET_PIPER`, `PROPHET_PIPER_VOICE`), `Tools::play(wav)` joue le son
+   par `pw-play` (sinon `aplay`) ; `prophet voice --say "…"` fait les deux, `--out` garde le WAV.
+   La configuration de référence installe la voix française « siwis » de Piper (medium), comme
+   les autres modèles ; sans voix, l'OS écoute mais ne parle pas, et le dit. La preuve est une
+   boucle fermée : l'OS dit une phrase, Whisper la réécoute et retrouve ses mots.
+
 ## Conséquences
 
 - Une phrase dite devient un plan de mission à examiner, sans réseau. Preuve : une phrase
@@ -39,6 +46,7 @@ distant ; et la parole ne donne aucun droit, elle produit un texte que l'humain 
   ne reçoit pas de dictée. Le contrôleur est testé avec des réponses de dictée simulées
   (ajout, texte vide, échec nommé).
 - Ce qui n'est pas livré : la voix humaine (le test parle avec une voix de synthèse ; la
-  qualité sur un vrai micro reste à mesurer), la réponse parlée de l'OS (aucune synthèse), et
-  le mot d'activation. Le modèle `base` est un compromis vitesse/qualité sur processeur ; un
-  modèle plus grand s'installe par `prophet.voice.model`.
+  qualité sur un vrai micro reste à mesurer), la lecture réelle sur une sortie audio (vérifiée
+  par ses refus seulement), le mot d'activation, et la lecture automatique des résultats dans
+  l'atelier. Le modèle `base` est un compromis vitesse/qualité sur processeur ; un modèle plus
+  grand s'installe par `prophet.voice.model`, une autre voix par `prophet.voice.speaker`.

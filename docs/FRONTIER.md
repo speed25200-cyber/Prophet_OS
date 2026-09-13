@@ -206,4 +206,6 @@ whisper.cpp, et fait de la phrase dite une mission à examiner. Preuve : une phr
 synthèse transcrite avec ses mots-clés par le vrai modèle, et un bouton « Dicter » dans
 l'atelier dont le contrôleur est testé avec des dictées simulées. Le critère d'interface (espace
 de commande, conversations) progresse sans être coché : la voix humaine n'est pas mesurée sur
-un vrai micro, et l'OS ne parle pas.
+un vrai micro. L'OS parle aussi, en local par Piper (`prophet voice --say`), prouvé en boucle
+fermée avec Whisper ; la lecture sur une vraie sortie audio et le mot d'activation restent
+à vérifier.

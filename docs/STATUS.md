@@ -302,7 +302,10 @@ rend ses mots-clés (« note », « documents ») et la langue `fr`, détectée 
 tests unitaires de la lecture de whisper et des refus. L'atelier gagne un bouton « Dicter (6 s) »
 sous l'objectif, présent seulement avec un modèle de parole, qui écoute et transcrit hors du fil
 graphique et ajoute le texte à l'objectif que l'humain relit ; son contrôleur est testé avec des
-dictées simulées. Ni voix humaine mesurée, ni réponse parlée : voir
+dictées simulées. L'OS parle aussi : `prophet voice --say` synthétise en local par Piper avec la
+voix française « siwis » (installée par la configuration de référence) et joue par `pw-play` ;
+preuve en boucle fermée, l'OS dit une phrase et Whisper la réécoute presque mot pour mot. Ni
+voix humaine mesurée, ni lecture vérifiée sur une vraie sortie audio, ni mot d'activation : voir
 l'[ADR 0036](adr/0036-la-parole-de-l-humain.md) et le [rapport](reports/parole-2026-09-13.md).
 
 Jalons d'intégration réellement exercés le 12 septembre 2026 :

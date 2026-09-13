@@ -68,6 +68,23 @@ pub struct Tools {
     pub recorder: Option<Recorder>,
     /// `timeout` de coreutils, pour arrêter `pw-record` sur un signal propre.
     pub timeout: Option<PathBuf>,
+    /// `piper` de Piper, la synthèse vocale locale, s'il est configuré.
+    pub piper: Option<PathBuf>,
+    /// Voix de Piper (`*.onnx`, son `.onnx.json` à côté), si configurée.
+    pub speaker: Option<PathBuf>,
+    /// Lecteur audio de la session (`pw-play`, sinon `aplay`), s'il y en a un.
+    pub player: Option<PathBuf>,
+}
+
+/// Ce que la synthèse a produit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Speech {
+    /// Fichier WAV écrit.
+    pub wav: PathBuf,
+    /// Octets du fichier.
+    pub bytes: u64,
+    /// Durée de la synthèse.
+    pub duration_ms: u64,
 }
 
 impl Tools {
@@ -102,7 +119,117 @@ impl Tools {
             model,
             recorder,
             timeout: which("timeout"),
+            piper: std::env::var_os("PROPHET_PIPER")
+                .map(PathBuf::from)
+                .or_else(|| which("piper")),
+            speaker: std::env::var_os("PROPHET_PIPER_VOICE")
+                .map(PathBuf::from)
+                .filter(|p| p.is_file()),
+            player: std::env::var_os("PROPHET_PLAYER")
+                .map(PathBuf::from)
+                .or_else(|| which("pw-play"))
+                .or_else(|| which("aplay")),
         })
+    }
+
+    /// L'OS peut parler : Piper et une voix sont configurés.
+    #[must_use]
+    pub fn can_speak(&self) -> bool {
+        self.piper.is_some() && self.speaker.is_some()
+    }
+
+    /// Synthétise `text` dans `out` (WAV) par Piper, en local.
+    ///
+    /// # Errors
+    /// Piper ou voix absents, texte vide, programme en échec.
+    pub fn speak(&self, text: &str, out: &Path) -> Result<Speech, Error> {
+        let text = text.trim();
+        if text.is_empty() || text.chars().count() > 4000 {
+            return Err(Error::Invalid(
+                "texte à dire : entre 1 et 4 000 caractères".into(),
+            ));
+        }
+        let piper = self
+            .piper
+            .as_ref()
+            .ok_or_else(|| Error::Missing("piper introuvable : l'OS n'a pas de voix".into()))?;
+        let speaker = self.speaker.as_ref().ok_or_else(|| {
+            Error::Missing(
+                "aucune voix : PROPHET_PIPER_VOICE doit nommer un modèle .onnx de Piper".into(),
+            )
+        })?;
+        let started = Instant::now();
+        let mut child = Command::new(piper)
+            .arg("--model")
+            .arg(speaker)
+            .arg("--output_file")
+            .arg(out)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| Error::Program {
+                program: "piper".into(),
+                detail: e.to_string(),
+            })?;
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write as _;
+            let _ = stdin.write_all(text.as_bytes());
+            let _ = stdin.write_all(b"\n");
+        }
+        let status = child.wait().map_err(|e| Error::Program {
+            program: "piper".into(),
+            detail: e.to_string(),
+        })?;
+        let bytes = std::fs::metadata(out).map(|m| m.len()).unwrap_or(0);
+        if !status.success() || bytes == 0 {
+            return Err(Error::Program {
+                program: "piper".into(),
+                detail: format!("terminé avec {status}, aucun son produit"),
+            });
+        }
+        Ok(Speech {
+            wav: out.to_path_buf(),
+            bytes,
+            duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        })
+    }
+
+    /// Joue un WAV sur la sortie audio de la session.
+    ///
+    /// # Errors
+    /// Aucun lecteur, fichier absent, lecteur en échec.
+    pub fn play(&self, wav: &Path) -> Result<(), Error> {
+        if !wav.is_file() {
+            return Err(Error::Invalid(format!(
+                "fichier audio introuvable : {}",
+                wav.display()
+            )));
+        }
+        let player = self.player.as_ref().ok_or_else(|| {
+            Error::Missing("aucun lecteur audio : ni pw-play ni aplay sur cette machine".into())
+        })?;
+        let mut command = Command::new(player);
+        if player.file_name().is_some_and(|n| n == "aplay") {
+            command.arg("-q");
+        }
+        let status = command
+            .arg(wav)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|e| Error::Program {
+                program: "lecteur audio".into(),
+                detail: e.to_string(),
+            })?;
+        if !status.success() {
+            return Err(Error::Program {
+                program: "lecteur audio".into(),
+                detail: format!("terminé avec {status}"),
+            });
+        }
+        Ok(())
     }
 
     /// Enregistre `seconds` secondes du micro dans `out` (WAV 16 kHz mono).
@@ -280,6 +407,9 @@ mod tests {
             model: PathBuf::from("/nonexistent/model.bin"),
             recorder: None,
             timeout: None,
+            piper: None,
+            speaker: None,
+            player: None,
         };
         assert!(matches!(
             tools.record(0, Path::new("/tmp/x.wav")),
@@ -291,6 +421,20 @@ mod tests {
         ));
         assert!(matches!(
             tools.transcribe(Path::new("/nonexistent/a.wav"), None),
+            Err(Error::Invalid(_))
+        ));
+        // Sans Piper ni voix, l'OS ne parle pas et le dit ; un texte vide est refusé avant.
+        assert!(!tools.can_speak());
+        assert!(matches!(
+            tools.speak("   ", Path::new("/tmp/x.wav")),
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(
+            tools.speak("Bonjour", Path::new("/tmp/x.wav")),
+            Err(Error::Missing(_))
+        ));
+        assert!(matches!(
+            tools.play(Path::new("/nonexistent/a.wav")),
             Err(Error::Invalid(_))
         ));
     }

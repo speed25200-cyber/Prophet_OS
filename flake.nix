@@ -61,6 +61,19 @@
         url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin";
         sha256 = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe";
       };
+      # La voix de l'OS : « siwis », voix française de Piper (medium, 63 Mo), et sa description ;
+      # Piper exige les deux côte à côte, sous le même nom (ADR 0036).
+      voixFrancaise = pkgs: pkgs.runCommand "piper-voix-fr-siwis-medium" { } ''
+        mkdir -p $out
+        cp ${pkgs.fetchurl {
+          url = "https://huggingface.co/rhasspy/piper-voices/resolve/1162a9173d0ce503555aed757976b7a9912eae4c/fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx";
+          sha256 = "641d1ab097da2b81128c076810edb052b385decc8be3381814802a64a73baf99";
+        }} $out/fr_FR-siwis-medium.onnx
+        cp ${pkgs.fetchurl {
+          url = "https://huggingface.co/rhasspy/piper-voices/resolve/1162a9173d0ce503555aed757976b7a9912eae4c/fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx.json";
+          sha256 = "39479916c2db192b5ac9764daddd0c744d83e023ad890c6976c0633ae4df8959";
+        }} $out/fr_FR-siwis-medium.onnx.json
+      '';
     in
     {
       inherit nixosModules;
@@ -84,6 +97,7 @@
             prophet.localEngine.weights = pkgs.fetchurl modeleParDefaut;
             prophet.localEngine.executeWeights = pkgs.fetchurl modeleExecution;
             prophet.voice.model = pkgs.fetchurl modeleParole;
+            prophet.voice.speaker = "${voixFrancaise pkgs}/fr_FR-siwis-medium.onnx";
             nixpkgs.config.allowUnfreePredicate = autoriserLesClients;
           })
         ];

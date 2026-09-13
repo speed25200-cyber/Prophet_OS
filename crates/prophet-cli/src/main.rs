@@ -76,6 +76,13 @@ enum Command {
         /// Modèle admis par le contexte, avec `--prepare` ; le premier modèle admis sinon.
         #[arg(long)]
         model: Option<String>,
+        /// Faire parler l'OS : synthétiser ce texte en local (Piper) et le jouer, au lieu
+        /// d'écouter.
+        #[arg(long, conflicts_with_all = ["file", "prepare"])]
+        say: Option<String>,
+        /// Avec `--say` : écrire le son dans ce fichier WAV au lieu de le jouer.
+        #[arg(long, requires = "say")]
+        out: Option<std::path::PathBuf>,
     },
 }
 
@@ -332,14 +339,19 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
             language,
             prepare,
             model,
-        } => voice(
-            file.as_deref(),
-            *seconds,
-            language.as_deref(),
-            prepare.as_deref(),
-            model.clone(),
-            cli.json,
-        ),
+            say,
+            out,
+        } => match say {
+            Some(text) => speak(text, out.as_deref(), cli.json),
+            None => voice(
+                file.as_deref(),
+                *seconds,
+                language.as_deref(),
+                prepare.as_deref(),
+                model.clone(),
+                cli.json,
+            ),
+        },
         Command::Memory { action } => memory(action),
         Command::Log { action } => log(action),
         Command::Task { action } => task(action, cli.json),
@@ -350,6 +362,49 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
              Lancez `prophet status` pour voir ce qui est disponible sur cette machine."
         ),
     }
+}
+
+/// L'OS parle : le texte est synthétisé en local par Piper, puis joué sur la sortie audio de
+/// la session, ou écrit dans un fichier (ADR 0036). Rien ne quitte la machine.
+fn speak(text: &str, out: Option<&std::path::Path>, as_json: bool) -> anyhow::Result<String> {
+    let tools = voice::Tools::from_env()?;
+    let temporary;
+    let wav = match out {
+        Some(path) => path,
+        None => {
+            let dir = std::env::var_os("XDG_RUNTIME_DIR")
+                .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+            temporary = dir.join(format!("prophet-parole-{}.wav", std::process::id()));
+            &temporary
+        }
+    };
+    let speech = tools.speak(text, wav)?;
+    let played = if out.is_none() {
+        let result = tools.play(wav);
+        let _ = std::fs::remove_file(wav);
+        result?;
+        true
+    } else {
+        false
+    };
+    if as_json {
+        return Ok(format!(
+            "{}\n",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "speech": speech, "played": played, "kept": out.is_some()
+            }))?
+        ));
+    }
+    Ok(if played {
+        format!("Dit en {} ms.\n", speech.duration_ms)
+    } else {
+        format!(
+            "Écrit dans {} ({} octets, {} ms).\n",
+            speech.wav.display(),
+            speech.bytes,
+            speech.duration_ms
+        )
+    })
 }
 
 /// La parole : un fichier ou le micro, transcrit en local, et au choix une mission préparée

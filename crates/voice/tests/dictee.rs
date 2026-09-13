@@ -37,3 +37,34 @@ fn une_phrase_synthetisee_est_transcrite_avec_ses_mots_cles() {
     let auto = tools.transcribe(&wav, None).unwrap();
     assert_eq!(auto.language.as_deref(), Some("fr"), "{auto:?}");
 }
+
+/// L'OS parle par Piper, puis se réécoute par whisper : la boucle fermée prouve les deux
+/// voies en local. Exigé en plus : `PROPHET_PIPER` et `PROPHET_PIPER_VOICE`.
+#[test]
+#[ignore = "needs_piper_voice: PROPHET_PIPER, PROPHET_PIPER_VOICE, PROPHET_WHISPER_MODEL"]
+fn l_os_parle_et_se_reecoute() {
+    let tools = voice::Tools::from_env().unwrap();
+    assert!(tools.can_speak(), "{tools:?}");
+    let dir = tempfile::tempdir().unwrap();
+    let wav = dir.path().join("reponse.wav");
+    let debut = std::time::Instant::now();
+    let speech = tools
+        .speak(
+            "La note de réunion est écrite dans vos documents. Voulez-vous la publier ?",
+            &wav,
+        )
+        .unwrap();
+    assert!(speech.bytes > 10_000, "{speech:?}");
+    let transcript = tools.transcribe(&wav, Some("fr")).unwrap();
+    eprintln!(
+        "synthèse {} ms, {} octets ; réécoute en {:.1} s : « {} »",
+        speech.duration_ms,
+        speech.bytes,
+        debut.elapsed().as_secs_f64(),
+        transcript.text
+    );
+    let texte = transcript.text.to_lowercase();
+    assert!(texte.contains("note"), "{texte}");
+    assert!(texte.contains("documents"), "{texte}");
+    assert!(texte.contains("publier"), "{texte}");
+}

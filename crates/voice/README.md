@@ -12,6 +12,9 @@ machine.
 | `PROPHET_WHISPER_MODEL` | Modèle ggml de whisper.cpp, requis (`ggml-base.bin`) |
 | `PROPHET_WHISPER` | `whisper-cli` ; sinon cherché sur le chemin |
 | `PROPHET_RECORDER` | `pw-record` ou `arecord` ; sinon cherché sur le chemin |
+| `PROPHET_PIPER` | `piper`, la synthèse vocale ; sinon cherché sur le chemin |
+| `PROPHET_PIPER_VOICE` | Voix de Piper (`*.onnx`, `.onnx.json` à côté) ; sans elle, l'OS ne parle pas |
+| `PROPHET_PLAYER` | `pw-play` ou `aplay` ; sinon cherché sur le chemin |
 
 ## Usage
 
@@ -19,6 +22,8 @@ machine.
 prophet voice --file phrase.wav --language fr
 prophet voice --seconds 8 --prepare documents
 prophet --json voice --file phrase.wav
+prophet voice --say "La note est écrite. Voulez-vous la publier ?"
+prophet voice --say "Bonjour" --out bonjour.wav
 ```
 
 ## Validation
