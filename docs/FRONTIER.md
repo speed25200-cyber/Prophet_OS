@@ -198,3 +198,11 @@ avec les vrais services ; l'exécution des vrais clients exige une connexion que
 fait. Le critère « clients officiels exécutés dans le confinement requis » progresse (lancement
 par le service via la session, événements réduits au texte final) sans être coché : le client
 n'est pas confiné, et ses événements et demandes de permission ne sont pas traduits.
+
+Le même jour, l'image sert deux modèles en mode routeur (Qwen3-1.7B en réflexion, Qwen3-0.6B
+en exécution, ADR 0034), et la [parole](adr/0036-la-parole-de-l-humain.md) entre dans le
+système : `prophet voice` enregistre le micro ou lit un fichier, transcrit en local par
+whisper.cpp, et fait de la phrase dite une mission à examiner. Preuve : une phrase française de
+synthèse transcrite avec ses mots-clés par le vrai modèle. Le critère d'interface (espace de
+commande, conversations) progresse sans être coché : l'atelier n'a pas encore de bouton de
+dictée, la voix humaine n'est pas mesurée, et l'OS ne parle pas.

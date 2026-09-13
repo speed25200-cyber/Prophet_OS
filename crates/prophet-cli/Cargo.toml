@@ -23,6 +23,7 @@ shell = { workspace = true }
 vault = { workspace = true }
 providers = { workspace = true }
 agentd = { workspace = true }
+voice = { workspace = true }
 ulid = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }

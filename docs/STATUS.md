@@ -291,6 +291,17 @@ une complétion sur chacun ; la configuration de référence s'évalue avec les 
 `ConditionPathExists` et le routeur dans `ExecStart`. La variante `prophet-ci` et le test de VM du
 moteur restent à un seul modèle ; le démarrage installé avec les deux poids attend la CI.
 
+La parole, 13 septembre 2026, dans le commit portant ce rapport : le crate `voice` enregistre le
+micro de la session (`pw-record`, sinon `arecord`) et transcrit un fichier audio en local par
+whisper.cpp ; `prophet voice` transcrit un fichier ou le micro et, avec `--prepare <contexte>`,
+fait de la phrase dite une mission à examiner par le chemin de `prophet task prepare` ; le module
+`voice.nix` installe whisper.cpp et PipeWire dans la session, et la configuration de référence
+télécharge le modèle `ggml-base` (148 Mo, empreinte vérifiée) à l'installation. Preuve : une
+phrase française synthétisée par espeak-ng, transcrite par le vrai whisper.cpp et le vrai modèle,
+rend ses mots-clés (« note », « documents ») et la langue `fr`, détectée aussi sans indication ;
+tests unitaires de la lecture de whisper et des refus. Ni voix humaine, ni bouton de dictée dans
+l'atelier, ni réponse parlée : voir l'[ADR 0036](adr/0036-la-parole-de-l-humain.md).
+
 Jalons d'intégration réellement exercés le 12 septembre 2026 :
 
 - `c3b0c08` — moteur local réel, CLI et gel d'un processus possédé par sandboxd.

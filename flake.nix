@@ -55,6 +55,12 @@
         url = "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/23749fefcc72300e3a2ad315e1317431b06b590a/Qwen3-0.6B-Q8_0.gguf";
         sha256 = "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031";
       };
+      # Le modèle de parole : whisper.cpp « base », multilingue, 148 Mo ; l'humain dicte une
+      # intention, transcrite en local, sans réseau (ADR 0036).
+      modeleParole = {
+        url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin";
+        sha256 = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe";
+      };
     in
     {
       inherit nixosModules;
@@ -77,6 +83,7 @@
             prophet.enable = true;
             prophet.localEngine.weights = pkgs.fetchurl modeleParDefaut;
             prophet.localEngine.executeWeights = pkgs.fetchurl modeleExecution;
+            prophet.voice.model = pkgs.fetchurl modeleParole;
             nixpkgs.config.allowUnfreePredicate = autoriserLesClients;
           })
         ];

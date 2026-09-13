@@ -57,6 +57,26 @@ enum Command {
     },
     /// Gel d'urgence de toutes les tâches.
     Freeze,
+    /// Parler à Prophet OS : enregistrer le micro ou lire un fichier audio, transcrire en
+    /// local par whisper.cpp, et au choix en faire une mission à examiner (ADR 0036).
+    Voice {
+        /// Fichier audio à transcrire ; sans lui, le micro est enregistré.
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+        /// Durée d'enregistrement du micro, en secondes.
+        #[arg(long, default_value_t = 6)]
+        seconds: u32,
+        /// Langue (code à deux lettres) ; détection automatique sinon.
+        #[arg(long)]
+        language: Option<String>,
+        /// Préparer une mission dans ce contexte du catalogue avec le texte transcrit comme
+        /// objectif ; le plan est rendu, l'humain le lance séparément.
+        #[arg(long)]
+        prepare: Option<String>,
+        /// Modèle admis par le contexte, avec `--prepare` ; le premier modèle admis sinon.
+        #[arg(long)]
+        model: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -306,6 +326,20 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
             freeze(&socket, cli.json)
         }
         Command::Provider { action } => provider(action, cli.json),
+        Command::Voice {
+            file,
+            seconds,
+            language,
+            prepare,
+            model,
+        } => voice(
+            file.as_deref(),
+            *seconds,
+            language.as_deref(),
+            prepare.as_deref(),
+            model.clone(),
+            cli.json,
+        ),
         Command::Memory { action } => memory(action),
         Command::Log { action } => log(action),
         Command::Task { action } => task(action, cli.json),
@@ -316,6 +350,73 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
              Lancez `prophet status` pour voir ce qui est disponible sur cette machine."
         ),
     }
+}
+
+/// La parole : un fichier ou le micro, transcrit en local, et au choix une mission préparée
+/// avec ce texte pour objectif (ADR 0036). Le son ne quitte pas la machine.
+fn voice(
+    file: Option<&std::path::Path>,
+    seconds: u32,
+    language: Option<&str>,
+    prepare: Option<&str>,
+    model: Option<String>,
+    as_json: bool,
+) -> anyhow::Result<String> {
+    let tools = voice::Tools::from_env()?;
+    let recorded;
+    let audio = match file {
+        Some(path) => path,
+        None => {
+            let dir = std::env::var_os("XDG_RUNTIME_DIR")
+                .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+            recorded = dir.join(format!("prophet-voix-{}.wav", std::process::id()));
+            eprintln!("prophet : enregistrement du micro pendant {seconds} s…");
+            tools.record(seconds, &recorded)?;
+            &recorded
+        }
+    };
+    let transcript = tools.transcribe(audio, language);
+    if file.is_none() {
+        let _ = std::fs::remove_file(audio);
+    }
+    let transcript = transcript?;
+    if transcript.text.is_empty() {
+        anyhow::bail!("rien n'a été compris ; rien n'est préparé");
+    }
+    let plan = match prepare {
+        Some(profile) => Some(task(
+            &TaskAction::Prepare {
+                profile: profile.to_owned(),
+                model,
+                client: false,
+                id: None,
+                intent: transcript.text.clone(),
+            },
+            as_json,
+        )?),
+        None => None,
+    };
+    if as_json {
+        let plan: Option<serde_json::Value> =
+            plan.as_deref().map(serde_json::from_str).transpose()?;
+        return Ok(format!(
+            "{}\n",
+            serde_json::to_string_pretty(
+                &serde_json::json!({"transcript": transcript, "plan": plan})
+            )?
+        ));
+    }
+    let mut out = format!(
+        "« {} »\n({}, {} segment(s), transcrit en {} ms)\n",
+        transcript.text,
+        transcript.language.as_deref().unwrap_or("langue inconnue"),
+        transcript.segments,
+        transcript.duration_ms
+    );
+    if let Some(plan) = plan {
+        out.push_str(&plan);
+    }
+    Ok(out)
 }
 
 fn freeze(socket: &std::path::Path, as_json: bool) -> anyhow::Result<String> {
