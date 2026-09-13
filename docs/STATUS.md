@@ -337,8 +337,11 @@ chaîne vocale (le travail « Surface d'observation » exerce tous les essais ig
 échoué sur le modèle absent, pas sur l'écoute : un travail « Parole (Whisper et Piper réels) »
 apporte désormais les programmes, le modèle et la voix par `nix build .#chaine-vocale` — les
 mêmes que dans l'image — et exerce les essais `needs_voice_stack` du crate `voice`, de la CLI
-et de l'atelier ; la surface les laisse à ce travail. Ni voix humaine mesurée, ni lecture
-vérifiée sur une vraie sortie audio : voir
+et de l'atelier ; la surface les laisse à ce travail. Le résultat d'une mission se dit sur
+demande, `prophet task result <id> --say` : état, début du texte ou raison, changements à
+examiner, sans mise en forme, coupé à la phrase ; Whisper réécoute la voix de Piper et y trouve
+les mots attendus ; sans chaîne vocale, la commande le dit au lieu de se taire. Ni voix humaine
+mesurée, ni lecture vérifiée sur une vraie sortie audio : voir
 l'[ADR 0036](adr/0036-la-parole-de-l-humain.md) et le [rapport](reports/parole-2026-09-13.md).
 
 Jalons d'intégration réellement exercés le 12 septembre 2026 :

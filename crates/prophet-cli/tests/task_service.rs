@@ -137,6 +137,62 @@ fn une_phrase_dite_devient_une_mission_et_l_os_repond() {
     assert!(heard.contains("compris"), "{heard}");
 }
 
+/// Le résultat d'une mission, dit par l'OS : `task result --say --out` demande le résultat au
+/// service (simulé), en fait une phrase courte, la synthétise avec Piper ; Whisper la réécoute.
+#[test]
+#[ignore = "needs_voice_stack: PROPHET_WHISPER_MODEL, PROPHET_WHISPER, PROPHET_PIPER, PROPHET_PIPER_VOICE"]
+fn le_resultat_d_une_mission_est_dit_a_voix_haute() {
+    let temp = tempfile::tempdir().unwrap();
+    let reponse = temp.path().join("resultat.wav");
+    let (output, _) = invoke_with(
+        &[
+            "task",
+            "result",
+            "mission-x",
+            "--say",
+            "--out",
+            reponse.to_str().unwrap(),
+        ],
+        "task.result",
+        json!({
+            "state": "done",
+            "text": "La note de réunion est écrite dans vos documents.",
+            "diff": {"changes": [{"path": "docs/note.md", "kind": "added"}]}
+        }),
+    );
+    let out = success(output);
+    assert!(out.contains("Mission mission-x · done"), "{out}");
+    assert!(
+        out.contains("Résultat écrit dans") && out.contains("Mission terminée."),
+        "{out}"
+    );
+    let tools = voice::Tools::from_env().unwrap();
+    let heard = tools.transcribe(&reponse, Some("fr")).unwrap();
+    eprintln!("résultat réécouté : « {} »", heard.text);
+    let heard = heard.text.to_lowercase();
+    assert!(heard.contains("termin"), "{heard}");
+    assert!(
+        heard.contains("note") && heard.contains("documents"),
+        "{heard}"
+    );
+    assert!(heard.contains("changement"), "{heard}");
+}
+
+/// Sans chaîne vocale, `--say` ne rend pas un résultat muet pour un succès : le service a bien
+/// été consulté, la commande échoue en nommant ce qui manque.
+#[test]
+fn sans_voix_le_resultat_n_est_pas_dit_et_la_commande_le_dit() {
+    let (output, _) = invoke_env(
+        &["task", "result", "mission-x", "--say"],
+        &[("PROPHET_WHISPER_MODEL", "/nonexistent/ggml.bin")],
+        "task.result",
+        json!({"state": "done", "text": "Fini."}),
+    );
+    assert!(!output.status.success());
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(err.contains("modèle de parole"), "{err}");
+}
+
 /// Le mot d'activation, de bout en bout : un faux enregistreur (un script à la place de
 /// `pw-record`) livre d'abord une tranche sans le mot, puis « Prophète, écris une note de réunion
 /// dans mes documents » ; seule la seconde devient une mission, l'OS répond, et l'écoute s'arrête

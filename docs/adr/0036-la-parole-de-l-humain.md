@@ -62,8 +62,11 @@ distant ; et la parole ne donne aucun droit, elle produit un texte que l'humain 
   le texte rejoint l'objectif que l'humain relit avant tout envoi ; un brouillon déjà envoyé
   ne reçoit pas de dictée. Le contrôleur est testé avec des réponses de dictée simulées
   (ajout, texte vide, échec nommé).
+- Le résultat d'une mission se dit sur demande : `prophet task result <id> --say` en fait une
+  phrase courte (état, début du texte ou raison, changements à examiner, sans mise en forme,
+  coupée à la phrase avant 360 caractères) que Piper lit ; le dit est aussi écrit.
 - Ce qui n'est pas livré : la voix humaine (le test parle avec une voix de synthèse ; la
   qualité sur un vrai micro reste à mesurer), la lecture réelle sur une sortie audio (vérifiée
-  par ses refus seulement), le mot d'activation, et la lecture automatique des résultats dans
-  l'atelier. Le modèle `base` est un compromis vitesse/qualité sur processeur ; un modèle plus
+  par ses refus seulement), et la lecture des résultats d'elle-même à la fin d'une mission ou
+  dans l'atelier. Le modèle `base` est un compromis vitesse/qualité sur processeur ; un modèle plus
   grand s'installe par `prophet.voice.model`, une autre voix par `prophet.voice.speaker`.
