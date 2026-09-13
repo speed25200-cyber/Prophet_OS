@@ -11,7 +11,7 @@
 
 | Méthode | Effet |
 |---|---|
-| `pilot.status` | Chaque client : installé, connecté (sondé par sa propre commande), version, sans lire ses fichiers |
+| `pilot.status` | Chaque client : installé, connecté (sondé par sa propre commande), version, sans lire ses fichiers. Servi d'un cache rafraîchi en arrière-plan (toutes les 60 s, et après chaque lancement) : la réponse ne dépend pas de la durée des sondes, qui peuvent attendre le réseau |
 | `pilot.run` | `{task, driver, intent, wall_time_s}` : écrit la configuration MCP en 0600, lance le client en mode non interactif, attend (tué au délai), rend `{exit_code, text, duration_ms, output_bytes}` |
 
 ## Comment agentd s'en sert

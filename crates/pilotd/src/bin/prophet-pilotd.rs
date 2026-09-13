@@ -9,8 +9,9 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
-use pilotd::{DEFAULT_SOCKET, Launcher, METHOD_RUN, METHOD_STATUS, RunRequest};
+use pilotd::{DEFAULT_SOCKET, Launcher, METHOD_RUN, METHOD_STATUS, RunRequest, StatusCache};
 use prophet_ipc::{Error, ErrorCode, Handler, PeerIdentity, Server};
 use serde_json::Value;
 
@@ -19,7 +20,15 @@ struct Pilot {
     /// session s'il l'a demandé explicitement (essais).
     allowed: Vec<u32>,
     launcher: Launcher,
+    /// Dernier sondage des clients, rafraîchi en arrière-plan : `pilot.status` répond
+    /// aussitôt, le catalogue des modèles d'agentd n'attend jamais les sondes.
+    status: StatusCache,
 }
+
+/// Âge au-delà duquel un état connu est resondé avant d'être servi.
+const STATUS_TTL: Duration = Duration::from_secs(120);
+/// Cadence du rafraîchissement en arrière-plan.
+const STATUS_REFRESH: Duration = Duration::from_secs(60);
 
 impl Handler for Pilot {
     async fn call(
@@ -39,8 +48,16 @@ impl Handler for Pilot {
             ));
         }
         match method.as_str() {
-            METHOD_STATUS => serde_json::to_value(self.launcher.status())
-                .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string())),
+            METHOD_STATUS => {
+                let (launcher, cache) = (self.launcher.clone(), self.status.clone());
+                let status = tokio::task::spawn_blocking(move || {
+                    cache.get_or_refresh(&launcher, STATUS_TTL)
+                })
+                .await
+                .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?;
+                serde_json::to_value(status)
+                    .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))
+            }
             METHOD_RUN => {
                 let request: RunRequest = serde_json::from_value(params)
                     .map_err(|e| Error::new(ErrorCode::InvalidParams, e.to_string()))?;
@@ -50,21 +67,27 @@ impl Handler for Pilot {
                     pilote = %request.driver,
                     "lancement d'un client dans une mission"
                 );
-                let result = tokio::task::spawn_blocking(move || launcher.run(&request))
-                    .await
-                    .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?
-                    .map_err(|e| {
-                        let code = match e {
-                            pilotd::Error::UnknownDriver(_) | pilotd::Error::Invalid(_) => {
-                                ErrorCode::InvalidParams
-                            }
-                            pilotd::Error::NotReady { .. } => ErrorCode::Conflict,
-                            pilotd::Error::Launch { .. } | pilotd::Error::Timeout { .. } => {
-                                ErrorCode::InternalError
-                            }
-                        };
-                        Error::new(code, e.to_string())
-                    })?;
+                let cache = self.status.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    let result = launcher.run(&request);
+                    // Un lancement en dit plus qu'une sonde : l'état est resondé après.
+                    cache.refresh(&launcher);
+                    result
+                })
+                .await
+                .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?
+                .map_err(|e| {
+                    let code = match e {
+                        pilotd::Error::UnknownDriver(_) | pilotd::Error::Invalid(_) => {
+                            ErrorCode::InvalidParams
+                        }
+                        pilotd::Error::NotReady { .. } => ErrorCode::Conflict,
+                        pilotd::Error::Launch { .. } | pilotd::Error::Timeout { .. } => {
+                            ErrorCode::InternalError
+                        }
+                    };
+                    Error::new(code, e.to_string())
+                })?;
                 serde_json::to_value(result)
                     .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))
             }
@@ -180,7 +203,29 @@ async fn main() {
         }
     }
     tracing::info!(socket, admis = ?allowed, pont = %launcher.bridge.display(), "lanceur de pilotes prêt");
-    let pilot = Arc::new(Pilot { allowed, launcher });
+    let status = StatusCache::default();
+    {
+        // Première sonde puis rafraîchissement périodique, hors du fil qui répond.
+        let (launcher, cache) = (launcher.clone(), status.clone());
+        std::thread::Builder::new()
+            .name("pilot-status".into())
+            .spawn(move || {
+                loop {
+                    let etat = cache.refresh(&launcher);
+                    tracing::debug!(
+                        prets = ?etat.drivers.iter().filter(|d| d.ready()).map(|d| d.driver.as_str()).collect::<Vec<_>>(),
+                        "état des clients sondé"
+                    );
+                    std::thread::sleep(STATUS_REFRESH);
+                }
+            })
+            .expect("fil de sondage");
+    }
+    let pilot = Arc::new(Pilot {
+        allowed,
+        launcher,
+        status,
+    });
     if let Err(e) = server.serve(pilot).await {
         tracing::error!(erreur = %e, "service interrompu");
         std::process::exit(1);

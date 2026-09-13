@@ -28,7 +28,9 @@ profil privé (`prophet provider login <pilote>`).
 
 ## Méthodes
 
-- `pilot.status` → `{drivers: [{driver, connection, executable?, version?}]}`.
+- `pilot.status` → `{drivers: [{driver, connection, executable?, version?}]}` ; répond du dernier
+  sondage, rafraîchi par un fil toutes les 60 s et après chaque lancement, resondé s'il a plus de
+  deux minutes (`StatusCache`).
 - `pilot.run {task, driver, intent, wall_time_s}` → `{exit_code, text, duration_ms, output_bytes}`.
   La configuration MCP est écrite en 0600 sous `$XDG_RUNTIME_DIR/prophet-pilot/`, puis retirée.
 

@@ -177,29 +177,37 @@ impl Launcher {
             .map_err(|e| Error::Invalid(format!("clients de remplacement : {e}")))
     }
 
+    /// L'état d'un pilote, sondé par la commande du client (jusqu'à cinq secondes par sonde),
+    /// sans lire ses fichiers ; `None` pour un pilote inconnu.
+    #[must_use]
+    pub fn driver_state(&self, driver: &str) -> Option<DriverState> {
+        let profile = ClientProfile::all()
+            .into_iter()
+            .find(|p| p.driver == driver)?;
+        if let Some(over) = self.overrides.get(&profile.driver) {
+            return Some(DriverState {
+                driver: profile.driver,
+                connection: "simulated".into(),
+                executable: Some(over.program.clone()),
+                version: None,
+            });
+        }
+        let diagnostic = OfficialDriver::new(profile.clone(), &self.root, &self.user).diagnostic();
+        Some(DriverState {
+            driver: profile.driver,
+            connection: connection_name(diagnostic.connection).into(),
+            executable: diagnostic.executable.map(|p| p.display().to_string()),
+            version: diagnostic.version,
+        })
+    }
+
     /// L'état de chaque pilote connu, sondé par sa propre commande, sans lire ses fichiers.
+    /// Les sondes coûtent jusqu'à quinze secondes en tout : le service les garde en cache.
     #[must_use]
     pub fn status(&self) -> Status {
         let drivers = ClientProfile::all()
             .into_iter()
-            .map(|profile| {
-                if let Some(over) = self.overrides.get(&profile.driver) {
-                    return DriverState {
-                        driver: profile.driver,
-                        connection: "simulated".into(),
-                        executable: Some(over.program.clone()),
-                        version: None,
-                    };
-                }
-                let diagnostic =
-                    OfficialDriver::new(profile.clone(), &self.root, &self.user).diagnostic();
-                DriverState {
-                    driver: profile.driver,
-                    connection: connection_name(diagnostic.connection).into(),
-                    executable: diagnostic.executable.map(|p| p.display().to_string()),
-                    version: diagnostic.version,
-                }
-            })
+            .filter_map(|profile| self.driver_state(&profile.driver))
             .collect();
         Status { drivers }
     }
@@ -303,10 +311,7 @@ impl Launcher {
             return Err(Error::Invalid("wall_time_s doit être positif".into()));
         }
         let state = self
-            .status()
-            .drivers
-            .into_iter()
-            .find(|d| d.driver == request.driver)
+            .driver_state(&request.driver)
             .ok_or_else(|| Error::UnknownDriver(request.driver.clone()))?;
         if !state.ready() {
             return Err(Error::NotReady {
@@ -387,6 +392,43 @@ impl Launcher {
             duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             output_bytes,
         })
+    }
+}
+
+/// Le dernier état sondé des clients, partagé entre le service et le fil qui le rafraîchit :
+/// `pilot.status` répond sans attendre les sondes, qui coûtent jusqu'à cinq secondes par client
+/// quand le réseau est coupé.
+#[derive(Debug, Clone, Default)]
+pub struct StatusCache {
+    inner: std::sync::Arc<std::sync::Mutex<Option<(Instant, Status)>>>,
+}
+
+impl StatusCache {
+    /// Le dernier état connu, s'il y en a un, et son âge.
+    #[must_use]
+    pub fn get(&self) -> Option<(Status, Duration)> {
+        self.inner
+            .lock()
+            .ok()?
+            .as_ref()
+            .map(|(at, status)| (status.clone(), at.elapsed()))
+    }
+
+    /// Sonde maintenant, mémorise, et rend l'état.
+    pub fn refresh(&self, launcher: &Launcher) -> Status {
+        let status = launcher.status();
+        if let Ok(mut guard) = self.inner.lock() {
+            *guard = Some((Instant::now(), status.clone()));
+        }
+        status
+    }
+
+    /// L'état connu s'il a moins de `ttl`, sinon une sonde neuve.
+    pub fn get_or_refresh(&self, launcher: &Launcher, ttl: Duration) -> Status {
+        match self.get() {
+            Some((status, age)) if age <= ttl => status,
+            _ => self.refresh(launcher),
+        }
     }
 }
 
@@ -616,6 +658,36 @@ mod tests {
             })
             .unwrap_err();
         assert!(matches!(erreur, Error::NotReady { .. }), "{erreur}");
+    }
+
+    #[test]
+    fn le_cache_d_etat_sert_le_dernier_sondage_puis_le_renouvelle() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut launcher = launcher(dir.path());
+        launcher.overrides = Launcher::parse_overrides(
+            r#"{"codex": {"program": "/bin/echo", "args": ["{intent}"]}}"#,
+        )
+        .unwrap();
+        let cache = StatusCache::default();
+        assert!(
+            cache.get().is_none(),
+            "rien n'est connu avant la première sonde"
+        );
+        let premier = cache.get_or_refresh(&launcher, Duration::from_secs(60));
+        assert_eq!(premier.drivers[1].connection, "simulated");
+        let (connu, age) = cache.get().expect("la sonde est mémorisée");
+        assert_eq!(connu, premier);
+        assert!(age < Duration::from_secs(60));
+        // Tant que l'état est frais, aucune sonde : un remplacement changé n'est pas vu.
+        launcher.overrides = BTreeMap::new();
+        assert_eq!(
+            cache.get_or_refresh(&launcher, Duration::from_secs(60)),
+            premier
+        );
+        // Périmé, il est resondé.
+        let renouvele = cache.get_or_refresh(&launcher, Duration::ZERO);
+        assert_ne!(renouvele.drivers[1].connection, "simulated");
+        assert_eq!(cache.refresh(&launcher), renouvele);
     }
 
     #[test]
