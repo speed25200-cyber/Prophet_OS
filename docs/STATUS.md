@@ -127,8 +127,9 @@ Séance d'outils MCP du 13 septembre 2026, dans le commit portant ce rapport : u
 l'humain (Claude Code, Codex…) travaille dans une mission préparée, tenue par `agentd` avec le
 même jeton, le même travail SFS, le même registre et le même journal qu'une mission native,
 sans modèle (`task.attach`, `task.tools`, `task.call`, `task.detach`). `prophet-mcp` devient
-le pont stdio qui relaie ces appels et ne tient aucun jeton ; `prophet task mcp-config` rend la
-configuration à donner au client. Trois tests avec les vrais capd, ledger, agentd et le vrai
+le pont stdio qui relaie ces appels et ne tient aucun jeton ; `prophet task options`,
+`prophet task prepare` et `prophet task mcp-config` préparent une mission depuis un terminal
+et rendent la configuration à donner au client. Trois tests avec les vrais capd, ledger, agentd et le vrai
 pont prouvent la séance de bout en bout : outils limités au jeton, écriture dans le travail et
 non dans le home, refus hors périmètre sans fuite du contenu, retrait qui scelle les versions,
 examen puis publication par le créateur ; annulation pendant la séance ; mission inconnue

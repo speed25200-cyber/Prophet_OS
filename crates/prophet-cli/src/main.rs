@@ -89,6 +89,22 @@ enum TaskAction {
         /// Identifiant.
         id: String,
     },
+    /// Liste les contextes du service, leurs modèles disponibles et l'état du navigateur piloté.
+    Options,
+    /// Prépare une mission depuis un contexte du service, sans la lancer.
+    Prepare {
+        /// Contexte du catalogue du service (voir `prophet task options`).
+        #[arg(long)]
+        profile: String,
+        /// Modèle admis par ce contexte.
+        #[arg(long)]
+        model: String,
+        /// Référence à conserver ; générée sinon.
+        #[arg(long)]
+        id: Option<String>,
+        /// Objectif de la mission.
+        intent: String,
+    },
     /// Rend la configuration MCP qui donne à un client (Claude Code, Codex) les outils d'une
     /// mission préparée, par le pont `prophet-mcp`.
     McpConfig {
@@ -741,6 +757,79 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                     "Mission {id} : publication annulée : {a} ajout(s) retiré(s), {m} modification(s) rétablie(s), {s} suppression(s) rétablie(s)\n"
                 )
             })
+        }
+        TaskAction::Options => {
+            let options: agentd::preparation::Options = serde_json::from_value(task_rpc(
+                &socket_agentd(),
+                "task.options",
+                serde_json::json!({}),
+            )?)?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&options)?));
+            }
+            let mut out = String::from("Contextes de mission\n");
+            if options.profiles.is_empty() {
+                out.push_str(
+                    "  aucun : le service ne charge aucun catalogue (PROPHET_MISSION_PROFILES)\n",
+                );
+            }
+            for profile in &options.profiles {
+                let models = if profile.models.is_empty() {
+                    "aucun modèle disponible".to_owned()
+                } else {
+                    profile.models.join(", ")
+                };
+                out.push_str(&format!(
+                    "  {} — {}{}\n      {}\n      modèles : {} · périmètres : {}\n",
+                    profile.id,
+                    profile.name,
+                    if profile.web {
+                        " (consulte le web)"
+                    } else {
+                        ""
+                    },
+                    profile.description,
+                    models,
+                    profile.scopes.join(", ")
+                ));
+            }
+            if let Some(error) = &options.model_error {
+                out.push_str(&format!("  moteur indisponible : {error}\n"));
+            }
+            match &options.browser {
+                None => out.push_str("Navigateur piloté : aucun (PROPHET_BROWSER absent)\n"),
+                Some(state) => out.push_str(&format!(
+                    "Navigateur piloté : {} {} — {}\n",
+                    if state.ready { "✓" } else { "✗" },
+                    state.program,
+                    state.detail
+                )),
+            }
+            out.push_str("Préparer : prophet task prepare --profile <contexte> --model <modèle> \"<objectif>\"\n");
+            Ok(out)
+        }
+        TaskAction::Prepare {
+            profile,
+            model,
+            id,
+            intent,
+        } => {
+            let id = id
+                .clone()
+                .unwrap_or_else(|| format!("mission-{}", ulid::Ulid::new()));
+            let result = task_rpc(
+                &socket_agentd(),
+                "task.prepare",
+                serde_json::json!({"id":id, "intent":intent, "profile":profile, "model":model}),
+            )?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&result)?));
+            }
+            let plan: agentd::TaskPlan = serde_json::from_value(result)?;
+            Ok(format!(
+                "{}\nDémarrer : prophet task start {id}\nClient MCP : prophet task mcp-config {id}\n",
+                plan.render()
+            ))
         }
         TaskAction::McpConfig { id } => {
             // La mission doit exister pour ce créateur ; le pont ne fait que la servir.

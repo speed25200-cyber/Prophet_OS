@@ -140,3 +140,87 @@ fn detail_et_diff_proviennent_de_la_meme_inspection_que_la_surface() {
         }
     }
 }
+
+#[test]
+fn les_contextes_du_service_se_lisent_et_une_mission_se_prepare_sans_manifeste_fourni() {
+    let options = json!({
+        "profiles":[{"id":"web","name":"Recherche sur le web","description":"Consulter le web","models":["qwen3-1.7b"],"scopes":["~/Documents/Prophet"],"grants":["net.egress sur *"],"limits":agentd::Limits::default(),"web":true}],
+        "model_error":null,
+        "browser":{"program":"/run/current-system/sw/bin/chromium","ready":true,"detail":"HeadlessChrome/131.0"}
+    });
+    let rendu = success(invoke(
+        &["task", "options"],
+        "task.options",
+        json!({}),
+        options,
+    ));
+    assert!(
+        rendu.contains("web — Recherche sur le web (consulte le web)"),
+        "{rendu}"
+    );
+    assert!(rendu.contains("modèles : qwen3-1.7b"), "{rendu}");
+    assert!(
+        rendu.contains(
+            "Navigateur piloté : ✓ /run/current-system/sw/bin/chromium — HeadlessChrome/131.0"
+        ),
+        "{rendu}"
+    );
+
+    // La CLI ne fournit ni manifeste, ni droits : seulement l'intention et le contexte choisi.
+    let rendu = success(invoke(
+        &[
+            "--json",
+            "task",
+            "prepare",
+            "--profile",
+            "web",
+            "--model",
+            "qwen3-1.7b",
+            "--id",
+            "essai-cli",
+            "Lire une page et noter son titre",
+        ],
+        "task.prepare",
+        json!({"id":"essai-cli","intent":"Lire une page et noter son titre","profile":"web","model":"qwen3-1.7b"}),
+        json!({"task":"essai-cli"}),
+    ));
+    assert_eq!(
+        serde_json::from_str::<Value>(&rendu).unwrap()["task"],
+        "essai-cli"
+    );
+}
+
+#[test]
+fn la_configuration_mcp_ne_vise_qu_une_mission_preparee() {
+    let mut planned = inspection();
+    planned["task"]["state"] = json!("planned");
+    planned["result"] = Value::Null;
+    let rendu = success(invoke(
+        &["task", "mcp-config", "task:service"],
+        "task.inspect",
+        json!({"id":"task:service"}),
+        planned,
+    ));
+    let config: Value = serde_json::from_str(&rendu).unwrap();
+    assert_eq!(
+        config["mcpServers"]["prophet"]["env"]["PROPHET_TASK"],
+        "task:service"
+    );
+    assert!(
+        config["mcpServers"]["prophet"]["command"]
+            .as_str()
+            .unwrap()
+            .ends_with("prophet-mcp"),
+        "{config}"
+    );
+
+    // Une mission terminée n'accueille plus de client : la CLI le dit au lieu de configurer.
+    let output = invoke(
+        &["task", "mcp-config", "task:service"],
+        "task.inspect",
+        json!({"id":"task:service"}),
+        inspection(),
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("seule une mission préparée"));
+}
