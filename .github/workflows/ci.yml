@@ -189,24 +189,56 @@ jobs:
           PROPHET_CAPTURE_DIR: ${{ github.workspace }}
         run: cargo test -p surface --release -- --ignored --test-threads=1 --nocapture
 
-      - name: Capturer les états et les tailles de l'espace natif
+      # Le champ est allégé de lui-même sur un rastériseur logiciel ; les captures le montrent
+      # complet, tel qu'une carte graphique le trace, pour qu'on juge ce que l'utilisateur verra.
+      - name: Capturer les états, les tailles et les accents de l'espace natif
         run: |
-          cargo run --release -p surface --bin prophet-surface -- \
-            --capture surface-contemplation.png --demonstration
-          cargo run --release -p surface --bin prophet-surface -- \
-            --capture surface-decision.png --demonstration --decision
-          cargo run --release -p surface --bin prophet-surface -- \
-            --capture surface-compacte.png --largeur 1280 --hauteur 720 --demonstration
-          cargo run --release -p surface --bin prophet-surface -- \
-            --capture surface-modele-absent.png --page modeles --endpoint http://127.0.0.1:1/v1
+          S="cargo run --release -p surface --bin prophet-surface --"
+          $S --capture surface-missions.png --demonstration --champ-complet --largeur 1920 --hauteur 1080
+          $S --capture surface-decision.png --demonstration --decision --champ-complet
+          $S --capture surface-examen.png --demonstration --decision --examen --champ-complet --largeur 1440 --hauteur 1000
+          $S --capture surface-compacte.png --largeur 640 --hauteur 900 --demonstration --champ-complet
+          $S --capture surface-systeme.png --page activite --demonstration --champ-complet --largeur 1440 --hauteur 1000
+          $S --capture surface-modele-absent.png --page modeles --endpoint http://127.0.0.1:1/v1
+          for accent in or plasma jade nacre; do
+            $S --capture "surface-accent-$accent.png" --demonstration --champ-complet --accent "$accent" --largeur 1440 --hauteur 1000
+          done
           ls -lh surface-*.png
 
-      - name: Publier les images
+      # Les mesures du critère d'interface, sur ce coureur : un processeur qui rastérise, et il
+      # le dit. Les mêmes commandes, sur une machine avec carte graphique, mesurent la carte.
+      - name: Mesurer le rendu et la consommation au repos
+        run: |
+          S="cargo run --release -p surface --bin prophet-surface --"
+          {
+            echo "## Rendu, rastériseur logiciel du coureur"
+            echo '```'
+            echo "# cinq missions de démonstration, champ allégé (défaut sur rastériseur logiciel)"
+            $S --mesure 120 --demonstration --largeur 1920 --hauteur 1080
+            echo
+            echo "# cinq missions de démonstration, champ complet"
+            $S --mesure 120 --demonstration --champ-complet --largeur 1920 --hauteur 1080
+            echo
+            echo "# aucune mission, services absents"
+            PROPHET_AGENTD_SOCKET=/nonexistent/agentd.sock $S --mesure 120 --largeur 1920 --hauteur 1080 --endpoint http://127.0.0.1:1/v1
+            echo
+            echo "# repos : cinq missions, mouvement réduit, dix secondes"
+            $S --repos 10 --demonstration --mouvement-reduit --largeur 1920 --hauteur 1080
+            echo
+            echo "# activité : cinq missions, champ vivant, dix secondes"
+            $S --repos 10 --demonstration --largeur 1920 --hauteur 1080
+            echo '```'
+          } 2>/dev/null | tee surface-mesures.md
+          cat surface-mesures.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publier les images et les mesures
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: surface
-          path: surface-*.png
+          path: |
+            surface-*.png
+            surface-mesures.md
           retention-days: 30
 
   # Les tests matériels tournent ici et nulle part ailleurs : le conteneur de développement n'a ni
