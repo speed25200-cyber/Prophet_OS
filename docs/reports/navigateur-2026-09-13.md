@@ -16,6 +16,10 @@ outils annonçait, et donne au bureau un navigateur à profil Prophet et l'appli
   contrôlée par capd ; lire l'arbre et agir sont des accès d'interface (`ui.read`, `ui.act`
   sur `browser`) ; `submit` exige une décision humaine. Les outils n'existent que si le service
   nomme un programme (`PROPHET_BROWSER`).
+- L'humain voit où l'agent navigue : les outils web déposent l'adresse, le titre et la taille
+  de la page courante dans l'état privé du service, `task.inspect` les rend dans `browsing`,
+  et l'inspecteur affiche « Sur le web : titre · adresse » avec un bouton qui ouvre l'adresse
+  dans le navigateur de l'humain. L'arbre lui-même n'est jamais déposé ni rendu ainsi.
 - Le bureau ouvre Chromium avec un profil Prophet (Super+N) et X en fenêtre d'application à
   profil propre (Super+X) ; `prophet-ouvrir --liste` rend la liste sans session graphique et le
   test `desktop-session` la vérifie. Cette partie n'a pas été construite dans cette session,

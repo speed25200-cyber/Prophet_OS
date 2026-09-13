@@ -92,6 +92,7 @@ fn inspection() -> Value {
         publication: None,
         can_apply: false,
         can_undo: false,
+        browsing: None,
     })
 }
 

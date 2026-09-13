@@ -40,7 +40,9 @@ bibliothèque SFS relit l'index et les originaux avant la première mutation et 
 document retouché ; le service n'ajoute que l'identité, la sérialisation (une publication à la
 fois) et le journal : `fs.commit`, ou `fs.undo` puis `task.rolled_back`, sous l'acteur `user`.
 Une intention interrompue (`applying`, `undoing`) se reprend par la même commande. `task.inspect`
-rend l'état SFS dans `publication`, et `can_apply` / `can_undo` au seul créateur. Avant de
+rend l'état SFS dans `publication`, `can_apply` / `can_undo` au seul créateur, et dans
+`browsing` l'adresse, le titre et la taille de la page où l'agent navigue, déposés par les
+outils web, jamais l'arbre. Avant de
 publier, le service conserve le manifeste de la mission, demande à capd un jeton de deux minutes
 borné aux chemins de l'index exact et soumet chaque chemin à `cap.check` ; un refus est
 journalisé (`policy.deny`, étape `publish`) sans rien écrire. La publication s'exécute ensuite

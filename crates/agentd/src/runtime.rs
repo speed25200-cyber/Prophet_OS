@@ -157,6 +157,9 @@ pub struct Inspection {
     /// Le créateur peut annuler une publication effectuée.
     #[serde(default)]
     pub can_undo: bool,
+    /// Où l'agent navigue en ce moment : adresse, titre et taille de la page, jamais son contenu.
+    #[serde(default)]
+    pub browsing: Option<serde_json::Value>,
 }
 
 impl Inspection {
@@ -475,6 +478,7 @@ impl Runtime {
             publication: None,
             can_apply: false,
             can_undo: false,
+            browsing: None,
         })
     }
 

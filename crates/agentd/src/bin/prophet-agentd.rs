@@ -261,23 +261,29 @@ impl Handler for Agents {
                 };
                 // L'état de publication vit dans SFS, pas dans le service : il est relu hors
                 // du verrou, seulement pour une mission qui possède des versions conservées.
-                let publication = if inspection
+                let has_review = inspection
                     .result
                     .as_ref()
-                    .is_some_and(|result| result.get("review").is_some())
-                {
-                    let task = id.clone();
-                    tokio::task::spawn_blocking(move || {
-                        sfs::Workspace::open(&home, &task)
-                            .ok()
-                            .map(|workspace| workspace.state())
-                    })
-                    .await
-                    .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?
-                } else {
-                    None
-                };
-                commun::repondre(&inspection.with_publication(owner, publication))
+                    .is_some_and(|result| result.get("review").is_some());
+                let observation =
+                    mcp_system::tools::Browsing::observation_path(&self.browser_root, &id);
+                let task = id.clone();
+                let (publication, browsing) = tokio::task::spawn_blocking(move || {
+                    let publication = has_review
+                        .then(|| sfs::Workspace::open(&home, &task).ok())
+                        .flatten()
+                        .map(|workspace| workspace.state());
+                    // Où l'agent navigue : déposé par les outils web, lu ici sans l'arbre.
+                    let browsing = std::fs::read_to_string(observation)
+                        .ok()
+                        .and_then(|text| serde_json::from_str::<Value>(&text).ok());
+                    (publication, browsing)
+                })
+                .await
+                .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?;
+                let mut inspection = inspection.with_publication(owner, publication);
+                inspection.browsing = browsing;
+                commun::repondre(&inspection)
             }
 
             // Le créateur publie l'index exact qu'il a examiné, ou annule cette publication.

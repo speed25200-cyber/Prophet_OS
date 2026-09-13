@@ -193,6 +193,29 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
             ui.add_space(4.0);
             small(ui, publication(state));
         }
+        if let Some(browsing) = &info.browsing
+            && let Some(url) = browsing["url"].as_str()
+        {
+            // Où l'agent navigue, tel que ses outils l'ont déposé : titre et adresse, sans
+            // l'arbre. L'humain peut y aller avec son propre navigateur.
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                small(ui, "Sur le web :");
+                ui.label(
+                    RichText::new(limited(
+                        browsing["title"].as_str().unwrap_or("(sans titre)"),
+                        80,
+                    ))
+                    .size(13.0),
+                );
+                ui.label(RichText::new(limited(url, 100)).size(12.0).color(MUTED));
+                if std::env::var_os("BROWSER").is_some()
+                    && bouton(ui, "browsing-open", "Ouvrir", false).clicked()
+                {
+                    open_in_browser(url);
+                }
+            });
+        }
         if !reviewing {
             ui.add_space(10.0);
             phases(ui, info);
@@ -573,6 +596,30 @@ fn result(ui: &mut egui::Ui, info: &Inspection, file_requested: &mut Option<Stri
     );
 }
 
+/// Ouvre une adresse avec la commande que la session a donnée (`BROWSER`), sans rien
+/// attendre d'elle : la surface ne lit ni la sortie ni l'issue du navigateur humain.
+fn open_in_browser(url: &str) {
+    let Some(browser) = std::env::var_os("BROWSER") else {
+        return;
+    };
+    let mut parts = browser
+        .to_string_lossy()
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        return;
+    }
+    let program = parts.remove(0);
+    let _ = std::process::Command::new(program)
+        .args(parts)
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
 fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::TrailEntry]) {
     use crate::missions::Outcome;
     heading(ui, "Parcours observé", 23.0);
@@ -616,25 +663,10 @@ fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::Trail
                 // commande que la session lui a donnée ; jamais par une adresse venue du modèle
                 // au-delà de l'hôte contrôlé par capd.
                 if matches!(entry.tool.as_str(), "web.open" | "http.fetch")
-                    && let Some(browser) = std::env::var_os("BROWSER")
+                    && std::env::var_os("BROWSER").is_some()
                     && bouton(ui, &format!("trail-open-{}", entry.seq), "Ouvrir", false).clicked()
                 {
-                    let url = format!("https://{target}/");
-                    let mut parts = browser
-                        .to_string_lossy()
-                        .split_whitespace()
-                        .map(str::to_owned)
-                        .collect::<Vec<_>>();
-                    if !parts.is_empty() {
-                        let program = parts.remove(0);
-                        let _ = std::process::Command::new(program)
-                            .args(parts)
-                            .arg(url)
-                            .stdin(std::process::Stdio::null())
-                            .stdout(std::process::Stdio::null())
-                            .stderr(std::process::Stdio::null())
-                            .spawn();
-                    }
+                    open_in_browser(&format!("https://{target}/"));
                 }
             }
             if !note.is_empty() {

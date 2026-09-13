@@ -86,6 +86,34 @@ impl Browsing {
         f(live)
     }
 
+    /// Fichier où la dernière observation d'une tâche est déposée pour la supervision.
+    ///
+    /// Adresse, titre et taille de l'arbre, jamais l'arbre lui-même : l'humain voit où l'agent
+    /// est et ce que la page dit d'elle-même, pas ce qu'elle contient.
+    #[must_use]
+    pub fn observation_path(profile_root: &std::path::Path, task: &str) -> PathBuf {
+        profile_root.join(task).join("observation.json")
+    }
+
+    fn record(&self, task: &str, url: &str, tree: &sup::tree::Tree) {
+        let path = Self::observation_path(&self.profile_root, task);
+        let value = json!({
+            "url": url,
+            "title": tree.title,
+            "nodes": tree.root.count(),
+            "at": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
+        });
+        let tmp = path.with_extension("json.tmp");
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if std::fs::write(&tmp, value.to_string()).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+    }
+
     fn launch(&self, task: &str) -> Result<Live, String> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -191,7 +219,10 @@ impl Tool for Open {
             Ok(tree)
         });
         match result {
-            Ok(tree) => observation(&url, &tree, detail),
+            Ok(tree) => {
+                self.0.record(&context.task, &url, &tree);
+                observation(&url, &tree, detail)
+            }
             Err(e) => CallResult::error(ErrorCode::SandboxError, e),
         }
     }
@@ -312,12 +343,15 @@ impl Tool for Act {
             Ok((outcome, url, tree))
         });
         match result {
-            Ok((outcome, url, tree)) if outcome.ok => CallResult::structured(json!({
-                "ok": true,
-                "url": url,
-                "title": tree.title,
-                "tree": tree,
-            })),
+            Ok((outcome, url, tree)) if outcome.ok => {
+                self.0.record(&context.task, &url, &tree);
+                CallResult::structured(json!({
+                    "ok": true,
+                    "url": url,
+                    "title": tree.title,
+                    "tree": tree,
+                }))
+            }
             Ok((outcome, _, _)) => CallResult::error(
                 match outcome.error.as_deref() {
                     Some("NodeNotFound") => ErrorCode::NotFound,

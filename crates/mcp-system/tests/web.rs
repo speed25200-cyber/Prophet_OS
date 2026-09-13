@@ -186,6 +186,24 @@ fn ouvrir_lire_et_agir_par_l_arbre_sous_le_controle_de_capd() {
     assert!(!opened.is_error, "{opened:?}");
     let opened = opened.structured.unwrap();
     assert_eq!(opened["title"], "Réservation", "{opened}");
+    // La supervision lit où l'agent est, sans l'arbre : adresse, titre, taille.
+    let observation: Value = serde_json::from_str(
+        &std::fs::read_to_string(Browsing::observation_path(
+            &m._dir.path().join("navigateurs"),
+            "task:web",
+        ))
+        .expect("observation déposée"),
+    )
+    .unwrap();
+    assert_eq!(observation["title"], "Réservation");
+    assert!(
+        observation["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("http://127.0.0.1")
+    );
+    assert!(observation["nodes"].as_u64().unwrap() > 3);
+    assert!(observation.get("tree").is_none(), "jamais l'arbre lui-même");
     assert!(opened["nodes"].as_u64().unwrap() > 3);
     let field = trouver(&opened["tree"]["root"], "field", "Départ").expect("champ Départ");
     let field_id = field["id"].as_str().unwrap().to_owned();

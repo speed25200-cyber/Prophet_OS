@@ -103,7 +103,8 @@ nomme un programme de navigateur. `web.open {url, detail?}` exige `net.egress` s
 rend l'arbre SUP de la page ; `web.tree {detail?}` exige `ui.read browser` ; `web.act {action,
 node?, value?}` exige `ui.act browser`, avec `click`, `set_field` et `submit` ; seul `submit`
 est externe et demande une décision. Le profil du navigateur est propre à la tâche, dans l'état
-privé du service. La sortie réseau propre du navigateur (sous-ressources) n'est pas relayée par
+privé du service, où les outils déposent aussi l'observation courante (adresse, titre, nombre
+de nœuds) que `task.inspect` rend à la supervision. La sortie réseau propre du navigateur (sous-ressources) n'est pas relayée par
 egress : voir l'[ADR 0024](../adr/0024-navigateur-integre-et-applications-web.md).
 
 ## Fichier de registre
