@@ -147,6 +147,14 @@ test du daemon a montré qu'un `sleep` survivait au délai avant cela. Tests du 
 règles, refus) sans sandboxd ; exécution réelle prouvée par `sandbox.run` sur cette machine.
 Voir l'[ADR 0031](adr/0031-execution-de-programmes-sous-sandboxd.md).
 
+CI de 9a9b985 (13 septembre 2026, 17 h 10 UTC) : « Support d'amorçage » — installeur, ISO,
+système installé construit et posé avec le contrôle des fichiers de machine, image démarrée
+sous OVMF **et** sous SeaBIOS, sept services, **système installé démarré sans UEFI** (GRUB) :
+verts ; « Le système installé démarre » rouge sur le test seul (la fenêtre de Mousepad se
+cherche par son identifiant Wayland `org.xfce.mousepad`, corrigé ici). « ci » — check, moteur
+local, niveaux d'isolation, surface : verts ; ChatGPT rouge (Fontconfig, préexistant) ; mission
+locale au modèle réel en cours au moment de ce rapport.
+
 Client officiel en sous-mission, 13 septembre 2026, dans le commit portant ce rapport :
 `task.delegate` accepte `model = "claude-code"` ou `"codex"`. L'enfant est préparé comme une
 séance d'outils ; `prophet-supd`, dans la session de l'humain, lance son client (`client.run`,

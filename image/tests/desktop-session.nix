@@ -274,7 +274,9 @@ pkgs.testers.runNixOSTest {
             machine.succeed("install -d -m 0700 -o pilot -g users /home/pilot/Documents/Prophet")
             machine.succeed("install -m 0600 -o pilot -g users /dev/null /home/pilot/Documents/Prophet/bonjour.txt")
             machine.succeed("su - pilot -c " + q("swaymsg exec " + q("prophet-ouvrir editeur /home/pilot/Documents/Prophet/bonjour.txt")))
-            window("mousepad")
+            # Sway connaît la fenêtre par son identifiant d'application Wayland ; le bus
+            # d'accessibilité, par le nom que l'application s'y donne (« mousepad »).
+            window("org.xfce.mousepad")
             prophet = "su - pilot -c " + q("prophet --json task ")
             def appel(outil, args):
                 return json.loads(machine.succeed(prophet[:-1] + "call essai-bureau " + outil + " " + json.dumps(args) + "'"))
