@@ -11,9 +11,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use pilotd::{DEFAULT_SOCKET, Launcher, METHOD_RUN, METHOD_STATUS, RunRequest, StatusCache};
+use pilotd::{
+    DEFAULT_SOCKET, Launcher, METHOD_RUN, METHOD_STATUS, METHOD_STOP, RunRequest, StatusCache,
+    StopRequest,
+};
 use prophet_ipc::{Error, ErrorCode, Handler, PeerIdentity, Server};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 struct Pilot {
     /// Identifiants d'utilisateur admis à appeler : `agentd`, et le propriétaire de la
@@ -81,7 +84,9 @@ impl Handler for Pilot {
                         pilotd::Error::UnknownDriver(_) | pilotd::Error::Invalid(_) => {
                             ErrorCode::InvalidParams
                         }
-                        pilotd::Error::NotReady { .. } => ErrorCode::Conflict,
+                        pilotd::Error::NotReady { .. } | pilotd::Error::Stopped { .. } => {
+                            ErrorCode::Conflict
+                        }
                         pilotd::Error::Launch { .. } | pilotd::Error::Timeout { .. } => {
                             ErrorCode::InternalError
                         }
@@ -90,6 +95,13 @@ impl Handler for Pilot {
                 })?;
                 serde_json::to_value(result)
                     .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))
+            }
+            METHOD_STOP => {
+                let request: StopRequest = serde_json::from_value(params)
+                    .map_err(|e| Error::new(ErrorCode::InvalidParams, e.to_string()))?;
+                let stopped = self.launcher.stop(&request.task);
+                tracing::info!(tache = %request.task, tournait = stopped, "arrêt d'un client demandé");
+                Ok(json!({ "task": request.task, "stopped": stopped }))
             }
             _ => Err(Error::new(
                 ErrorCode::MethodNotFound,
@@ -180,6 +192,7 @@ async fn main() {
         runtime_dir,
         workdir: if documents.is_dir() { documents } else { home },
         overrides,
+        arrets: Default::default(),
     };
     let server = match Server::bind(&socket) {
         Ok(s) => s,

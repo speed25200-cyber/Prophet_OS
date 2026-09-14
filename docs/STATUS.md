@@ -314,6 +314,16 @@ parent, périmètre hors du parent laissé chez l'enfant, parent fermé refusé)
 les vrais services : le faux Claude Code lit le code que le faux Codex vient d'écrire et son
 verdict revient chez Codex ; le code de Codex pour un parent local est chez ce parent.
 
+La CI de `a5ac295` (clients principaux, invité overlay, `proc.kill` admis) réussit `check` (le
+test du client comme modèle principal compris), l'isolation sur l'hôte (les trois essais
+`needs_kvm` avec l'invité à surcouche : le niveau 2 exécute et rapatrie depuis `/home`), la
+parole, la surface, ChatGPT, le protocole du moteur, la mission locale réelle, l'installeur,
+l'ISO, les sept services (le catalogue avec `proc.kill` charge), le système installé et ses
+deux démarrages. Un seul rouge : « Voir l'image démarrer » sous UEFI, où le noyau de l'invité
+QEMU s'est planté au chargement de modules (`__text_poke`, parport, floppy) avant tout terminal
+— le même support a démarré sous SeaBIOS dans le même travail, et ce démarrage UEFI était vert
+sept fois de suite avant : une panne de l'hôte d'intégration, pas de l'image, à rejouer.
+
 La CI de `ddf6e89` (relais et lanceur de pilotes) réussit `check`, l'isolation, le protocole du
 moteur, la surface, les sept services sous systemd, l'installeur, l'ISO et son démarrage, la
 construction du système installé et son démarrage sans UEFI ; ChatGPT reste rouge sur Fontconfig.
@@ -1545,11 +1555,12 @@ tranche au moment où cela arrive. Le workflow reste donc à déclenchement manu
   contexte « logiciel »). Restent : une mission réelle de bout en bout sur une machine à KVM
   (un client écrit un outil, l'exécute, le résultat revient à l'humain), le lancement
   des outils produits depuis le lanceur du bureau, et d'autres interpréteurs dans la racine.
-- **Arrêter un client lancé.** `task.cancel` d'une mission menée par un client conclut sa
-  séance (son prochain appel d'outil échoue) et une mission pas encore rejointe est annulée
-  avant l'attache ; mais le processus du client n'est arrêté que par lui-même ou par le délai
-  du lanceur. Un `pilot.stop {task}` dans `prophet-pilotd`, appelé par `task.cancel`, doit
-  tuer le client sur-le-champ : l'humain supervise, il doit pouvoir couper.
+- **Arrêter un client lancé — fait.** `task.cancel` d'une mission menée par un client conclut
+  sa séance puis demande `pilot.stop {task}` au lanceur, qui tue le client et tout son groupe
+  de processus (les clients sont lancés meneurs de groupe ; le délai tue de même). Prouvé dans
+  le lanceur (un client qui a lancé un sous-processus est arrêté en moins d'une seconde) et
+  avec les vrais services : une mission sur le faux Codex, qui s'attarde trente secondes, est
+  annulée, et une autre sur le même client se lance et finit aussitôt.
 - **Les vrais clients.** Tout ce qui précède est prouvé avec des clients de remplacement sur le
   même chemin (pont, séance, CLI). Le vrai Claude Code et le vrai Codex, connectés par l'humain
   sur une machine installée, restent l'essai `needs_claude_login` / `needs_chatgpt_login` à

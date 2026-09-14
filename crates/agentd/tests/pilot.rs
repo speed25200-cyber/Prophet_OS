@@ -60,6 +60,7 @@ fn faux_codex(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathBu
              [ -n \"$CODEX_HOME\" ] || exit 4\n\
              [ -f \"$PROPHET_MCP_CONFIG\" ] || exit 5\n\
              \"$P\" task attach \"$PROPHET_TASK\" --client codex >/dev/null\n\
+             case \"$1\" in *attends*) sleep 30 & wait ;; esac\n\
              \"$P\" task call \"$PROPHET_TASK\" fs.write '{{\"path\":\"~/docs/code.txt\",\"content\":\"fn main() {{}}\"}}' >/dev/null\n\
              texte=\"Code écrit par le faux Codex : $1\"\n\
              case \"$1\" in *relire*)\n\
@@ -667,6 +668,73 @@ async fn un_modele_nomme_dans_une_delegation_peut_etre_un_client_officiel() {
         .await
         .unwrap_err();
     assert_eq!(refus.code, ErrorCode::NotFound, "{refus:?}");
+}
+
+/// L'humain annule une mission menée par un client : la séance est conclue et le client est
+/// tué sur-le-champ par le lanceur, avec ce qu'il a lancé ; la place est libre pour la suite.
+#[tokio::test]
+async fn annuler_une_mission_menee_par_un_client_le_tue_sur_le_champ() {
+    let chain = Chain::new(vec![], true).await;
+    chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"lente","intent":"Écris ~/docs/code.txt mais attends d'abord","profile":"atelier","model":"codex"}),
+        )
+        .await
+        .unwrap();
+    chain
+        .client
+        .call("task.start", json!({"id":"lente"}))
+        .await
+        .unwrap();
+    // Le client rejoint la mission (elle passe en cours), puis s'attarde.
+    let mut rejointe = false;
+    for _ in 0..100 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let info = chain
+            .client
+            .call("task.inspect", json!({"id":"lente"}))
+            .await
+            .unwrap();
+        if info["task"]["state"] == "running" {
+            rejointe = true;
+            break;
+        }
+    }
+    assert!(rejointe, "le client n'a pas rejoint la mission");
+    let debut = std::time::Instant::now();
+    let reponse = chain
+        .client
+        .call("task.cancel", json!({"id":"lente"}))
+        .await
+        .unwrap();
+    assert_eq!(reponse["cancel_requested"], "lente", "{reponse}");
+    let info = chain.attendre("lente").await;
+    assert_eq!(info["task"]["state"], "cancelled", "{info}");
+    // Le client tué, sa place est libre bien avant ses trente secondes d'attente : une autre
+    // mission sur le même client se lance et finit.
+    chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"suivante","intent":"Écris ~/docs/code.txt","profile":"atelier","model":"codex"}),
+        )
+        .await
+        .unwrap();
+    chain
+        .client
+        .call("task.start", json!({"id":"suivante"}))
+        .await
+        .unwrap();
+    let info = chain.attendre("suivante").await;
+    assert_eq!(info["task"]["state"], "done", "{info}");
+    assert!(
+        debut.elapsed() < std::time::Duration::from_secs(20),
+        "{:?}",
+        debut.elapsed()
+    );
+    assert!(chain.asked.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

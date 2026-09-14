@@ -570,6 +570,36 @@ impl Handler for Agents {
 
             "task.cancel" => {
                 let id = commun::texte(&params, "id")?;
+                // Une mission menée par un client officiel : après sa conclusion ici, le
+                // lanceur de la session tue le client sur-le-champ (ADR 0035). L'humain
+                // supervise ; il doit pouvoir couper.
+                let client = {
+                    let runtime = self.runtime.lock().await;
+                    runtime
+                        .task(&id)
+                        .and_then(|t| t.driver.clone())
+                        .filter(|d| d.starts_with("driver:"))
+                };
+                let reponse = self.annuler(id.clone()).await;
+                if client.is_some()
+                    && let Some(socket) = self.pilot.as_deref()
+                {
+                    arreter_le_pilote(socket, &id).await;
+                }
+                reponse
+            }
+
+            autre => Err(commun::methode_inconnue(autre)),
+        }
+    }
+}
+
+impl Agents {
+    /// Annule une mission : un travailleur en cours est prié de s'arrêter, une séance d'outils
+    /// est conclue, une mission pas encore lancée est annulée dans l'état.
+    async fn annuler(&self, id: String) -> Result<Value, Error> {
+        {
+            {
                 let stop = self
                     .jobs
                     .lock()
@@ -607,9 +637,36 @@ impl Handler for Agents {
                 tracing::info!(tache = %id, "tâche annulée");
                 Ok(json!({ "cancelled": id }))
             }
-
-            autre => Err(commun::methode_inconnue(autre)),
         }
+    }
+}
+
+/// Demande au lanceur de la session de tuer le client lancé pour une mission, en trois secondes
+/// au plus ; ce qui ne répond pas est dit, sans faire échouer l'annulation.
+async fn arreter_le_pilote(socket: &std::path::Path, id: &str) {
+    let demande = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        let client = Client::connect(socket).await.map_err(|e| e.to_string())?;
+        client
+            .call(pilotd::METHOD_STOP, json!({ "task": id }))
+            .await
+            .map_err(|e| e.message)
+    })
+    .await;
+    match demande {
+        Ok(Ok(reponse)) => {
+            tracing::info!(
+                tache = id,
+                tournait = reponse["stopped"].as_bool().unwrap_or(false),
+                "client arrêté par le lanceur"
+            );
+        }
+        Ok(Err(erreur)) => {
+            tracing::warn!(tache = id, %erreur, "arrêt du client refusé par le lanceur")
+        }
+        Err(_) => tracing::warn!(
+            tache = id,
+            "lanceur de pilotes muet : le client sera tué au délai"
+        ),
     }
 }
 

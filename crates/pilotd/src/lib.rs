@@ -13,10 +13,12 @@
 //! délégué par capd et par le journal. Ce que le client fait *hors* de la mission n'est pas
 //! confiné par ce lanceur : c'est la limite déjà nommée de la séance MCP.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read as _;
+use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use providers::official::{ClientProfile, ConnectionState, OfficialDriver};
@@ -29,6 +31,9 @@ pub const DEFAULT_SOCKET: &str = "/run/prophet/pilot.sock";
 pub const METHOD_STATUS: &str = "pilot.status";
 /// Méthode : lancer un client dans une mission et attendre sa fin.
 pub const METHOD_RUN: &str = "pilot.run";
+/// Méthode : tuer sur-le-champ le client lancé pour une mission (`{task}`), parce que l'humain
+/// l'annule. Rend `{task, stopped}` ; `stopped` dit si un client tournait pour cette mission.
+pub const METHOD_STOP: &str = "pilot.stop";
 /// Ce qu'on garde de la sortie du client, au plus : le reste n'est ni lu ni journalisé.
 const MAX_OUTPUT_BYTES: usize = 1 << 20;
 /// Ce qu'on rend au parent, au plus.
@@ -64,6 +69,12 @@ pub enum Error {
         /// Durée accordée.
         seconds: u64,
     },
+    /// Le client a été tué à la demande (`pilot.stop`).
+    #[error("{driver} arrêté à la demande")]
+    Stopped {
+        /// Pilote visé.
+        driver: String,
+    },
     /// Requête invalide.
     #[error("{0}")]
     Invalid(String),
@@ -89,6 +100,57 @@ impl DriverState {
     #[must_use]
     pub fn ready(&self) -> bool {
         matches!(self.connection.as_str(), "connected" | "simulated")
+    }
+}
+
+/// Requête de `pilot.stop`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StopRequest {
+    /// Mission dont le client doit être tué.
+    pub task: String,
+}
+
+/// Les arrêts demandés et les clients en cours, partagés entre les appels du lanceur : un
+/// `pilot.stop` reçu pendant un `pilot.run` fait tuer le client de cette mission.
+#[derive(Debug, Clone, Default)]
+pub struct Arrets {
+    demandes: Arc<Mutex<BTreeSet<String>>>,
+    en_cours: Arc<Mutex<BTreeSet<String>>>,
+}
+
+impl Arrets {
+    fn demander(&self, task: &str) -> bool {
+        let en_cours = self
+            .en_cours
+            .lock()
+            .map(|e| e.contains(task))
+            .unwrap_or(false);
+        if let Ok(mut demandes) = self.demandes.lock() {
+            demandes.insert(task.to_owned());
+        }
+        en_cours
+    }
+
+    fn demande(&self, task: &str) -> bool {
+        self.demandes
+            .lock()
+            .map(|mut d| d.remove(task))
+            .unwrap_or(false)
+    }
+
+    fn commence(&self, task: &str) {
+        if let Ok(mut e) = self.en_cours.lock() {
+            e.insert(task.to_owned());
+        }
+    }
+
+    fn finit(&self, task: &str) {
+        if let Ok(mut e) = self.en_cours.lock() {
+            e.remove(task);
+        }
+        if let Ok(mut d) = self.demandes.lock() {
+            d.remove(task);
+        }
     }
 }
 
@@ -165,9 +227,18 @@ pub struct Launcher {
     pub workdir: PathBuf,
     /// Clients de remplacement, par pilote (essais).
     pub overrides: BTreeMap<String, Override>,
+    /// Arrêts demandés et clients en cours, partagés entre les appels.
+    pub arrets: Arrets,
 }
 
 impl Launcher {
+    /// Demande l'arrêt du client lancé pour `task` : le `pilot.run` en cours le tue avec tout
+    /// son groupe de processus et rend `Error::Stopped`. Vrai si un client tournait pour cette
+    /// mission ; sinon la demande est retenue jusqu'à ce qu'un lancement la consomme.
+    pub fn stop(&self, task: &str) -> bool {
+        self.arrets.demander(task)
+    }
+
     /// Lit les clients de remplacement d'une variable JSON (`{"codex": {"program": …}}`).
     ///
     /// # Errors
@@ -327,6 +398,8 @@ impl Launcher {
             })?;
         let ClientCommand { program, args, env } = self.command(request, &mcp_config)?;
         let started = Instant::now();
+        // Le client mène son propre groupe de processus : le tuer au délai ou à la demande tue
+        // aussi ce qu'il a lancé, sans quoi un sous-processus garderait la sortie ouverte.
         let mut child = Command::new(&program)
             .args(&args)
             .envs(env)
@@ -334,11 +407,13 @@ impl Launcher {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
+            .process_group(0)
             .spawn()
             .map_err(|source| Error::Launch {
                 driver: request.driver.clone(),
                 source,
             })?;
+        self.arrets.commence(&request.task);
         let mut stdout = child.stdout.take().expect("sortie standard demandée");
         let reader = std::thread::spawn(move || {
             let mut buffer = Vec::new();
@@ -359,14 +434,27 @@ impl Launcher {
             (buffer, total)
         });
         let deadline = started + Duration::from_secs(request.wall_time_s);
+        let tuer = |child: &mut std::process::Child| {
+            tuer_le_groupe(child);
+            let _ = child.wait();
+        };
         let exit_code = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status.code(),
-                Ok(None) if Instant::now() >= deadline => {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                Ok(None) if self.arrets.demande(&request.task) => {
+                    tuer(&mut child);
                     let _ = reader.join();
                     let _ = std::fs::remove_file(&mcp_config);
+                    self.arrets.finit(&request.task);
+                    return Err(Error::Stopped {
+                        driver: request.driver.clone(),
+                    });
+                }
+                Ok(None) if Instant::now() >= deadline => {
+                    tuer(&mut child);
+                    let _ = reader.join();
+                    let _ = std::fs::remove_file(&mcp_config);
+                    self.arrets.finit(&request.task);
                     return Err(Error::Timeout {
                         driver: request.driver.clone(),
                         seconds: request.wall_time_s,
@@ -374,9 +462,10 @@ impl Launcher {
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(50)),
                 Err(source) => {
-                    let _ = child.kill();
+                    tuer(&mut child);
                     let _ = reader.join();
                     let _ = std::fs::remove_file(&mcp_config);
+                    self.arrets.finit(&request.task);
                     return Err(Error::Launch {
                         driver: request.driver.clone(),
                         source,
@@ -386,6 +475,7 @@ impl Launcher {
         };
         let (output, output_bytes) = reader.join().unwrap_or_default();
         let _ = std::fs::remove_file(&mcp_config);
+        self.arrets.finit(&request.task);
         Ok(RunResult {
             exit_code,
             text: final_text(&request.driver, &output),
@@ -393,6 +483,19 @@ impl Launcher {
             output_bytes,
         })
     }
+}
+
+/// Tue le client et tout son groupe de processus (il en est le meneur, voir `process_group`),
+/// puis le client seul si le groupe n'a pas pu l'être.
+fn tuer_le_groupe(child: &mut std::process::Child) {
+    if let Ok(pid) = libc::pid_t::try_from(child.id()) {
+        // SAFETY: `killpg` n'a pas d'effet mémoire ; le groupe visé est celui que ce processus
+        // a créé pour son enfant (`process_group(0)`), identifié par l'identifiant de l'enfant
+        // que `Child` tient encore : aucun autre groupe ne peut porter ce numéro tant que
+        // l'enfant n'a pas été attendu.
+        let _ = unsafe { libc::killpg(pid, libc::SIGKILL) };
+    }
+    let _ = child.kill();
 }
 
 /// Le dernier état sondé des clients, partagé entre le service et le fil qui le rafraîchit :
@@ -509,7 +612,47 @@ mod tests {
             runtime_dir: dir.join("run"),
             workdir: dir.to_path_buf(),
             overrides: BTreeMap::new(),
+            arrets: Arrets::default(),
         }
+    }
+
+    #[test]
+    fn un_client_est_tue_a_la_demande_avec_ce_qu_il_a_lance() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut launcher = launcher(dir.path());
+        // Le client lance un sous-processus qui garderait sa sortie ouverte : l'arrêt doit
+        // emporter le groupe entier, sinon `run` attendrait la fin du sous-processus.
+        launcher.overrides = Launcher::parse_overrides(
+            r#"{"gemini": {"program": "/bin/sh", "args": ["-c", "sleep 30 & wait"]}}"#,
+        )
+        .unwrap();
+        let demandeur = launcher.clone();
+        let stop = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(400));
+            demandeur.stop("m")
+        });
+        let debut = Instant::now();
+        let erreur = launcher
+            .run(&RunRequest {
+                task: "m".into(),
+                driver: "gemini".into(),
+                intent: "attendre".into(),
+                wall_time_s: 30,
+            })
+            .unwrap_err();
+        assert!(matches!(erreur, Error::Stopped { .. }), "{erreur}");
+        assert!(
+            debut.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            debut.elapsed()
+        );
+        assert!(
+            stop.join().unwrap(),
+            "un client tournait pour cette mission"
+        );
+        assert!(!dir.path().join("run/m.json").exists());
+        // Une mission dont aucun client ne tourne : la demande est retenue, sans effet.
+        assert!(!launcher.stop("autre"));
     }
 
     #[test]

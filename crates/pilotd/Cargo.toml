@@ -11,6 +11,7 @@ name = "prophet-pilotd"
 path = "src/bin/prophet-pilotd.rs"
 
 [dependencies]
+libc = { workspace = true }
 prophet-ipc = { workspace = true }
 providers = { workspace = true }
 serde = { workspace = true }

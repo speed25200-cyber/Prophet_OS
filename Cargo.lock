@@ -3663,6 +3663,7 @@ checksum = "5be167a7af36ee22fe3115051bc51f6e6c7054c9348e28deb4f49bd6f705a315"
 name = "pilotd"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "prophet-ipc",
  "providers",
  "serde",
@@ -3908,6 +3909,7 @@ dependencies = [
  "tokio",
  "ulid",
  "vault",
+ "voice",
 ]
 
 [[package]]
@@ -4898,6 +4900,7 @@ dependencies = [
  "tokio",
  "tracing",
  "ulid",
+ "voice",
  "wgpu",
  "winit",
 ]
@@ -5593,6 +5596,16 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "voice"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+]
 
 [[package]]
 name = "walkdir"

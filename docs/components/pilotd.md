@@ -12,7 +12,8 @@
 | Méthode | Effet |
 |---|---|
 | `pilot.status` | Chaque client : installé, connecté (sondé par sa propre commande), version, sans lire ses fichiers. Servi d'un cache rafraîchi en arrière-plan (toutes les 60 s, et après chaque lancement) : la réponse ne dépend pas de la durée des sondes, qui peuvent attendre le réseau |
-| `pilot.run` | `{task, driver, intent, wall_time_s}` : écrit la configuration MCP en 0600, lance le client en mode non interactif, attend (tué au délai), rend `{exit_code, text, duration_ms, output_bytes}` |
+| `pilot.run` | `{task, driver, intent, wall_time_s}` : écrit la configuration MCP en 0600, lance le client en mode non interactif dans son propre groupe de processus, attend (tué au délai, avec ce qu'il a lancé), rend `{exit_code, text, duration_ms, output_bytes}` |
+| `pilot.stop` | `{task}` : tue sur-le-champ le client lancé pour cette mission, et son groupe de processus ; `pilot.run` rend alors « arrêté à la demande ». `{task, stopped}`, `stopped` disant si un client tournait |
 
 ## Comment agentd s'en sert
 
