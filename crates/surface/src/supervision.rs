@@ -810,6 +810,40 @@ impl Supervision {
                 ui.add_space(22.0);
                 plaque(ui, 28, |ui| {
                     ui.set_width(ui.available_width());
+                    etiquette(ui, "MACHINE, VUE PAR L'INSTALLEUR");
+                    ui.add_space(4.0);
+                    let releve = inventaire_de_la_machine();
+                    if releve.is_empty() {
+                        ui.label(titre("Aucun relevé.", 22.0));
+                        petit(
+                            ui,
+                            "Cette machine n'a pas été installée par l'installeur de Prophet OS, qui relève l'écran, le réseau, le micro et la virtualisation avant d'effacer le disque.",
+                        );
+                    } else {
+                        ui.label(titre("Ce que la clé a vu avant d'effacer le disque.", 22.0));
+                        ui.add_space(8.0);
+                        for (manque, ligne) in releve {
+                            ui.horizontal_wrapped(|ui| {
+                                let (dot, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
+                                ui.painter().circle_filled(
+                                    dot.center(),
+                                    3.0,
+                                    if *manque { ATTENTE } else { accent.vif },
+                                );
+                                ui.label(
+                                    RichText::new(ligne)
+                                        .size(13.0)
+                                        .color(if *manque { ATTENTE } else { ENCRE }),
+                                );
+                            });
+                        }
+                        ui.add_space(6.0);
+                        petit(ui, "Un point d'alerte est un manque que l'installeur a signalé. Le système installé a les mêmes pilotes que la clé.");
+                    }
+                });
+                ui.add_space(22.0);
+                plaque(ui, 28, |ui| {
+                    ui.set_width(ui.available_width());
                     etiquette(ui, "APPARENCE");
                     ui.add_space(4.0);
                     ui.label(titre("La couleur de ce qui signale.", 22.0));
@@ -1049,6 +1083,40 @@ fn conversation(ui: &mut egui::Ui, atelier: &mut Atelier) {
     });
 }
 
+/// Le relevé que l'installeur a fait de la machine avant d'effacer le disque, gardé dans la
+/// source posée sur elle (`image/machine/inventaire.txt` ; `PROPHET_INVENTAIRE` le déplace),
+/// lu une fois : chaque ligne, et si l'installeur l'a marquée « ! » comme un manque.
+fn inventaire_de_la_machine() -> &'static [(bool, String)] {
+    static RELEVE: std::sync::OnceLock<Vec<(bool, String)>> = std::sync::OnceLock::new();
+    RELEVE.get_or_init(|| {
+        let chemin = std::env::var_os("PROPHET_INVENTAIRE").map_or_else(
+            || std::path::PathBuf::from("/etc/prophet/source/image/machine/inventaire.txt"),
+            std::path::PathBuf::from,
+        );
+        std::fs::read_to_string(chemin)
+            .map(|texte| lire_inventaire(&texte))
+            .unwrap_or_default()
+    })
+}
+
+/// Les lignes d'un relevé : « ! … » est un manque, le reste une constatation ; le vide est
+/// ignoré.
+fn lire_inventaire(texte: &str) -> Vec<(bool, String)> {
+    texte
+        .lines()
+        .filter_map(|ligne| {
+            let ligne = ligne.trim();
+            if ligne.is_empty() {
+                None
+            } else if let Some(manque) = ligne.strip_prefix('!') {
+                Some((true, manque.trim().to_owned()))
+            } else {
+                Some((false, ligne.to_owned()))
+            }
+        })
+        .collect()
+}
+
 /// Lance une application du bureau, ou un outil publié (`outils <nom>`), par le lanceur de la
 /// session ; faux s'il n'est pas installé.
 fn ouvrir_application(args: &[String]) -> bool {
@@ -1285,5 +1353,24 @@ mod tests {
         assert!(Filtre::Attention.inclut(&c));
         assert!(!Filtre::Actives.inclut(&c));
         assert!(!Filtre::Terminees.inclut(&c));
+    }
+}
+
+#[cfg(test)]
+mod releve_de_la_machine {
+    #[test]
+    fn un_releve_se_lit_avec_ses_manques_et_sans_ses_vides() {
+        let releve = super::lire_inventaire(
+            "  processeur : 8 cœurs, AMD Ryzen 5\n\n! son : aucune carte détectée\n  TPM : présent\n",
+        );
+        assert_eq!(
+            releve,
+            vec![
+                (false, "processeur : 8 cœurs, AMD Ryzen 5".to_owned()),
+                (true, "son : aucune carte détectée".to_owned()),
+                (false, "TPM : présent".to_owned()),
+            ]
+        );
+        assert!(super::lire_inventaire("").is_empty());
     }
 }

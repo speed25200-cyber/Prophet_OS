@@ -361,7 +361,7 @@ les outils que l'atelier logiciel a produits et que l'humain a publiés (« Outi
 par la voix : « Prophète, ouvre l'outil bonjour », « ouvre le navigateur ». L'installeur dit
 ce qu'il voit de la machine avant d'effacer le disque (processeur, mémoire, KVM, carte
 graphique et pilote, réseau, son et micro, Secure Boot, TPM ; relevé gardé dans
-`image/machine/inventaire.txt`, relu par `prophet status`), parce que rien n'a jamais démarré
+`image/machine/inventaire.txt`, relu par `prophet status` et par la page Système de la surface), parce que rien n'a jamais démarré
 sur un vrai PC et qu'un manque doit se voir tant que Windows est encore là ; le travail
 « Installeur sur disque en boucle » vérifie qu'il le dit. Le rapport
 du jour :

@@ -15,7 +15,10 @@ Depuis la direction Réacteur ([ADR 0025](../adr/0025-direction-visuelle-reacteu
 est une nuit : plaques de verre à crochets d'angle, jauges à couronne de graduations, chiffres
 fins, capitales espacées, et un **accent** au choix de la personne — Arc, Or, Plasma, Jade,
 Nacre — qui colore tout ce qui signale et rien d'autre. Le choix se fait dans la page Système
-et se conserve dans la configuration ; `--accent` et `PROPHET_SURFACE_ACCENT` le forcent.
+et se conserve dans la configuration ; `--accent` et `PROPHET_SURFACE_ACCENT` le forcent. La
+même page montre l'échelle d'isolation et le relevé que l'installeur a fait de la machine avant
+d'effacer le disque (`image/machine/inventaire.txt` ; `PROPHET_INVENTAIRE` le déplace) : écran,
+réseau, micro, virtualisation, un manque en point d'alerte.
 Derrière les plaques, le **champ** dessine au GPU une grille et une voûte de grains fixes et,
 pour chaque mission reçue, un ruban de lumière tissé de fils qui avancent à la vitesse réelle
 de ses étapes : clair tant qu'il reste du budget, à la teinte d'alerte quand un humain est
