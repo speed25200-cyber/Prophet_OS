@@ -1407,7 +1407,8 @@ Le 14 septembre encore, l'accélération graphique des modèles locaux
 `prophet.localEngine.gpu.enable` qui la fait servir, place le modèle sur la carte
 (`--gpu-layers`, préréglages du routeur compris) et n'ouvre à l'unité que les nœuds DRM.
 Faux par défaut : jamais mesuré sur une vraie carte (`needs_gpu`), le processeur reste le
-chemin prouvé. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
+chemin prouvé. La CI de `1c30ab6` construit la variante Vulkan avec le correctif (31 minutes
+pour le travail « Moteur local », grammaire comprise). Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
 que Fontconfig reproche.
 Le rouge de ChatGPT est lu : Fontconfig dit « Cannot load default config file: File not
 found: /etc/fonts/fonts.conf » depuis un renderer de Chromium, dans le bac à sable de
