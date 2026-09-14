@@ -92,6 +92,7 @@
           # d'amorçage. Vides dans le dépôt (ADR 0032).
           ./image/machine/hardware-configuration.nix
           ./image/machine/amorcage.nix
+          ./image/machine/acceleration.nix
           ({ pkgs, ... }: {
             prophet.enable = true;
             prophet.localEngine.weights = pkgs.fetchurl modeleParDefaut;
@@ -117,6 +118,7 @@
           ./image/modules/desktop.nix
           ./image/machine/hardware-configuration.nix
           ./image/machine/amorcage.nix
+          ./image/machine/acceleration.nix
           {
             prophet.enable = true;
             prophet.desktop.suite.enable = false;

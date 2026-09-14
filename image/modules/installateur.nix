@@ -28,6 +28,7 @@ let
     curl # joindre huggingface.co avant de promettre un modèle local
     nixos-install-tools # nixos-install, nixos-generate-config
     mkpasswd # le haché du mot de passe du compte, jamais le mot de passe
+    vulkan-tools # vulkaninfo : y a-t-il une carte graphique pour les modèles locaux ? (ADR 0037)
   ];
 
   prophet-installer = pkgs.stdenv.mkDerivation {
@@ -60,6 +61,9 @@ in
 
   config = {
     environment.systemPackages = [ prophet-installer ];
+    # Les pilotes Vulkan de Mesa sur le support d'amorçage : sans eux, `vulkaninfo` ne verrait
+    # aucune carte, même présente, et l'installeur laisserait les modèles sur processeur.
+    hardware.graphics.enable = true;
 
     environment.etc."prophet/source" = lib.mkIf (config.prophet.installateur.source != null) {
       source = config.prophet.installateur.source;

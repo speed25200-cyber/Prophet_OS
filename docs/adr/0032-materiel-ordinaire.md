@@ -26,7 +26,8 @@ trouvé trois écarts entre « l'image démarre en CI » et « l'image s'install
    `amdgpu` (`radeon.si_support=0 amdgpu.si_support=1`, idem `cik`) : c'est le pilote qui leur
    donne Vulkan par RADV, dont la surface a besoin ; `radeon` n'offrait que GL.
 2. **Deux fichiers par machine**, `image/machine/hardware-configuration.nix` et
-   `image/machine/amorcage.nix`, importés par le flake et vides dans le dépôt. L'installeur les
+   `image/machine/amorcage.nix`, importés par le flake et vides dans le dépôt (un troisième,
+   `acceleration.nix`, s'y est ajouté avec l'ADR 0037 : la carte graphique). L'installeur les
    écrit dans la copie du dépôt qu'il pose sur le disque : le premier par
    `nixos-generate-config --show-hardware-config --no-filesystems` (les systèmes de fichiers
    restent ceux d'`immutable.nix`, par étiquettes), le second seulement sans UEFI. Le dépôt ne

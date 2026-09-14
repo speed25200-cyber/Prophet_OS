@@ -321,6 +321,27 @@ grep -q "boot.initrd.availableKernelModules" "$MACHINE/hardware-configuration.ni
   || mourir "la détection du matériel n'a rien produit ; rien n'est installé."
 vert "✓ matériel détecté : $(grep -c '"' "$MACHINE/hardware-configuration.nix") lignes de modules et de réglages"
 
+# La carte graphique, si elle sert à quelque chose : un périphérique Vulkan qui n'est pas le
+# rastériseur logiciel. Alors les modèles locaux tourneront dessus (ADR 0037) ; sinon, sur
+# processeur, et le fichier reste celui du dépôt, vide.
+CARTE=""
+if command -v vulkaninfo >/dev/null 2>&1; then
+  CARTE=$(vulkaninfo --summary 2>/dev/null | grep -E '^[[:space:]]*deviceName'     | grep -viE 'llvmpipe|lavapipe|swiftshader' | head -n 1 | sed 's/^[^=]*=[[:space:]]*//')
+fi
+if [ -n "$CARTE" ]; then
+  {
+    printf '# Écrit par l'"'"'installeur : cette machine a une carte graphique utilisable par Vulkan (ADR 0037) :
+'
+    printf '# %s
+' "$CARTE"
+    printf '{ ... }: { prophet.localEngine.gpu.enable = true; }
+'
+  } > "$MACHINE/acceleration.nix"
+  vert "✓ carte graphique : $CARTE — les modèles locaux tourneront dessus (Vulkan)"
+else
+  info "aucune carte graphique utilisable par Vulkan : les modèles locaux tourneront sur processeur"
+fi
+
 if [ "$AMORCAGE" = "bios" ]; then
   # GRUB s'installe sur le disque, désigné par un chemin qui ne change pas d'un démarrage à
   # l'autre : les liens de /dev/disk/by-id (ata-…, nvme-…, wwn-…). Un disque en boucle n'en a

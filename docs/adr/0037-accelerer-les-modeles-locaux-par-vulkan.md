@@ -35,9 +35,11 @@ qu'elle compile toujours ; aucun coureur n'a de carte, elle n'y est pas exercée
 
 ## Conséquences
 
-- Une machine à carte graphique active l'option dans sa configuration ; l'installeur pourra le
-  faire lui-même quand il saura reconnaître un périphérique Vulkan utilisable, et cela reste à
-  faire.
+- L'installeur active l'option lui-même : si `vulkaninfo`, sur le support d'amorçage muni des
+  pilotes Vulkan de Mesa, voit un périphérique qui n'est pas le rastériseur logiciel, il écrit
+  `image/machine/acceleration.nix` (troisième fichier propre à la machine, après ceux de
+  l'ADR 0032) ; sinon le fichier reste vide et les modèles tournent sur processeur. Une
+  machine peut aussi poser l'option à la main.
 - L'essai réel est marqué `needs_gpu` : vitesse, mémoire vidéo occupée et chute sur processeur
   quand la carte manque sont à mesurer sur du matériel, pas en machine virtuelle.
 - Le test du moteur local en VM reste sur processeur ; la variante Vulkan n'est vérifiée que
