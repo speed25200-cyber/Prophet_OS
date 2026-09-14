@@ -1417,7 +1417,11 @@ sans carte, rien ne change.
 entièrement vertes, ChatGPT compris — une première.** `check`, surface, isolation, moteur
 (variante Vulkan construite), parole, mission locale au modèle réel avec le contexte web,
 ChatGPT sous NixOS, sept services, installeur, ISO avec Kdenlive et darktable, démarrage,
-système installé avec et sans UEFI. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
+système installé avec et sans UEFI. Puis `b2267a2` (l'installeur sonde la carte, l'ISO porte
+Mesa) : vert aussi, après une reprise de `check` — le test du navigateur piloté de `mcp-system`
+avait trébuché une fois sur « le navigateur n'a pas répondu à Page.navigate en 15 s », deux
+Chromium lancés à la fois sur le coureur ; le délai d'une commande au navigateur passe à 45 s,
+sous la minute qu'accorde `prophet task call`. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
 que Fontconfig reproche.
 Le rouge de ChatGPT est lu : Fontconfig dit « Cannot load default config file: File not
 found: /etc/fonts/fonts.conf » depuis un renderer de Chromium, dans le bac à sable de
