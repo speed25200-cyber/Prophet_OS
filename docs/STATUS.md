@@ -1427,7 +1427,8 @@ capd a interrompu la mission — le moteur sert ses réglages de conversation (t
 et un modèle de 1,7 milliard de paramètres tiré ainsi choisit parfois le mauvais outil. Les
 tours de mission passent à 0,2 (`providers::local::MISSION_TEMPERATURE`) ; la conversation de
 l'atelier garde les réglages du moteur. L'interruption sur refus reste : un agent qui sort de
-ses droits s'arrête. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
+ses droits s'arrête. Verdict de `f2d91fc` (14 septembre 10:11 UTC) : **les deux
+chaînes entièrement vertes**, mission web comprise. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
 que Fontconfig reproche.
 Le rouge de ChatGPT est lu : Fontconfig dit « Cannot load default config file: File not
 found: /etc/fonts/fonts.conf » depuis un renderer de Chromium, dans le bac à sable de
