@@ -688,6 +688,14 @@ async fn annuler_une_mission_menee_par_un_client_le_tue_sur_le_champ() {
         .call("task.start", json!({"id":"lente"}))
         .await
         .unwrap();
+    // Dès le lancement, la mission est en main : elle ne se relance pas, elle s'annule.
+    let info = chain
+        .client
+        .call("task.inspect", json!({"id":"lente"}))
+        .await
+        .unwrap();
+    assert_eq!(info["can_start"], false, "{info}");
+    assert_eq!(info["can_cancel"], true, "{info}");
     // Le client rejoint la mission (elle passe en cours), puis s'attarde.
     let mut rejointe = false;
     for _ in 0..100 {

@@ -582,7 +582,9 @@ impl Runtime {
             None
         };
         Ok(Inspection {
-            can_start: task.state == State::Planned && start_reason.is_none(),
+            // Une mission déjà en main (un client lancé qui ne l'a pas encore rejointe) ne se
+            // relance pas.
+            can_start: task.state == State::Planned && start_reason.is_none() && !has_worker,
             can_cancel: !task.state.is_terminal()
                 && (has_worker || matches!(task.state, State::Pending | State::Planned)),
             task,

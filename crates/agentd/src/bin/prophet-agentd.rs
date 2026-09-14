@@ -377,13 +377,14 @@ impl Handler for Agents {
 
             "task.inspect" => {
                 let id = commun::texte(&params, "id")?;
-                let has_worker = self
-                    .jobs
-                    .lock()
-                    .map_err(|_| {
+                // Un travailleur du service, ou un client officiel lancé pour la mission et pas
+                // encore attaché : dans les deux cas, elle est en main.
+                let has_worker = {
+                    let jobs = self.jobs.lock().map_err(|_| {
                         Error::new(ErrorCode::InternalError, "travailleurs indisponibles")
-                    })?
-                    .contains_key(&id);
+                    })?;
+                    jobs.contains_key(&id) || jobs.contains_key(&cle_de_pilote(&id))
+                };
                 let (inspection, owner, home) = {
                     let runtime = self.runtime.lock().await;
                     let inspection = runtime
