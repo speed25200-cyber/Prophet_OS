@@ -1358,7 +1358,11 @@ retirer), et un `timeout` côté invité dans le sous-test. Verdict (`14cffce`) 
 arrêt de Chromium au journal, mais le sous-test reste muet jusqu'à la limite — et le journal
 montre qu'il n'atteint jamais la mission web : il s'arrête au témoin HTTP lancé en arrière-plan
 du shell du pilote de test (`(… &)`), qui garde le canal du pilote ouvert. Le témoin devient
-une unité transitoire (`systemd-run --unit=temoin`), lue par `journalctl`. À confirmer par la CI.
+une unité transitoire (`systemd-run --unit=temoin`), lue par `journalctl`. Verdict (`eefdef4`,
+14 septembre 02:38 UTC) : **vert, pour la première fois** — la mission réelle (Qwen3-1.7B en
+routeur, 24 s), puis le contexte web : navigateur `Chrome/152.0.7977.82` prêt sous l'unité
+réelle, la mission ouvre `http://127.0.0.1:8099/`, relit le titre « Témoin Prophet », le témoin
+voit `GET /` (52 s), et l'arrêt du moteur est effectif. Ce travail ne bloque plus.
 
 Le parcours du système installé (UEFI) échouait, une fois le verrouillage passé, sur un
 fichier créé par l'humain dans Documents/Prophet que le service ne lisait pas. Les
