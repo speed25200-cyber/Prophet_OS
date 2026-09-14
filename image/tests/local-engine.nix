@@ -126,6 +126,10 @@ in pkgs.testers.runNixOSTest {
         machine.succeed("test ! -d /home/prophet")
         machine.succeed("systemctl restart prophet-agentd")
         machine.wait_for_unit("prophet-agentd.service")
+        # « actif » précède « écoute » de quelques millisecondes : le service reprend ses tâches
+        # avant d'ouvrir son socket, et une lecture lancée aussitôt se heurtait à « Connection
+        # refused » (une exécution sur cinq). On attend qu'il réponde.
+        machine.wait_until_succeeds("runuser -u pilot -- prophet task ls", timeout=30)
         persisted = json.loads(machine.succeed(f"runuser -u pilot -- python3 /etc/test-mission.py {ident}"))
         assert persisted == {key:proof[key] for key in ['result','review']}, persisted
         machine.succeed(f"python3 /etc/test-mission.py deny {ident}")

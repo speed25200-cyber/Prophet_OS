@@ -1391,7 +1391,12 @@ chacun leur part. Verdict (`59224e7`) : **le parcours du bureau passe entièreme
 système installé — champ trouvé dans l'arbre d'accessibilité, « bonjour » écrit, enregistré
 par le menu, thunar refusé par capd, séance close. Le sous-test suivant, déconnexion annulée,
 comparait alors les fenêtres au relevé pris au verrouillage, avant l'ouverture de l'éditeur ;
-il compare désormais à l'instant. À confirmer par la CI.
+il compare désormais à l'instant. Verdict (`4a8fb44`, 14 septembre 06:08 UTC) : **le parcours
+du système installé (UEFI) est vert**, verrouillage, bureau piloté par l'agent, déconnexion
+annulée, déconnexion réelle et reconnexion compris. Ce travail ne bloque plus. La même
+exécution a vu « Mission locale » trébucher une fois sur cinq dans son scénario : le service
+redémarré est « actif » quelques millisecondes avant d'écouter, et la lecture lancée aussitôt
+recevait « Connection refused » ; le scénario attend désormais que `prophet task ls` réponde.
 
 Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le
 dernier mot : le job `isolation` de l'intégration continue installe gVisor, Firecracker et les
