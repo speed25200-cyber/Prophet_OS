@@ -111,7 +111,8 @@ noyau lui a lié (Vulkan ou rendu logiciel), interfaces réseau filaires et Wi-F
 et leur état, carte son et présence d'une entrée micro, Secure Boot, TPM. Une ligne rouge est un
 manque : c'est le moment de renoncer, tant que Windows est encore là, si l'écran, le réseau ou le
 micro ne sont pas reconnus. Le système installé a les mêmes pilotes que la clé et verra la même
-chose ; ce relevé est gardé avec la machine (`image/machine/inventaire.txt` dans sa source).
+chose ; ce relevé est gardé avec la machine (`image/machine/inventaire.txt` dans sa source) et
+`prophet status` le relit, rubrique « Machine, vue par l'installeur ».
 Puis il vous montre ce qu'il va effacer, nomme les systèmes d'exploitation qu'il détecte, et
 **vous demande de recopier le nom du disque**. Rien n'est écrit avant cette confirmation. Il
 demande ensuite deux choses, chacune deux fois : la **phrase de passe du chiffrement**, puis le

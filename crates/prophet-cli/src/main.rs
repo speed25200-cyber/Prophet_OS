@@ -347,6 +347,7 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
                     }),
             );
             out.push_str(&status_parole_et_pilotes(options.as_ref()));
+            out.push_str(&status_machine(&chemin_de_l_inventaire()));
             Ok(out)
         }
         Command::Freeze => {
@@ -2164,6 +2165,39 @@ fn options_du_service(socket: &std::path::Path) -> Option<agentd::preparation::O
 /// Les lignes de `prophet status` sur ce que l'humain peut dire et entendre, et sur les clients
 /// officiels que le lanceur de session sait lancer (ADR 0035, 0036). Rien n'est inventé : un
 /// service muet donne « inconnu », une chaîne absente le dit.
+/// Le relevé que l'installeur a fait de la machine avant d'effacer le disque, gardé avec la
+/// source posée sur elle ; `PROPHET_INVENTAIRE` le déplace (essais, machine non installée par
+/// l'installeur).
+fn chemin_de_l_inventaire() -> std::path::PathBuf {
+    std::env::var_os("PROPHET_INVENTAIRE").map_or_else(
+        || std::path::PathBuf::from("/etc/prophet/source/image/machine/inventaire.txt"),
+        std::path::PathBuf::from,
+    )
+}
+
+/// Ce que l'installeur a vu de la machine : processeur, mémoire, KVM, carte graphique, réseau,
+/// son et micro, Secure Boot, TPM. Une ligne que l'installeur a marquée « ! » est un manque, et
+/// se lit comme tel ; sans relevé, la commande le dit au lieu de deviner.
+fn status_machine(inventaire: &std::path::Path) -> String {
+    let mut out = String::from("\n  Machine, vue par l'installeur\n");
+    match std::fs::read_to_string(inventaire) {
+        Ok(texte) if !texte.trim().is_empty() => {
+            for ligne in texte.lines() {
+                let ligne = ligne.trim_end();
+                if let Some(manque) = ligne.strip_prefix('!') {
+                    out.push_str(&format!("    ✗ {}\n", manque.trim()));
+                } else if !ligne.trim().is_empty() {
+                    out.push_str(&format!("    · {}\n", ligne.trim()));
+                }
+            }
+        }
+        _ => out.push_str(
+            "    — aucun relevé : cette machine n'a pas été installée par l'installeur de Prophet OS\n",
+        ),
+    }
+    out
+}
+
 fn status_parole_et_pilotes(options: Option<&agentd::preparation::Options>) -> String {
     let mut out = String::from("\n  Parole\n");
     match voice::Tools::from_env() {
@@ -2223,6 +2257,33 @@ fn taches_en_cours(socket: &std::path::Path) -> Result<Vec<agentd::Task>, String
             .map_err(|e| e.message.clone())?;
         serde_json::from_value(brut).map_err(|e| format!("réponse illisible : {e}"))
     })
+}
+
+#[cfg(test)]
+mod machine {
+    //! Le relevé de l'installeur, relu par `prophet status`.
+
+    #[test]
+    fn le_releve_de_l_installeur_se_relit_avec_ses_manques() {
+        let dir = tempfile::tempdir().unwrap();
+        let releve = dir.path().join("inventaire.txt");
+        std::fs::write(
+            &releve,
+            "  processeur : 8 cœurs, AMD Ryzen 5\n! son : aucune carte détectée — ni voix ni parole sur cette machine\n  TPM : présent\n",
+        )
+        .unwrap();
+        let rendu = super::status_machine(&releve);
+        assert!(rendu.contains("Machine, vue par l'installeur"), "{rendu}");
+        assert!(
+            rendu.contains("· processeur : 8 cœurs, AMD Ryzen 5"),
+            "{rendu}"
+        );
+        assert!(rendu.contains("✗ son : aucune carte détectée"), "{rendu}");
+        assert!(rendu.contains("· TPM : présent"), "{rendu}");
+
+        let rendu = super::status_machine(&dir.path().join("absent.txt"));
+        assert!(rendu.contains("aucun relevé"), "{rendu}");
+    }
 }
 
 #[cfg(test)]
