@@ -1421,6 +1421,29 @@ contraire pendant des heures, sur la foi d'un unique 404, et demandé trois fois
 modification qui n'était pas nécessaire. L'essai a rendu `204 No Content`. Le serveur n'est plus
 inatteint : le run `34703605599` y a tourné, et le secret `VPS_PASSWORD` est posé.
 
+### Fin de session du 14 septembre 2026, soir
+
+**Fini.** Le motif du modèle joint à une demande d'approbation (`c160cee`, ADR 0041) ; le
+lanceur du bureau ouvre les outils que l'atelier logiciel a produits et que l'humain a publiés
+(`907ef27`, ADR 0038 complément ; test du bureau corrigé dans `580a929`) ; la voix ouvre une
+application ou un outil (`cc5d07f`, ADR 0036) ; l'installeur relève la machine avant
+d'effacer le disque et `prophet status` relit ce relevé (`aa35d8a`, `28863a7`) ; le
+sous-test sandbox des sept services vit dans l'état du service (`ffd88d2`) ; le guide
+d'installation dit ce qui est vrai (`97c5492`). CI verte des deux côtés sur `c160cee` ;
+`d6cd159` verte sauf le test Outils (corrigé) ; `580a929` en cours au moment d'écrire.
+
+**Bloqué.** Rien n'a jamais démarré sur un vrai PC (écran, réseau, micro, micrologiciel) ;
+les vrais Claude Code et Codex n'ont jamais tourné dans une mission avec un compte ; le
+client n'est pas confiné (ADR 0026). La machine de développement a rempli son disque en
+cours de session (fichier d'échange de Windows pendant les builds WSL, disque virtuel de
+125 Go) : deux fichiers tronqués ont été restaurés depuis git, les builds tournent avec deux
+travaux et un garde-fou, et le disque virtuel attend un compactage administrateur.
+
+**Pour la session suivante.** Lire la CI de `580a929` et suivants ; installer sur une machine
+sacrifiable ou une VM chez l'humain et lire le relevé de l'installeur ; connecter un vrai
+client et jouer `needs_codex_login` ; confiner le client ; lancer les outils publiés sous
+sandboxd quand le service saura relayer un terminal.
+
 ## Blocages
 
 Le travail « Mission locale sous NixOS (modèle réel) » n'a jamais rendu de verdict depuis
