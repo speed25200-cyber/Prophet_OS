@@ -80,7 +80,9 @@ vert sept fois de suite avant. Le travail rejoue désormais une fois après un t
 trace du premier essai conservée. CI de `239753b` (clients principaux, espace partagé, client
 nommé, `pilot.stop`) : **les deux chaînes entièrement vertes** (14 sept. 12:40 UTC), ISO UEFI
 comprise. CI de `0d3fa49` (« Confiées », mission en main, second essai UEFI) : verte des deux côtés
-(13:20 UTC). CI de `ead38a8` (paliers de modèles) : verte des deux côtés (14:05 UTC).
+(13:20 UTC). CI de `ead38a8` (paliers de modèles) : verte des deux côtés (14:05 UTC). CI de `478736a` (atelier
+logiciel de bout en bout — l'hôte de la CI a joué l'essai du client qui écrit un outil et
+l'exécute en microVM —, disque de travail corrigé) : verte des deux côtés (15:06 UTC).
 
 ## Ce qui n'est pas prouvé
 

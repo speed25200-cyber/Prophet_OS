@@ -344,7 +344,10 @@ services » offrait cette fois la virtualisation imbriquée, le sous-test « san
 isoler » a donc pris le niveau 2 pour de vrai, et l'image ext4 de l'espace de travail — `/tmp`
 entier, avec les partages du pilote de test — a manqué d'inodes (« Could not allocate »). Le
 disque compte désormais ses entrées et demande autant d'inodes qu'il faut (rejoué sous KVM avec
-six mille petits fichiers), et le sous-test image un répertoire à lui. Le rapport
+six mille petits fichiers), et le sous-test image un répertoire à lui. La CI de `478736a`
+(atelier logiciel de bout en bout, disque corrigé) est **entièrement verte des deux côtés**
+(15:06 UTC) : l'hôte de l'isolation a joué l'essai du client qui écrit un outil et l'exécute en
+microVM, les sept services ont repris leur vert. Le rapport
 du jour :
 [clients principaux](reports/clients-principaux-2026-09-14.md).
 
