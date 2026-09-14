@@ -130,8 +130,11 @@ fn commande(programme: &str, arguments: &[&str]) -> Result<(), String> {
     }
 }
 
-fn taille_du(dossier: &Path) -> u64 {
+/// Les octets des fichiers d'un répertoire, et le nombre de ses entrées (fichiers, dossiers,
+/// liens) : le disque doit avoir la place des uns et un inode pour chacune des autres.
+fn taille_du(dossier: &Path) -> (u64, u64) {
     let mut total = 0;
+    let mut entrees_vues = 0;
     let mut pile = vec![dossier.to_path_buf()];
     while let Some(courant) = pile.pop() {
         let Ok(entrees) = std::fs::read_dir(&courant) else {
@@ -141,6 +144,7 @@ fn taille_du(dossier: &Path) -> u64 {
             let Ok(meta) = entree.metadata() else {
                 continue;
             };
+            entrees_vues += 1;
             if meta.is_dir() {
                 pile.push(entree.path());
             } else {
@@ -148,7 +152,7 @@ fn taille_du(dossier: &Path) -> u64 {
             }
         }
     }
-    total
+    (total, entrees_vues)
 }
 
 /// Construit le disque de travail : une image ext4 du répertoire de travail, puis le script sous
@@ -170,7 +174,7 @@ pub fn disque_de_travail(workdir: &Path, script: &str, destination: &Path) -> Re
     }
     let mkfs = which("mkfs.ext4").ok_or("il manque mkfs.ext4 (e2fsprogs)")?;
     let debugfs = which("debugfs").ok_or("il manque debugfs (e2fsprogs)")?;
-    let contenu = taille_du(workdir);
+    let (contenu, entrees) = taille_du(workdir);
     if contenu > TAILLE_MAX {
         return Err(format!(
             "répertoire de travail de {} Mio : plus de {} Mio, ce n'est pas un espace de travail",
@@ -178,8 +182,12 @@ pub fn disque_de_travail(workdir: &Path, script: &str, destination: &Path) -> Re
             TAILLE_MAX / (1024 * 1024)
         ));
     }
-    let octets = contenu.saturating_mul(2) + MARGE_OCTETS;
+    // Deux fois les octets, un bloc par entrée, et une marge ; et autant d'inodes qu'il faut :
+    // le ratio par défaut de mkfs (un inode par 16 Kio) en manque pour un répertoire de
+    // milliers de petits fichiers — « Could not allocate » à l'image, vu en CI sur /tmp.
+    let octets = contenu.saturating_mul(2) + entrees.saturating_mul(4096) + MARGE_OCTETS;
     let mio = octets.div_ceil(1024 * 1024);
+    let inodes = (entrees.saturating_mul(2) + 256).to_string();
     let fichier = std::fs::File::create(destination).map_err(|e| e.to_string())?;
     fichier
         .set_len(mio * 1024 * 1024)
@@ -187,7 +195,12 @@ pub fn disque_de_travail(workdir: &Path, script: &str, destination: &Path) -> Re
     drop(fichier);
     let dest = destination.display().to_string();
     let src = workdir.display().to_string();
-    commande(&mkfs, &["-q", "-F", "-d", &src, "-L", "travail", &dest])?;
+    commande(
+        &mkfs,
+        &[
+            "-q", "-F", "-N", &inodes, "-d", &src, "-L", "travail", &dest,
+        ],
+    )?;
     let script_hote = destination.with_extension("exec.sh");
     std::fs::write(&script_hote, script).map_err(|e| e.to_string())?;
     let _ = commande(&debugfs, &["-w", &dest, "-R", &format!("mkdir {DOSSIER}")]);

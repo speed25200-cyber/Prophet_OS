@@ -338,7 +338,13 @@ premier essai conservée (`demarrage-plante.log`) ; deux plantages restent un é
 deux côtés**, démarrage UEFI de l'ISO compris (14 septembre, 12:40 UTC) ; celle de `0d3fa49`
 (« Confiées », mission en main, second essai UEFI) l'est aussi (13:20 UTC), et celle de `ead38a8`
 (paliers de modèles : `check` joue le faux Claude Code avec `--model sonnet`, les sept services
-chargent le catalogue à paliers, le système installé démarre) l'est encore (14:05 UTC). Le rapport
+chargent le catalogue à paliers, le système installé démarre) l'est encore (14:05 UTC). Celle de
+`bcc3e51` (docs, essai réel ignoré, script d'hôte) a un rouge instructif : le coureur des « sept
+services » offrait cette fois la virtualisation imbriquée, le sous-test « sandboxd peut réellement
+isoler » a donc pris le niveau 2 pour de vrai, et l'image ext4 de l'espace de travail — `/tmp`
+entier, avec les partages du pilote de test — a manqué d'inodes (« Could not allocate »). Le
+disque compte désormais ses entrées et demande autant d'inodes qu'il faut (rejoué sous KVM avec
+six mille petits fichiers), et le sous-test image un répertoire à lui. Le rapport
 du jour :
 [clients principaux](reports/clients-principaux-2026-09-14.md).
 

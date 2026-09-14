@@ -423,6 +423,13 @@ fn le_niveau_deux_execute_un_programme_et_rapatrie_ses_fichiers() {
     );
     let travail = tempfile::tempdir().unwrap();
     std::fs::write(travail.path().join("entree.txt"), "3 et 4").unwrap();
+    // Un espace de travail de milliers de petits fichiers : le disque doit avoir un inode pour
+    // chacun (le ratio par défaut de mkfs n'en donnait qu'un par 16 Kio, et l'image échouait).
+    let plein = travail.path().join("plein");
+    std::fs::create_dir(&plein).unwrap();
+    for i in 0..6000 {
+        std::fs::write(plein.join(format!("f{i}")), "x").unwrap();
+    }
     let manager = Manager::new(helper().display().to_string());
     let spec = SandboxSpec::new(2, "/usr/bin/python3", travail.path().display().to_string())
         .args([

@@ -17,7 +17,7 @@ let
   # tâche ; ce petit client fait l'appel que `agentd` attend, et rien de plus.
   essai = pkgs.writeShellScriptBin "prophet-essai-tache" ''
     exec ${pkgs.python3}/bin/python3 - "$@" <<'PYTHON'
-    import json, socket, sys
+    import json, os, socket, sys
 
     def appeler(chemin, methode, params):
         s = socket.socket(socket.AF_UNIX)
@@ -49,14 +49,17 @@ let
         if niveau < 0:
             raise SystemExit(0)
         # On demande le niveau que la machine dit tenir, et rien de plus : demander plus haut
-        # testerait le refus, qui l'est déjà ailleurs.
+        # testerait le refus, qui l'est déjà ailleurs. L'espace de travail est un répertoire à
+        # lui : au niveau 2, il part dans un disque pour la microVM — pas /tmp entier, avec les
+        # partages du pilote de test.
+        os.makedirs("/tmp/essai-sandbox", exist_ok=True)
         lancee = appeler("/run/prophet/sandboxd.sock", "sandbox.start", {
             "task": "task:essai-sandbox",
             "spec": {
                 "level": niveau,
                 "program": "/run/current-system/sw/bin/true",
                 "args": [],
-                "workdir": "/tmp",
+                "workdir": "/tmp/essai-sandbox",
                 "env": [],
                 "rules": {"paths": [], "egress": [], "exec": [], "min_sandbox_level": 0},
                 "read_only_mounts": ["/nix/store", "/run/current-system/sw"],
