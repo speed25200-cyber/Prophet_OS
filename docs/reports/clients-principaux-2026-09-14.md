@@ -60,7 +60,9 @@ ISO, sept services, système installé et ses deux démarrages — sauf « Voir 
 sous UEFI : le noyau de l'invité QEMU s'est planté au chargement des modules avant tout
 terminal, le même support ayant démarré sous SeaBIOS dans le même travail ; ce démarrage était
 vert sept fois de suite avant. Le travail rejoue désormais une fois après un tel plantage, la
-trace du premier essai conservée. CI de `239753b` : à lire.
+trace du premier essai conservée. CI de `239753b` (clients principaux, espace partagé, client
+nommé, `pilot.stop`) : **les deux chaînes entièrement vertes** (14 sept. 12:40 UTC), ISO UEFI
+comprise.
 
 ## Ce qui n'est pas prouvé
 
@@ -74,7 +76,8 @@ trace du premier essai conservée. CI de `239753b` : à lire.
 
 ## Pour la session suivante
 
-1. Lire la CI de `239753b` ; rejouer l'ISO si l'hôte se plante encore.
+1. Lire la CI de `d81da7c` et suivants (surface : « Confiées », mission en main ; CI : second
+   essai UEFI).
 2. Une machine avec Claude Code ou Codex connecté : `prophet task prepare --model codex`, et
    regarder le vrai client rejoindre la mission.
 3. Confiner le client (ADR 0026) ; montrer dans la surface ce que chaque client a rapporté.
