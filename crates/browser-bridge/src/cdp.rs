@@ -32,8 +32,11 @@ pub enum CdpError {
     Unexpected(String),
 }
 
-/// Délai maximal d'une commande adressée au navigateur.
-pub const CALL_TIMEOUT_SECONDS: u64 = 15;
+/// Délai maximal d'une commande adressée au navigateur. Quinze secondes ne suffisaient pas à
+/// la première navigation d'un Chromium fraîchement lancé sur un coureur d'intégration continue
+/// chargé (deux navigateurs à la fois, 14 septembre 2026) ; quarante-cinq laissent la commande
+/// sous le délai qu'accorde `prophet task call` à un outil, tout en bornant un navigateur muet.
+pub const CALL_TIMEOUT_SECONDS: u64 = 45;
 
 /// Un navigateur piloté.
 #[derive(Debug)]
