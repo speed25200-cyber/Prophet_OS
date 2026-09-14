@@ -1411,7 +1411,13 @@ chemin prouvé. La CI de `1c30ab6` construit la variante Vulkan avec le correcti
 pour le travail « Moteur local », grammaire comprise). L'installeur reconnaît lui-même la
 carte : un périphérique Vulkan qui n'est pas le rastériseur logiciel, vu par `vulkaninfo` sur
 le support d'amorçage muni des pilotes de Mesa, et il écrit `image/machine/acceleration.nix` ;
-sans carte, rien ne change. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
+sans carte, rien ne change.
+
+**Verdict de `4cb676a`, 14 septembre 08:07 UTC : les deux chaînes d'intégration continue sont
+entièrement vertes, ChatGPT compris — une première.** `check`, surface, isolation, moteur
+(variante Vulkan construite), parole, mission locale au modèle réel avec le contexte web,
+ChatGPT sous NixOS, sept services, installeur, ISO avec Kdenlive et darktable, démarrage,
+système installé avec et sans UEFI. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
 que Fontconfig reproche.
 Le rouge de ChatGPT est lu : Fontconfig dit « Cannot load default config file: File not
 found: /etc/fonts/fonts.conf » depuis un renderer de Chromium, dans le bac à sable de
