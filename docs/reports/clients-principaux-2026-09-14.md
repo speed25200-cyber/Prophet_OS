@@ -67,7 +67,8 @@ terminal, le même support ayant démarré sous SeaBIOS dans le même travail ; 
 vert sept fois de suite avant. Le travail rejoue désormais une fois après un tel plantage, la
 trace du premier essai conservée. CI de `239753b` (clients principaux, espace partagé, client
 nommé, `pilot.stop`) : **les deux chaînes entièrement vertes** (14 sept. 12:40 UTC), ISO UEFI
-comprise.
+comprise. CI de `0d3fa49` (« Confiées », mission en main, second essai UEFI) : verte des deux côtés
+(13:20 UTC).
 
 ## Ce qui n'est pas prouvé
 

@@ -335,7 +335,8 @@ sept fois de suite avant : une panne de l'hôte d'intégration, pas de l'image. 
 désormais une fois le démarrage UEFI après un tel plantage du noyau de l'invité, la trace du
 premier essai conservée (`demarrage-plante.log`) ; deux plantages restent un échec. La CI de
 `239753b` (espace partagé du relais, client nommé, `pilot.stop`) est **entièrement verte des
-deux côtés**, démarrage UEFI de l'ISO compris (14 septembre, 12:40 UTC). Le rapport du jour :
+deux côtés**, démarrage UEFI de l'ISO compris (14 septembre, 12:40 UTC) ; celle de `0d3fa49`
+(« Confiées », mission en main, second essai UEFI) l'est aussi (13:20 UTC). Le rapport du jour :
 [clients principaux](reports/clients-principaux-2026-09-14.md).
 
 La CI de `ddf6e89` (relais et lanceur de pilotes) réussit `check`, l'isolation, le protocole du
