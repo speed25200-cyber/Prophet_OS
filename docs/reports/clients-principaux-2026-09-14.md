@@ -72,6 +72,9 @@ des scripts de remplacement lancés par le vrai lanceur, sur le même chemin que
 | Niveau 2 depuis un répertoire absent de la racine de l'invité (`/root`) : 4 s la première fois, 1,8 s ensuite | `crates/sandboxd/tests/enforcement.rs` (`needs_kvm`) |
 | Catalogue de l'image (`proc.kill`) chargé | `crates/agentd/tests/preparation.rs` ; job « sept services » |
 | Un client écrit `somme.py`, l'exécute en microVM (niveau 2, vrai sandboxd), « somme 7 » et `resultat.txt` reviennent — 2,9 s | `crates/agentd/tests/pilot.rs` (`needs_kvm`) |
+| Le modèle joint son motif à une demande d'approbation (`approval.wait {reason}`), borné, lisible par l'état, montré par la surface et la CLI | `crates/capd/src/approvals.rs`, `crates/mcp-system/tests/approbations.rs`, `crates/surface/src/depuis.rs`, `crates/prophet-cli/tests/task_service.rs` |
+| Un outil déposé dans `~/Documents/Prophet/outils` est listé par le lanceur (« Outils »), un inconnu refusé, l'outil ouvert dans un terminal dans son dossier et sa sortie lue à l'écran | `image/tests/desktop-session.nix` (CI) |
+| « Ouvre le navigateur », « ouvre l'outil bonjour », « lance l'outil somme » deviennent des arguments du lanceur ; « ouvre » seul ouvre le lanceur ; une phrase longue reste une intention | `crates/voice/src/lib.rs`, `crates/surface/src/preparation.rs` |
 
 CI de `a5ac295` : tout vert — `check`, isolation sur l'hôte (les trois essais `needs_kvm` avec
 l'invité à surcouche), parole, surface, ChatGPT, moteur, mission locale réelle, installeur,
@@ -101,8 +104,13 @@ sandboxd ne voit pas (`PrivateTmp`) — corrigé dans `ffd88d2` (sept services v
 
 ## Pour la session suivante
 
-1. Lire la CI de `d81da7c` et suivants (surface : « Confiées », mission en main ; CI : second
-   essai UEFI).
+1. Lire la CI de `907ef27` (le test du bureau ouvre un outil publié et lit sa sortie à
+   l'écran) et de `cc5d07f` (la voix ouvre).
 2. Une machine avec Claude Code ou Codex connecté : `prophet task prepare --model codex`, et
-   regarder le vrai client rejoindre la mission.
-3. Confiner le client (ADR 0026) ; montrer dans la surface ce que chaque client a rapporté.
+   regarder le vrai client rejoindre la mission ; puis l'atelier logiciel de bout en bout avec
+   lui, jusqu'à l'outil ouvert depuis le lanceur.
+3. Confiner le client (ADR 0026) ; lancer les outils publiés sous sandboxd (niveau 1) quand le
+   service saura relayer un terminal.
+4. Sur la machine de développement : compacter le disque de WSL (`diskpart`, administrateur)
+   — le disque système s'est rempli le 14 septembre, deux fichiers ont été tronqués puis
+   restaurés depuis git.
