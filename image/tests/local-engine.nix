@@ -134,7 +134,10 @@ in pkgs.testers.runNixOSTest {
         # navigateur de agentd, donc par le relais, egress et capd, sans autre route.
         machine.succeed("mkdir -p /tmp/temoin")
         machine.succeed("printf '<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><title>Témoin Prophet</title></head><body><h1>Bienvenue</h1></body></html>' > /tmp/temoin/index.html")
-        machine.execute("(cd /tmp/temoin && python3 -m http.server 8099 --bind 127.0.0.1 > /tmp/temoin.log 2>&1 &)")
+        # Le témoin est une unité transitoire, pas un processus en arrière-plan du shell du
+        # pilote de test : lancé avec `&`, il gardait le canal du pilote ouvert et le scénario
+        # attendait là, sans une ligne, jusqu'à sa limite de 90 minutes (trois exécutions).
+        machine.succeed("systemd-run --unit=temoin --working-directory=/tmp/temoin python3 -m http.server 8099 --bind 127.0.0.1")
         machine.wait_for_open_port(8099)
         try:
             # `timeout` côté invité, sous runuser : la limite du pilote de test n'atteint pas un
@@ -142,13 +145,14 @@ in pkgs.testers.runNixOSTest {
             proof = json.loads(machine.succeed("runuser -u pilot -- timeout -k 5 400 python3 /etc/test-mission.py web", timeout=420))
         except Exception:
             print(machine.succeed("journalctl -u prophet-agentd -u prophet-egress -u prophet-local-engine --no-pager -n 150"))
-            print(machine.succeed("cat /tmp/temoin.log || true"))
+            print(machine.succeed("journalctl -u temoin --no-pager || true"))
             raise
         print(json.dumps(proof, ensure_ascii=False, indent=2))
         assert proof["browser"]["ready"] and "Chrome" in proof["browser"]["detail"], proof["browser"]
         assert proof["browsing"] and proof["browsing"]["url"].startswith("http://127.0.0.1:8099"), proof
         assert proof["browsing"]["title"] == "Témoin Prophet", proof["browsing"]
-        machine.succeed("grep -q 'GET / ' /tmp/temoin.log")
+        machine.succeed("journalctl -u temoin --no-pager | grep -q 'GET / '")
+        machine.succeed("systemctl stop temoin")
     with subtest("l'arrêt du moteur est effectif"):
         machine.succeed("systemctl stop prophet-local-engine")
         machine.fail("curl -fsS http://127.0.0.1:8080/health")

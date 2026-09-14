@@ -1351,7 +1351,11 @@ d'agentd avec `SystemCallErrorNumber=EPERM`, il répond EPERM et le zygote meurt
 page ne s'ouvre jamais, et la limite du pilote de test n'atteignait pas un python lancé par
 `runuser`. Correctif dans le commit portant ce paragraphe : `capset` admis pour le service
 d'agentd quand il porte le navigateur (le `CapabilityBoundingSet` vide fait qu'il ne peut que
-retirer), et un `timeout` côté invité dans le sous-test. À confirmer par la CI.
+retirer), et un `timeout` côté invité dans le sous-test. Verdict (`14cffce`) : plus aucun
+arrêt de Chromium au journal, mais le sous-test reste muet jusqu'à la limite — et le journal
+montre qu'il n'atteint jamais la mission web : il s'arrête au témoin HTTP lancé en arrière-plan
+du shell du pilote de test (`(… &)`), qui garde le canal du pilote ouvert. Le témoin devient
+une unité transitoire (`systemd-run --unit=temoin`), lue par `journalctl`. À confirmer par la CI.
 
 Le parcours du système installé (UEFI) échouait, une fois le verrouillage passé, sur un
 fichier créé par l'humain dans Documents/Prophet que le service ne lisait pas. Les
