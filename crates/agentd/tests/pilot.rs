@@ -60,7 +60,7 @@ fn faux_codex(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathBu
              [ -n \"$CODEX_HOME\" ] || exit 4\n\
              [ -f \"$PROPHET_MCP_CONFIG\" ] || exit 5\n\
              \"$P\" task attach \"$PROPHET_TASK\" --client codex >/dev/null\n\
-             case \"$1\" in *attends*) sleep 30 & wait ;; esac\n\
+             case \"$1\" in *attends*) sleep 30 & echo $! > \"$HOME/attente.pid\"; wait ;; esac\n\
              case \"$1\" in *outil*)\n\
                \"$P\" task call \"$PROPHET_TASK\" fs.write '{{\"path\":\"~/docs/somme.py\",\"content\":\"print(\\\"somme\\\", 3 + 4)\\nopen(\\\"docs/resultat.txt\\\", \\\"w\\\").write(\\\"fait\\\")\\n\"}}' >/dev/null\n\
                sortie=$(\"$P\" task call \"$PROPHET_TASK\" proc.exec '{{\"program\":\"python3\",\"args\":[\"docs/somme.py\"]}}' --json)\n\
@@ -815,22 +815,32 @@ async fn annuler_une_mission_menee_par_un_client_le_tue_sur_le_champ() {
     assert_eq!(reponse["cancel_requested"], "lente", "{reponse}");
     let info = chain.attendre("lente").await;
     assert_eq!(info["task"]["state"], "cancelled", "{info}");
-    // Le lanceur a tué le client et son groupe de processus : l'attente qu'il avait lancée
-    // n'existe plus, bien avant ses trente secondes.
+    // Le lanceur a tué le client et son groupe de processus : l'attente qu'il avait lancée —
+    // dont il a écrit le PID — n'existe plus, bien avant ses trente secondes. (Un `pgrep` sur
+    // toute la machine confondrait un autre `sleep 30` du coureur avec le sien.)
+    let pid: u32 = std::fs::read_to_string(chain.dir.path().join("home/attente.pid"))
+        .expect("le faux Codex a écrit le PID de son attente")
+        .trim()
+        .parse()
+        .unwrap();
     let mut tue = false;
     for _ in 0..50 {
-        let restants = std::process::Command::new("pgrep")
-            .args(["-f", "^sleep 30$"])
-            .output()
-            .map(|o| o.stdout.is_empty())
-            .unwrap_or(true);
-        if restants {
+        let etat = std::fs::read_to_string(format!("/proc/{pid}/status")).ok();
+        let vivant = etat.is_some_and(|s| {
+            s.lines()
+                .find(|l| l.starts_with("State:"))
+                .is_some_and(|l| !l.contains('Z'))
+        });
+        if !vivant {
             tue = true;
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    assert!(tue, "l'attente du faux Codex a survécu à l'annulation");
+    assert!(
+        tue,
+        "l'attente du faux Codex ({pid}) a survécu à l'annulation"
+    );
     // Le client tué, sa place est libre bien avant ses trente secondes d'attente : une autre
     // mission sur le même client se lance et finit.
     chain

@@ -347,7 +347,11 @@ disque compte désormais ses entrées et demande autant d'inodes qu'il faut (rej
 six mille petits fichiers), et le sous-test image un répertoire à lui. La CI de `478736a`
 (atelier logiciel de bout en bout, disque corrigé) est **entièrement verte des deux côtés**
 (15:06 UTC) : l'hôte de l'isolation a joué l'essai du client qui écrit un outil et l'exécute en
-microVM, les sept services ont repris leur vert. Le rapport
+microVM, les sept services ont repris leur vert. Celle de `345b1d1` (approbations, CLI des
+décisions) a un rouge à `check` qui est le mien : le test d'annulation vérifiait la mort de
+l'attente du faux client par un `pgrep` sur toute la machine, et le coureur avait un autre
+`sleep 30` ; le faux client écrit désormais le PID de son attente, que le test regarde seul.
+Le rapport
 du jour :
 [clients principaux](reports/clients-principaux-2026-09-14.md).
 
@@ -1597,7 +1601,8 @@ tranche au moment où cela arrive. Le workflow reste donc à déclenchement manu
   pour toute la tâche selon la portée — ou reste refusé. capd garde une décision une heure
   (`approval.status`) et consomme une décision « une fois » à la demande identique suivante.
   Prouvé avec un vrai broker et un outil irréversible et externe ; la CLI tranche aussi
-  (`prophet cap approvals` / `approve` / `deny` / `rules`). Reste : un résumé enrichi par le
+  (`prophet cap approvals` / `approve` / `deny` / `rules`), la surface accorde aussi pour toute
+  la mission, et la voix tranche (« accorde », « refuse »). Reste : un résumé enrichi par le
   modèle.
 - **Arrêter un client lancé — fait.** `task.cancel` d'une mission menée par un client conclut
   sa séance puis demande `pilot.stop {task}` au lanceur, qui tue le client et tout son groupe
