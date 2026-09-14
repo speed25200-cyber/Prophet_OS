@@ -1409,6 +1409,13 @@ Le 14 septembre encore, l'accélération graphique des modèles locaux
 Faux par défaut : jamais mesuré sur une vraie carte (`needs_gpu`), le processeur reste le
 chemin prouvé. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
 que Fontconfig reproche.
+Le rouge de ChatGPT est lu : Fontconfig dit « Cannot load default config file: File not
+found: /etc/fonts/fonts.conf » depuis un renderer de Chromium, dans le bac à sable de
+l'application, qui ne voit aucun fichier par construction ; le fichier existe et le runtime le
+donne à lire, et le texte est rendu (« Sign in to ChatGPT » lu à l'écran). Le contrôle tolère
+désormais cette seule ligne et refuse toute autre plainte de Fontconfig ; ce n'est plus une
+condition de livraison, c'est une limite connue du bac à sable d'Electron.
+
 La suite de l'humain gagne le montage vidéo (Kdenlive) et le développement photo
 (darktable), dans le lanceur (« Montage vidéo », « Photo ») et dans le contexte « bureau » que
 l'agent pilote par l'accessibilité ; leur ouverture réelle et leur pilotage par l'agent restent
