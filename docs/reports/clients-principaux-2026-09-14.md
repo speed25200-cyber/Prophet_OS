@@ -77,6 +77,7 @@ des scripts de remplacement lancés par le vrai lanceur, sur le même chemin que
 | « Ouvre le navigateur », « ouvre l'outil bonjour », « lance l'outil somme » deviennent des arguments du lanceur ; « ouvre » seul ouvre le lanceur ; une phrase longue reste une intention | `crates/voice/src/lib.rs`, `crates/surface/src/preparation.rs` |
 | L'installeur relève la machine avant d'effacer (processeur, mémoire, KVM, carte graphique et pilote, réseau, son et micro, Secure Boot, TPM), marque les manques, garde le relevé ; le coureur de la CI en a un peu de chaque | `image/installateur/prophet-installer.sh`, travail « Installeur sur disque en boucle » ; joué en WSL |
 | `prophet status` relit le relevé, manques en « ✗ », et dit quand il n'y en a pas | `crates/prophet-cli/src/main.rs` (`machine`) |
+| La page Système de la surface montre le relevé (manque en point d'alerte) ou dit qu'il n'y en a pas ; un relevé se lit avec ses manques et sans ses vides | `crates/surface/src/supervision.rs` (`releve_de_la_machine`) |
 
 CI de `a5ac295` : tout vert — `check`, isolation sur l'hôte (les trois essais `needs_kvm` avec
 l'invité à surcouche), parole, surface, ChatGPT, moteur, mission locale réelle, installeur,
