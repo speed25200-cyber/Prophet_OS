@@ -219,6 +219,9 @@
 
         packages = {
           llama-cpp = pkgs.callPackage ./image/packages/llama-cpp.nix { };
+          # La même chose avec le backend Vulkan (ADR 0037) : construite à chaque poussée par
+          # l'intégration continue, servie par l'image quand `prophet.localEngine.gpu.enable`.
+          llama-cpp-vulkan = pkgs.callPackage ./image/packages/llama-cpp.nix { vulkan = true; };
           # Même paquet et mêmes bibliothèques graphiques dans l'atelier et dans l'image.
           default = pkgs.callPackage ./image/packages/prophet-os.nix { };
         }

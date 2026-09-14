@@ -1,10 +1,13 @@
-# Un moteur CPU local et un premier contexte de mission explicitement partagé.
+# Un moteur local (processeur, ou carte graphique par Vulkan sur demande, ADR 0037) et un
+# premier contexte de mission explicitement partagé.
 { config, lib, pkgs, utils, ... }:
 let
   cfg = config.prophet.localEngine;
   home = config.users.users.${config.prophet.user}.home;
   owner = config.prophet.user;
-  engine = pkgs.callPackage ../packages/llama-cpp.nix { };
+  engine = pkgs.callPackage ../packages/llama-cpp.nix { vulkan = cfg.gpu.enable; };
+  # Couches du modèle placées sur la carte : toutes si l'accélération est demandée, aucune sinon.
+  couches = if cfg.gpu.enable then toString cfg.gpu.layers else "0";
   endpoint = "http://127.0.0.1:${toString cfg.port}/v1";
   navigateur = config.prophet.navigateur != null;
   # Le relais local (ADR 0034) : avec un second poids, le moteur sert deux modèles en mode
@@ -164,6 +167,14 @@ in {
       default = "qwen3-0.6b";
       description = "Identifiant du modèle d'exécution exposé par le moteur.";
     };
+    gpu = {
+      enable = lib.mkEnableOption "l'accélération des modèles locaux par la carte graphique, avec le backend Vulkan de llama.cpp (ADR 0037) ; le moteur est alors servi par la variante Vulkan du paquet et l'unité voit les périphériques DRM. Non mesuré sur une vraie carte : le processeur reste le défaut";
+      layers = lib.mkOption {
+        type = lib.types.ints.between 1 999;
+        default = 999;
+        description = "Couches du modèle placées sur la carte quand l'accélération est active ; 999 les place toutes, une valeur plus basse partage avec le processeur quand la mémoire vidéo manque.";
+      };
+    };
     port = lib.mkOption { type = lib.types.port; default = 8080; description = "Port sur la boucle locale uniquement."; };
     threads = lib.mkOption { type = lib.types.ints.between 1 128; default = 4; description = "Nombre maximal de threads CPU d'inférence."; };
     contextSize = lib.mkOption { type = lib.types.ints.between 4096 131072; default = 4096; description = "Contexte par requête ; sa compatibilité et sa mémoire dépendent du modèle."; };
@@ -225,7 +236,7 @@ in {
       # Les réglages d'un modèle, identiques en mode simple et en mode routeur.
       reglages = [
         "--jinja" "--reasoning" "off" "--ctx-size" (toString cfg.contextSize)
-        "--threads" (toString cfg.threads) "--parallel" "1" "--gpu-layers" "0"
+        "--threads" (toString cfg.threads) "--parallel" "1" "--gpu-layers" couches
         "--temp" "0.7" "--top-p" "0.8" "--top-k" "20" "--min-p" "0"
         "--presence-penalty" "1.5"
       ];
@@ -239,7 +250,7 @@ in {
         ctx-size = ${toString cfg.contextSize}
         threads = ${toString cfg.threads}
         parallel = 1
-        n-gpu-layers = 0
+        n-gpu-layers = ${couches}
         temp = 0.7
         top-p = 0.8
         top-k = 20
@@ -249,7 +260,7 @@ in {
       prereglages = pkgs.writeText "prophet-modeles.ini"
         (section cfg.model cfg.weights + "\n" + section cfg.executeModel cfg.executeWeights);
     in lib.mkIf (cfg.weights != null) {
-      description = "Prophet OS — moteur local CPU";
+      description = "Prophet OS — moteur local ${if cfg.gpu.enable then "sur carte graphique (Vulkan)" else "CPU"}";
       wantedBy = [ "multi-user.target" ];
       after = [ "systemd-tmpfiles-setup.service" ];
       unitConfig.ConditionPathExists = [ (toString cfg.weights) ]
@@ -273,7 +284,9 @@ in {
         ProtectSystem = "strict";
         ProtectHome = true;
         PrivateTmp = true;
-        PrivateDevices = true;
+        # Sans carte, aucun périphérique ; avec, les seuls nœuds DRM, par le contrôle de
+        # périphériques du cgroup, et les groupes qui y donnent accès (ADR 0037).
+        PrivateDevices = !cfg.gpu.enable;
         ProtectKernelTunables = true;
         ProtectKernelModules = true;
         ProtectKernelLogs = true;
@@ -285,6 +298,9 @@ in {
         RestrictAddressFamilies = [ "AF_UNIX" "AF_INET" "AF_INET6" ];
         IPAddressDeny = "any";
         IPAddressAllow = "localhost";
+      } // lib.optionalAttrs cfg.gpu.enable {
+        DeviceAllow = [ "char-drm rw" ];
+        SupplementaryGroups = [ "video" "render" ];
       };
     };
   };

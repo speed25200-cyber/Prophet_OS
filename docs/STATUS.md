@@ -1401,6 +1401,15 @@ Verdict de `75b794f` (14 septembre 06:50 UTC) : **tout est vert sauf ChatGPT** (
 connu) — `check`, surface, isolation, moteur, parole, mission locale au modèle réel, sept
 services, installeur, ISO, démarrage, système installé avec et sans UEFI.
 
+Le 14 septembre encore, l'accélération graphique des modèles locaux
+([ADR 0037](adr/0037-accelerer-les-modeles-locaux-par-vulkan.md)) : une variante
+`llama-cpp-vulkan` du moteur, construite par la CI à chaque poussée, et l'option
+`prophet.localEngine.gpu.enable` qui la fait servir, place le modèle sur la carte
+(`--gpu-layers`, préréglages du routeur compris) et n'ouvre à l'unité que les nœuds DRM.
+Faux par défaut : jamais mesuré sur une vraie carte (`needs_gpu`), le processeur reste le
+chemin prouvé. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
+que Fontconfig reproche.
+
 Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le
 dernier mot : le job `isolation` de l'intégration continue installe gVisor, Firecracker et les
 images d'invité sur un coureur Ubuntu muni de KVM, et y exerce les quatre tests matériels. C'est
