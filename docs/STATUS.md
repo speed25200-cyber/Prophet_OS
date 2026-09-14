@@ -1397,6 +1397,9 @@ annulée, déconnexion réelle et reconnexion compris. Ce travail ne bloque plus
 exécution a vu « Mission locale » trébucher une fois sur cinq dans son scénario : le service
 redémarré est « actif » quelques millisecondes avant d'écouter, et la lecture lancée aussitôt
 recevait « Connection refused » ; le scénario attend désormais que `prophet task ls` réponde.
+Verdict de `75b794f` (14 septembre 06:50 UTC) : **tout est vert sauf ChatGPT** (Fontconfig,
+connu) — `check`, surface, isolation, moteur, parole, mission locale au modèle réel, sept
+services, installeur, ISO, démarrage, système installé avec et sans UEFI.
 
 Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le
 dernier mot : le job `isolation` de l'intégration continue installe gVisor, Firecracker et les
