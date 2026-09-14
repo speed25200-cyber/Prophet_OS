@@ -147,11 +147,27 @@ impl Handler for Agents {
                 // alors lui qui mène la mission, lancé dans la session par le lanceur de
                 // pilotes, et il doit être connecté (ADR 0035).
                 let driver = agentd::preparation::driver_name(&request.model).map(str::to_owned);
+                // Un client garde son palier de modèle (`claude-code@opus`) dans la référence
+                // du plan ; le contexte l'admet s'il admet le client (ADR 0040).
                 let reference = match &driver {
-                    Some(d) => format!("driver:{d}"),
+                    Some(_) => format!(
+                        "driver:{}",
+                        request
+                            .model
+                            .strip_prefix("driver:")
+                            .unwrap_or(&request.model)
+                    ),
                     None => format!("local:{}", request.model),
                 };
-                if !profile.manifest.model.preferred.contains(&reference) {
+                let admis = profile.manifest.model.preferred.contains(&reference)
+                    || driver.as_ref().is_some_and(|d| {
+                        profile
+                            .manifest
+                            .model
+                            .preferred
+                            .contains(&format!("driver:{d}"))
+                    });
+                if !admis {
                     return Err(Error::new(
                         ErrorCode::PolicyDenied,
                         "Modèle non admis par ce profil.",
@@ -1044,9 +1060,11 @@ impl Agents {
             }
             jobs.insert(cle, Arc::new(AtomicBool::new(false)));
         }
+        let (client, palier) = palier_de(&driver);
         let requete = pilotd::RunRequest {
             task: id.clone(),
-            driver: driver.clone(),
+            driver: client.to_owned(),
+            model: palier.map(str::to_owned),
             intent,
             wall_time_s,
         };
@@ -1456,7 +1474,11 @@ fn deleguer(
     let admitted = |m: &str| {
         let preferred = &profile.manifest.model.preferred;
         match agentd::preparation::driver_name(m) {
-            Some(d) => preferred.contains(&format!("driver:{d}")),
+            Some(d) => {
+                let spec = m.strip_prefix("driver:").unwrap_or(m);
+                preferred.contains(&format!("driver:{spec}"))
+                    || preferred.contains(&format!("driver:{d}"))
+            }
             None => preferred.contains(&format!("local:{m}")),
         }
     };
@@ -1504,8 +1526,8 @@ fn deleguer(
     // pilotes de la session (ADR 0035). Il doit être connecté.
     let client = explicit
         .as_deref()
-        .and_then(agentd::preparation::driver_name)
-        .map(str::to_owned)
+        .filter(|m| agentd::preparation::driver_name(m).is_some())
+        .map(|m| m.strip_prefix("driver:").unwrap_or(m).to_owned())
         .or_else(|| {
             (explicit.is_none() && request.role.is_none())
                 .then(|| parent_driver.clone().filter(|d| admitted(d)))
@@ -1514,7 +1536,8 @@ fn deleguer(
     if let Some(driver) = client {
         let pilot = ctx.pilot.clone();
         let status = bloquer(async move { Ok(pilot_status(pilot.as_deref()).await) })?;
-        if !ready_drivers(status.as_ref()).contains(&driver) {
+        let (nom, _) = palier_de(&driver);
+        if !ready_drivers(status.as_ref()).iter().any(|r| r == nom) {
             return Err((
                 Code::Invalid,
                 format!(
@@ -1734,6 +1757,13 @@ fn deleguer(
     }))
 }
 
+/// Le client et son palier de modèle dans `claude-code@opus` (ADR 0040) ; le client seul
+/// sans palier.
+fn palier_de(spec: &str) -> (&str, Option<&str>) {
+    spec.split_once('@')
+        .map_or((spec, None), |(client, palier)| (client, Some(palier)))
+}
+
 /// La clé, parmi les travaux du service, du client officiel lancé pour une mission.
 fn cle_de_pilote(id: &str) -> String {
     format!("pilote:{id}")
@@ -1842,7 +1872,7 @@ fn deleguer_pilote(
     })?;
     let scopes: Vec<&str> = profile.scopes.iter().map(String::as_str).collect();
     let availability = Availability {
-        logged_in_drivers: vec![driver.to_owned()],
+        logged_in_drivers: vec![palier_de(driver).0.to_owned()],
         ..Default::default()
     };
     let wall_time_s = {
@@ -1886,9 +1916,11 @@ fn deleguer_pilote(
     // même si la séance a déjà été conclue par le pont.
     let run = {
         let pilot = pilot_socket.clone();
+        let (client, palier) = palier_de(driver);
         let requete = pilotd::RunRequest {
             task: child_id.to_owned(),
-            driver: driver.to_owned(),
+            driver: client.to_owned(),
+            model: palier.map(str::to_owned),
             intent: request.intent.trim().to_owned(),
             wall_time_s,
         };

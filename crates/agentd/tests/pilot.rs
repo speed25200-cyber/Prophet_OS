@@ -94,7 +94,7 @@ fn faux_claude(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathB
              \"$P\" task attach \"$PROPHET_TASK\" --client claude-code >/dev/null\n\
              lu=$(\"$P\" task call \"$PROPHET_TASK\" fs.read '{{\"path\":\"~/docs/code.txt\"}}')\n\
              \"$P\" task call \"$PROPHET_TASK\" fs.write '{{\"path\":\"~/docs/relecture.txt\",\"content\":\"Relu.\"}}' >/dev/null\n\
-             \"$P\" task detach \"$PROPHET_TASK\" --text \"Relu par le faux Claude Code : $1 ; lu : $lu\" >/dev/null\n\
+             \"$P\" task detach \"$PROPHET_TASK\" --text \"Relu par le faux Claude Code : $1 ; lu : $lu ; arguments : $*\" >/dev/null\n\
              echo '{{\"type\":\"result\",\"result\":\"Relu par le faux Claude Code.\"}}'\n",
             cli = cli.display()
         ),
@@ -207,9 +207,11 @@ impl Chain {
         atelier["capabilities"]["max"]["tool.call"] =
             json!(["fs.read", "fs.write", "task.delegate"]);
         // Le code revient à Codex s'il est connecté, sinon au modèle local.
+        // La relecture demande à Claude Code son palier « sonnet » (ADR 0040) : le catalogue
+        // l'admet parce que le profil admet le client.
         atelier["model"]["roles"] = json!({
             "code": ["driver:codex", "local:modele-controle"],
-            "review": ["driver:claude-code", "local:modele-controle"],
+            "review": ["driver:claude-code@sonnet", "local:modele-controle"],
             "execute": ["local:modele-controle"]
         });
         let profiles = dir.path().join("profiles.json");
@@ -530,7 +532,7 @@ async fn codex_mene_la_mission_et_confie_la_relecture_a_claude_code() {
         .unwrap();
     assert_eq!(
         atelier["roles"]["review"],
-        json!(["driver:claude-code", "modele-controle"]),
+        json!(["driver:claude-code@sonnet", "modele-controle"]),
         "{atelier}"
     );
     assert_eq!(options["pilot"]["drivers"][0]["driver"], "claude-code");
@@ -569,8 +571,16 @@ async fn codex_mene_la_mission_et_confie_la_relecture_a_claude_code() {
         .await
         .unwrap();
     assert_eq!(child["task"]["state"], "done", "{child}");
-    assert_eq!(child["task"]["driver"], "driver:claude-code");
+    assert_eq!(child["task"]["driver"], "driver:claude-code@sonnet");
     assert_eq!(child["task"]["role"], "review");
+    // Le lanceur a passé le palier au client (`--model sonnet`).
+    assert!(
+        child["result"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("arguments : Relis ~/docs/code.txt --model sonnet"),
+        "{child}"
+    );
     assert_eq!(child["task"]["parent"], "duo");
     assert!(
         child["result"]["text"]
@@ -720,6 +730,22 @@ async fn annuler_une_mission_menee_par_un_client_le_tue_sur_le_champ() {
     assert_eq!(reponse["cancel_requested"], "lente", "{reponse}");
     let info = chain.attendre("lente").await;
     assert_eq!(info["task"]["state"], "cancelled", "{info}");
+    // Le lanceur a tué le client et son groupe de processus : l'attente qu'il avait lancée
+    // n'existe plus, bien avant ses trente secondes.
+    let mut tue = false;
+    for _ in 0..50 {
+        let restants = std::process::Command::new("pgrep")
+            .args(["-f", "^sleep 30$"])
+            .output()
+            .map(|o| o.stdout.is_empty())
+            .unwrap_or(true);
+        if restants {
+            tue = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(tue, "l'attente du faux Codex a survécu à l'annulation");
     // Le client tué, sa place est libre bien avant ses trente secondes d'attente : une autre
     // mission sur le même client se lance et finit.
     chain

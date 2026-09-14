@@ -24,21 +24,35 @@ pub const OFFICIAL_DRIVERS: [&str; 3] = ["claude-code", "codex", "gemini"];
 /// Vrai pour `driver:<client officiel>`.
 #[must_use]
 pub fn is_official_driver(reference: &str) -> bool {
-    reference
-        .strip_prefix("driver:")
-        .is_some_and(|d| OFFICIAL_DRIVERS.contains(&d))
+    prophet_types::manifest::split_driver(reference)
+        .is_some_and(|(client, _)| OFFICIAL_DRIVERS.contains(&client))
 }
 
 /// Le nom qu'un humain lit pour un modèle proposé : les clients officiels par leur nom
 /// d'usage et leur éditeur, un modèle local par son identifiant.
 #[must_use]
 pub fn model_label(model: &str) -> String {
-    match driver_name(model) {
-        Some("claude-code") => "Claude Code (Anthropic)".to_owned(),
-        Some("codex") => "Codex (ChatGPT)".to_owned(),
-        Some("gemini") => "Gemini (Google)".to_owned(),
-        _ => model.to_owned(),
+    let nom = match driver_name(model) {
+        Some("claude-code") => "Claude Code (Anthropic)",
+        Some("codex") => "Codex (ChatGPT)",
+        Some("gemini") => "Gemini (Google)",
+        _ => return model.to_owned(),
+    };
+    match driver_tier(model) {
+        Some(palier) => format!("{nom} · {palier}"),
+        None => nom.to_owned(),
     }
+}
+
+/// Le palier de modèle demandé à un client (`claude-code@opus` → `opus`), s'il y en a un
+/// (ADR 0040).
+#[must_use]
+pub fn driver_tier(model: &str) -> Option<&str> {
+    driver_name(model)?;
+    let spec = model.strip_prefix("driver:").unwrap_or(model);
+    spec.split_once('@')
+        .map(|(_, palier)| palier)
+        .filter(|palier| !palier.is_empty())
 }
 
 /// Le nom qu'un humain lit pour la référence d'un plan (`driver:codex`, `local:qwen3-1.7b`) :
@@ -56,7 +70,9 @@ pub fn reference_label(reference: &str) -> String {
 /// (ADR 0035) : l'humain les nomme comme il nomme un modèle local.
 #[must_use]
 pub fn driver_name(model: &str) -> Option<&str> {
-    let nom = model.strip_prefix("driver:").unwrap_or(model);
+    let spec = model.strip_prefix("driver:").unwrap_or(model);
+    // Un palier de modèle peut suivre le client (`claude-code@opus`, ADR 0040).
+    let nom = spec.split('@').next().unwrap_or(spec);
     OFFICIAL_DRIVERS.contains(&nom).then_some(nom)
 }
 
@@ -234,9 +250,10 @@ impl Profile {
                 .preferred
                 .iter()
                 .filter_map(|reference| {
-                    reference
-                        .strip_prefix("driver:")
-                        .and_then(|d| drivers.iter().any(|v| v == d).then(|| d.to_owned()))
+                    reference.strip_prefix("driver:").and_then(|d| {
+                        let client = d.split('@').next().unwrap_or(d);
+                        drivers.iter().any(|v| v == client).then(|| d.to_owned())
+                    })
                 })
                 .chain(
                     self.manifest
@@ -271,7 +288,8 @@ impl Profile {
                                 if let Some(m) = r.strip_prefix("local:") {
                                     models.iter().any(|v| v == m).then(|| m.to_owned())
                                 } else if let Some(d) = r.strip_prefix("driver:") {
-                                    drivers.iter().any(|v| v == d).then(|| r.clone())
+                                    let client = d.split('@').next().unwrap_or(d);
+                                    drivers.iter().any(|v| v == client).then(|| r.clone())
                                 } else {
                                     None
                                 }
@@ -313,10 +331,17 @@ impl Profile {
         // Un rôle ne peut nommer qu'un modèle du plafond : le relais choisit parmi ce que le
         // profil admet déjà, il n'y ajoute rien.
         for (role, models) in &self.manifest.model.roles {
-            if let Some(model) = models
-                .iter()
-                .find(|m| !self.manifest.model.preferred.contains(m))
-            {
+            // Un client à palier (`driver:claude-code@opus`) est admis si le profil admet le
+            // client (ADR 0040).
+            if let Some(model) = models.iter().find(|m| {
+                !self.manifest.model.preferred.contains(m)
+                    && !prophet_types::manifest::split_driver(m).is_some_and(|(client, _)| {
+                        self.manifest
+                            .model
+                            .preferred
+                            .contains(&format!("driver:{client}"))
+                    })
+            }) {
                 return Err(format!(
                     "Le rôle {role} du profil {} nomme {model}, absent de model.preferred.",
                     self.id

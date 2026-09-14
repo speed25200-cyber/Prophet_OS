@@ -206,6 +206,7 @@ Une mission se confie à l'un d'eux comme à un modèle, par son identifiant :
 ```sh
 prophet task options                                   # contextes, modèles, clients connectés
 prophet task prepare --profile documents --model codex "Résumer les notes de la semaine"
+prophet task prepare --profile atelier --model claude-code@opus "Concevoir l'outil de tri"   # un palier de modèle, au choix
 prophet task start <id>                                # Codex est lancé dans la mission, sous votre identité
 prophet task inspect <id>                              # son avancement, puis son résultat
 prophet task cancel <id>                               # coupe : la séance est conclue, le client tué

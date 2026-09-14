@@ -172,6 +172,11 @@ pub struct RunRequest {
     pub intent: String,
     /// Durée accordée, en secondes ; au-delà, le client est tué.
     pub wall_time_s: u64,
+    /// Palier de modèle demandé au client (`opus`, `haiku`, un identifiant que son option
+    /// `--model` accepte), passé tel quel ; sans lui, le client prend son modèle par défaut
+    /// (ADR 0040).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// Réponse de `pilot.run`.
@@ -331,11 +336,16 @@ impl Launcher {
             ("PROPHET_MCP_CONFIG".to_owned(), config.clone()),
         ];
         if let Some(over) = self.overrides.get(&request.driver) {
-            let args = over
+            let mut args: Vec<String> = over
                 .args
                 .iter()
                 .map(|a| a.replace("{intent}", &request.intent))
                 .collect();
+            // Le client de remplacement reçoit le palier comme le vrai, pour que les essais
+            // le voient.
+            if let Some(model) = &request.model {
+                args.extend(["--model".to_owned(), model.clone()]);
+            }
             return Ok(ClientCommand {
                 program: over.program.clone(),
                 args,
@@ -343,6 +353,22 @@ impl Launcher {
             });
         }
         let mut args = profile.command_line(&request.intent, &config, None);
+        // Le palier de modèle, par l'option de chaque client : `--model` pour Claude Code,
+        // avant le séparateur ; `-m` pour Codex, après `exec` ; `-m` pour Gemini (ADR 0040).
+        if let Some(model) = &request.model {
+            match profile.driver.as_str() {
+                "claude-code" => {
+                    let pos = args.iter().position(|a| a == "--").unwrap_or(args.len());
+                    args.splice(pos..pos, ["--model".to_owned(), model.clone()]);
+                }
+                "codex" => {
+                    args.splice(1..1, ["-m".to_owned(), model.clone()]);
+                }
+                _ => {
+                    args.splice(0..0, ["-m".to_owned(), model.clone()]);
+                }
+            }
+        }
         if profile.driver == "codex" {
             // Codex ne prend pas de fichier MCP en argument : ses serveurs viennent de sa
             // configuration, que `-c` sait surcharger pour cette seule exécution.
@@ -638,6 +664,7 @@ mod tests {
                 driver: "gemini".into(),
                 intent: "attendre".into(),
                 wall_time_s: 30,
+                model: None,
             })
             .unwrap_err();
         assert!(matches!(erreur, Error::Stopped { .. }), "{erreur}");
@@ -693,6 +720,7 @@ mod tests {
                     driver: "claude-code".into(),
                     intent: "Écris".into(),
                     wall_time_s: 10,
+                    model: None,
                 },
                 &config,
             )
@@ -720,6 +748,7 @@ mod tests {
                     driver: "codex".into(),
                     intent: "Code".into(),
                     wall_time_s: 10,
+                    model: None,
                 },
                 &config,
             )
@@ -739,7 +768,8 @@ mod tests {
                     task: "m".into(),
                     driver: "muse".into(),
                     intent: "?".into(),
-                    wall_time_s: 1
+                    wall_time_s: 1,
+                    model: None,
                 },
                 &config
             ),
@@ -763,6 +793,7 @@ mod tests {
                 driver: "codex".into(),
                 intent: "écrire".into(),
                 wall_time_s: 10,
+                model: None,
             })
             .unwrap();
         assert_eq!(result.exit_code, Some(0));
@@ -771,6 +802,41 @@ mod tests {
             !dir.path().join("run/m.json").exists(),
             "la configuration est retirée après"
         );
+    }
+
+    #[test]
+    fn un_palier_de_modele_est_passe_au_client() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut launcher = launcher(dir.path());
+        let config = dir.path().join("run/m.json");
+        let requete = |driver: &str| RunRequest {
+            task: "m".into(),
+            driver: driver.into(),
+            intent: "Écris".into(),
+            wall_time_s: 10,
+            model: Some("opus".into()),
+        };
+        let claude = launcher.command(&requete("claude-code"), &config).unwrap();
+        let separateur = claude.args.iter().position(|a| a == "--").unwrap();
+        let option = claude.args.iter().position(|a| a == "--model").unwrap();
+        assert!(
+            option < separateur && claude.args[option + 1] == "opus",
+            "{:?}",
+            claude.args
+        );
+        let codex = launcher.command(&requete("codex"), &config).unwrap();
+        let option = codex.args.iter().position(|a| a == "-m").unwrap();
+        assert!(
+            option > 0 && codex.args[option + 1] == "opus",
+            "{:?}",
+            codex.args
+        );
+        launcher.overrides = Launcher::parse_overrides(
+            r#"{"codex": {"program": "/bin/echo", "args": ["{intent}"]}}"#,
+        )
+        .unwrap();
+        let faux = launcher.command(&requete("codex"), &config).unwrap();
+        assert_eq!(faux.args, ["Écris", "--model", "opus"]);
     }
 
     #[test]
@@ -787,6 +853,7 @@ mod tests {
                 driver: "gemini".into(),
                 intent: "attendre".into(),
                 wall_time_s: 1,
+                model: None,
             })
             .unwrap_err();
         assert!(matches!(erreur, Error::Timeout { .. }), "{erreur}");
@@ -798,6 +865,7 @@ mod tests {
                 driver: "claude-code".into(),
                 intent: "x".into(),
                 wall_time_s: 1,
+                model: None,
             })
             .unwrap_err();
         assert!(matches!(erreur, Error::NotReady { .. }), "{erreur}");

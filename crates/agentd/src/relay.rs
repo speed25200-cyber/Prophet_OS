@@ -53,9 +53,11 @@ pub fn resolve(
             reference
                 .strip_prefix("local:")
                 .is_some_and(|name| available.iter().any(|a| a == name))
-                || reference
-                    .strip_prefix("driver:")
-                    .is_some_and(|name| drivers.iter().any(|d| d == name))
+                || reference.strip_prefix("driver:").is_some_and(|name| {
+                    // `client@palier` : le client seul décide de la disponibilité (ADR 0040).
+                    let client = name.split('@').next().unwrap_or(name);
+                    drivers.iter().any(|d| d == client)
+                })
         })
         .cloned()
         .ok_or_else(|| {
@@ -159,6 +161,27 @@ mod tests {
                 vec!["local:absent".to_owned(), "local:petit".to_owned()],
             ),
         ])
+    }
+
+    #[test]
+    fn un_role_peut_nommer_le_palier_de_modele_d_un_client() {
+        let mut roles = roles();
+        roles.insert(
+            "execute".to_owned(),
+            vec![
+                "driver:claude-code@haiku".to_owned(),
+                "local:petit".to_owned(),
+            ],
+        );
+        let servis = vec!["petit".to_owned()];
+        assert_eq!(
+            resolve(&roles, "execute", &servis, &["claude-code".to_owned()]).unwrap(),
+            "driver:claude-code@haiku"
+        );
+        assert_eq!(
+            resolve(&roles, "execute", &servis, &[]).unwrap(),
+            "local:petit"
+        );
     }
 
     #[test]

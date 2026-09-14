@@ -504,6 +504,18 @@ fn validate_publisher_key(key: &str) -> Result<(), ManifestError> {
     Ok(())
 }
 
+/// Décompose `driver:<client>[@<palier>]` : le client officiel et, s'il y en a un, le palier
+/// de modèle que le lanceur lui passera (`opus`, `haiku`… ; ADR 0040). `None` pour toute
+/// autre référence.
+#[must_use]
+pub fn split_driver(reference: &str) -> Option<(&str, Option<&str>)> {
+    let rest = reference.strip_prefix("driver:")?;
+    Some(
+        rest.split_once('@')
+            .map_or((rest, None), |(client, palier)| (client, Some(palier))),
+    )
+}
+
 fn validate_model_ref(reference: &str) -> Result<(), ManifestError> {
     let bad = || ManifestError::BadModelRef(reference.to_owned());
     let Some((kind, rest)) = reference.split_once(':') else {
@@ -513,7 +525,22 @@ fn validate_model_ref(reference: &str) -> Result<(), ManifestError> {
         return Err(bad());
     }
     match kind {
-        "local" | "driver" => Ok(()),
+        "local" => Ok(()),
+        // `driver:<client>` ou `driver:<client>@<palier>` : le palier nomme le modèle que le
+        // client doit employer, sans espace ni séparateur (ADR 0040).
+        "driver" => {
+            let (client, palier) = split_driver(reference).ok_or_else(bad)?;
+            let palier_valide = palier.is_none_or(|p| {
+                !p.is_empty()
+                    && p.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+            });
+            if !client.is_empty() && palier_valide {
+                Ok(())
+            } else {
+                Err(bad())
+            }
+        }
         "api" => {
             if rest.split(':').count() == 2 && !rest.split(':').any(str::is_empty) {
                 Ok(())
@@ -566,6 +593,20 @@ max_calls = 1
 [memory]
 spaces = ["work"]
 "#;
+
+    #[test]
+    fn un_palier_de_modele_suit_le_client() {
+        assert!(validate_model_ref("driver:claude-code@opus").is_ok());
+        assert!(validate_model_ref("driver:claude-code@").is_err());
+        assert!(validate_model_ref("driver:@opus").is_err());
+        assert!(validate_model_ref("driver:claude-code@o pus").is_err());
+        assert_eq!(split_driver("driver:codex"), Some(("codex", None)));
+        assert_eq!(
+            split_driver("driver:claude-code@haiku"),
+            Some(("claude-code", Some("haiku")))
+        );
+        assert_eq!(split_driver("local:qwen"), None);
+    }
 
     #[test]
     fn manifeste_valide() {

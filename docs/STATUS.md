@@ -313,6 +313,15 @@ ne se publie plus seule. Prouvé dans sfs (capture depuis le parent, rapport, pu
 parent, périmètre hors du parent laissé chez l'enfant, parent fermé refusé) et dans agentd avec
 les vrais services : le faux Claude Code lit le code que le faux Codex vient d'écrire et son
 verdict revient chez Codex ; le code de Codex pour un parent local est chez ce parent.
+Puis les paliers de modèles (ADR 0040) : une référence de client porte le modèle que le
+lanceur lui demandera (`driver:claude-code@opus`), validée par le manifeste, disponible dès que
+le client l'est, admise par le catalogue dès que le profil admet le client ; le lanceur place
+`--model` (Claude Code) ou `-m` (Codex, Gemini) sur la ligne de commande. Les contextes de
+l'image donnent la réflexion et le code au palier `opus`, la relecture à Codex puis au palier
+`sonnet`, l'exécution au palier `haiku` — réglables par `prophet.localEngine.paliers`. Prouvé
+en unitaire (manifeste, sélection, rôles, lanceur) et avec les vrais services : le faux Claude
+Code reçoit `--model sonnet` pour la relecture confiée par Codex. Ce que cela ne prouve pas :
+que les vrais clients acceptent ces alias, construits d'après leur documentation.
 
 La CI de `a5ac295` (clients principaux, invité overlay, `proc.kill` admis) réussit `check` (le
 test du client comme modèle principal compris), l'isolation sur l'hôte (les trois essais

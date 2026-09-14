@@ -21,14 +21,19 @@ let
   # secours, hors ligne ou sans compte connecté ; il ferme chaque liste. Les rôles suivent :
   # Claude Code réfléchit et relit, Codex code et exécute, chacun n'étant proposé que connecté.
   clients = [ "driver:claude-code" "driver:codex" ];
+  # Les paliers de modèles (ADR 0040) : le meilleur modèle de Claude Code pour réfléchir et
+  # coder, un palier moins coûteux pour relire, le moins cher pour exécuter — l'économie de
+  # tokens du relais, par l'option `--model` que le lanceur passe au client. Codex garde son
+  # modèle par défaut. Les paliers se changent par `prophet.localEngine.paliers`.
+  paliers = cfg.paliers;
   modele = {
     preferred = clients ++ modelesLocaux;
     privacy = "local-preferred";
     roles = {
-      reflect = [ "driver:claude-code" "driver:codex" "local:${cfg.model}" ];
-      code = [ "driver:codex" "driver:claude-code" "local:${cfg.model}" ];
-      review = [ "driver:claude-code" "driver:codex" "local:${cfg.model}" ];
-      execute = [ "driver:codex" ] ++ lib.optional relais "local:${cfg.executeModel}" ++ [ "local:${cfg.model}" ];
+      reflect = [ "driver:claude-code@${paliers.reflect}" "driver:codex" "local:${cfg.model}" ];
+      code = [ "driver:claude-code@${paliers.code}" "driver:codex" "local:${cfg.model}" ];
+      review = [ "driver:codex" "driver:claude-code@${paliers.review}" "local:${cfg.model}" ];
+      execute = [ "driver:claude-code@${paliers.execute}" "driver:codex" ] ++ lib.optional relais "local:${cfg.executeModel}" ++ [ "local:${cfg.model}" ];
     };
   };
   profiles = pkgs.writeText "prophet-mission-profiles.json" (builtins.toJSON [
@@ -144,15 +149,15 @@ let
       };
     }
     # L'atelier : les clients officiels de l'humain travaillent ensemble par le relais (ADR
-    # 0034, 0035). Claude Code réfléchit, Codex code, Claude Code relit ce que Codex a produit
-    # (un autre regard que l'auteur), Codex exécute les étapes simples ; chacun n'est proposé
-    # que si le lanceur de la session le dit connecté, sinon le rôle retombe sur le modèle
-    # local. Les clients rejoignent leur sous-mission par une séance d'outils, sous un jeton
+    # 0034, 0035, 0040). Claude Code réfléchit et code avec son meilleur palier, Codex relit
+    # (un autre regard que l'auteur) puis Claude Code à un palier moindre, le palier le moins
+    # cher exécute les étapes simples ; chacun n'est proposé que si le lanceur de la session
+    # le dit connecté, sinon le rôle retombe sur le modèle local. Les clients rejoignent leur sous-mission par une séance d'outils, sous un jeton
     # délégué par capd ; l'OS ne touche jamais à leurs identifiants.
     {
       id = "atelier";
       name = "Atelier des agents";
-      description = "Faire avancer Claude Code et Codex ensemble sur un objectif dans ~/Documents/Prophet : la réflexion à Claude Code, le code à Codex, la relecture du code à Claude Code, les étapes simples à Codex, chacun dans sa propre mission contrôlée ; le modèle local ne sert que de secours. Les clients doivent être connectés dans leur profil Prophet.";
+      description = "Faire avancer Claude Code et Codex ensemble sur un objectif dans ~/Documents/Prophet : la réflexion et le code au meilleur palier de Claude Code, la relecture à Codex, les étapes simples au palier le moins cher, chacun dans sa propre mission contrôlée ; le modèle local ne sert que de secours. Les clients doivent être connectés dans leur profil Prophet.";
       scopes = [ "~/Documents/Prophet" ];
       manifest = {
         agent = {
@@ -203,6 +208,12 @@ in {
         default = 999;
         description = "Couches du modèle placées sur la carte quand l'accélération est active ; 999 les place toutes, une valeur plus basse partage avec le processeur quand la mémoire vidéo manque.";
       };
+    };
+    paliers = {
+      reflect = lib.mkOption { type = lib.types.str; default = "opus"; description = "Palier de modèle demandé à Claude Code pour la réflexion (ADR 0040) : un alias ou un identifiant que `claude --model` accepte."; };
+      code = lib.mkOption { type = lib.types.str; default = "opus"; description = "Palier de modèle demandé à Claude Code pour le code."; };
+      review = lib.mkOption { type = lib.types.str; default = "sonnet"; description = "Palier de modèle demandé à Claude Code pour la relecture, après Codex."; };
+      execute = lib.mkOption { type = lib.types.str; default = "haiku"; description = "Palier de modèle demandé à Claude Code pour les étapes simples : le moins cher."; };
     };
     port = lib.mkOption { type = lib.types.port; default = 8080; description = "Port sur la boucle locale uniquement."; };
     threads = lib.mkOption { type = lib.types.ints.between 1 128; default = 4; description = "Nombre maximal de threads CPU d'inférence."; };

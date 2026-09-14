@@ -204,7 +204,10 @@ le catalogue les propose en tête, tous les contextes de l'image les préfèrent
 local n'est qu'un secours. Le même jour, l'[ADR 0039](adr/0039-l-espace-de-travail-partage-du-relais.md)
 fait du relais un travail commun : une sous-mission part de l'espace de travail de son parent
 et y rapporte ce qu'elle change, le parent publie le tout ; prouvé avec un faux Codex qui écrit
-et un faux Claude Code qui relit ce code et dépose son verdict chez Codex.
+et un faux Claude Code qui relit ce code et dépose son verdict chez Codex. L'[ADR 0040](adr/0040-les-paliers-de-modeles-des-clients.md)
+donne aux rôles leurs paliers de modèles (`driver:claude-code@opus` pour réfléchir et coder,
+`@haiku` pour exécuter), passés au client par son option de modèle : l'économie de tokens du
+relais chez les clients.
 
 Le même jour, l'image sert deux modèles en mode routeur (Qwen3-1.7B en réflexion, Qwen3-0.6B
 en exécution, ADR 0034), et la [parole](adr/0036-la-parole-de-l-humain.md) entre dans le

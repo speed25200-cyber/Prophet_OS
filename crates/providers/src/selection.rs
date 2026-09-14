@@ -71,13 +71,15 @@ pub fn choose(manifest: &Manifest, availability: &Availability) -> Result<Choice
                 if manifest.model.privacy == Privacy::LocalOnly {
                     continue;
                 }
-                if availability.exhausted_drivers.iter().any(|d| d == rest) {
+                // `client@palier` : le client seul décide de la disponibilité (ADR 0040).
+                let client = rest.split('@').next().unwrap_or(rest);
+                if availability.exhausted_drivers.iter().any(|d| d == client) {
                     continue;
                 }
-                if availability.logged_in_drivers.iter().any(|d| d == rest) {
+                if availability.logged_in_drivers.iter().any(|d| d == client) {
                     return Ok(Choice {
                         reference: reference.clone(),
-                        reason: format!("abonnement {rest} connecté et quota disponible"),
+                        reason: format!("abonnement {client} connecté et quota disponible"),
                     });
                 }
             }
@@ -140,6 +142,24 @@ privacy = "{privacy}"
 "#
         );
         Manifest::from_toml(&text).unwrap()
+    }
+
+    #[test]
+    fn un_palier_de_modele_ne_change_pas_le_client_choisi() {
+        let m = manifeste(
+            &["driver:claude-code@opus", "driver:codex"],
+            "local-preferred",
+        );
+        let a = Availability {
+            logged_in_drivers: vec!["claude-code".into()],
+            ..Availability::default()
+        };
+        assert_eq!(choose(&m, &a).unwrap().reference, "driver:claude-code@opus");
+        let a = Availability {
+            logged_in_drivers: vec!["codex".into()],
+            ..Availability::default()
+        };
+        assert_eq!(choose(&m, &a).unwrap().reference, "driver:codex");
     }
 
     #[test]
