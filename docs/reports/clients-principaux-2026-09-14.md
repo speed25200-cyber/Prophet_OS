@@ -42,6 +42,10 @@ leurs identifiants ; ce qui est prouvé ; ce qui ne l'est pas.
   pouvait pas démarrer (mission montée au niveau 2 par le planificateur, approbation par
   commande que rien ne pouvait donner) : corrigé, ADR 0031 complété. Puis un coureur à
   virtualisation imbriquée a montré un disque de travail sans assez d'inodes : corrigé.
+- **Les approbations de bout en bout** (ADR 0041, `9772ede`) : une action que capd refuse
+  faute de décision humaine est soumise à l'humain par le registre, le modèle l'attend avec
+  `approval.wait`, l'humain tranche dans la surface, et le même appel passe ou reste refusé.
+  Avant, une telle mission mourait sans que l'humain ait rien vu.
 - **Deux rouges de la CI corrigés** : l'invité microVM monte l'espace de travail au chemin de
   l'hôte par une surcouche overlay (`4ade307` ; l'hôte de la CI a son répertoire temporaire
   sous `/home`, que la racine squashfs ne laissait pas créer) ; le contrôle des profils admet
