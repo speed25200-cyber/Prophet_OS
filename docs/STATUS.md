@@ -336,7 +336,10 @@ désormais une fois le démarrage UEFI après un tel plantage du noyau de l'invi
 premier essai conservée (`demarrage-plante.log`) ; deux plantages restent un échec. La CI de
 `239753b` (espace partagé du relais, client nommé, `pilot.stop`) est **entièrement verte des
 deux côtés**, démarrage UEFI de l'ISO compris (14 septembre, 12:40 UTC) ; celle de `0d3fa49`
-(« Confiées », mission en main, second essai UEFI) l'est aussi (13:20 UTC). Le rapport du jour :
+(« Confiées », mission en main, second essai UEFI) l'est aussi (13:20 UTC), et celle de `ead38a8`
+(paliers de modèles : `check` joue le faux Claude Code avec `--model sonnet`, les sept services
+chargent le catalogue à paliers, le système installé démarre) l'est encore (14:05 UTC). Le rapport
+du jour :
 [clients principaux](reports/clients-principaux-2026-09-14.md).
 
 La CI de `ddf6e89` (relais et lanceur de pilotes) réussit `check`, l'isolation, le protocole du
