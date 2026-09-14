@@ -36,6 +36,8 @@ Blender
 FreeCAD
 Lecteur PDF
 Vidéo
+Montage vidéo
+Photo
 ''}Fichiers
 Terminal
 Verrouiller
@@ -59,6 +61,7 @@ Déconnexion'
           Navigateur) app=navigateur ;; X) app=x ;; Éditeur) app=editeur ;;
           LibreOffice) app=libreoffice ;; GIMP) app=gimp ;; Inkscape) app=inkscape ;;
           Blender) app=blender ;; FreeCAD) app=freecad ;; 'Lecteur PDF') app=pdf ;; Vidéo) app=video ;;
+          'Montage vidéo') app=montage ;; Photo) app=photo ;;
           Verrouiller) app=verrouiller ;; Déconnexion) app=deconnexion ;;
           *) exit 0 ;;
         esac
@@ -91,7 +94,7 @@ Déconnexion'
           launch ${pkgs.thunar}/bin/thunar "$HOME/Documents/Prophet"
           ;;
 ${lib.optionalString cfg.suite.enable ''
-        libreoffice|gimp|inkscape|blender|freecad|pdf|video)
+        libreoffice|gimp|inkscape|blender|freecad|pdf|video|montage|photo)
           # La suite de l'humain, dans l'espace Atelier ; un chemin en second argument ouvre
           # ce fichier. LibreOffice et les applications GTK publient leur accessibilité, et
           # l'agent les lit et les pilote par elle (contexte « bureau ») ; Blender, non.
@@ -106,6 +109,8 @@ ${lib.optionalString cfg.suite.enable ''
             freecad) launch "$(command -v freecad || command -v FreeCAD)" "''${2:-}" ;;
             pdf) launch evince "''${2:-}" ;;
             video) launch mpv "''${2:-}" ;;
+            montage) launch kdenlive "''${2:-}" ;;
+            photo) launch darktable "''${2:-}" ;;
           esac
           ;;
 ''}        editeur)
@@ -235,7 +240,8 @@ ${lib.optionalString cfg.suite.enable ''
 in {
   options.prophet.desktop.enable = lib.mkEnableOption "la session humaine de Prophet OS" // { default = true; };
   # La suite d'applications de l'humain : bureautique, image, dessin vectoriel, 3D, CAO, PDF,
-  # vidéo. Ce sont les logiciels libres qui tiennent les rôles de Word, Photoshop, Illustrator,
+  # lecture vidéo, montage vidéo (Kdenlive) et développement photo (darktable). Ce sont les
+  # logiciels libres qui tiennent les rôles de Word, Photoshop, Lightroom, Illustrator, Premiere,
   # Blender et AutoCAD ; ceux qui publient une accessibilité (GTK, Qt) se pilotent par l'agent
   # (ADR 0027). Désactivée dans les tests, qui n'en ont pas l'usage et paient chaque octet.
   options.prophet.desktop.suite.enable = lib.mkEnableOption "la suite d'applications du bureau" // { default = true; };
@@ -290,6 +296,7 @@ in {
       launcher session chatgpt chromium pkgs.foot pkgs.thunar pkgs.mousepad pkgs.wl-clipboard
     ] ++ lib.optionals cfg.suite.enable [
       pkgs.libreoffice pkgs.gimp pkgs.inkscape pkgs.blender pkgs.freecad pkgs.evince pkgs.mpv
+      pkgs.kdePackages.kdenlive pkgs.darktable
       pkgs.fuzzel pkgs.waybar pkgs.swaylock pkgs.adwaita-icon-theme
     ];
     environment.sessionVariables = {

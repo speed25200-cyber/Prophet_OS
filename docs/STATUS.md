@@ -1409,6 +1409,10 @@ Le 14 septembre encore, l'accélération graphique des modèles locaux
 Faux par défaut : jamais mesuré sur une vraie carte (`needs_gpu`), le processeur reste le
 chemin prouvé. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
 que Fontconfig reproche.
+La suite de l'humain gagne le montage vidéo (Kdenlive) et le développement photo
+(darktable), dans le lanceur (« Montage vidéo », « Photo ») et dans le contexte « bureau » que
+l'agent pilote par l'accessibilité ; leur ouverture réelle et leur pilotage par l'agent restent
+à voir sur une machine, la CI n'installe pas la suite.
 
 Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le
 dernier mot : le job `isolation` de l'intégration continue installe gVisor, Firecracker et les
