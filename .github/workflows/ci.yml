@@ -357,6 +357,22 @@ jobs:
         # l'accès est donc accordé explicitement.
         run: PROPHET_AUTORISER_KVM=1 sudo -E ./tools/install-isolation.sh microvm
 
+      # L'invité du dépôt (ADR 0038), celui que l'image installée sert, plutôt que la racine
+      # Ubuntu téléchargée à l'étape précédente : c'est lui que le niveau 2 doit démarrer.
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+      - name: Le noyau et la racine d'invité du dépôt
+        run: |
+          nix build .#invite-microvm --print-build-logs -o invite-microvm
+          ls -lL invite-microvm/
+          {
+            echo "PROPHET_MICROVM_KERNEL=$PWD/invite-microvm/vmlinux"
+            echo "PROPHET_MICROVM_ROOTFS=$PWD/invite-microvm/rootfs.squashfs"
+          } >> "$GITHUB_ENV"
+
       - name: Niveaux d'isolation
         run: ./tools/verify-on-host.sh --niveaux
         env:

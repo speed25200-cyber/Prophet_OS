@@ -224,6 +224,10 @@
           # La même chose avec le backend Vulkan (ADR 0037) : construite à chaque poussée par
           # l'intégration continue, servie par l'image quand `prophet.localEngine.gpu.enable`.
           llama-cpp-vulkan = pkgs.callPackage ./image/packages/llama-cpp.nix { vulkan = true; };
+          # L'invité des microVM de sandboxd (ADR 0038) : noyau publié par Firecracker, racine
+          # busybox + Python construite ici. L'image installée y pointe ; l'hôte de la CI
+          # l'exerce sous KVM.
+          invite-microvm = pkgs.callPackage ./image/packages/microvm-invite.nix { };
           # Même paquet et mêmes bibliothèques graphiques dans l'atelier et dans l'image.
           default = pkgs.callPackage ./image/packages/prophet-os.nix { };
         }

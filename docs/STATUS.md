@@ -1428,7 +1428,18 @@ et un modèle de 1,7 milliard de paramètres tiré ainsi choisit parfois le mauv
 tours de mission passent à 0,2 (`providers::local::MISSION_TEMPERATURE`) ; la conversation de
 l'atelier garde les réglages du moteur. L'interruption sur refus reste : un agent qui sort de
 ses droits s'arrête. Verdict de `f2d91fc` (14 septembre 10:11 UTC) : **les deux
-chaînes entièrement vertes**, mission web comprise. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
+chaînes entièrement vertes**, mission web comprise.
+
+L'invité des microVM ([ADR 0038](adr/0038-l-invite-des-microvm-dans-l-image.md)) : le dépôt
+construit `invite-microvm` — le noyau publié par Firecracker, épinglé, et une racine squashfs
+faite par Nix (busybox statique, Python 3, un `/init` qui lit la ligne de commande et dit sur la
+console série « PROPHET_INVITE_PRET » puis « PROPHET_INVITE_FIN code=N ») ; l'image installée
+le sert à sandboxd avec Firecracker sur le chemin du service, et l'hôte de la CI l'emploie pour
+les essais de niveau 2. Prouvé ici sous KVM imbriqué : l'invité démarre, dit ses deux lignes,
+redémarre, et le moniteur sort avec le code 0 en 1,1 s, trois fois sur trois (88 Mo de racine,
+41 Mo de noyau). Ce qui manque encore : le contrat d'exécution côté hôte (l'espace de
+travail sur un second disque, la console lue jusqu'à la fin, les fichiers rapatriés) ; c'est
+la prochaine marche vers l'atelier logiciel. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
 que Fontconfig reproche.
 Le rouge de ChatGPT est lu : Fontconfig dit « Cannot load default config file: File not
 found: /etc/fonts/fonts.conf » depuis un renderer de Chromium, dans le bac à sable de
