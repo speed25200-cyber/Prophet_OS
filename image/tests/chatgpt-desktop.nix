@@ -89,6 +89,10 @@ pkgs.testers.runNixOSTest {
     # l'écran lisible, les plugins et la fermeture afin de conserver leurs preuves,
     # même lorsque cette dernière condition de livraison échoue.
     with subtest("aucune erreur de configuration des polices au démarrage"):
+        # Ce que Fontconfig reproche, mot pour mot, et ce que le runtime lui donne : sans ces
+        # lignes, le rouge de ce contrôle ne disait pas lequel des fichiers manquait.
+        print(machine.execute("grep -n 'Fontconfig' /tmp/chatgpt-startup.log | head -20"))
+        print(machine.execute("ls -la /etc/fonts/ /etc/fonts/conf.d | head -40; readlink -f /etc/fonts/fonts.conf; fc-match sans-serif"))
         machine.fail("grep -q 'Fontconfig error' /tmp/chatgpt-startup.log")
   '';
 }
