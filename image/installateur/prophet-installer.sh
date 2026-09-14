@@ -127,6 +127,105 @@ if [ "$JUSQU_AU_MONTAGE" = "0" ]; then
   vert "✓ réseau, cache Nix et huggingface.co joignables"
 fi
 
+# --- 1 bis. Ce que cette machine offre ---
+#
+# Dit avant d'effacer quoi que ce soit : un PC formaté dont l'écran, le réseau ou le micro ne
+# répondent pas est une machine à réinstaller, et il vaut mieux le savoir tant que Windows est
+# encore là. Tout vient de /sys et /proc, tels que le support d'amorçage les voit ; le système
+# installé a les mêmes pilotes et verra la même chose. Une ligne qui commence par « ! » est un
+# manque ; rien ici n'arrête l'installation, c'est la personne qui juge.
+inventaire() {
+  local modele coeurs memoire_kio memoire_gio machine c nom pilote genre etat reseau son
+  machine=$(cat /sys/class/dmi/id/sys_vendor /sys/class/dmi/id/product_name 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')
+  [ -n "$machine" ] && printf '  machine : %s\n' "$machine"
+  coeurs=$(nproc 2>/dev/null || echo "?")
+  modele=$(sed -n 's/^model name[[:space:]]*: //p' /proc/cpuinfo 2>/dev/null | head -n 1)
+  printf '  processeur : %s cœurs, %s\n' "$coeurs" "${modele:-inconnu}"
+  memoire_kio=$(grep -E '^MemTotal:' /proc/meminfo 2>/dev/null | sed 's/[^0-9]//g')
+  memoire_gio=$(( ${memoire_kio:-0} / 1024 / 1024 ))
+  if [ "$memoire_gio" -lt 8 ]; then
+    printf '! mémoire : %s Gio — il en faut 8 pour le bureau et un modèle local ; les modèles locaux resteront petits\n' "$memoire_gio"
+  else
+    printf '  mémoire : %s Gio\n' "$memoire_gio"
+  fi
+  if [ -e /dev/kvm ]; then
+    printf '  virtualisation (KVM) : présente — le niveau 2 d'"'"'isolation (microVM) sera disponible\n'
+  else
+    printf '! virtualisation (KVM) : absente — activez VT-x ou AMD-V dans le micrologiciel, sinon le niveau 2 d'"'"'isolation (microVM) restera refusé\n'
+  fi
+  # La carte graphique : le pilote que le noyau lui a lié, et Vulkan s'il la voit (ADR 0037).
+  local pilotes=""
+  for c in /sys/class/drm/card*; do
+    [ -e "$c/device/driver" ] || continue
+    case "$(basename "$c")" in *-*) continue ;; esac
+    pilote=$(basename "$(readlink -f "$c/device/driver")")
+    pilotes="${pilotes:+$pilotes, }$pilote"
+  done
+  CARTE=""
+  if command -v vulkaninfo >/dev/null 2>&1; then
+    CARTE=$(vulkaninfo --summary 2>/dev/null | grep -E '^[[:space:]]*deviceName' | grep -viE 'llvmpipe|lavapipe|swiftshader' | head -n 1 | sed 's/^[^=]*=[[:space:]]*//') || true
+  fi
+  if [ -n "$CARTE" ]; then
+    printf '  carte graphique : %s (pilote %s), Vulkan — le bureau et les modèles locaux l'"'"'utiliseront\n' "$CARTE" "${pilotes:-?}"
+  elif [ -n "$pilotes" ]; then
+    printf '  carte graphique : pilote %s, sans Vulkan — le bureau tournera en rendu logiciel, les modèles locaux sur processeur\n' "$pilotes"
+  else
+    printf '! carte graphique : aucun pilote d'"'"'affichage chargé — si un écran est branché, le bureau ne s'"'"'affichera peut-être pas (NVIDIA n'"'"'est pas pris en charge)\n'
+  fi
+  # Le réseau : les interfaces qui ont un périphérique (pas les virtuelles), filaires ou Wi-Fi.
+  reseau=""
+  for c in /sys/class/net/*; do
+    nom=$(basename "$c")
+    [ "$nom" = lo ] && continue
+    [ -e "$c/device" ] || continue
+    pilote=$(basename "$(readlink -f "$c/device/driver" 2>/dev/null || echo inconnu)")
+    if [ -d "$c/wireless" ]; then genre="Wi-Fi"; else genre="filaire"; fi
+    etat=$(cat "$c/operstate" 2>/dev/null || echo "?")
+    reseau="${reseau:+$reseau ; }$nom ($genre, $pilote, $etat)"
+  done
+  if [ -n "$reseau" ]; then
+    printf '  réseau : %s\n' "$reseau"
+  else
+    printf '! réseau : aucune interface avec pilote — sans réseau, ni installation ni clients\n'
+  fi
+  # Le son, et une entrée (micro) : la parole en dépend (ADR 0036).
+  son=$(grep -E '^ *[0-9]+ \[' /proc/asound/cards 2>/dev/null | sed -E 's/^ *[0-9]+ \[[^]]*\]: [^ ]* - //' | paste -sd ';' -) || true
+  if [ -n "$son" ]; then
+    if ls -d /proc/asound/card*/pcm*c >/dev/null 2>&1; then
+      printf '  son : %s — avec une entrée (micro) : la parole sera possible\n' "$son"
+    else
+      printf '! son : %s — sans entrée détectée : pas de micro, la parole attendra\n' "$son"
+    fi
+  else
+    printf '! son : aucune carte détectée — ni voix ni parole sur cette machine\n'
+  fi
+  # Secure Boot : le chargeur n'est pas signé, la machine installée ne démarrerait pas.
+  local sb=/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c
+  if [ "$AMORCAGE" = uefi ] && [ -r "$sb" ]; then
+    if [ "$(od -An -tu1 -j4 -N1 "$sb" 2>/dev/null | tr -d ' ')" = "1" ]; then
+      printf '! Secure Boot : activé — le chargeur de Prophet OS n'"'"'est pas signé, la machine installée ne démarrera pas ; désactivez-le dans le micrologiciel avant de continuer\n'
+    else
+      printf '  Secure Boot : désactivé\n'
+    fi
+  fi
+  if [ -e /sys/class/tpm/tpm0 ]; then
+    printf '  TPM : présent — la phrase de passe pourra s'"'"'enrôler après l'"'"'installation\n'
+  else
+    printf '  TPM : absent — la phrase de passe sera tapée à chaque démarrage\n'
+  fi
+}
+
+titre "Ce que cette machine offre"
+echo
+INVENTAIRE=$(inventaire)
+while IFS= read -r ligne; do
+  case "$ligne" in
+    "!"*) rouge "  ${ligne#! }" ;;
+    *) printf '%s\n' "$ligne" ;;
+  esac
+done <<< "$INVENTAIRE"
+echo
+
 # --- 2. Ce qui va être détruit, et la confirmation ---
 
 titre "Ce que cette installation va effacer"
@@ -321,13 +420,13 @@ grep -q "boot.initrd.availableKernelModules" "$MACHINE/hardware-configuration.ni
   || mourir "la détection du matériel n'a rien produit ; rien n'est installé."
 vert "✓ matériel détecté : $(grep -c '"' "$MACHINE/hardware-configuration.nix") lignes de modules et de réglages"
 
+# Ce que l'installeur a vu de la machine, gardé avec elle : la supervision et un humain qui
+# cherche pourquoi le micro ou l'écran ne répond pas le reliront.
+printf '%s\n' "$INVENTAIRE" > "$MACHINE/inventaire.txt"
+
 # La carte graphique, si elle sert à quelque chose : un périphérique Vulkan qui n'est pas le
-# rastériseur logiciel. Alors les modèles locaux tourneront dessus (ADR 0037) ; sinon, sur
-# processeur, et le fichier reste celui du dépôt, vide.
-CARTE=""
-if command -v vulkaninfo >/dev/null 2>&1; then
-  CARTE=$(vulkaninfo --summary 2>/dev/null | grep -E '^[[:space:]]*deviceName'     | grep -viE 'llvmpipe|lavapipe|swiftshader' | head -n 1 | sed 's/^[^=]*=[[:space:]]*//')
-fi
+# rastériseur logiciel (vu par l'inventaire, ci-dessus). Alors les modèles locaux tourneront
+# dessus (ADR 0037) ; sinon, sur processeur, et le fichier reste celui du dépôt, vide.
 if [ -n "$CARTE" ]; then
   {
     printf '# Écrit par l'"'"'installeur : cette machine a une carte graphique utilisable par Vulkan (ADR 0037) :

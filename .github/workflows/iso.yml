@@ -112,8 +112,20 @@ jobs:
           BOUCLE='${{ steps.disque.outputs.boucle }}'
           # La confirmation, la phrase de passe deux fois, puis le mot de passe du compte deux
           # fois : exactement ce qu'un humain tape, dans l'ordre où le script le demande.
+          set +e
           printf '%s\nphrase-de-passe-de-test\nphrase-de-passe-de-test\nmot-de-passe-de-test\nmot-de-passe-de-test\n' "$BOUCLE" \
-            | sudo ./image/installateur/prophet-installer.sh --disque "$BOUCLE" --jusqu-au-montage
+            | sudo ./image/installateur/prophet-installer.sh --disque "$BOUCLE" --jusqu-au-montage >/tmp/prepare.txt 2>&1
+          code=$?
+          set -e
+          cat /tmp/prepare.txt
+          [ "$code" -eq 0 ] || { echo "::error::l'installeur a échoué (code $code)"; exit 1; }
+          # Avant d'effacer, l'installeur dit ce qu'il voit de la machine : processeur, mémoire,
+          # virtualisation, carte graphique, réseau, son, TPM. Le coureur en a un peu de chaque.
+          for attendu in "Ce que cette machine offre" "processeur : " "mémoire : " "virtualisation (KVM) : " "carte graphique : " "réseau : " "son : " "TPM : "; do
+            grep -q -- "$attendu" /tmp/prepare.txt \
+              || { echo "::error::l'inventaire de la machine ne dit pas « $attendu »"; exit 1; }
+          done
+          echo "inventaire de la machine présent"
 
       - name: Refuser un mot de passe de compte trop court
         run: |

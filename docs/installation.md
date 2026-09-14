@@ -105,7 +105,14 @@ Remplacez `/dev/nvme0n1` par ce que `lsblk` affiche pour **votre** disque. Un po
 généralement un seul disque NVMe ; une tour peut en avoir plusieurs, et se tromper de disque est
 la seule erreur irréparable de cette procédure.
 
-L'installeur vous montre ce qu'il va effacer, nomme les systèmes d'exploitation qu'il détecte, et
+L'installeur dit d'abord **ce qu'il voit de la machine** — processeur et mémoire, virtualisation
+(KVM, sans laquelle le niveau 2 d'isolation reste refusé), carte graphique et le pilote que le
+noyau lui a lié (Vulkan ou rendu logiciel), interfaces réseau filaires et Wi-Fi avec leur pilote
+et leur état, carte son et présence d'une entrée micro, Secure Boot, TPM. Une ligne rouge est un
+manque : c'est le moment de renoncer, tant que Windows est encore là, si l'écran, le réseau ou le
+micro ne sont pas reconnus. Le système installé a les mêmes pilotes que la clé et verra la même
+chose ; ce relevé est gardé avec la machine (`image/machine/inventaire.txt` dans sa source).
+Puis il vous montre ce qu'il va effacer, nomme les systèmes d'exploitation qu'il détecte, et
 **vous demande de recopier le nom du disque**. Rien n'est écrit avant cette confirmation. Il
 demande ensuite deux choses, chacune deux fois : la **phrase de passe du chiffrement**, puis le
 **mot de passe de votre compte**.
@@ -289,7 +296,9 @@ Dit franchement, parce que vous aurez effacé un disque pour l'essayer.
   pas votre carte graphique, votre réseau ni votre micrologiciel. Le système installé embarque
   désormais les micrologiciels redistribuables et le matériel que l'installeur détecte, et met
   les Radeon HD 7000/8000 sous `amdgpu` pour avoir Vulkan (ADR 0032) ; que votre carte, votre
-  Wi-Fi et votre BIOS s'en satisfassent reste à constater sur la machine. Les performances
+  Wi-Fi et votre BIOS s'en satisfassent reste à constater sur la machine — l'inventaire que
+  l'installeur affiche avant d'effacer le disque le dit pour l'essentiel (pilote d'affichage,
+  Vulkan, réseau, micro), depuis la clé, sans rien risquer. Les performances
   d'inférence GPU et les comparaisons avec les distributions prises en charge restent aussi à
   mesurer.
 
