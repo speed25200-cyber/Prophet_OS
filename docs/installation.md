@@ -199,6 +199,19 @@ prophet provider ls                   # quels clients sont là, et lesquels sont
 prophet provider login claude-code    # connecter votre abonnement
 ```
 
+Une fois connectés, Claude Code et Codex sont les modèles principaux des missions : le
+service les propose en tête de chaque contexte et le modèle local ne sert que de secours.
+Une mission se confie à l'un d'eux comme à un modèle, par son identifiant :
+
+```sh
+prophet task options                                   # contextes, modèles, clients connectés
+prophet task prepare --profile documents --model codex "Résumer les notes de la semaine"
+prophet task start <id>                                # Codex est lancé dans la mission, sous votre identité
+prophet task inspect <id>                              # son avancement, puis son résultat
+```
+
+Un client non connecté est refusé à la préparation, en disant comment se connecter.
+
 `prophet provider ls` distingue clients présents, connexion et exécution agentique disponible.
 Codex et Claude Code sont des dépendances obligatoires du nixpkgs épinglé. Gemini CLI est
 également fourni lorsque ce nixpkgs le propose. Les sondes utilisent les commandes des clients,

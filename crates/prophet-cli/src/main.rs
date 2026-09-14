@@ -1335,10 +1335,20 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                 );
             }
             for profile in &options.profiles {
+                // Un client officiel se nomme par son identifiant, comme un modèle local, et se
+                // lit par son nom d'usage (ADR 0035).
                 let models = if profile.models.is_empty() {
                     "aucun modèle disponible".to_owned()
                 } else {
-                    profile.models.join(", ")
+                    profile
+                        .models
+                        .iter()
+                        .map(|m| match agentd::preparation::driver_name(m) {
+                            Some(_) => format!("{m} — {}", agentd::preparation::model_label(m)),
+                            None => m.clone(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 };
                 out.push_str(&format!(
                     "  {} — {}{}\n      {}\n      modèles : {} · périmètres : {}\n",
@@ -1366,7 +1376,30 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                     state.detail
                 )),
             }
-            out.push_str("Préparer : prophet task prepare --profile <contexte> --model <modèle> \"<objectif>\"\n");
+            // Les clients officiels sont les modèles principaux : leur état dit lesquels une
+            // mission peut prendre, et comment connecter les autres.
+            if let Some(pilot) = &options.pilot {
+                if pilot.drivers.is_empty() {
+                    out.push_str("Clients officiels : aucun connu du lanceur de la session\n");
+                } else {
+                    out.push_str("Clients officiels (modèles principaux) :\n");
+                    for state in &pilot.drivers {
+                        let suite = if state.ready() {
+                            String::new()
+                        } else {
+                            format!(" — prophet provider login {}", state.driver)
+                        };
+                        out.push_str(&format!(
+                            "  {} {} ({}) : {}{suite}\n",
+                            if state.ready() { "✓" } else { "✗" },
+                            agentd::preparation::model_label(&state.driver),
+                            state.driver,
+                            state.connection
+                        ));
+                    }
+                }
+            }
+            out.push_str("Préparer : prophet task prepare --profile <contexte> --model <modèle ou client : codex, claude-code> \"<objectif>\"\n");
             Ok(out)
         }
         TaskAction::Prepare {

@@ -535,6 +535,39 @@ fn les_contextes_du_service_se_lisent_et_une_mission_se_prepare_sans_manifeste_f
         ),
         "{rendu}"
     );
+    assert!(!rendu.contains("Clients officiels"), "{rendu}");
+
+    // Avec un lanceur de pilotes : les clients connectés sont des modèles, nommés en premier
+    // et lisibles ; les autres disent comment se connecter (ADR 0035).
+    let options = json!({
+        "profiles":[{"id":"documents","name":"Documents","description":"Préparer","models":["codex","qwen3-1.7b"],"scopes":["~/Documents/Prophet"],"grants":[],"limits":agentd::Limits::default(),"web":false}],
+        "model_error":null,
+        "browser":null,
+        "pilot":{"drivers":[
+            {"driver":"claude-code","connection":"logged-out","executable":"/run/current-system/sw/bin/claude","version":null},
+            {"driver":"codex","connection":"connected","executable":"/run/current-system/sw/bin/codex","version":"0.40"}
+        ]}
+    });
+    let rendu = success(invoke(
+        &["task", "options"],
+        "task.options",
+        json!({}),
+        options,
+    ));
+    assert!(
+        rendu.contains("modèles : codex — Codex (ChatGPT), qwen3-1.7b"),
+        "{rendu}"
+    );
+    assert!(
+        rendu.contains("✓ Codex (ChatGPT) (codex) : connected"),
+        "{rendu}"
+    );
+    assert!(
+        rendu.contains(
+            "✗ Claude Code (Anthropic) (claude-code) : logged-out — prophet provider login claude-code"
+        ),
+        "{rendu}"
+    );
 
     // La CLI ne fournit ni manifeste, ni droits : seulement l'intention et le contexte choisi.
     let rendu = success(invoke(
