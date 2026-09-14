@@ -296,8 +296,15 @@ propose les clients connectés en tête des modèles ; tous les contextes de l'i
 le modèle local n'étant plus qu'un secours (hors ligne, sans compte), et les rôles suivent
 (Claude Code réfléchit et relit, Codex code et exécute). Prouvé avec les vrais services et un
 faux Codex : préparation sur `codex`, lancement, écriture par la séance, texte revenu, moteur
-local jamais sollicité ; et refusé sans lanceur. Ce que cela ne prouve pas : le vrai Codex et le
-vrai Claude Code, qui exigent la connexion de l'humain sur une machine installée.
+local jamais sollicité ; et refusé sans lanceur. Puis les deux ensemble, sans aucun modèle du
+service : Codex mène la mission, écrit, confie la relecture (`task.delegate {role: "review"}`)
+à un faux Claude Code qui rejoint sa sous-mission par le pont et rend son avis, avec lequel
+Codex conclut — chacun dans sa mission contrôlée, compté sous son nom. Ce que cela ne prouve
+pas : le vrai Codex et le vrai Claude Code, qui exigent la connexion de l'humain sur une
+machine installée. Ce que cela a montré : une sous-mission ne voit pas l'espace de travail du
+parent (elle part des fichiers de l'humain), donc un relecteur ne lit que ce que l'auteur cite
+dans l'intention ou ce qui est déjà publié ; partager en lecture l'espace du parent avec
+l'enfant est au carnet.
 
 La CI de `ddf6e89` (relais et lanceur de pilotes) réussit `check`, l'isolation, le protocole du
 moteur, la surface, les sept services sous systemd, l'installeur, l'ISO et son démarrage, la

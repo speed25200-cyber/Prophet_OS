@@ -68,7 +68,16 @@ Codex.
   ce qui garde les essais de la CI sans clients. Preuve : le test `une_mission_demarre_
   directement_sur_le_client_officiel_connecte` (faux Codex, vrais services : préparation sur
   `codex`, lancement, écriture par la séance, texte revenu, moteur local jamais sollicité) et
-  son contraire sans lanceur.
+  son contraire sans lanceur. Et les deux cerveaux ensemble, sans aucun modèle du service
+  (`codex_mene_la_mission_et_confie_la_relecture_a_claude_code`) : Codex mène la mission,
+  écrit, confie la relecture par `task.delegate {role: "review"}` à Claude Code, qui rejoint
+  sa sous-mission par le pont, rend son avis, et Codex conclut avec cet avis ; chaque client
+  dans sa propre mission contrôlée, compté sous son nom, le parent portant le compte de
+  l'enfant. Une limite vue en l'écrivant : une sous-mission travaille dans son propre espace,
+  pris sur les fichiers de l'humain, et ne voit pas ce que le parent a écrit sans l'avoir
+  publié ; le relecteur juge donc ce que l'auteur cite dans l'intention (ou ce qui est déjà
+  publié), pas l'espace de travail du parent. Donner à l'enfant une vue en lecture de l'espace
+  du parent est la prochaine marche du relais.
 - Limites : le client n'est pas confiné par la séance (ADR 0026) ; l'argument `-c` de Codex
   pour ses serveurs MCP est construit d'après sa documentation et non vérifié sur le binaire ;
   Gemini n'a pas de configuration MCP raccordée ; le parent ne voit du client que son texte

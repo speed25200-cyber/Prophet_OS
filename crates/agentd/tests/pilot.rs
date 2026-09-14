@@ -61,8 +61,39 @@ fn faux_codex(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathBu
              [ -f \"$PROPHET_MCP_CONFIG\" ] || exit 5\n\
              \"$P\" task attach \"$PROPHET_TASK\" --client codex >/dev/null\n\
              \"$P\" task call \"$PROPHET_TASK\" fs.write '{{\"path\":\"~/docs/code.txt\",\"content\":\"fn main() {{}}\"}}' >/dev/null\n\
-             \"$P\" task detach \"$PROPHET_TASK\" --text \"Code écrit par le faux Codex : $1\" >/dev/null\n\
+             texte=\"Code écrit par le faux Codex : $1\"\n\
+             case \"$1\" in *relire*)\n\
+               relecture=$(\"$P\" task call \"$PROPHET_TASK\" task.delegate '{{\"intent\":\"Relis ce code : fn main() {{}}\",\"profile\":\"atelier\",\"role\":\"review\"}}' --json)\n\
+               texte=\"$texte ; relecture : $relecture\" ;;\n\
+             esac\n\
+             \"$P\" task detach \"$PROPHET_TASK\" --text \"$texte\" >/dev/null\n\
              echo '{{\"item\":{{\"type\":\"agent_message\",\"text\":\"Code écrit par le faux Codex.\"}}}}'\n",
+            cli = cli.display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    script
+}
+
+/// Le faux Claude Code : rejoint la mission qu'on lui confie, lit le fichier, rend son avis ;
+/// il reçoit de `prophet-pilotd` l'environnement d'un vrai Claude Code et parle comme lui.
+fn faux_claude(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathBuf {
+    let script = dir.join("faux-claude.sh");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nset -e\nP={cli}\n\
+             [ -n \"$PROPHET_TASK\" ] || exit 3\n\
+             [ -n \"$CLAUDE_CONFIG_DIR\" ] || exit 4\n\
+             \"$P\" task attach \"$PROPHET_TASK\" --client claude-code >/dev/null\n\
+             \"$P\" task call \"$PROPHET_TASK\" fs.write '{{\"path\":\"~/docs/relecture.txt\",\"content\":\"Relu.\"}}' >/dev/null\n\
+             \"$P\" task detach \"$PROPHET_TASK\" --text \"Relu par le faux Claude Code : $1\" >/dev/null\n\
+             echo '{{\"type\":\"result\",\"result\":\"Relu par le faux Claude Code.\"}}'\n",
             cli = cli.display()
         ),
     )
@@ -161,9 +192,22 @@ impl Chain {
         chef["capabilities"]["max"]["tool.call"] = json!(["fs.read", "fs.write", "task.delegate"]);
         let mut atelier = base["manifest"].clone();
         atelier["agent"]["id"] = json!("org.prophet.atelier");
+        // L'atelier admet les deux clients : le catalogue exige qu'un modèle de rôle soit
+        // aussi un modèle admis.
+        atelier["model"]["preferred"] = json!([
+            "local:modele-controle",
+            "driver:codex",
+            "driver:claude-code"
+        ]);
+        // Comme dans l'image, l'atelier peut se confier des sous-missions : un client qui le
+        // mène délègue un rôle à l'autre.
+        atelier["capabilities"]["max"]["task.spawn"] = json!(["atelier"]);
+        atelier["capabilities"]["max"]["tool.call"] =
+            json!(["fs.read", "fs.write", "task.delegate"]);
         // Le code revient à Codex s'il est connecté, sinon au modèle local.
         atelier["model"]["roles"] = json!({
             "code": ["driver:codex", "local:modele-controle"],
+            "review": ["driver:claude-code", "local:modele-controle"],
             "execute": ["local:modele-controle"]
         });
         let profiles = dir.path().join("profiles.json");
@@ -193,10 +237,13 @@ impl Chain {
         daemons.push(ledger);
         if with_pilot {
             let cli = binaire_voisin("prophet");
-            let script = faux_codex(dir.path(), &cli);
-            let clients =
-                json!({"codex": {"program": script.display().to_string(), "args": ["{intent}"]}})
-                    .to_string();
+            let codex = faux_codex(dir.path(), &cli);
+            let claude = faux_claude(dir.path(), &cli);
+            let clients = json!({
+                "codex": {"program": codex.display().to_string(), "args": ["{intent}"]},
+                "claude-code": {"program": claude.display().to_string(), "args": ["{intent}"]}
+            })
+            .to_string();
             let pilot = Daemon::lancer_avec(
                 binaire_voisin("prophet-pilotd").to_str().unwrap(),
                 &pilot_socket,
@@ -374,7 +421,7 @@ async fn une_mission_demarre_directement_sur_le_client_officiel_connecte() {
         .unwrap();
     assert_eq!(
         atelier["models"],
-        json!(["codex", "modele-controle"]),
+        json!(["codex", "claude-code", "modele-controle"]),
         "{atelier}"
     );
     // Un client que le profil n'admet pas reste refusé, connecté ou non.
@@ -382,7 +429,7 @@ async fn une_mission_demarre_directement_sur_le_client_officiel_connecte() {
         .client
         .call(
             "task.prepare",
-            json!({"id":"direct-claude","intent":"Écris ~/docs/code.txt","profile":"atelier","model":"claude-code"}),
+            json!({"id":"direct-gemini","intent":"Écris ~/docs/code.txt","profile":"atelier","model":"gemini"}),
         )
         .await
         .unwrap_err();
@@ -454,6 +501,85 @@ async fn une_mission_demarre_directement_sur_le_client_officiel_connecte() {
         .unwrap();
     let info = chain.attendre("direct-codex-2").await;
     assert_eq!(info["task"]["state"], "done", "{info}");
+}
+
+/// Les deux cerveaux ensemble, sans modèle local : l'humain confie la mission à Codex, qui
+/// écrit le code puis confie sa relecture à Claude Code par `task.delegate {role: "review"}` ;
+/// Claude Code rejoint sa sous-mission par le pont, lit, rend son avis, et Codex conclut avec
+/// cet avis. Chaque client dans sa propre mission contrôlée, chaque appel compté sous son nom.
+#[tokio::test]
+async fn codex_mene_la_mission_et_confie_la_relecture_a_claude_code() {
+    let chain = Chain::new(vec![], true).await;
+    let options = chain.client.call("task.options", json!({})).await.unwrap();
+    let atelier = options["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "atelier")
+        .unwrap();
+    assert_eq!(
+        atelier["roles"]["review"],
+        json!(["driver:claude-code", "modele-controle"]),
+        "{atelier}"
+    );
+    assert_eq!(options["pilot"]["drivers"][0]["driver"], "claude-code");
+    assert_eq!(options["pilot"]["drivers"][0]["connection"], "simulated");
+    chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"duo","intent":"Écris ~/docs/code.txt et fais-le relire","profile":"atelier","model":"codex"}),
+        )
+        .await
+        .unwrap();
+    chain
+        .client
+        .call("task.start", json!({"id":"duo"}))
+        .await
+        .unwrap();
+    let parent = chain.attendre("duo").await;
+    assert_eq!(parent["task"]["state"], "done", "{parent}");
+    assert_eq!(parent["task"]["driver"], "driver:codex");
+    let texte = parent["result"]["text"].as_str().unwrap();
+    assert!(
+        texte.starts_with("Code écrit par le faux Codex : Écris ~/docs/code.txt et fais-le relire"),
+        "{texte}"
+    );
+    assert!(
+        texte.contains("Relu par le faux Claude Code : Relis ce code : fn main() {}"),
+        "{texte}"
+    );
+    let child = chain
+        .client
+        .call("task.inspect", json!({"id":"duo.1"}))
+        .await
+        .unwrap();
+    assert_eq!(child["task"]["state"], "done", "{child}");
+    assert_eq!(child["task"]["driver"], "driver:claude-code");
+    assert_eq!(child["task"]["role"], "review");
+    assert_eq!(child["task"]["parent"], "duo");
+    assert_eq!(
+        child["result"]["text"],
+        "Relu par le faux Claude Code : Relis ce code : fn main() {}"
+    );
+    // Chaque client est compté sous son nom, et le parent porte le compte de l'enfant.
+    assert_eq!(
+        child["task"]["usage"]["client:claude-code"]["turns"], 1,
+        "{child}"
+    );
+    assert_eq!(
+        parent["task"]["usage"]["client:claude-code"]["turns"], 1,
+        "{parent}"
+    );
+    assert!(
+        parent["task"]["usage"]["client:codex"]["turns"]
+            .as_u64()
+            .unwrap()
+            >= 2,
+        "{parent}"
+    );
+    // Le moteur local n'a jamais été sollicité : deux clients, aucun modèle du service.
+    assert!(chain.asked.lock().unwrap().is_empty(), "{:?}", chain.asked);
 }
 
 #[tokio::test]
