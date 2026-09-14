@@ -50,16 +50,18 @@ let
             raise SystemExit(0)
         # On demande le niveau que la machine dit tenir, et rien de plus : demander plus haut
         # testerait le refus, qui l'est déjà ailleurs. L'espace de travail est un répertoire à
-        # lui : au niveau 2, il part dans un disque pour la microVM — pas /tmp entier, avec les
-        # partages du pilote de test.
-        os.makedirs("/tmp/essai-sandbox", exist_ok=True)
+        # lui : au niveau 2, il part dans un disque pour la microVM — pas /tmp entier, que
+        # sandboxd ne voit d'ailleurs pas (PrivateTmp) : un répertoire de son état, qu'il lit
+        # et où il rapatrie.
+        travail = "/var/lib/prophet/sandboxd/essai-sandbox"
+        os.makedirs(travail, exist_ok=True)
         lancee = appeler("/run/prophet/sandboxd.sock", "sandbox.start", {
             "task": "task:essai-sandbox",
             "spec": {
                 "level": niveau,
                 "program": "/run/current-system/sw/bin/true",
                 "args": [],
-                "workdir": "/tmp/essai-sandbox",
+                "workdir": travail,
                 "env": [],
                 "rules": {"paths": [], "egress": [], "exec": [], "min_sandbox_level": 0},
                 "read_only_mounts": ["/nix/store", "/run/current-system/sw"],
