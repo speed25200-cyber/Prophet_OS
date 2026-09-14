@@ -126,6 +126,15 @@ impl Handler for Capd {
                 let broker = self.broker.lock().await;
                 commun::repondre(&broker.approvals().pending())
             }
+            // Celui qui attend une décision la lit ici, sans rien pouvoir trancher.
+            "approval.status" => {
+                let id = commun::texte(&params, "id")?;
+                let broker = self.broker.lock().await;
+                let demande = broker.approval_status(&id).ok_or_else(|| {
+                    Error::new(ErrorCode::NotFound, "demande inconnue ou oubliée")
+                })?;
+                commun::repondre(&demande)
+            }
 
             "approval.resolve" => {
                 let id = commun::texte(&params, "id")?;

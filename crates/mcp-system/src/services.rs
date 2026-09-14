@@ -47,6 +47,25 @@ impl Authority for Services {
             .ok().and_then(|v|serde_json::from_value(v).ok())
             .unwrap_or_else(||Decision::deny(DenyReason::PolicyDenied))
     }
+
+    fn request_approval(
+        &self,
+        token: &Token,
+        request: &CheckRequest,
+        summary: &str,
+        _now: OffsetDateTime,
+    ) -> Option<capd::Approval> {
+        rpc(&self.capd,"approval.request",json!({"token":token,"res":request.res,"act":request.act,
+            "target":request.target,"sandbox_level":request.sandbox_level,"irreversible":request.irreversible,
+            "external":request.external,"context":request.context,"summary":summary}))
+            .ok().and_then(|v|serde_json::from_value(v).ok())
+    }
+
+    fn approval_status(&self, id: &str) -> Option<capd::Approval> {
+        rpc(&self.capd, "approval.status", json!({ "id": id }))
+            .ok()
+            .and_then(|v| serde_json::from_value(v).ok())
+    }
 }
 
 impl Journal for Services {

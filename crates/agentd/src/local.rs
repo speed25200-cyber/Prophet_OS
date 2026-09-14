@@ -184,6 +184,23 @@ impl Control {
 }
 
 impl Authority for Control {
+    fn request_approval(
+        &self,
+        token: &Token,
+        request: &CheckRequest,
+        summary: &str,
+        now: OffsetDateTime,
+    ) -> Option<capd::Approval> {
+        if self.check_live().is_err() {
+            return None;
+        }
+        self.services.request_approval(token, request, summary, now)
+    }
+
+    fn approval_status(&self, id: &str) -> Option<capd::Approval> {
+        self.services.approval_status(id)
+    }
+
     fn check(&self, token: &Token, request: &CheckRequest, now: OffsetDateTime) -> Decision {
         let target = std::path::Path::new(&request.target);
         if self.check_live().is_err()
@@ -546,11 +563,9 @@ impl Mission {
                         tool,
                         ok: false,
                         error: Some(code),
-                    } if matches!(
-                        code.as_str(),
-                        "PolicyDenied" | "ApprovalRequired" | "Internal"
-                    ) =>
-                    {
+                    } if matches!(code.as_str(), "PolicyDenied" | "Internal") => {
+                        // Une décision humaine demandée (ApprovalRequired) n'interrompt pas :
+                        // le modèle l'attend et réessaie (ADR 0041).
                         return Err(format!("{tool} interrompu : {code}"));
                     }
                     DriverEvent::Text { text: fragment, .. } => text = fragment,

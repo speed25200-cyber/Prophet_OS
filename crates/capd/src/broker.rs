@@ -427,6 +427,12 @@ impl Broker {
         classify(request.res, request.act, &self.facts_for(request))
     }
 
+    /// L'état d'une demande d'approbation : en attente, ou tranchée récemment.
+    #[must_use]
+    pub fn approval_status(&self, id: &str) -> Option<crate::approvals::Approval> {
+        self.approvals.status(id)
+    }
+
     /// Crée une demande d'approbation pour une action refusée faute de décision humaine.
     pub fn request_approval(
         &mut self,

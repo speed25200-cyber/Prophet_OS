@@ -18,6 +18,7 @@ politique Cedar qui l'autorise : les deux doivent dire oui.
 | `cap.public_key` | La clé publique, pour vérifier un jeton sans repasser par ici |
 | `approval.request` | Soumet à un humain une action refusée faute de décision |
 | `approval.pending` | Les demandes en attente, les plus anciennes d'abord |
+| `approval.status` | L'état d'une demande, en attente ou tranchée depuis moins d'une heure (ADR 0041) |
 | `approval.resolve` | Tranche une demande ; portée `once` (défaut), `task` ou `agent` |
 | `approval.expire` | Retire les demandes périmées |
 

@@ -1587,12 +1587,14 @@ tranche au moment où cela arrive. Le workflow reste donc à déclenchement manu
   travail examinée avant publication — n'exige plus de décision par commande. L'hôte de la CI
   joue cet essai ; restent le lancement des outils produits depuis le lanceur du bureau et
   d'autres interpréteurs dans la racine.
-- **Les approbations, de bout en bout.** Une action que capd refuse faute de décision humaine
-  (`ApprovalRequired`) interrompt aujourd'hui la mission : personne ne crée la demande que le
-  panneau de décision de la surface saurait trancher (`approval.request` de capd n'a pas
-  d'appelant ; les outils `approval.request` / `approval.wait` sont des coquilles). À faire :
-  le registre crée la demande et rend son identifiant, `approval.wait` attend la décision, le
-  modèle réessaie.
+- **Les approbations, de bout en bout — fait (ADR 0041).** Une action que capd refuse faute
+  de décision humaine est soumise à l'humain par le registre lui-même (journal
+  `approval.requested`, identifiant rendu au modèle), `approval.wait` attend la décision (45 s
+  au plus par appel), l'humain tranche dans la surface, et le même appel passe — une fois, ou
+  pour toute la tâche selon la portée — ou reste refusé. capd garde une décision une heure
+  (`approval.status`) et consomme une décision « une fois » à la demande identique suivante.
+  Prouvé avec un vrai broker et un outil irréversible et externe. Reste : trancher depuis la
+  CLI, et un résumé enrichi par le modèle.
 - **Arrêter un client lancé — fait.** `task.cancel` d'une mission menée par un client conclut
   sa séance puis demande `pilot.stop {task}` au lanceur, qui tue le client et tout son groupe
   de processus (les clients sont lancés meneurs de groupe ; le délai tue de même). Prouvé dans

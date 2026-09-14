@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use capd::{Broker, CheckRequest};
+use capd::{Approval, ApprovalDecision, ApprovalState, Broker, CheckRequest};
 use prophet_types::cap::{Act, Decision, DenyReason, Res, Token};
 use prophet_types::ledger::{Actor, Draft, EventKind};
 use serde_json::{Value, json};
@@ -76,6 +76,24 @@ pub trait ResourceAccess {
 pub trait Authority: Send + Sync {
     /// Vérifie la demande complète ; une panne doit produire un refus.
     fn check(&self, token: &Token, request: &CheckRequest, now: OffsetDateTime) -> Decision;
+
+    /// Soumet à l'humain une action refusée faute de décision (ADR 0041) : rend la demande,
+    /// tranchée aussitôt si une règle ou une décision « une fois » la couvre, en attente sinon ;
+    /// `None` quand l'autorité ne répond pas.
+    fn request_approval(
+        &self,
+        _token: &Token,
+        _request: &CheckRequest,
+        _summary: &str,
+        _now: OffsetDateTime,
+    ) -> Option<Approval> {
+        None
+    }
+
+    /// L'état d'une demande : en attente, tranchée, expirée ; `None` si inconnue.
+    fn approval_status(&self, _id: &str) -> Option<Approval> {
+        None
+    }
 }
 
 impl Authority for Mutex<Broker> {
@@ -84,6 +102,22 @@ impl Authority for Mutex<Broker> {
             .ok()
             .and_then(|b| b.check(token, request, now).ok())
             .unwrap_or_else(|| Decision::deny(DenyReason::PolicyDenied))
+    }
+
+    fn request_approval(
+        &self,
+        token: &Token,
+        request: &CheckRequest,
+        summary: &str,
+        now: OffsetDateTime,
+    ) -> Option<Approval> {
+        self.lock()
+            .ok()
+            .map(|mut b| b.request_approval(token, request, summary, now))
+    }
+
+    fn approval_status(&self, id: &str) -> Option<Approval> {
+        self.lock().ok().and_then(|b| b.approval_status(id))
     }
 }
 
@@ -301,7 +335,31 @@ impl Registry {
             .step(context.step),
         )?;
 
-        let decision = self.authorize(name, &meta, args, context, now);
+        // Attendre une décision n'exige aucun droit et ne touche à rien.
+        if name == "approval.wait" {
+            let result = self.attendre_approbation(args);
+            self.record_result(name, &result, context, now)?;
+            return Ok(result);
+        }
+
+        let (decision, demande) = self.authorize(name, &meta, args, context, now);
+        // Une action refusée faute de décision humaine est soumise à l'humain (ADR 0041) : le
+        // registre crée la demande, et la rend au modèle avec son identifiant ; une décision
+        // déjà rendue — règle de tâche ou d'agent, ou « une fois » pour cette même action —
+        // tranche sur-le-champ.
+        let decision = match (decision, demande) {
+            (
+                Decision::Deny {
+                    reason: DenyReason::ApprovalRequired,
+                    ..
+                },
+                Some(demande),
+            ) => match self.approbation(name, &demande, context, now)? {
+                Ok(decision) => decision,
+                Err(result) => return Ok(result),
+            },
+            (decision, _) => decision,
+        };
         if let Decision::Deny { reason, rule } = &decision {
             self.journal.record(
                 Draft::new(
@@ -347,6 +405,119 @@ impl Registry {
         Ok(result)
     }
 
+    /// Soumet à l'humain une action refusée faute de décision, et dit au modèle quoi faire.
+    ///
+    /// `Ok(Ok(decision))` : la décision est rendue, l'appel continue ou est refusé selon elle ;
+    /// `Ok(Err(result))` : la demande attend l'humain, le résultat à rendre au modèle porte son
+    /// identifiant ; `Err` : le journal a failli.
+    fn approbation(
+        &self,
+        name: &str,
+        demande: &CheckRequest,
+        context: &ToolContext,
+        now: OffsetDateTime,
+    ) -> Result<Result<Decision, CallResult>, String> {
+        let resume = if demande.res == Res::Tool {
+            format!("Appeler {name}")
+        } else {
+            format!("{name} sur {}", demande.target)
+        };
+        let Some(approval) = self
+            .authority
+            .request_approval(&context.token, demande, &resume, now)
+        else {
+            return Ok(Ok(Decision::deny(DenyReason::PolicyDenied)));
+        };
+        match approval.state {
+            ApprovalState::Resolved {
+                decision: ApprovalDecision::Allow,
+            } => Ok(Ok(Decision::Allow { grant: 0 })),
+            ApprovalState::Resolved {
+                decision: ApprovalDecision::Deny,
+            }
+            | ApprovalState::Expired => Ok(Ok(Decision::Deny {
+                reason: DenyReason::PolicyDenied,
+                rule: Some("décision humaine".into()),
+            })),
+            ApprovalState::Pending => {
+                self.journal.record(
+                    Draft::new(
+                        now,
+                        Actor::daemon("capd"),
+                        EventKind::ApprovalRequested,
+                        json!({
+                            "approval": approval.id,
+                            "tool": name,
+                            "action": approval.action,
+                            "target": approval.target,
+                            "summary": approval.summary,
+                        }),
+                    )
+                    .task(&context.task)
+                    .step(context.step),
+                )?;
+                let detail = format!(
+                    "décision humaine demandée ({}) : attendez-la avec approval.wait, puis réessayez le même appel",
+                    approval.id
+                );
+                let mut result = CallResult::error(ErrorCode::ApprovalRequired, detail.clone());
+                result.structured = Some(json!({
+                    "code": "ApprovalRequired",
+                    "detail": detail,
+                    "approval": approval.id,
+                    "summary": approval.summary,
+                }));
+                self.record_result(name, &result, context, now)?;
+                Ok(Err(result))
+            }
+        }
+    }
+
+    /// Attend la décision humaine sur une demande, au plus `timeout_s` secondes (45 par défaut
+    /// et au plus : un client qui attend par sa séance a son propre délai) ; rend l'état.
+    fn attendre_approbation(&self, args: &Value) -> CallResult {
+        let Some(id) = args
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        else {
+            return CallResult::error(ErrorCode::Invalid, "id de la demande attendu");
+        };
+        let timeout = args
+            .get("timeout_s")
+            .and_then(Value::as_u64)
+            .unwrap_or(45)
+            .clamp(1, 45);
+        let debut = std::time::Instant::now();
+        loop {
+            let Some(approval) = self.authority.approval_status(id) else {
+                return CallResult::error(ErrorCode::NotFound, "demande inconnue ou oubliée");
+            };
+            let etat = match approval.state {
+                ApprovalState::Pending => {
+                    if debut.elapsed() >= std::time::Duration::from_secs(timeout) {
+                        "pending"
+                    } else {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        continue;
+                    }
+                }
+                ApprovalState::Resolved {
+                    decision: ApprovalDecision::Allow,
+                } => "allowed",
+                ApprovalState::Resolved {
+                    decision: ApprovalDecision::Deny,
+                } => "denied",
+                ApprovalState::Expired => "expired",
+            };
+            return CallResult::structured(json!({
+                "id": id,
+                "state": etat,
+                "summary": approval.summary,
+            }));
+        }
+    }
+
     fn authorize(
         &self,
         name: &str,
@@ -354,11 +525,11 @@ impl Registry {
         args: &Value,
         context: &ToolContext,
         now: OffsetDateTime,
-    ) -> Decision {
+    ) -> (Decision, Option<CheckRequest>) {
         // Une description incomplète ou un contexte incohérent ne doivent jamais transformer
         // une autorisation impossible à vérifier en permission implicite.
         let Some((res, act)) = parse_requires(&meta.requires) else {
-            return Decision::deny(DenyReason::PolicyDenied);
+            return (Decision::deny(DenyReason::PolicyDenied), None);
         };
         if context.task != context.token.sub
             || context.sandbox_level > 2
@@ -367,11 +538,11 @@ impl Registry {
                 .is_some_and(|minimum| context.sandbox_level < minimum)
             || (res == Res::Tool && act != Act::Call)
         {
-            return Decision::deny(DenyReason::PolicyDenied);
+            return (Decision::deny(DenyReason::PolicyDenied), None);
         }
 
         let Some(tool) = self.tools.get(name) else {
-            return Decision::deny(DenyReason::PolicyDenied);
+            return (Decision::deny(DenyReason::PolicyDenied), None);
         };
         let (irreversible, external) = tool.effects(args, meta);
 
@@ -386,19 +557,19 @@ impl Registry {
         }
         let decision = self.authority.check(&context.token, &call_request, now);
         if !decision.is_allow() {
-            return decision;
+            return (decision, Some(call_request));
         }
 
         // Second contrôle : la ressource que l'outil va toucher. Le droit d'appeler `fs.read` ne
         // dit rien sur le fichier visé ; c'est ici que le périmètre est vérifié.
         if res == Res::Tool {
-            return decision;
+            return (decision, None);
         }
         let Some(target) = tool.target(args, context) else {
-            return Decision::deny(DenyReason::PolicyDenied);
+            return (Decision::deny(DenyReason::PolicyDenied), None);
         };
         if target.trim().is_empty() {
-            return Decision::deny(DenyReason::PolicyDenied);
+            return (Decision::deny(DenyReason::PolicyDenied), None);
         }
         // Une commande s'exécute à son propre niveau (ADR 0031) : la liste blanche sur place,
         // tout autre programme en microVM. C'est ce niveau-là que capd juge, jamais celui de
@@ -419,7 +590,8 @@ impl Registry {
         if external {
             request = request.external();
         }
-        self.authority.check(&context.token, &request, now)
+        let decision = self.authority.check(&context.token, &request, now);
+        (decision, Some(request))
     }
 
     fn record_result(

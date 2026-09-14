@@ -286,7 +286,7 @@ impl Tool for RequestApproval {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "approval.request".into(),
-            description: "Demande une décision humaine avant une action engageante. Rend un identifiant à passer à approval.wait. Formulez le résumé du point de vue de l'utilisateur : ce qui va se passer, pas la mécanique.".into(),
+            description: "Inutile en pratique : une action qui exige une décision humaine la demande d'elle-même, et l'outil refusé rend l'identifiant de la demande ; attendez-la avec approval.wait, puis réessayez le même appel.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -317,7 +317,10 @@ impl Tool for RequestApproval {
                 "un résumé est obligatoire : un humain ne peut pas trancher ce qu'il ne comprend pas",
             );
         }
-        CallResult::error(ErrorCode::Internal, "capd n'est pas en service")
+        CallResult::error(
+            ErrorCode::Invalid,
+            "une action qui exige une décision humaine la demande d'elle-même : appelez l'outil voulu, il rend l'identifiant de la demande, attendez-la avec approval.wait, puis réessayez",
+        )
     }
 }
 
@@ -330,7 +333,7 @@ impl Tool for WaitApproval {
         ToolSpec {
             name: "approval.wait".into(),
             description:
-                "Attend la décision humaine sur une demande. Rend accordé, refusé ou expiré.".into(),
+                "Attend la décision humaine sur une demande, au plus timeout_s secondes (45 au plus). Rend allowed, denied, expired, ou pending s'il faut attendre encore : réessayez alors l'attente, puis l'appel refusé.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {

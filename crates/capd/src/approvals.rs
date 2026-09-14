@@ -125,12 +125,20 @@ impl StandingRule {
 
 /// Durée de vie par défaut d'une demande sans réponse.
 pub const DEFAULT_TTL_HOURS: i64 = 24;
+/// Durée pendant laquelle une demande tranchée reste lisible (`status`) et, pour une décision
+/// « une fois », attend la demande identique qui la consommera.
+pub const RESOLVED_TTL_HOURS: i64 = 1;
 
 /// File d'approbations et règles permanentes.
 #[derive(Debug, Default)]
 pub struct Approvals {
     pending: HashMap<String, Approval>,
     rules: Vec<StandingRule>,
+    /// Les demandes tranchées, gardées un temps pour que celui qui attend lise la décision.
+    resolved: HashMap<String, Approval>,
+    /// Les décisions « une fois » pas encore consommées : la prochaine demande identique (même
+    /// tâche, même action, même cible) les prend et ne repasse pas devant l'humain.
+    once: HashMap<String, Approval>,
 }
 
 /// Ce qui décrit une demande d'approbation à créer.
@@ -182,8 +190,35 @@ impl Approvals {
             };
             return approval;
         }
+        // Une décision « une fois » rendue pour cette même action vaut pour cette demande, et
+        // pour elle seule.
+        let consommable = self
+            .once
+            .iter()
+            .filter(|(_, a)| {
+                a.task == approval.task
+                    && a.action == approval.action
+                    && a.target == approval.target
+            })
+            .min_by_key(|(_, a)| a.created)
+            .map(|(id, _)| id.clone());
+        if let Some(id) = consommable
+            && let Some(rendue) = self.once.remove(&id)
+        {
+            approval.state = rendue.state;
+            return approval;
+        }
         self.pending.insert(approval.id.clone(), approval.clone());
         approval
+    }
+
+    /// L'état d'une demande : en attente, ou tranchée récemment.
+    #[must_use]
+    pub fn status(&self, id: &str) -> Option<Approval> {
+        self.pending
+            .get(id)
+            .or_else(|| self.resolved.get(id))
+            .cloned()
     }
 
     /// Tranche une demande et crée la règle permanente correspondant à la portée.
@@ -199,8 +234,11 @@ impl Approvals {
     ) -> Option<Approval> {
         let mut approval = self.pending.remove(id)?;
         approval.state = ApprovalState::Resolved { decision };
+        self.resolved.insert(id.to_owned(), approval.clone());
         match scope {
-            ApprovalScope::Once => {}
+            ApprovalScope::Once => {
+                self.once.insert(id.to_owned(), approval.clone());
+            }
             ApprovalScope::Task => self.rules.push(StandingRule {
                 id: Id::new(Kind::Approval).to_string(),
                 decision,
@@ -231,8 +269,11 @@ impl Approvals {
         list
     }
 
-    /// Retire les demandes expirées et les renvoie.
+    /// Retire les demandes expirées et les renvoie ; oublie aussi les décisions anciennes.
     pub fn expire(&mut self, now: OffsetDateTime) -> Vec<Approval> {
+        let horizon = now - time::Duration::hours(RESOLVED_TTL_HOURS);
+        self.resolved.retain(|_, a| a.created > horizon);
+        self.once.retain(|_, a| a.created > horizon);
         let expired: Vec<String> = self
             .pending
             .iter()
@@ -427,5 +468,47 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn une_decision_une_fois_vaut_pour_la_prochaine_demande_identique_et_se_lit_par_son_etat() {
+        let mut file = Approvals::new();
+        let premiere = file.request(requete(), now());
+        assert_eq!(premiere.state, ApprovalState::Pending);
+        assert_eq!(
+            file.status(&premiere.id).unwrap().state,
+            ApprovalState::Pending
+        );
+        assert!(file.status("inconnue").is_none());
+        file.resolve(&premiere.id, Decision::Allow, ApprovalScope::Once, now())
+            .unwrap();
+        // Celui qui attendait lit la décision.
+        assert_eq!(
+            file.status(&premiere.id).unwrap().state,
+            ApprovalState::Resolved {
+                decision: Decision::Allow
+            }
+        );
+        // La demande identique qui suit est tranchée par cette décision, sans repasser devant
+        // l'humain ; la suivante repasse.
+        let seconde = file.request(requete(), now());
+        assert_eq!(
+            seconde.state,
+            ApprovalState::Resolved {
+                decision: Decision::Allow
+            }
+        );
+        assert!(file.pending().is_empty());
+        let troisieme = file.request(requete(), now());
+        assert_eq!(troisieme.state, ApprovalState::Pending);
+        // Une autre cible n'en profite pas.
+        let mut autre = requete();
+        autre.target = "mail.send.autre".into();
+        file.resolve(&troisieme.id, Decision::Deny, ApprovalScope::Once, now())
+            .unwrap();
+        assert_eq!(file.request(autre, now()).state, ApprovalState::Pending);
+        // Les décisions anciennes s'oublient.
+        let _ = file.expire(now() + time::Duration::hours(2));
+        assert!(file.status(&premiere.id).is_none());
     }
 }
