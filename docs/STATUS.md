@@ -1421,7 +1421,13 @@ système installé avec et sans UEFI. Puis `b2267a2` (l'installeur sonde la cart
 Mesa) : vert aussi, après une reprise de `check` — le test du navigateur piloté de `mcp-system`
 avait trébuché une fois sur « le navigateur n'a pas répondu à Page.navigate en 15 s », deux
 Chromium lancés à la fois sur le coureur ; le délai d'une commande au navigateur passe à 45 s,
-sous la minute qu'accorde `prophet task call`. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
+sous la minute qu'accorde `prophet task call`. Sur `c416c06`, c'est « Mission locale » qui a trébuché, dans le
+contexte web : le modèle local a appelé `doc.read`, hors des droits du contexte, et le refus de
+capd a interrompu la mission — le moteur sert ses réglages de conversation (température 0,7),
+et un modèle de 1,7 milliard de paramètres tiré ainsi choisit parfois le mauvais outil. Les
+tours de mission passent à 0,2 (`providers::local::MISSION_TEMPERATURE`) ; la conversation de
+l'atelier garde les réglages du moteur. L'interruption sur refus reste : un agent qui sort de
+ses droits s'arrête. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
 que Fontconfig reproche.
 Le rouge de ChatGPT est lu : Fontconfig dit « Cannot load default config file: File not
 found: /etc/fonts/fonts.conf » depuis un renderer de Chromium, dans le bac à sable de

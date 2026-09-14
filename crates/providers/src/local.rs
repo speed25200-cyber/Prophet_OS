@@ -20,6 +20,13 @@ use crate::native::{ModelClient, ModelTurn, Usage};
 
 const MAX_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
 
+/// Température des tours de mission. Le moteur sert ses réglages de conversation (0,7 pour
+/// Qwen3), faits pour varier ; une mission, elle, choisit des outils, et un petit modèle tiré à
+/// 0,7 a pris `doc.read` hors de ses droits une fois sur cinq dans le contexte web, ce qui
+/// interrompt la mission sur le refus de capd. À 0,2, le choix n'est plus tiré au sort ; la
+/// conversation de l'atelier garde les réglages du moteur.
+pub const MISSION_TEMPERATURE: f64 = 0.2;
+
 /// Fonction proposée au modèle. Les droits sont encore contrôlés par l'exécuteur à chaque appel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalTool {
@@ -142,6 +149,7 @@ impl ModelClient for LocalModel {
             "messages": messages(history)?,
             "stream": false,
             "max_tokens": self.max_tokens,
+            "temperature": MISSION_TEMPERATURE,
         });
         if !self.tools.is_empty() {
             body["tools"] = json!(
@@ -494,7 +502,7 @@ impl AsyncLocalModel {
     /// # Errors
     /// Moteur indisponible, réponse trop grande, incohérente ou incomplète.
     pub async fn next_turn(&self, history: &[Value]) -> Result<LocalReply, DriverError> {
-        let mut body = json!({"model":self.model,"messages":self.outgoing(history)?,"stream":false,"max_tokens":self.max_tokens});
+        let mut body = json!({"model":self.model,"messages":self.outgoing(history)?,"stream":false,"max_tokens":self.max_tokens,"temperature":MISSION_TEMPERATURE});
         if !self.tools.is_empty() {
             body["tools"] = json!(
                 self.tools
