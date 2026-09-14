@@ -273,3 +273,84 @@ fn dorsale_detectee_et_limites_annoncees() {
         assert!(backend.limitations().contains("dernière validation"));
     }
 }
+
+/// Le relais (ADR 0039) : une sous-tâche part de l'espace de travail de son parent, non des
+/// fichiers de l'humain, et ce qu'elle change y revient, dans les périmètres du parent ; le
+/// parent publie le tout, d'un seul tenant.
+#[test]
+fn une_sous_tache_part_de_l_espace_du_parent_et_y_rapporte_ses_changements() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path();
+    let lire = |p: std::path::PathBuf| std::fs::read_to_string(p).unwrap();
+    ecrire(home, "docs/a.txt", "a de l'humain");
+    ecrire(home, "notes/n.txt", "note de l'humain");
+    let mut parent = Workspace::begin(home, "parent", &["docs"], now()).unwrap();
+    ecrire(&parent.workdir(), "docs/a.txt", "a du parent");
+    ecrire(&parent.workdir(), "docs/b.txt", "b du parent");
+
+    // L'enfant voit le travail du parent ; un périmètre que le parent n'a pas vient du home.
+    let enfant = Workspace::begin_authorized_from(
+        home,
+        "enfant",
+        &["docs".into(), "notes".into()],
+        now(),
+        &|_| true,
+        Some(&parent.workdir()),
+    )
+    .unwrap();
+    assert_eq!(lire(enfant.workdir().join("docs/a.txt")), "a du parent");
+    assert_eq!(lire(enfant.workdir().join("docs/b.txt")), "b du parent");
+    assert_eq!(
+        lire(enfant.workdir().join("notes/n.txt")),
+        "note de l'humain"
+    );
+    assert!(enfant.diff().unwrap().is_empty());
+
+    ecrire(&enfant.workdir(), "docs/a.txt", "a de l'enfant");
+    ecrire(&enfant.workdir(), "docs/c.txt", "c de l'enfant");
+    std::fs::remove_file(enfant.workdir().join("docs/b.txt")).unwrap();
+    // Hors des périmètres du parent : reste chez l'enfant.
+    ecrire(&enfant.workdir(), "notes/n.txt", "note de l'enfant");
+    let rapport = enfant.carry_into(&parent).unwrap();
+    let chemins: Vec<String> = rapport
+        .changes
+        .iter()
+        .map(|c| c.path.display().to_string())
+        .collect();
+    assert_eq!(chemins, ["docs/a.txt", "docs/b.txt", "docs/c.txt"]);
+    assert_eq!(lire(parent.workdir().join("docs/a.txt")), "a de l'enfant");
+    assert!(!parent.workdir().join("docs/b.txt").exists());
+    assert_eq!(lire(parent.workdir().join("docs/c.txt")), "c de l'enfant");
+    assert!(!parent.workdir().join("notes").exists());
+    assert_eq!(
+        lire(enfant.workdir().join("notes/n.txt")),
+        "note de l'enfant"
+    );
+    // Le home n'a pas bougé : seule la publication du parent l'atteindra.
+    assert_eq!(lire(home.join("docs/a.txt")), "a de l'humain");
+    assert!(!home.join("docs/c.txt").exists());
+
+    let diff = parent.commit(now(), None).unwrap();
+    let publies: Vec<(String, ChangeKind)> = diff
+        .changes
+        .iter()
+        .map(|c| (c.path.display().to_string(), c.kind))
+        .collect();
+    assert_eq!(
+        publies,
+        [
+            ("docs/a.txt".to_owned(), ChangeKind::Modified),
+            ("docs/c.txt".to_owned(), ChangeKind::Added)
+        ]
+    );
+    assert_eq!(lire(home.join("docs/a.txt")), "a de l'enfant");
+    assert_eq!(lire(home.join("docs/c.txt")), "c de l'enfant");
+    assert_eq!(lire(home.join("notes/n.txt")), "note de l'humain");
+    // Un parent qui n'est plus ouvert ne reçoit plus rien.
+    assert!(matches!(
+        enfant.carry_into(&parent),
+        Err(sfs::SfsError::BadState {
+            state: WorkspaceState::Committed
+        })
+    ));
+}

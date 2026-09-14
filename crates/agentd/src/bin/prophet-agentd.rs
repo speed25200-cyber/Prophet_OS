@@ -1607,6 +1607,7 @@ fn deleguer(
         task.reason = Some("sous-mission interrompue de manière inattendue".into());
         let _ = publish(task, None);
     }
+    let carried = rapporter_au_parent(&ctx.runtime, &child_id, parent_id);
     let (state, reason, result) = {
         let mut runtime = ctx.runtime.blocking_lock();
         runtime.absorb_child(&child_id, parent_id);
@@ -1623,7 +1624,8 @@ fn deleguer(
         "state": state,
         "reason": reason,
         "result": result,
-        "note": "La sous-mission a travaillé dans son propre espace ; ses changements sont à examiner et à appliquer comme les vôtres.",
+        "carried": carried,
+        "note": "La sous-mission est partie de votre espace de travail ; ce qu'elle y a changé (carried) est revenu dans le vôtre et se publiera avec le reste, examiné d'un seul tenant.",
     }))
 }
 
@@ -1827,6 +1829,7 @@ fn deleguer_pilote(
     {
         taken.finish(Some(client_text.clone()).filter(|t| !t.is_empty()));
     }
+    let carried = rapporter_au_parent(&ctx.runtime, child_id, parent_id);
     let (state, reason, result) = {
         let mut runtime = ctx.runtime.blocking_lock();
         if let Some(mut task) = runtime.task(child_id).cloned()
@@ -1862,10 +1865,43 @@ fn deleguer_pilote(
         "state": state,
         "reason": reason,
         "result": result,
+        "carried": carried,
         "driver": reference,
         "client_text": client_text,
-        "note": "La sous-mission a été menée par un client officiel dans sa propre séance ; ses changements sont à examiner et à appliquer comme les vôtres.",
+        "note": "La sous-mission a été menée par un client officiel dans sa propre séance, partie de votre espace de travail ; ce qu'elle y a changé (carried) est revenu dans le vôtre et se publiera avec le reste.",
     }))
+}
+
+/// Rapporte au parent ce qu'une sous-mission finie a changé dans son espace (ADR 0039) : le
+/// parent continue avec, et publie le tout, examiné d'un seul tenant. Rien n'est rapporté d'une
+/// sous-mission qui a échoué ; ce qui n'a pas pu l'être est dit, sans faire échouer la
+/// délégation.
+fn rapporter_au_parent(runtime: &Arc<Mutex<Runtime>>, child: &str, parent: &str) -> Value {
+    let (home, finie) = {
+        let runtime = runtime.blocking_lock();
+        (
+            runtime.home().to_path_buf(),
+            runtime
+                .task(child)
+                .is_some_and(|t| t.state == agentd::State::Done),
+        )
+    };
+    if !finie {
+        return Value::Null;
+    }
+    let rapport = sfs::Workspace::open(&home, child)
+        .and_then(|enfant| {
+            let parent = sfs::Workspace::open(&home, parent)?;
+            enfant.carry_into(&parent)
+        })
+        .map_err(|e| e.to_string());
+    match rapport {
+        Ok(diff) => json!(diff),
+        Err(error) => {
+            tracing::warn!(enfant = child, parent, %error, "changements non rapportés au parent");
+            json!({ "error": error })
+        }
+    }
 }
 
 /// Attend une opération asynchrone depuis un fil sans exécuteur : chaque délégation en crée un,

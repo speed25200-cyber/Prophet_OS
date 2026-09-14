@@ -63,7 +63,7 @@ fn faux_codex(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathBu
              \"$P\" task call \"$PROPHET_TASK\" fs.write '{{\"path\":\"~/docs/code.txt\",\"content\":\"fn main() {{}}\"}}' >/dev/null\n\
              texte=\"Code écrit par le faux Codex : $1\"\n\
              case \"$1\" in *relire*)\n\
-               relecture=$(\"$P\" task call \"$PROPHET_TASK\" task.delegate '{{\"intent\":\"Relis ce code : fn main() {{}}\",\"profile\":\"atelier\",\"role\":\"review\"}}' --json)\n\
+               relecture=$(\"$P\" task call \"$PROPHET_TASK\" task.delegate '{{\"intent\":\"Relis ~/docs/code.txt\",\"profile\":\"atelier\",\"role\":\"review\"}}' --json)\n\
                texte=\"$texte ; relecture : $relecture\" ;;\n\
              esac\n\
              \"$P\" task detach \"$PROPHET_TASK\" --text \"$texte\" >/dev/null\n\
@@ -91,8 +91,9 @@ fn faux_claude(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathB
              [ -n \"$PROPHET_TASK\" ] || exit 3\n\
              [ -n \"$CLAUDE_CONFIG_DIR\" ] || exit 4\n\
              \"$P\" task attach \"$PROPHET_TASK\" --client claude-code >/dev/null\n\
+             lu=$(\"$P\" task call \"$PROPHET_TASK\" fs.read '{{\"path\":\"~/docs/code.txt\"}}')\n\
              \"$P\" task call \"$PROPHET_TASK\" fs.write '{{\"path\":\"~/docs/relecture.txt\",\"content\":\"Relu.\"}}' >/dev/null\n\
-             \"$P\" task detach \"$PROPHET_TASK\" --text \"Relu par le faux Claude Code : $1\" >/dev/null\n\
+             \"$P\" task detach \"$PROPHET_TASK\" --text \"Relu par le faux Claude Code : $1 ; lu : $lu\" >/dev/null\n\
              echo '{{\"type\":\"result\",\"result\":\"Relu par le faux Claude Code.\"}}'\n",
             cli = cli.display()
         ),
@@ -400,6 +401,15 @@ async fn le_role_code_lance_le_client_officiel_dans_une_seance_et_son_texte_revi
         .path()
         .join("home/.prophet/tasks/relais-codex.1/work/docs/code.txt");
     assert_eq!(std::fs::read_to_string(&code).unwrap(), "fn main() {}");
+    // Le code de Codex est revenu dans l'espace du parent, qui publiera le tout (ADR 0039).
+    let chez_le_parent = chain
+        .dir
+        .path()
+        .join("home/.prophet/tasks/relais-codex/work/docs/code.txt");
+    assert_eq!(
+        std::fs::read_to_string(&chez_le_parent).unwrap(),
+        "fn main() {}"
+    );
     // Le parent porte le compte de l'enfant, modèle local et client confondus.
     assert_eq!(
         parent["task"]["usage"]["client:codex"]["turns"], 1,
@@ -545,10 +555,13 @@ async fn codex_mene_la_mission_et_confie_la_relecture_a_claude_code() {
         texte.starts_with("Code écrit par le faux Codex : Écris ~/docs/code.txt et fais-le relire"),
         "{texte}"
     );
+    // Le relecteur a lu le code que Codex venait d'écrire : la sous-mission part de l'espace
+    // de travail du parent (ADR 0039).
     assert!(
-        texte.contains("Relu par le faux Claude Code : Relis ce code : fn main() {}"),
+        texte.contains("Relu par le faux Claude Code : Relis ~/docs/code.txt ; lu : "),
         "{texte}"
     );
+    assert!(texte.contains("fn main() {}"), "{texte}");
     let child = chain
         .client
         .call("task.inspect", json!({"id":"duo.1"}))
@@ -558,17 +571,34 @@ async fn codex_mene_la_mission_et_confie_la_relecture_a_claude_code() {
     assert_eq!(child["task"]["driver"], "driver:claude-code");
     assert_eq!(child["task"]["role"], "review");
     assert_eq!(child["task"]["parent"], "duo");
-    assert_eq!(
-        child["result"]["text"],
-        "Relu par le faux Claude Code : Relis ce code : fn main() {}"
+    assert!(
+        child["result"]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Relu par le faux Claude Code : Relis ~/docs/code.txt ; lu : "),
+        "{child}"
     );
-    // Chaque client est compté sous son nom, et le parent porte le compte de l'enfant.
+    // Le verdict écrit par le relecteur est revenu dans l'espace de Codex, qui publiera le
+    // tout ; la sous-mission, elle, ne se publie pas seule.
+    assert_eq!(child["can_apply"], false, "{child}");
+    let racine = chain.dir.path().join("home/.prophet/tasks");
     assert_eq!(
-        child["task"]["usage"]["client:claude-code"]["turns"], 1,
+        std::fs::read_to_string(racine.join("duo.1/work/docs/code.txt")).unwrap(),
+        "fn main() {}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(racine.join("duo/work/docs/relecture.txt")).unwrap(),
+        "Relu."
+    );
+    assert!(!chain.dir.path().join("home/docs/relecture.txt").exists());
+    // Chaque client est compté sous son nom (le relecteur a lu, puis écrit), et le parent
+    // porte le compte de l'enfant.
+    assert_eq!(
+        child["task"]["usage"]["client:claude-code"]["turns"], 2,
         "{child}"
     );
     assert_eq!(
-        parent["task"]["usage"]["client:claude-code"]["turns"], 1,
+        parent["task"]["usage"]["client:claude-code"]["turns"], 2,
         "{parent}"
     );
     assert!(

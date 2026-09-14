@@ -173,8 +173,11 @@ impl Inspection {
         use sfs::WorkspaceState as W;
         self.publication = state;
         let done = self.task.state == State::Done;
-        self.can_apply = owner && done && matches!(state, Some(W::Open | W::Applying));
-        self.can_undo = owner && done && matches!(state, Some(W::Committed | W::Undoing));
+        // Une sous-mission ne se publie pas seule : son travail est revenu dans l'espace de
+        // son parent, qui publie le tout (ADR 0039).
+        let racine = self.task.parent.is_none();
+        self.can_apply = owner && done && racine && matches!(state, Some(W::Open | W::Applying));
+        self.can_undo = owner && done && racine && matches!(state, Some(W::Committed | W::Undoing));
         self
     }
 }

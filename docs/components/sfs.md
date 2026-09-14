@@ -19,6 +19,11 @@ l'index examiné et le créateur constaté ; les droits capd liés à l'index et
 l'identité humaine restent à livrer. Les captures privées d'agentd et son ACL de lecture sur
 les documents ne deviennent pas des droits de publication.
 
+Pour le relais (ADR 0039), un espace peut s'ouvrir depuis le répertoire de travail d'une
+mission parente (`begin_authorized_from`) et rapporter son diff dans celui du parent
+(`carry_into`) : copies par fichier provisoire renommé, sans suivre de lien, dans les
+périmètres du parent seulement, et seulement vers un parent encore ouvert.
+
 Le [guide de la bibliothèque](../../crates/sfs/README.md) donne les interfaces et la commande
 de test. L'[ADR 0018](../adr/0018-examen-des-versions.md) décrit les bornes, l'autorisation,
 le compromis systemd nécessaire et les limites de récupération après interruption.

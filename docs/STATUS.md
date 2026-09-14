@@ -304,7 +304,15 @@ pas : le vrai Codex et le vrai Claude Code, qui exigent la connexion de l'humain
 machine installée. Ce que cela a montré : une sous-mission ne voit pas l'espace de travail du
 parent (elle part des fichiers de l'humain), donc un relecteur ne lit que ce que l'auteur cite
 dans l'intention ou ce qui est déjà publié ; partager en lecture l'espace du parent avec
-l'enfant est au carnet.
+l'enfant est au carnet — et fait dans la foulée (ADR 0039) : une sous-mission part de l'espace
+de travail de son parent (ses périmètres capturés depuis le répertoire de travail du parent, un
+périmètre absent chez lui pris au répertoire personnel, les droits jugés par capd comme
+toujours), et à sa fin son diff revient chez le parent (créés et modifiés copiés, supprimés
+retirés, dans les périmètres du parent), qui publie le tout d'un seul tenant ; une sous-mission
+ne se publie plus seule. Prouvé dans sfs (capture depuis le parent, rapport, publication du
+parent, périmètre hors du parent laissé chez l'enfant, parent fermé refusé) et dans agentd avec
+les vrais services : le faux Claude Code lit le code que le faux Codex vient d'écrire et son
+verdict revient chez Codex ; le code de Codex pour un parent local est chez ce parent.
 
 La CI de `ddf6e89` (relais et lanceur de pilotes) réussit `check`, l'isolation, le protocole du
 moteur, la surface, les sept services sous systemd, l'installeur, l'ISO et son démarrage, la

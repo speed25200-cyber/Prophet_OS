@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::backend::{Backend, detect_backend};
-use crate::diff::{self, Diff, Fingerprints};
+use crate::diff::{self, ChangeKind, Diff, Fingerprints};
 use crate::provenance::Provenance;
 
 /// Erreur du système de fichiers sémantique.
@@ -110,6 +110,24 @@ impl Workspace {
         now: OffsetDateTime,
         permits: &dyn Fn(&Path) -> bool,
     ) -> Result<Self, SfsError> {
+        Self::begin_authorized_from(home, task, scopes, now, permits, None)
+    }
+
+    /// Capture de service depuis l'espace de travail d'une mission parente (ADR 0039) : la
+    /// sous-mission part de ce que le parent a déjà fait, non des fichiers de l'humain ; un
+    /// périmètre que le parent n'a pas vient du répertoire personnel. Les droits se jugent sur
+    /// les chemins du répertoire personnel, comme pour toute capture.
+    ///
+    /// # Errors
+    /// Comme [`Self::begin_authorized`] ; source non absolue.
+    pub fn begin_authorized_from(
+        home: &Path,
+        task: &str,
+        scopes: &[String],
+        now: OffsetDateTime,
+        permits: &dyn Fn(&Path) -> bool,
+        source: Option<&Path>,
+    ) -> Result<Self, SfsError> {
         let mut resolved = Vec::new();
         for scope in scopes {
             let absolute = scope_path(home, scope)?;
@@ -125,7 +143,7 @@ impl Workspace {
             }
             resolved.push(relative);
         }
-        let base = crate::snapshot::capture(home, task, &resolved, permits)?;
+        let base = crate::snapshot::capture(home, task, &resolved, permits, source)?;
         let workspace = Self {
             root: Self::root_for(home).join(task),
             home: home.into(),
@@ -281,6 +299,82 @@ impl Workspace {
     /// Si l'espace de travail est illisible.
     pub fn diff(&self) -> Result<Diff, SfsError> {
         Ok(diff::compute(&self.meta.base, &self.root.join(WORK))?)
+    }
+
+    /// Rapporte les changements de cet espace dans celui de la mission parente (ADR 0039) :
+    /// les fichiers créés ou modifiés y sont copiés, les supprimés en sont retirés, dans les
+    /// périmètres du parent seulement — le reste demeure ici. Le parent continue avec, et
+    /// publie le tout, examiné d'un seul tenant. Aucun lien n'est suivi.
+    ///
+    /// # Errors
+    /// Parent qui n'est plus ouvert, chemin refusé, fichier qui n'est pas ordinaire, entrée-sortie.
+    pub fn carry_into(&self, parent: &Self) -> Result<Diff, SfsError> {
+        if parent.state() != WorkspaceState::Open {
+            return Err(SfsError::BadState {
+                state: parent.state(),
+            });
+        }
+        let diff = self.diff()?;
+        let work = self.workdir();
+        let destination = parent.workdir();
+        let mut carried = Vec::new();
+        for change in diff.changes {
+            let relative = &change.path;
+            if relative
+                .components()
+                .any(|c| !matches!(c, std::path::Component::Normal(_)))
+            {
+                return Err(SfsError::Io(std::io::Error::other(
+                    "rapport au parent : chemin refusé",
+                )));
+            }
+            if !parent
+                .meta
+                .scopes
+                .iter()
+                .any(|scope| relative.starts_with(scope))
+            {
+                continue;
+            }
+            let cible = destination.join(relative);
+            match change.kind {
+                ChangeKind::Deleted => match std::fs::remove_file(&cible) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                },
+                ChangeKind::Added | ChangeKind::Modified => {
+                    let origine = work.join(relative);
+                    if !std::fs::symlink_metadata(&origine)?.is_file() {
+                        return Err(SfsError::Io(std::io::Error::other(
+                            "rapport au parent : seul un fichier ordinaire se rapporte",
+                        )));
+                    }
+                    if let Ok(meta) = std::fs::symlink_metadata(&cible)
+                        && !meta.is_file()
+                    {
+                        return Err(SfsError::Io(std::io::Error::other(
+                            "rapport au parent : la destination n'est pas un fichier ordinaire",
+                        )));
+                    }
+                    if let Some(dossier) = cible.parent() {
+                        std::fs::create_dir_all(dossier)?;
+                    }
+                    let nom = relative
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .ok_or_else(|| {
+                            SfsError::Io(std::io::Error::other("rapport au parent : nom refusé"))
+                        })?;
+                    let provisoire =
+                        cible.with_file_name(format!(".{nom}.rapport-{}", std::process::id()));
+                    std::fs::copy(&origine, &provisoire)?;
+                    std::fs::rename(&provisoire, &cible)?;
+                }
+            }
+            carried.push(change);
+        }
+        Ok(Diff { changes: carried })
     }
 
     /// Publie les changements courants avec contrôle des conflits et journal de reprise.

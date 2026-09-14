@@ -45,6 +45,7 @@ pub(crate) fn capture(
     task: &str,
     scopes: &[PathBuf],
     permits: &dyn Fn(&Path) -> bool,
+    source_root: Option<&Path>,
 ) -> std::io::Result<Fingerprints> {
     if !home.is_absolute()
         || home.components().any(|c| matches!(c, Component::ParentDir))
@@ -65,6 +66,27 @@ pub(crate) fn capture(
         ResolveFlags::NO_SYMLINKS,
     )?
     .into();
+    // L'espace de travail d'une mission parente, s'il y en a un (ADR 0039) : la capture y lit
+    // d'abord, et retombe sur le répertoire personnel pour un périmètre que le parent n'a pas.
+    // Les droits, eux, se jugent toujours sur les chemins du répertoire personnel.
+    let parent: Option<File> = match source_root {
+        Some(root) => {
+            if !root.is_absolute() || root.components().any(|c| matches!(c, Component::ParentDir)) {
+                return Err(denied());
+            }
+            Some(
+                fs::openat2(
+                    fs::CWD,
+                    root,
+                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+                    Mode::empty(),
+                    ResolveFlags::NO_SYMLINKS,
+                )?
+                .into(),
+            )
+        }
+        None => None,
+    };
     let state = directory(&source, ".prophet")?;
     let tasks = directory(&state, "tasks")?;
     // Un identifiant existant n'est jamais réutilisé ni remplacé pendant une capture.
@@ -74,10 +96,13 @@ pub(crate) fn capture(
     let original = directory(&task_root, "base")?;
     directory(&task_root, "restore")?;
     let mut base = Fingerprints::new();
-    let mut pending: Vec<_> = scopes.iter().map(|p| (p.clone(), 0_u32)).collect();
+    let mut pending: Vec<_> = scopes
+        .iter()
+        .map(|p| (p.clone(), 0_u32, parent.is_some()))
+        .collect();
     let mut visited = 0;
     let mut bytes = 0_u64;
-    while let Some((relative, depth)) = pending.pop() {
+    while let Some((relative, depth, du_parent)) = pending.pop() {
         visited += 1;
         if visited > 10000 || depth > 64 {
             return Err(std::io::Error::other("capture SFS trop grande"));
@@ -94,11 +119,26 @@ pub(crate) fn capture(
         if !permits(&home.join(&relative)) {
             return Err(denied());
         }
-        let from = match open(&source, &relative, OFlags::PATH) {
-            Ok(f) => f,
+        let racine_de = |du_parent: bool| -> &File {
+            match (&parent, du_parent) {
+                (Some(p), true) => p,
+                _ => &source,
+            }
+        };
+        let (from, du_parent) = match open(racine_de(du_parent), &relative, OFlags::PATH) {
+            Ok(f) => (f, du_parent),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && du_parent && depth == 0 => {
+                // Le parent n'a pas ce périmètre : il vient du répertoire personnel.
+                match open(&source, &relative, OFlags::PATH) {
+                    Ok(f) => (f, false),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(e) => return Err(e),
+                }
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) => return Err(e),
         };
+        let racine = racine_de(du_parent);
         let meta = from.metadata()?;
         let mut target_parent = work.try_clone()?;
         let mut original_parent = original.try_clone()?;
@@ -115,7 +155,7 @@ pub(crate) fn capture(
                 directory(&target_parent, name)?;
                 directory(&original_parent, name)?;
             }
-            let dir = open(&source, &relative, OFlags::RDONLY | OFlags::DIRECTORY)?;
+            let dir = open(racine, &relative, OFlags::RDONLY | OFlags::DIRECTORY)?;
             for entry in fs::Dir::new(dir)? {
                 if visited + pending.len() > 10000 {
                     return Err(std::io::Error::other("capture SFS trop grande"));
@@ -125,10 +165,10 @@ pub(crate) fn capture(
                 if matches!(name, "." | ".." | ".prophet") {
                     continue;
                 }
-                pending.push((relative.join(name), depth + 1));
+                pending.push((relative.join(name), depth + 1, du_parent));
             }
         } else if meta.is_file() && meta.nlink() == 1 {
-            let mut from = open(&source, &relative, OFlags::RDONLY | OFlags::NONBLOCK)?;
+            let mut from = open(racine, &relative, OFlags::RDONLY | OFlags::NONBLOCK)?;
             let meta = from.metadata()?;
             if !meta.is_file() || meta.nlink() != 1 || bytes.saturating_add(meta.len()) > MAX_BYTES
             {

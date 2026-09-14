@@ -378,8 +378,16 @@ impl Mission {
     }
 
     /// Capture les périmètres dans le travail SFS, chaque lecture étant tranchée par capd.
+    /// Une sous-mission part de l'espace de travail de son parent, s'il est ouvert : elle voit
+    /// ce qu'il a déjà fait, et ce qu'elle fera y reviendra à sa fin (ADR 0039).
     fn open_workspace(&self, control: &Arc<Control>) -> Result<sfs::Workspace, String> {
-        sfs::Workspace::begin_authorized(
+        let parent = self.task.parent.as_deref().and_then(|parent| {
+            sfs::Workspace::open(&self.home, parent)
+                .ok()
+                .filter(|w| w.state() == sfs::WorkspaceState::Open)
+                .map(|w| w.workdir())
+        });
+        sfs::Workspace::begin_authorized_from(
             &self.home,
             &self.task.id,
             &self.plan.scopes,
@@ -394,6 +402,7 @@ impl Mission {
                     )
                     .is_allow()
             },
+            parent.as_deref(),
         )
         .map_err(|e| e.to_string())
     }
