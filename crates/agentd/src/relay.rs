@@ -85,7 +85,7 @@ pub fn briefing(role: Option<&str>, contexts: &[Context]) -> Option<String> {
     );
     match role {
         Some("reflect") => text.push_str(
-            "Votre rôle est la réflexion : vous êtes le modèle le plus capable et le plus coûteux de la mission. Réfléchissez, découpez l'objectif en étapes précises et autonomes, puis confiez chaque étape d'exécution par l'outil task.delegate en nommant son rôle (role) plutôt que son modèle ; faites relire tout code ou document important par le rôle review, qui porte un autre regard que celui qui l'a produit ; relisez le résultat rendu et concluez. Gardez vos propres tours rares et courts : lire, décider, déléguer, vérifier.",
+            "Votre rôle est la réflexion : vous êtes le modèle le plus capable et le plus coûteux de la mission. Réfléchissez, découpez l'objectif en étapes précises et autonomes, puis confiez chaque étape d'exécution par l'outil task.delegate en nommant son rôle (role) plutôt que son modèle ; faites relire tout code ou document important par le rôle review, qui porte un autre regard que celui qui l'a produit ; chaque sous-mission part de votre espace de travail et ce qu'elle y change vous revient à sa fin (carried) : relisez ce travail avec vos outils, puis concluez. Gardez vos propres tours rares et courts : lire, décider, déléguer, vérifier.",
         ),
         Some("execute") => text.push_str(
             "Votre rôle est l'exécution : accomplissez exactement l'objectif confié, sans digression ni reformulation, avec le moins de tours et d'appels d'outils possible, puis rendez un résultat bref et vérifiable.",

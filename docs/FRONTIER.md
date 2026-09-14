@@ -201,7 +201,10 @@ n'est pas confiné, et ses événements et demandes de permission ne sont pas tr
 Depuis le 14 septembre (complément de l'ADR 0035), les clients sont les modèles principaux :
 une mission de premier niveau se prépare et se lance directement sur `codex` ou `claude-code`,
 le catalogue les propose en tête, tous les contextes de l'image les préfèrent, et le modèle
-local n'est qu'un secours.
+local n'est qu'un secours. Le même jour, l'[ADR 0039](adr/0039-l-espace-de-travail-partage-du-relais.md)
+fait du relais un travail commun : une sous-mission part de l'espace de travail de son parent
+et y rapporte ce qu'elle change, le parent publie le tout ; prouvé avec un faux Codex qui écrit
+et un faux Claude Code qui relit ce code et dépose son verdict chez Codex.
 
 Le même jour, l'image sert deux modèles en mode routeur (Qwen3-1.7B en réflexion, Qwen3-0.6B
 en exécution, ADR 0034), et la [parole](adr/0036-la-parole-de-l-humain.md) entre dans le

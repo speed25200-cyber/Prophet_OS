@@ -35,7 +35,7 @@ impl SystemTool for Tool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "task.delegate".into(),
-            description: "Confie un objectif précis à une sous-mission menée par un autre agent, dans un contexte du catalogue (profile) et, au choix, pour un rôle (role : reflect, execute, code ou review, le service choisit alors le modèle que ce contexte admet pour ce rôle) ou avec un modèle local nommé (model). La sous-mission n'a jamais plus de droits que vous, travaille dans son propre espace, et son résultat vous est rendu ici quand elle a fini. Formulez l'objectif complet : elle ne voit pas votre conversation.".into(),
+            description: "Confie un objectif précis à une sous-mission menée par un autre agent, dans un contexte du catalogue (profile) et, au choix, pour un rôle (role : reflect, execute, code ou review, le service choisit alors le modèle que ce contexte admet pour ce rôle) ou avec un modèle local nommé (model). La sous-mission n'a jamais plus de droits que vous ; elle part de votre espace de travail (elle voit vos fichiers tels qu'ils sont maintenant), et ce qu'elle y change revient dans le vôtre quand elle a fini (carried, dans le résultat rendu ici), à publier avec le reste. Formulez l'objectif complet : elle ne voit pas votre conversation.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
