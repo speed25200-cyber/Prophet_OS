@@ -334,7 +334,7 @@ impl Desktop {
                 continue;
             };
             let name = proxy.name().await.unwrap_or_default();
-            let app = name.trim().to_lowercase();
+            let app = app_name(&name);
             if app.is_empty() {
                 continue;
             }
@@ -344,7 +344,7 @@ impl Desktop {
     }
 
     async fn find_application(&self, app: &str) -> Result<Application, Error> {
-        let voulu = app.trim().to_lowercase();
+        let voulu = app_name(app);
         self.list_applications()
             .await?
             .into_iter()
@@ -565,6 +565,24 @@ fn node_id(path: &str) -> String {
     path.rsplit('/').next().unwrap_or(path).to_owned()
 }
 
+/// L'identifiant d'une application, tel que capd le tranche et que les profils le nomment : le
+/// nom qu'elle se donne sur le bus, en minuscules — et, quand ce nom est un identifiant en
+/// domaine inversé (`org.xfce.mousepad`, `org.gnome.Nautilus` : au moins deux points, aucun
+/// espace), son dernier segment. Les applications GTK récentes se présentent ainsi sur le bus
+/// d'accessibilité ; le profil « bureau » dit `mousepad`, et l'agent aussi. Un nom à un seul
+/// point (`soffice.bin`) reste entier.
+fn app_name(name: &str) -> String {
+    let name = name.trim().to_lowercase();
+    if name.matches('.').count() >= 2 && !name.contains(char::is_whitespace) {
+        name.rsplit('.')
+            .find(|segment| !segment.is_empty())
+            .unwrap_or(&name)
+            .to_owned()
+    } else {
+        name
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -573,5 +591,17 @@ mod tests {
     fn l_identifiant_est_le_dernier_segment() {
         assert_eq!(node_id("/org/a11y/atspi/accessible/23"), "23");
         assert_eq!(node_id("/org/a11y/atspi/accessible/root"), "root");
+    }
+
+    #[test]
+    fn le_nom_d_une_application_est_court_et_en_minuscules() {
+        assert_eq!(app_name("mousepad"), "mousepad");
+        assert_eq!(app_name(" Mousepad "), "mousepad");
+        assert_eq!(app_name("org.xfce.mousepad"), "mousepad");
+        assert_eq!(app_name("org.gnome.Nautilus"), "nautilus");
+        assert_eq!(app_name("io.github.foo.Bar"), "bar");
+        assert_eq!(app_name("soffice.bin"), "soffice.bin");
+        assert_eq!(app_name("Mon appli. v2. finale"), "mon appli. v2. finale");
+        assert_eq!(app_name(""), "");
     }
 }

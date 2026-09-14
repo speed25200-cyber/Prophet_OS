@@ -1376,7 +1376,12 @@ les ACL écrivent leur masque (`m::r-x`, `d:m::r-x`) — confirmé par la CI (`1
 service lit le fichier de l'humain. Le scénario est alors allé plus loin qu'il n'était jamais
 allé, jusqu'à `ui.apps` dans la séance, et a trébuché sur lui-même : il lisait `structured` là
 où le protocole MCP écrit `structuredContent` (réponse brute imprimée par `eefdef4`, quatre
-applications vues par l'adaptateur, dont l'éditeur). Corrigé ; à confirmer par la CI.
+applications vues par l'adaptateur, dont l'éditeur). Corrigé (`51b043c`), et le pas suivant a
+trébuché à son tour : l'adaptateur nomme l'éditeur `org.xfce.mousepad`, le nom que les
+applications GTK récentes se donnent sur le bus d'accessibilité, alors que le profil « bureau »,
+capd et l'agent disent `mousepad`. L'adaptateur ramène désormais un identifiant en domaine
+inversé à son dernier segment (`supd::app_name`), pour la liste comme pour la recherche ; à
+confirmer par la CI.
 
 Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le
 dernier mot : le job `isolation` de l'intégration continue installe gVisor, Firecracker et les

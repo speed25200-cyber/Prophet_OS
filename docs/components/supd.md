@@ -12,7 +12,10 @@ admis : `agentd` (`PROPHET_SUP_CLIENT`), plus le propriétaire si `PROPHET_SUP_A
 | `sup.tree` | `{app, window?}` | `{tree, provenance, confidence, caveat, truncated?}` |
 | `sup.act` | `{app, window?, action, node, value?}` | `{message, observation?}` |
 
-L'identifiant d'une application est le nom qu'elle se donne sur le bus, en minuscules. Une
+L'identifiant d'une application est le nom qu'elle se donne sur le bus, en minuscules — et,
+quand ce nom est un identifiant en domaine inversé (`org.xfce.mousepad`, au moins deux points),
+son dernier segment : c'est ainsi que les applications GTK récentes se présentent, et le profil
+« bureau » comme l'agent disent `mousepad`. Une
 fenêtre est désignée par son identifiant de nœud ou son titre ; sans indication, la fenêtre
 active, sinon la dernière ouverte. Les nœuds portent le dernier segment de leur chemin d'objet
 AT-SPI ; une action vise ce nœud. `click` emploie la première action `click`, `activate`,
