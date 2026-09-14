@@ -1543,8 +1543,18 @@ tranche au moment où cela arrive. Le workflow reste donc à déclenchement manu
 
 - **Atelier logiciel, la suite.** L'invité est dans l'image et le niveau 2 exécute (ADR 0038,
   contexte « logiciel »). Restent : une mission réelle de bout en bout sur une machine à KVM
-  (le modèle local écrit un outil, l'exécute, le résultat revient à l'humain), le lancement
+  (un client écrit un outil, l'exécute, le résultat revient à l'humain), le lancement
   des outils produits depuis le lanceur du bureau, et d'autres interpréteurs dans la racine.
+- **Arrêter un client lancé.** `task.cancel` d'une mission menée par un client conclut sa
+  séance (son prochain appel d'outil échoue) et une mission pas encore rejointe est annulée
+  avant l'attache ; mais le processus du client n'est arrêté que par lui-même ou par le délai
+  du lanceur. Un `pilot.stop {task}` dans `prophet-pilotd`, appelé par `task.cancel`, doit
+  tuer le client sur-le-champ : l'humain supervise, il doit pouvoir couper.
+- **Les vrais clients.** Tout ce qui précède est prouvé avec des clients de remplacement sur le
+  même chemin (pont, séance, CLI). Le vrai Claude Code et le vrai Codex, connectés par l'humain
+  sur une machine installée, restent l'essai `needs_claude_login` / `needs_chatgpt_login` à
+  mener : la forme de leur sortie finale (`final_text`), leur configuration MCP et leur
+  comportement face aux refus de capd sont construits d'après leur documentation.
 - **Mesures sur matériel réel** : carte graphique (option Vulkan de l'ADR 0037, vitesse et
   mémoire vidéo), micro et sortie audio, énergie au repos de la surface. Rien n'a jamais
   tourné hors machine virtuelle.
