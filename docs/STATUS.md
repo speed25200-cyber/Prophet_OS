@@ -359,7 +359,10 @@ obéit aux mêmes ordres que la CLI (« Prophète, prépare », « lance la miss
 cette machine. Premier verdict du travail « Parole » (`27b55a9`) : `voice` et la CLI verts avec
 la vraie chaîne sur le coureur — les trois ordres à la suite compris — ; l'écoute de l'atelier
 laissait l'objectif vide, faute de dire la langue à Whisper (détection automatique fautive sur
-une phrase courte) : `PROPHET_VOICE_LANGUAGE`, `fr` dans l'image, donne la langue par défaut. Ni voix humaine
+une phrase courte) : `PROPHET_VOICE_LANGUAGE`, `fr` dans l'image, donne la langue par défaut ;
+puis « Profaite », entendu pour « Prophète », n'était pas reconnu : « ai » et « ei » valent
+« e ». Troisième verdict (`eefdef4`) : le travail « Parole » est vert — crate `voice`, CLI (les
+trois ordres à la suite) et écoute permanente de l'atelier, avec la vraie chaîne, sur le coureur. Ni voix humaine
 mesurée, ni lecture vérifiée sur une vraie sortie audio : voir
 l'[ADR 0036](adr/0036-la-parole-de-l-humain.md) et le [rapport](reports/parole-2026-09-13.md).
 
