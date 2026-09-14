@@ -75,6 +75,8 @@ des scripts de remplacement lancés par le vrai lanceur, sur le même chemin que
 | Le modèle joint son motif à une demande d'approbation (`approval.wait {reason}`), borné, lisible par l'état, montré par la surface et la CLI | `crates/capd/src/approvals.rs`, `crates/mcp-system/tests/approbations.rs`, `crates/surface/src/depuis.rs`, `crates/prophet-cli/tests/task_service.rs` |
 | Un outil déposé dans `~/Documents/Prophet/outils` est listé par le lanceur (« Outils »), un inconnu refusé, l'outil ouvert dans un terminal dans son dossier et sa sortie lue à l'écran | `image/tests/desktop-session.nix` (CI) |
 | « Ouvre le navigateur », « ouvre l'outil bonjour », « lance l'outil somme » deviennent des arguments du lanceur ; « ouvre » seul ouvre le lanceur ; une phrase longue reste une intention | `crates/voice/src/lib.rs`, `crates/surface/src/preparation.rs` |
+| L'installeur relève la machine avant d'effacer (processeur, mémoire, KVM, carte graphique et pilote, réseau, son et micro, Secure Boot, TPM), marque les manques, garde le relevé ; le coureur de la CI en a un peu de chaque | `image/installateur/prophet-installer.sh`, travail « Installeur sur disque en boucle » ; joué en WSL |
+| `prophet status` relit le relevé, manques en « ✗ », et dit quand il n'y en a pas | `crates/prophet-cli/src/main.rs` (`machine`) |
 
 CI de `a5ac295` : tout vert — `check`, isolation sur l'hôte (les trois essais `needs_kvm` avec
 l'invité à surcouche), parole, surface, ChatGPT, moteur, mission locale réelle, installeur,

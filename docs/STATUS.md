@@ -1636,7 +1636,8 @@ tranche au moment où cela arrive. Le workflow reste donc à déclenchement manu
   fichier écrit par `fs.write`, le résultat vérifié.
 - **Mesures sur matériel réel** : carte graphique (option Vulkan de l'ADR 0037, vitesse et
   mémoire vidéo), micro et sortie audio, énergie au repos de la surface. Rien n'a jamais
-  tourné hors machine virtuelle.
+  tourné hors machine virtuelle ; le relevé de l'installeur (pilote d'affichage, Vulkan,
+  réseau, micro, KVM) est le premier pas : il dira, depuis la clé, ce qu'un PC donné offre.
 - **Les vrais clients** : Claude Code et Codex connectés par l'humain dans leur profil Prophet,
   puis l'atelier des agents rejoué avec eux (`needs_claude_login`, `needs_chatgpt_login`).
 
