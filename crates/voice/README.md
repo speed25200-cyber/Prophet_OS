@@ -34,7 +34,9 @@ En écoute continue (`--listen`), seules les phrases qui commencent par le mot d
 action ; le reste de la phrase est l'intention. Des ordres brefs font exception — « accorde » et
 « refuse » tranchent la décision que le système attend (ADR 0041) — : « lance la
 mission » lance la dernière mission préparée dans cette écoute, « résultat » fait dire son
-résultat. Chaque tranche est effacée après transcription.
+résultat, « ouvre le navigateur » / « ouvre l'outil bonjour » ouvrent par le lanceur du bureau
+une application ou un outil publié (`voice::arguments_du_lanceur`). Chaque tranche est effacée
+après transcription.
 
 ## Validation
 

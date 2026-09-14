@@ -357,7 +357,8 @@ tiennent — sauf les « sept services » : le sous-test sandbox créait son ré
 dans `/tmp`, que sandboxd, sous `PrivateTmp`, ne voit pas ; il vit désormais dans l'état du
 service (`ffd88d2`), et les sept services ont repris leur vert (17:00 UTC). Le modèle joint
 désormais son motif à une demande d'approbation (`c160cee`), et le lanceur du bureau ouvre
-les outils que l'atelier logiciel a produits et que l'humain a publiés (« Outils »). Le rapport
+les outils que l'atelier logiciel a produits et que l'humain a publiés (« Outils »), y compris
+par la voix : « Prophète, ouvre l'outil bonjour », « ouvre le navigateur ». Le rapport
 du jour :
 [clients principaux](reports/clients-principaux-2026-09-14.md).
 

@@ -98,5 +98,5 @@ l'ouvre dans un terminal qui reste affiché, dans son dossier, sous l'identité 
 c'est son programme, comme s'il l'avait écrit — l'agent, lui, ne l'exécute qu'en microVM.
 `prophet-ouvrir outils --liste` les nomme sans session graphique ; `prophet-ouvrir outils
 <nom>` en ouvre un. Le test du bureau dépose un outil, le voit listé, l'ouvre et lit sa sortie
-à l'écran. Reste : le lancer sous sandboxd (niveau 1) quand le service saura relayer un
-terminal, et le proposer par la voix.
+à l'écran. La voix l'ouvre aussi : « Prophète, ouvre l'outil bonjour » (ADR 0036). Reste :
+le lancer sous sandboxd (niveau 1) quand le service saura relayer un terminal.

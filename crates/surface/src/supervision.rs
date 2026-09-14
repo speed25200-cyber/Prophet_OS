@@ -203,7 +203,7 @@ impl Supervision {
         // (l'approbation de l'humain, dite), entendre son résultat. Un refus se lit sous le
         // brouillon, comme une erreur de préparation.
         while let Some(ordre) = self.preparation.take_order() {
-            match ordre {
+            match &ordre {
                 voice::Ordre::Preparer => {
                     if let Err(error) = self.preparation.submit(&ctx) {
                         self.preparation
@@ -230,6 +230,15 @@ impl Supervision {
                         self.preparation.report_error(
                             "« accorde » / « refuse » : aucune décision n'attend.".to_owned(),
                         );
+                    }
+                }
+                // « Ouvre … » : une application du bureau ou un outil publié, par le lanceur
+                // de la session ; sans lanceur (hors du bureau), on le dit.
+                voice::Ordre::Ouvrir(cible) => {
+                    if !ouvrir_application(&voice::arguments_du_lanceur(cible)) {
+                        self.preparation.report_error(format!(
+                            "« ouvre {cible} » : pas de lanceur du bureau sur cette machine."
+                        ));
                     }
                 }
                 voice::Ordre::Intention => {}
@@ -1040,21 +1049,23 @@ fn conversation(ui: &mut egui::Ui, atelier: &mut Atelier) {
     });
 }
 
-/// Lance une application du bureau par le lanceur de la session, s'il est installé.
-fn ouvrir_application(app: &str) {
+/// Lance une application du bureau, ou un outil publié (`outils <nom>`), par le lanceur de la
+/// session ; faux s'il n'est pas installé.
+fn ouvrir_application(args: &[String]) -> bool {
     let Some(launcher) = std::env::var_os("PATH").and_then(|path| {
         std::env::split_paths(&path)
             .map(|dir| dir.join("prophet-ouvrir"))
             .find(|candidate| candidate.is_file())
     }) else {
-        return;
+        return false;
     };
-    let _ = std::process::Command::new(launcher)
-        .arg(app)
+    std::process::Command::new(launcher)
+        .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .spawn();
+        .spawn()
+        .is_ok()
 }
 
 fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
@@ -1152,7 +1163,7 @@ fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .clicked()
                 {
-                    ouvrir_application(&card.driver);
+                    ouvrir_application(std::slice::from_ref(&card.driver));
                 }
             }
         }

@@ -707,6 +707,7 @@ fn listen(
             voice::Ordre::Resultat => dire_le_resultat(&tools, derniere.as_deref(), reply, as_json),
             voice::Ordre::Accorder => trancher_par_la_voix(&tools, true, reply, as_json),
             voice::Ordre::Refuser => trancher_par_la_voix(&tools, false, reply, as_json),
+            voice::Ordre::Ouvrir(cible) => ouvrir_par_la_voix(&tools, &cible, reply),
         };
         match resultat {
             Ok(text) => out.push_str(&text),
@@ -733,6 +734,39 @@ fn dire_si_demande(
 
 /// « Prophète, lance la mission » : la dernière mission préparée dans cette écoute est lancée ;
 /// c'est la décision de l'humain, dite, qui vaut approbation du plan.
+/// « Ouvre … » : une application du bureau ou un outil publié, par le lanceur de la session
+/// (`prophet-ouvrir`) ; hors du bureau, l'OS dit qu'il n'a rien à ouvrir.
+fn ouvrir_par_la_voix(
+    tools: &voice::Tools,
+    cible: &str,
+    reply: Option<Option<&std::path::Path>>,
+) -> anyhow::Result<String> {
+    let lanceur = std::env::var_os("PATH").and_then(|path| {
+        std::env::split_paths(&path)
+            .map(|dir| dir.join("prophet-ouvrir"))
+            .find(|candidat| candidat.is_file())
+    });
+    let Some(lanceur) = lanceur else {
+        dire_si_demande(tools, reply, "Pas de bureau ici : rien à ouvrir.")?;
+        return Ok("« ouvre » : pas de lanceur du bureau sur cette machine.\n".to_owned());
+    };
+    let arguments = voice::arguments_du_lanceur(cible);
+    std::process::Command::new(lanceur)
+        .args(&arguments)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("lanceur du bureau : {e}"))?;
+    let phrase = if arguments.is_empty() {
+        "J'ouvre le lanceur.".to_owned()
+    } else {
+        format!("J'ouvre {}.", arguments.join(" "))
+    };
+    dire_si_demande(tools, reply, &phrase)?;
+    Ok(format!("{phrase}\n"))
+}
+
 /// « Accorde » / « refuse » : la plus ancienne décision en attente est tranchée, cette fois
 /// seulement, et dite (ADR 0041). Sans décision en attente, l'OS le dit.
 fn trancher_par_la_voix(

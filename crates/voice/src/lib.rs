@@ -602,10 +602,11 @@ pub fn resume_du_resultat(result: &serde_json::Value) -> String {
 }
 
 /// Ce que l'humain demande après le mot d'activation : une intention à préparer (le cas
-/// ordinaire), ou l'un de cinq ordres brefs : préparer l'objectif (l'atelier, où l'humain
+/// ordinaire), ou l'un de six ordres brefs : préparer l'objectif (l'atelier, où l'humain
 /// relit avant d'envoyer), lancer la mission préparée (son approbation, dite), entendre son
-/// résultat, accorder ou refuser la décision que le système attend de lui (ADR 0041).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// résultat, accorder ou refuser la décision que le système attend de lui (ADR 0041), ouvrir
+/// une application du bureau ou un outil publié par son nom.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ordre {
     /// Une intention : le texte devient un objectif.
     Intention,
@@ -619,15 +620,15 @@ pub enum Ordre {
     Accorder,
     /// « refuse », « n'autorise pas » : refuser la décision en attente.
     Refuser,
+    /// « ouvre le navigateur », « ouvre l'outil bonjour » : ouvrir par le lanceur du bureau
+    /// ce qui est nommé, sans article ; vide, le lanceur lui-même.
+    Ouvrir(String),
 }
 
-/// Reconnaît un ordre bref en tête de phrase, tel que Whisper l'écrit (casse, accents et
-/// ponctuation finale indifférents) ; tout le reste est une intention. Un ordre est court,
-/// quatre mots au plus : une phrase longue qui commence par le même verbe (« lance une
-/// recherche sur… ») reste une intention.
-#[must_use]
-pub fn ordre_vocal(intent: &str) -> Ordre {
-    let texte: String = intent
+/// Le texte tel qu'on le compare : minuscules, sans accents, apostrophes et traits d'union en
+/// espaces, ponctuation finale et espaces répétés ôtés.
+fn normaliser(texte: &str) -> String {
+    let texte: String = texte
         .trim()
         .to_lowercase()
         .chars()
@@ -642,11 +643,87 @@ pub fn ordre_vocal(intent: &str) -> Ordre {
             c => c,
         })
         .collect();
-    let texte = texte
+    texte
         .trim_end_matches(['.', '!', '?', ' '])
         .split_whitespace()
         .collect::<Vec<_>>()
-        .join(" ");
+        .join(" ")
+}
+
+/// Le nom sans l'article qui le précède : « le navigateur » → « navigateur ».
+fn sans_article(nom: &str) -> &str {
+    const ARTICLES: [&str; 10] = [
+        "le", "la", "les", "l", "un", "une", "mon", "ma", "mes", "du",
+    ];
+    let mut reste = nom.trim();
+    loop {
+        let Some((premier, suite)) = reste.split_once(' ') else {
+            return reste;
+        };
+        if ARTICLES.contains(&premier) {
+            reste = suite.trim();
+        } else {
+            return reste;
+        }
+    }
+}
+
+/// Ce que l'ordre « ouvre … » demande au lanceur du bureau (`prophet-ouvrir`) : une
+/// application par son nom courant, ou un outil publié par le sien (`outils <nom>`) ; rien,
+/// le lanceur lui-même.
+#[must_use]
+pub fn arguments_du_lanceur(cible: &str) -> Vec<String> {
+    let normalisee = normaliser(cible);
+    let nom = sans_article(&normalisee);
+    let application = match nom {
+        "" => return Vec::new(),
+        "terminal" => "terminal",
+        "fichiers" | "documents" => "fichiers",
+        "navigateur" | "internet" | "web" => "navigateur",
+        "editeur" | "editeur de texte" => "editeur",
+        "claude" | "claude code" => "claude-code",
+        "codex" => "codex",
+        "chatgpt" | "chat gpt" => "chatgpt",
+        "supervision" | "missions" => "supervision",
+        "x" | "twitter" => "x",
+        "outils" | "outil" => "outils",
+        outil => return vec!["outils".to_owned(), outil.to_owned()],
+    };
+    vec![application.to_owned()]
+}
+
+/// Reconnaît un ordre bref en tête de phrase, tel que Whisper l'écrit (casse, accents et
+/// ponctuation finale indifférents) ; tout le reste est une intention. Un ordre est court,
+/// quatre mots au plus : une phrase longue qui commence par le même verbe (« lance une
+/// recherche sur… ») reste une intention.
+#[must_use]
+pub fn ordre_vocal(intent: &str) -> Ordre {
+    let texte = normaliser(intent);
+    // « Ouvre … » d'abord : « lance l'outil … » commence comme « lance », et n'est pas la
+    // mission. Ce qui suit le verbe, sans article, nomme la cible — quatre mots au plus, une
+    // phrase plus longue est une intention.
+    const OUVRIR: [&str; 6] = [
+        "ouvre moi l outil",
+        "ouvre l outil",
+        "lance l outil",
+        "ouvre moi",
+        "ouvre",
+        "montre moi",
+    ];
+    for prefixe in OUVRIR {
+        let reste = if texte == prefixe {
+            Some("")
+        } else {
+            texte.strip_prefix(&format!("{prefixe} "))
+        };
+        if let Some(reste) = reste {
+            let cible = sans_article(reste);
+            if cible.split(' ').filter(|m| !m.is_empty()).count() <= 4 {
+                return Ordre::Ouvrir(cible.to_owned());
+            }
+            break;
+        }
+    }
     const PREPARER: [&str; 6] = [
         "prepare",
         "prepare la mission",
@@ -735,7 +812,22 @@ mod tests {
         for refuser in ["Refuse.", "Je refuse", "N'autorise pas", "Interdis !"] {
             assert_eq!(ordre_vocal(refuser), Ordre::Refuser, "{refuser}");
         }
+        for (ouvrir, cible) in [
+            ("Ouvre le navigateur.", "navigateur"),
+            ("Ouvre l'outil bonjour", "bonjour"),
+            ("Ouvre-moi Claude Code !", "claude code"),
+            ("Lance l'outil somme", "somme"),
+            ("Montre-moi les fichiers", "fichiers"),
+            ("Ouvre.", ""),
+        ] {
+            assert_eq!(
+                ordre_vocal(ouvrir),
+                Ordre::Ouvrir(cible.to_owned()),
+                "{ouvrir}"
+            );
+        }
         for intention in [
+            "Ouvre une note de réunion pour les trois points de demain matin.",
             "Écris une note de réunion dans mes documents.",
             "Lance une recherche sur les tarifs de l'électricité en 2026 et résume-la.",
             "Prépare une note de réunion pour demain matin avec les trois points.",
@@ -744,6 +836,21 @@ mod tests {
         ] {
             assert_eq!(ordre_vocal(intention), Ordre::Intention, "{intention}");
         }
+    }
+
+    #[test]
+    fn la_cible_d_un_ouvre_devient_les_arguments_du_lanceur() {
+        assert_eq!(arguments_du_lanceur("le navigateur"), ["navigateur"]);
+        assert_eq!(arguments_du_lanceur("Claude Code"), ["claude-code"]);
+        assert_eq!(arguments_du_lanceur("chat GPT"), ["chatgpt"]);
+        assert_eq!(arguments_du_lanceur("l'éditeur"), ["editeur"]);
+        assert_eq!(arguments_du_lanceur("les outils"), ["outils"]);
+        assert_eq!(arguments_du_lanceur("bonjour"), ["outils", "bonjour"]);
+        assert_eq!(
+            arguments_du_lanceur("l'outil somme"),
+            ["outils", "outil somme"]
+        );
+        assert!(arguments_du_lanceur("").is_empty());
     }
 
     #[test]

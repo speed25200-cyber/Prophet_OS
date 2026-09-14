@@ -68,9 +68,11 @@ distant ; et la parole ne donne aucun droit, elle produit un texte que l'humain 
 - En écoute continue, des ordres brefs après le mot d'activation (`voice::ordre_vocal`, quatre
   mots au plus) portent sur la mission en cours : « lance la mission » la lance (l'approbation
   de l'humain, dite), « résultat » fait dire son résultat, « accorde » / « refuse » tranchent
-  la décision que le système attend (ADR 0041), et dans l'atelier « prépare »
+  la décision que le système attend (ADR 0041), « ouvre … » (« ouvre le navigateur », « ouvre
+  l'outil bonjour », « lance l'outil somme ») ouvre par le lanceur du bureau une application
+  ou un outil publié par son nom (`voice::arguments_du_lanceur`), et dans l'atelier « prépare »
   envoie l'objectif que l'humain a relu ; toute autre phrase est une intention, y compris une
-  phrase longue qui commence par « lance ». En ligne de commande, l'intention est préparée
+  phrase longue qui commence par « lance » ou « ouvre ». En ligne de commande, l'intention est préparée
   aussitôt ; dans l'atelier, elle rejoint l'objectif, et les ordres vont à la supervision, qui
   prépare le brouillon, lance la mission choisie ou fait dire où elle en est. Un refus (rien
   de préparé, mission non lançable) se lit sous le brouillon.

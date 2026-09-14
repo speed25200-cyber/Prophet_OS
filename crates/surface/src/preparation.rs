@@ -604,6 +604,7 @@ mod tests {
             voice::Ordre::Resultat,
             voice::Ordre::Accorder,
             voice::Ordre::Refuser,
+            voice::Ordre::Ouvrir("navigateur".to_owned()),
         ] {
             preparation.tx.send(Reply::Order(ordre)).unwrap();
         }
@@ -613,6 +614,10 @@ mod tests {
         assert_eq!(preparation.take_order(), Some(voice::Ordre::Resultat));
         assert_eq!(preparation.take_order(), Some(voice::Ordre::Accorder));
         assert_eq!(preparation.take_order(), Some(voice::Ordre::Refuser));
+        assert_eq!(
+            preparation.take_order(),
+            Some(voice::Ordre::Ouvrir("navigateur".to_owned()))
+        );
         assert!(preparation.take_order().is_none());
         assert_eq!(preparation.intent, "Objectif");
     }
