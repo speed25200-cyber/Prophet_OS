@@ -1380,8 +1380,11 @@ applications vues par l'adaptateur, dont l'éditeur). Corrigé (`51b043c`), et l
 trébuché à son tour : l'adaptateur nomme l'éditeur `org.xfce.mousepad`, le nom que les
 applications GTK récentes se donnent sur le bus d'accessibilité, alors que le profil « bureau »,
 capd et l'agent disent `mousepad`. L'adaptateur ramène désormais un identifiant en domaine
-inversé à son dernier segment (`supd::app_name`), pour la liste comme pour la recherche ; à
-confirmer par la CI.
+inversé à son dernier segment (`supd::app_name`), pour la liste comme pour la recherche —
+confirmé par la CI (`1f022b3`) : l'éditeur est trouvé, et le pas suivant, `ui.tree`, échouait
+dans le scénario lui-même : les arguments JSON n'étaient pas cités pour le shell de l'humain,
+`{"app": "mousepad"}` arrivait en deux mots et la commande sortait en erreur d'usage. Cité ;
+à confirmer par la CI.
 
 Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le
 dernier mot : le job `isolation` de l'intégration continue installe gVisor, Firecracker et les

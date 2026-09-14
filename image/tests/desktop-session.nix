@@ -297,9 +297,12 @@ pkgs.testers.runNixOSTest {
             machine.succeed("runuser -u agentd -- cat /home/pilot/Documents/Prophet/bonjour.txt")
             machine.succeed("su - pilot -c " + q("swaymsg exec " + q("prophet-ouvrir editeur /home/pilot/Documents/Prophet/bonjour.txt")))
             window("org.xfce.mousepad")
-            prophet = "su - pilot -c " + q("prophet --json task ")
             def appel(outil, args):
-                brut = machine.succeed(prophet[:-1] + "call essai-bureau " + outil + " " + json.dumps(args) + "'")
+                # Les arguments JSON forment un seul mot pour le shell de l'humain : sans cette
+                # citation, `{"app": "mousepad"}` arrivait en deux arguments et la commande
+                # sortait en erreur d'usage (code 2), vu en CI le 14 septembre 2026.
+                commande = "prophet --json task call essai-bureau " + outil + " " + shlex.quote(json.dumps(args))
+                brut = machine.succeed("su - pilot -c " + q(commande))
                 reponse = json.loads(brut)
                 # Une réponse sans contenu structuré (`structuredContent`, le nom du protocole
                 # MCP, que ce scénario écrivait « structured » sans l'avoir jamais atteint) est
