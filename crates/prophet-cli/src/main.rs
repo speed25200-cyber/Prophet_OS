@@ -397,13 +397,146 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
         Command::Memory { action } => memory(action),
         Command::Log { action } => log(action),
         Command::Task { action } => task(action, cli.json),
-        // Les approbations vivent dans un daemon en service : sans lui, la commande le dit au
-        // lieu de faire semblant.
-        Command::Cap { .. } => anyhow::bail!(
-            "les approbations exigent capd en service. \
-             Lancez `prophet status` pour voir ce qui est disponible sur cette machine."
-        ),
+        Command::Cap { action } => cap(action, cli.json),
     }
+}
+
+/// Les approbations, depuis le terminal (ADR 0041) : voir ce qui attend une décision, la rendre,
+/// lire les règles qu'elle a laissées, révoquer une tâche. Tout passe par capd ; sans lui, la
+/// commande le dit au lieu de faire semblant.
+fn cap(action: &CapAction, as_json: bool) -> anyhow::Result<String> {
+    let socket = socket_capd();
+    match action {
+        CapAction::Approvals => {
+            let demandes = capd_rpc(&socket, "approval.pending", serde_json::json!({}))?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&demandes)?));
+            }
+            let liste = demandes.as_array().cloned().unwrap_or_default();
+            if liste.is_empty() {
+                return Ok("Aucune décision en attente.\n".to_owned());
+            }
+            let mut out = String::from("Décisions en attente\n");
+            for d in &liste {
+                out.push_str(&format!(
+                    "  {}\n      {} — {} sur {} (mission {}){}\n      accorder : prophet cap approve {} [--scope task] · refuser : prophet cap deny {}\n",
+                    d["id"].as_str().unwrap_or("?"),
+                    d["summary"].as_str().unwrap_or(""),
+                    d["action"].as_str().unwrap_or("?"),
+                    d["target"].as_str().unwrap_or("?"),
+                    d["task"].as_str().unwrap_or("?"),
+                    match (
+                        d["irreversible"].as_bool().unwrap_or(false),
+                        d["external"].as_bool().unwrap_or(false)
+                    ) {
+                        (true, true) => " · irréversible, hors de la machine",
+                        (true, false) => " · irréversible",
+                        (false, true) => " · hors de la machine",
+                        (false, false) => "",
+                    },
+                    d["id"].as_str().unwrap_or("?"),
+                    d["id"].as_str().unwrap_or("?"),
+                ));
+            }
+            Ok(out)
+        }
+        CapAction::Approve { id, scope } => {
+            anyhow::ensure!(
+                matches!(scope.as_str(), "once" | "task" | "agent"),
+                "portée inconnue : {scope} (attendu once, task ou agent)"
+            );
+            let tranchee = capd_rpc(
+                &socket,
+                "approval.resolve",
+                serde_json::json!({"id": id, "decision": "allow", "scope": scope}),
+            )?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&tranchee)?));
+            }
+            Ok(format!(
+                "Accordé : {} ({}).\n",
+                tranchee["summary"].as_str().unwrap_or(id),
+                match scope.as_str() {
+                    "task" => "pour toute la mission",
+                    "agent" => "pour cet agent, un temps",
+                    _ => "cette fois seulement",
+                }
+            ))
+        }
+        CapAction::Deny { id } => {
+            let tranchee = capd_rpc(
+                &socket,
+                "approval.resolve",
+                serde_json::json!({"id": id, "decision": "deny", "scope": "once"}),
+            )?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&tranchee)?));
+            }
+            Ok(format!(
+                "Refusé : {}.\n",
+                tranchee["summary"].as_str().unwrap_or(id)
+            ))
+        }
+        CapAction::Rules => {
+            let regles = capd_rpc(&socket, "approval.rules", serde_json::json!({}))?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&regles)?));
+            }
+            let liste = regles.as_array().cloned().unwrap_or_default();
+            if liste.is_empty() {
+                return Ok("Aucune règle permanente.\n".to_owned());
+            }
+            let mut out = String::from("Règles issues de décisions humaines\n");
+            for r in &liste {
+                out.push_str(&format!(
+                    "  {} : {} — {} sur {}{}{}\n",
+                    r["id"].as_str().unwrap_or("?"),
+                    r["decision"].as_str().unwrap_or("?"),
+                    r["action"].as_str().unwrap_or("?"),
+                    r["target"].as_str().unwrap_or("?"),
+                    r["task"]
+                        .as_str()
+                        .map(|t| format!(" (mission {t})"))
+                        .unwrap_or_default(),
+                    r["agent"]
+                        .as_str()
+                        .map(|a| format!(" (agent {a})"))
+                        .unwrap_or_default(),
+                ));
+            }
+            Ok(out)
+        }
+        CapAction::Revoke { task } => {
+            let r = capd_rpc(&socket, "cap.revoke", serde_json::json!({"subject": task}))?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&r)?));
+            }
+            Ok(format!(
+                "Révoqué : {} et ses descendants.\n",
+                r["revoked"].as_str().unwrap_or(task)
+            ))
+        }
+    }
+}
+
+/// Un appel à capd ; sans lui, la commande le dit au lieu de faire semblant.
+fn capd_rpc(
+    socket: &std::path::Path,
+    method: &str,
+    params: serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    task_rpc(socket, method, params).map_err(|e| {
+        anyhow::anyhow!(
+            "les approbations exigent capd en service ({e}).              Lancez `prophet status` pour voir ce qui est disponible sur cette machine."
+        )
+    })
+}
+
+fn socket_capd() -> std::path::PathBuf {
+    std::env::var("PROPHET_CAPD_SOCKET").map_or_else(
+        |_| prophet_ipc::socket_path("capd"),
+        std::path::PathBuf::from,
+    )
 }
 
 /// L'OS parle : le texte est synthétisé en local par Piper, puis joué sur la sortie audio de

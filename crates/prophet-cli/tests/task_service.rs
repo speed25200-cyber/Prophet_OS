@@ -85,6 +85,7 @@ fn invoke_seq(
         .args(args)
         .env("HOME", &home)
         .env("PROPHET_AGENTD_SOCKET", &socket)
+        .env("PROPHET_CAPD_SOCKET", &socket)
         .envs(env.iter().copied())
         .output()
         .unwrap();
@@ -731,4 +732,65 @@ fn une_seance_se_pilote_a_la_main_depuis_le_terminal() {
         json!({"task":"essai","state":"done"}),
     ));
     assert!(rendu.contains("done"), "{rendu}");
+}
+
+/// Les décisions humaines depuis le terminal (ADR 0041) : voir ce qui attend, accorder pour la
+/// mission, refuser ; chaque commande parle à capd, avec les paramètres exacts de sa méthode.
+#[test]
+fn les_decisions_humaines_se_prennent_depuis_le_terminal() {
+    let demande = json!({
+        "id": "apr_1", "task": "duo", "agent": "org.prophet.atelier", "action": "tool.call",
+        "target": "http.fetch", "summary": "Appeler http.fetch", "irreversible": true,
+        "external": true, "created": "2026-09-14T14:00:00Z", "expires": "2026-09-15T14:00:00Z",
+        "state": "pending"
+    });
+    let rendu = success(invoke(
+        &["cap", "approvals"],
+        "approval.pending",
+        json!({}),
+        json!([demande]),
+    ));
+    assert!(rendu.contains("apr_1"), "{rendu}");
+    assert!(rendu.contains("Appeler http.fetch"), "{rendu}");
+    assert!(
+        rendu.contains("irréversible, hors de la machine"),
+        "{rendu}"
+    );
+    assert!(rendu.contains("prophet cap approve apr_1"), "{rendu}");
+    let rendu = success(invoke(
+        &["cap", "approvals"],
+        "approval.pending",
+        json!({}),
+        json!([]),
+    ));
+    assert!(rendu.contains("Aucune décision en attente"), "{rendu}");
+
+    let tranchee = json!({"id": "apr_1", "summary": "Appeler http.fetch", "state": {"resolved": {"decision": "allow"}}});
+    let rendu = success(invoke(
+        &["cap", "approve", "apr_1", "--scope", "task"],
+        "approval.resolve",
+        json!({"id": "apr_1", "decision": "allow", "scope": "task"}),
+        tranchee.clone(),
+    ));
+    assert!(
+        rendu.contains("Accordé : Appeler http.fetch (pour toute la mission)"),
+        "{rendu}"
+    );
+    let rendu = success(invoke(
+        &["cap", "deny", "apr_1"],
+        "approval.resolve",
+        json!({"id": "apr_1", "decision": "deny", "scope": "once"}),
+        tranchee,
+    ));
+    assert!(rendu.contains("Refusé : Appeler http.fetch"), "{rendu}");
+    let rendu = success(invoke(
+        &["cap", "rules"],
+        "approval.rules",
+        json!({}),
+        json!([{"id": "regle_1", "decision": "allow", "action": "tool.call", "target": "http.fetch", "task": "duo"}]),
+    ));
+    assert!(
+        rendu.contains("allow — tool.call sur http.fetch (mission duo)"),
+        "{rendu}"
+    );
 }

@@ -1593,8 +1593,9 @@ tranche au moment où cela arrive. Le workflow reste donc à déclenchement manu
   au plus par appel), l'humain tranche dans la surface, et le même appel passe — une fois, ou
   pour toute la tâche selon la portée — ou reste refusé. capd garde une décision une heure
   (`approval.status`) et consomme une décision « une fois » à la demande identique suivante.
-  Prouvé avec un vrai broker et un outil irréversible et externe. Reste : trancher depuis la
-  CLI, et un résumé enrichi par le modèle.
+  Prouvé avec un vrai broker et un outil irréversible et externe ; la CLI tranche aussi
+  (`prophet cap approvals` / `approve` / `deny` / `rules`). Reste : un résumé enrichi par le
+  modèle.
 - **Arrêter un client lancé — fait.** `task.cancel` d'une mission menée par un client conclut
   sa séance puis demande `pilot.stop {task}` au lanceur, qui tue le client et tout son groupe
   de processus (les clients sont lancés meneurs de groupe ; le délai tue de même). Prouvé dans
