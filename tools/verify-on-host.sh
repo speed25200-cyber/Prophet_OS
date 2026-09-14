@@ -256,6 +256,16 @@ etape_niveaux() {
     ECHECS=$((ECHECS + 1))
     return 1
   }
+  # Les tests d'agentd et de la CLI lancent les binaires voisins (capd, ledger, sandboxd, le
+  # pont, le lanceur de pilotes) : ils doivent exister, et à jour.
+  if printf '%s\n' "$crates_concernes" | grep -qxE "agentd|prophet-cli"; then
+    lancer "Construction des binaires voisins" \
+      cargo build --workspace --bins $JOBS || {
+      ko "les binaires voisins ne se construisent pas ; les tests interservices ne peuvent pas tourner"
+      ECHECS=$((ECHECS + 1))
+      return 1
+    }
+  fi
 
   local marqueur crate nom raison
   while IFS=$'\t' read -r marqueur crate nom; do

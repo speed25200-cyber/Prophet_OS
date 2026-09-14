@@ -173,3 +173,35 @@ fn sans_sandboxd_l_outil_le_dit_et_ne_lance_rien() {
         "{r:?}"
     );
 }
+
+/// capd juge une commande au niveau où elle tournera (ADR 0031) : un programme hors liste
+/// blanche, en microVM, est admis depuis une mission au niveau 0, sans décision par commande
+/// (la microVM ne voit qu'une copie de l'espace de travail, examinée avant publication) ; un
+/// programme que le profil n'accorde pas reste refusé. Sans sandboxd, l'outil s'arrête après
+/// l'autorisation, en le disant : c'est la preuve que l'autorisation est passée.
+#[test]
+fn un_programme_hors_liste_blanche_est_autorise_a_son_niveau_depuis_une_mission_au_niveau_0() {
+    let dir = tempfile::tempdir().unwrap();
+    let (context, registry) = contexte(dir.path());
+    assert_eq!(context.sandbox_level, 0);
+    let r = registry.call(
+        "proc.exec",
+        &json!({"program":"sh","args":["-c","echo bonjour"]}),
+        &context,
+        OffsetDateTime::now_utc(),
+    );
+    assert!(r.is_error, "{r:?}");
+    let rendu = serde_json::to_string(&r).unwrap();
+    assert!(rendu.contains("sandboxd"), "{rendu}");
+    assert!(!rendu.contains("PolicyDenied"), "{rendu}");
+    // Un programme que le profil n'accorde pas : refusé par capd, avant tout lancement.
+    let r = registry.call(
+        "proc.exec",
+        &json!({"program":"python3"}),
+        &context,
+        OffsetDateTime::now_utc(),
+    );
+    assert!(r.is_error, "{r:?}");
+    let rendu = serde_json::to_string(&r).unwrap();
+    assert!(rendu.contains("PolicyDenied"), "{rendu}");
+}

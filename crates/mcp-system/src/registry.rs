@@ -400,7 +400,19 @@ impl Registry {
         if target.trim().is_empty() {
             return Decision::deny(DenyReason::PolicyDenied);
         }
-        let mut request = CheckRequest::new(res, act, target).sandbox_level(context.sandbox_level);
+        // Une commande s'exécute à son propre niveau (ADR 0031) : la liste blanche sur place,
+        // tout autre programme en microVM. C'est ce niveau-là que capd juge, jamais celui de
+        // la mission — qui, elle, tourne au niveau 0 avec ses outils —, et jamais plus bas que
+        // lui.
+        let level = if (res, act) == (Res::Proc, Act::Exec) {
+            context.sandbox_level.max(crate::tools::required_level_for(
+                &target,
+                args.get("level").and_then(Value::as_u64).map(|v| v as u8),
+            ))
+        } else {
+            context.sandbox_level
+        };
+        let mut request = CheckRequest::new(res, act, target).sandbox_level(level);
         if irreversible {
             request = request.irreversible();
         }

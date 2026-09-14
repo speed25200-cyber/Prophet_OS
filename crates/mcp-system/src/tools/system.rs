@@ -146,7 +146,7 @@ impl Tool for Exec {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "proc.exec".into(),
-            description: "Exécute un programme dans une sandbox, avec ses arguments, dans l'espace de travail de la tâche, et rend sa sortie (bornée) et son code de retour. Les utilitaires qui ne modifient rien (cat, ls, wc, head, tail, sort, uniq, grep, cut, tr, diff, file) tournent confinés sur place ; tout autre programme exige une microVM et une décision humaine. Le home n'est lisible que selon vos droits et n'est jamais modifié : écrivez dans l'espace de travail.".into(),
+            description: "Exécute un programme dans une sandbox, avec ses arguments, dans l'espace de travail de la tâche, et rend sa sortie (bornée) et son code de retour. Les utilitaires qui ne modifient rien (cat, ls, wc, head, tail, sort, uniq, grep, cut, tr, diff, file) tournent confinés sur place ; tout autre programme tourne dans une microVM sans réseau, qui ne voit qu'une copie de l'espace de travail. Le home n'est lisible que selon vos droits et n'est jamais modifié : écrivez dans l'espace de travail, ce qui en revient s'examine avant publication.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -160,7 +160,7 @@ impl Tool for Exec {
             }),
             meta: Some(ToolMeta {
                 requires: "proc.exec".into(),
-                irreversible: true,
+                irreversible: false,
                 external: false,
                 sandbox_level_min: Some(0),
             }),
@@ -173,11 +173,14 @@ impl Tool for Exec {
         string_arg(args, "program")
     }
 
-    /// Les utilitaires de la liste ne modifient rien : ils s'exécutent sans décision humaine.
-    /// Tout autre programme est tenu pour irréversible.
-    fn effects(&self, args: &Value, _meta: &ToolMeta) -> (bool, bool) {
-        let safe = string_arg(args, "program").is_some_and(|p| is_safe_binary(&p));
-        (!safe, false)
+    /// Rien d'irréversible ni d'externe : les utilitaires de la liste ne modifient rien, et
+    /// tout autre programme tourne dans une microVM sans réseau qui ne voit qu'une copie de
+    /// l'espace de travail (ADR 0038) — ce qui en revient s'examine avant publication, comme
+    /// toute écriture d'agent. La décision humaine est celle de la publication, pas une
+    /// décision par commande, qui rendait tout atelier logiciel inutilisable par un agent
+    /// (ADR 0031, complément du 14 septembre).
+    fn effects(&self, _args: &Value, _meta: &ToolMeta) -> (bool, bool) {
+        (false, false)
     }
 
     fn call(&self, args: &Value, context: &ToolContext) -> CallResult {

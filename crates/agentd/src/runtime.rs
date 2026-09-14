@@ -922,11 +922,12 @@ impl Runtime {
         let choice =
             choose(manifest, availability).map_err(|e| RuntimeError::NoDriver(format!("{e:?}")))?;
 
-        // Le niveau de sandbox est le plus contraignant des trois exigences : manifeste, jeton,
-        // et nature de la tâche. Jamais le plus permissif.
-        let executes_code = requested
-            .iter()
-            .any(|g| g.res == Res::Proc && g.act == Act::Exec);
+        // Le niveau de sandbox est le plus contraignant des exigences du manifeste et du jeton.
+        // Jamais le plus permissif. Un droit `proc.exec` n'élève pas la mission : chaque
+        // commande s'élève seule, sur place pour la liste blanche, en microVM pour le reste
+        // (ADR 0031) ; la mission, elle, tourne au niveau 0 avec ses outils. La première
+        // version montait toute mission à `proc.exec` au niveau 2, que le lanceur refusait :
+        // aucun contexte à programmes ne pouvait démarrer.
         let sandbox_level = sandboxd::Manager::required_level(
             manifest.sandbox.min_level,
             requested
@@ -934,7 +935,7 @@ impl Runtime {
                 .filter_map(|g| g.constraints.level)
                 .max()
                 .unwrap_or(0),
-            executes_code,
+            false,
         );
 
         let token = match &mut self.broker {

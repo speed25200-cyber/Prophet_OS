@@ -1570,9 +1570,23 @@ tranche au moment où cela arrive. Le workflow reste donc à déclenchement manu
 ## Backlog (hors tâche courante, à ne pas faire maintenant)
 
 - **Atelier logiciel, la suite.** L'invité est dans l'image et le niveau 2 exécute (ADR 0038,
-  contexte « logiciel »). Restent : une mission réelle de bout en bout sur une machine à KVM
-  (un client écrit un outil, l'exécute, le résultat revient à l'humain), le lancement
-  des outils produits depuis le lanceur du bureau, et d'autres interpréteurs dans la racine.
+  contexte « logiciel »). L'essai de bout en bout est écrit (`needs_kvm_un_client_ecrit_un_
+  outil_et_l_execute_en_microvm` : un faux Codex écrit `somme.py` par `fs.write`, l'exécute
+  par `proc.exec` — microVM, vrai sandboxd —, la sortie et le fichier écrit par l'outil
+  reviennent) et a montré que le contexte ne pouvait pas démarrer : le planificateur montait
+  toute mission à `proc.exec` au niveau 2, que le lanceur refusait, puis que chaque commande
+  hors liste blanche exigeait une approbation humaine que rien ne pouvait donner à un agent.
+  Corrigé (ADR 0031, complément) : la mission reste au niveau 0, chaque commande s'élève seule,
+  capd juge la commande à son niveau, et la microVM — sans réseau, sur une copie de l'espace de
+  travail examinée avant publication — n'exige plus de décision par commande. L'hôte de la CI
+  joue cet essai ; restent le lancement des outils produits depuis le lanceur du bureau et
+  d'autres interpréteurs dans la racine.
+- **Les approbations, de bout en bout.** Une action que capd refuse faute de décision humaine
+  (`ApprovalRequired`) interrompt aujourd'hui la mission : personne ne crée la demande que le
+  panneau de décision de la surface saurait trancher (`approval.request` de capd n'a pas
+  d'appelant ; les outils `approval.request` / `approval.wait` sont des coquilles). À faire :
+  le registre crée la demande et rend son identifiant, `approval.wait` attend la décision, le
+  modèle réessaie.
 - **Arrêter un client lancé — fait.** `task.cancel` d'une mission menée par un client conclut
   sa séance puis demande `pilot.stop {task}` au lanceur, qui tue le client et tout son groupe
   de processus (les clients sont lancés meneurs de groupe ; le délai tue de même). Prouvé dans

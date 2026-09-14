@@ -44,6 +44,19 @@ et une décision humaine. Les commandes `sandbox.run` sont suivies pendant leur 
 liste, gel global, dégel et arrêt utilisent la même poignée que l'exécution. Une seconde
 commande sur la même tâche est refusée. Le test réel vérifie aussi l'état arrêté dans `/proc`.
 
+Correction du 14 septembre : la mission qui exécute des programmes reste au niveau 0. Le
+planificateur montait toute mission dotée d'un droit `proc.exec` au niveau 2 — l'ancien schéma
+du « pilote isolé », tout l'agent en microVM —, que le lanceur local refusait : aucun contexte
+à programmes, dont l'atelier logiciel de l'image, ne pouvait démarrer, ce que le premier essai
+de bout en bout a montré. Désormais chaque commande s'élève seule, et c'est le niveau de la
+commande — celui de la liste blanche sur place, la microVM pour le reste — que le registre
+soumet à capd, jamais plus bas que celui de la mission. Et la « décision humaine » par
+commande du point 3 est retirée : depuis l'ADR 0038, un programme en microVM n'a ni réseau ni
+autre vue que la copie de l'espace de travail de la mission, et ce qui en revient s'examine
+avant publication comme toute écriture d'agent (point 2) ; la décision humaine est celle de la
+publication. Exiger en plus une approbation par commande — que rien ne pouvait donner à un
+agent — rendait tout atelier logiciel inutilisable. `rg` reste en microVM, sans décision.
+
 - Les agents lisent, comptent, comparent et convertissent avec les outils du système, sous
   contrôle, et le journal garde chaque commande.
 - La microVM exige KVM, Firecracker et des images d'invité : sans eux, un programme hors liste

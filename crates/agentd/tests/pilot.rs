@@ -61,6 +61,13 @@ fn faux_codex(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathBu
              [ -f \"$PROPHET_MCP_CONFIG\" ] || exit 5\n\
              \"$P\" task attach \"$PROPHET_TASK\" --client codex >/dev/null\n\
              case \"$1\" in *attends*) sleep 30 & wait ;; esac\n\
+             case \"$1\" in *outil*)\n\
+               \"$P\" task call \"$PROPHET_TASK\" fs.write '{{\"path\":\"~/docs/somme.py\",\"content\":\"print(\\\"somme\\\", 3 + 4)\\nopen(\\\"docs/resultat.txt\\\", \\\"w\\\").write(\\\"fait\\\")\\n\"}}' >/dev/null\n\
+               sortie=$(\"$P\" task call \"$PROPHET_TASK\" proc.exec '{{\"program\":\"python3\",\"args\":[\"docs/somme.py\"]}}' --json)\n\
+               \"$P\" task detach \"$PROPHET_TASK\" --text \"outil exécuté : $sortie\" >/dev/null\n\
+               echo '{{\"item\":{{\"type\":\"agent_message\",\"text\":\"Outil écrit et exécuté.\"}}}}'\n\
+               exit 0 ;;\n\
+             esac\n\
              \"$P\" task call \"$PROPHET_TASK\" fs.write '{{\"path\":\"~/docs/code.txt\",\"content\":\"fn main() {{}}\"}}' >/dev/null\n\
              texte=\"Code écrit par le faux Codex : $1\"\n\
              case \"$1\" in *relire*)\n\
@@ -128,11 +135,14 @@ impl Chain {
             } else {
                 Pilote::Aucun
             },
+            false,
         )
         .await
     }
 
-    async fn demarrer(script: Vec<Value>, pilote: Pilote) -> Self {
+    /// `sandbox` : avec le vrai sandboxd, pour `proc.exec` (les programmes hors liste blanche
+    /// exigent une microVM, donc KVM sur la machine).
+    async fn demarrer(script: Vec<Value>, pilote: Pilote, sandbox: bool) -> Self {
         let with_pilot = !matches!(pilote, Pilote::Aucun);
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -245,10 +255,21 @@ impl Chain {
             "review": ["driver:claude-code@sonnet", "local:modele-controle"],
             "execute": ["local:modele-controle"]
         });
+        // L'atelier logiciel, comme dans l'image : écrire un outil et l'exécuter en microVM.
+        let mut logiciel = base["manifest"].clone();
+        logiciel["agent"]["id"] = json!("org.prophet.logiciel");
+        logiciel["sandbox"] = json!({"min_level": 0, "code_execution": "microvm"});
+        logiciel["capabilities"]["max"] = json!({
+            "fs.read": ["~/docs/**"],
+            "fs.write": ["~/docs/**"],
+            "proc.exec": ["python3"],
+            "tool.call": ["fs.read", "fs.write", "proc.exec"]
+        });
         let profiles = dir.path().join("profiles.json");
         std::fs::write(&profiles, json!([
             {"id":"chef", "name":"Chef", "description":"Réfléchit et confie", "manifest":chef, "scopes":["~/docs"]},
-            {"id":"atelier", "name":"Atelier", "description":"Code", "manifest":atelier, "scopes":["~/docs"]}
+            {"id":"atelier", "name":"Atelier", "description":"Code", "manifest":atelier, "scopes":["~/docs"]},
+            {"id":"logiciel", "name":"Atelier logiciel", "description":"Outils", "manifest":logiciel, "scopes":["~/docs"]}
         ]).to_string()).unwrap();
         let caps = dir.path().join("cap.sock");
         let logs = dir.path().join("ledger.sock");
@@ -270,6 +291,16 @@ impl Chain {
         );
         drop(ledger.joindre().await);
         daemons.push(ledger);
+        let sandbox_socket = dir.path().join("sandbox.sock");
+        if sandbox {
+            let sandboxd = Daemon::lancer(
+                binaire_voisin("prophet-sandboxd").to_str().unwrap(),
+                &sandbox_socket,
+                &dir.path().join("sandbox-state"),
+            );
+            drop(sandboxd.joindre().await);
+            daemons.push(sandboxd);
+        }
         if with_pilot {
             let cli = binaire_voisin("prophet");
             let codex = faux_codex(dir.path(), &cli);
@@ -326,6 +357,12 @@ impl Chain {
                 profiles.to_str().unwrap().to_owned(),
             ),
         ];
+        if sandbox {
+            env.push((
+                "PROPHET_SANDBOXD_SOCKET",
+                sandbox_socket.to_str().unwrap().to_owned(),
+            ));
+        }
         if with_pilot {
             env.push((
                 "PROPHET_PILOT_SOCKET",
@@ -840,6 +877,7 @@ async fn needs_codex_login_un_vrai_client_rejoint_une_mission_et_ecrit_un_fichie
             client: client.clone(),
             etat,
         },
+        false,
     )
     .await;
     let options = chain.client.call("task.options", json!({})).await.unwrap();
@@ -890,6 +928,45 @@ async fn needs_codex_login_un_vrai_client_rejoint_une_mission_et_ecrit_un_fichie
     let contenu = std::fs::read_to_string(&fichier).unwrap_or_default();
     assert!(contenu.to_lowercase().contains("bonjour"), "{contenu:?}");
     // Le moteur du service n'a servi à rien : le client est le modèle.
+    assert!(chain.asked.lock().unwrap().is_empty());
+}
+
+/// L'atelier logiciel de bout en bout (ADR 0031, 0038) : un client écrit un outil Python dans
+/// l'espace de la mission, l'exécute par `proc.exec` — hors liste blanche, donc en microVM,
+/// par le vrai sandboxd —, et la sortie de l'outil comme le fichier qu'il a écrit reviennent.
+/// Exige KVM, Firecracker, e2fsprogs et l'invité (`PROPHET_MICROVM_KERNEL`,
+/// `PROPHET_MICROVM_ROOTFS`) ; l'hôte de l'intégration continue les a.
+#[tokio::test]
+#[ignore = "needs_kvm"]
+async fn needs_kvm_un_client_ecrit_un_outil_et_l_execute_en_microvm() {
+    let chain = Chain::demarrer(vec![], Pilote::Faux, true).await;
+    chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"outil","intent":"Écris l'outil somme.py et exécute-le","profile":"logiciel","model":"codex"}),
+        )
+        .await
+        .unwrap();
+    chain
+        .client
+        .call("task.start", json!({"id":"outil"}))
+        .await
+        .unwrap();
+    let info = chain.attendre_pendant("outil", 120).await;
+    assert_eq!(info["task"]["state"], "done", "{info}");
+    let texte = info["result"]["text"].as_str().unwrap();
+    // L'outil a tourné en microVM (niveau 2) et a parlé.
+    assert!(texte.contains("\"level\": 2"), "{texte}");
+    assert!(texte.contains("somme 7"), "{texte}");
+    // Ce que l'outil a écrit dans la microVM est revenu dans l'espace de la mission.
+    let docs = chain.dir.path().join("home/.prophet/tasks/outil/work/docs");
+    assert_eq!(
+        std::fs::read_to_string(docs.join("resultat.txt")).unwrap(),
+        "fait"
+    );
+    assert!(docs.join("somme.py").is_file());
+    assert_eq!(info["task"]["usage"]["client:codex"]["turns"], 2, "{info}");
     assert!(chain.asked.lock().unwrap().is_empty());
 }
 

@@ -515,10 +515,12 @@ fn chaque_outil_declare_la_capacite_qu_il_exige() {
 }
 
 #[test]
-fn l_execution_de_code_est_irreversible_hors_liste_blanche() {
+fn l_execution_de_code_hors_liste_blanche_va_en_microvm_sans_decision_par_commande() {
     // Le niveau minimal de l'outil est 0 : c'est la politique de capd qui n'accorde, sous 2,
     // que les utilitaires confinés ; l'outil lui-même met tout autre programme en microVM
-    // (ADR 0031). L'annonce reste « irréversible » pour qu'un client ne s'y trompe pas.
+    // (ADR 0031). Rien d'irréversible : la microVM ne voit qu'une copie de l'espace de
+    // travail, examinée avant publication (ADR 0038) ; une décision par commande rendait
+    // l'atelier logiciel inutilisable par un agent.
     let m = monde();
     let exec = m
         .registry
@@ -528,7 +530,7 @@ fn l_execution_de_code_est_irreversible_hors_liste_blanche() {
         .unwrap();
     let meta = exec.meta.unwrap();
     assert_eq!(meta.sandbox_level_min, Some(0));
-    assert!(meta.irreversible);
+    assert!(!meta.irreversible && !meta.external);
     assert_eq!(
         mcp_system::tools::required_level_for("cat", None),
         0,
