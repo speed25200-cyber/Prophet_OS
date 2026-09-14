@@ -322,7 +322,10 @@ l'ISO, les sept services (le catalogue avec `proc.kill` charge), le système ins
 deux démarrages. Un seul rouge : « Voir l'image démarrer » sous UEFI, où le noyau de l'invité
 QEMU s'est planté au chargement de modules (`__text_poke`, parport, floppy) avant tout terminal
 — le même support a démarré sous SeaBIOS dans le même travail, et ce démarrage UEFI était vert
-sept fois de suite avant : une panne de l'hôte d'intégration, pas de l'image, à rejouer.
+sept fois de suite avant : une panne de l'hôte d'intégration, pas de l'image. Le travail rejoue
+désormais une fois le démarrage UEFI après un tel plantage du noyau de l'invité, la trace du
+premier essai conservée (`demarrage-plante.log`) ; deux plantages restent un échec. Le rapport
+du jour : [clients principaux](reports/clients-principaux-2026-09-14.md).
 
 La CI de `ddf6e89` (relais et lanceur de pilotes) réussit `check`, l'isolation, le protocole du
 moteur, la surface, les sept services sous systemd, l'installeur, l'ISO et son démarrage, la
