@@ -28,8 +28,10 @@ leurs identifiants ; ce qui est prouvé ; ce qui ne l'est pas.
 - **L'humain coupe** (`239753b`) : `task.cancel` d'une mission menée par un client conclut sa
   séance puis `pilot.stop` tue le client et tout son groupe de processus, sur-le-champ.
 - **Lisible** : `prophet task options` nomme les clients (« codex — Codex (ChatGPT) ») et dit
-  leur connexion ; la surface nomme qui mène une mission ; le guide d'installation montre le
-  chemin au terminal (`4b0c564`, `ab96339`).
+  leur connexion ; la surface nomme qui mène une mission et liste, sous « Confiées », les
+  sous-missions qu'elle a déléguées (à qui, quoi, où chacune en est) ; le guide d'installation
+  montre le chemin au terminal (`4b0c564`, `ab96339`, `475cf84`). Une mission dont le client
+  est lancé mais pas encore attaché ne se relance pas : elle s'annule (`bd80bf3`).
 - **Deux rouges de la CI corrigés** : l'invité microVM monte l'espace de travail au chemin de
   l'hôte par une surcouche overlay (`4ade307` ; l'hôte de la CI a son répertoire temporaire
   sous `/home`, que la racine squashfs ne laissait pas créer) ; le contrôle des profils admet
