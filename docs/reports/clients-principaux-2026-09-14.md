@@ -32,6 +32,10 @@ leurs identifiants ; ce qui est prouvé ; ce qui ne l'est pas.
   sous-missions qu'elle a déléguées (à qui, quoi, où chacune en est) ; le guide d'installation
   montre le chemin au terminal (`4b0c564`, `ab96339`, `475cf84`). Une mission dont le client
   est lancé mais pas encore attaché ne se relance pas : elle s'annule (`bd80bf3`).
+- **Les paliers de modèles** (ADR 0040, `b18ebaf`) : `driver:claude-code@opus` pour réfléchir et
+  coder, `@sonnet` pour relire après Codex, `@haiku` pour exécuter ; le lanceur passe le palier
+  au client par `--model` (Claude Code) ou `-m` (Codex, Gemini) ; réglables par
+  `prophet.localEngine.paliers`. C'est l'économie de tokens demandée, chez les clients.
 - **Deux rouges de la CI corrigés** : l'invité microVM monte l'espace de travail au chemin de
   l'hôte par une surcouche overlay (`4ade307` ; l'hôte de la CI a son répertoire temporaire
   sous `/home`, que la racine squashfs ne laissait pas créer) ; le contrôle des profils admet
@@ -49,7 +53,8 @@ des scripts de remplacement lancés par le vrai lanceur, sur le même chemin que
 | Mission préparée sur `codex`, lancée, écrite par la séance, texte revenu, moteur local jamais sollicité ; refus sans lanceur ; client non admis refusé | `crates/agentd/tests/pilot.rs` |
 | Codex mène, confie la relecture à Claude Code, qui lit le code que Codex vient d'écrire et dépose son verdict chez Codex ; le parent porte le compte de l'enfant | idem |
 | `task.delegate {model: "codex"}` ; `gemini` non admis = erreur d'argument sans sous-mission | idem |
-| Annulation : le faux Codex qui s'attarde trente secondes est tué ; une autre mission sur lui se lance et finit aussitôt | idem, et `crates/pilotd/src/lib.rs` (client avec sous-processus arrêté en moins d'une seconde) |
+| Annulation : le faux Codex qui s'attarde trente secondes est tué (son attente disparaît, vérifié par `pgrep`) ; une autre mission sur lui se lance et finit aussitôt | idem, et `crates/pilotd/src/lib.rs` (client avec sous-processus arrêté en moins d'une seconde) |
+| Le faux Claude Code reçoit `--model sonnet` pour la relecture ; le lanceur place `--model`/`-m` au bon endroit pour chaque client | idem, et `crates/pilotd/src/lib.rs` |
 | Sous-tâche depuis l'espace du parent, rapport (modifié, supprimé, ajouté), périmètre hors du parent laissé chez l'enfant, publication du parent, parent fermé refusé | `crates/sfs/tests/workspace.rs` |
 | Niveau 2 depuis un répertoire absent de la racine de l'invité (`/root`) : 4 s la première fois, 1,8 s ensuite | `crates/sandboxd/tests/enforcement.rs` (`needs_kvm`) |
 | Catalogue de l'image (`proc.kill`) chargé | `crates/agentd/tests/preparation.rs` ; job « sept services » |
