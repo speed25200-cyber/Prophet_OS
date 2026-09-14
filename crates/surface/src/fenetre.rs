@@ -17,8 +17,10 @@ use winit::window::{Window, WindowId};
 /// Réponse humaine à l'action précise montrée par la surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reponse {
-    /// Autorisation.
+    /// Autorisation, cette fois seulement.
     Accepte,
+    /// Autorisation pour toute la mission : la même action ne redemandera pas (ADR 0041).
+    AccepteMission,
     /// Refus.
     Refuse,
 }

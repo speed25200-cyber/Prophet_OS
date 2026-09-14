@@ -717,6 +717,17 @@ impl Supervision {
                         *reponse = Some(Reponse::Accepte);
                         self.examen = None;
                     }
+                    if bouton(
+                        ui,
+                        "decision-autoriser-mission",
+                        "Autoriser pour toute la mission",
+                        false,
+                    )
+                    .clicked()
+                    {
+                        *reponse = Some(Reponse::AccepteMission);
+                        self.examen = None;
+                    }
                 });
                 // Les crochets sur ce que le panneau occupe réellement, une fois composé.
                 hud::crochets(ui.painter(), ui.min_rect().expand(33.0), ATTENTE, 16.0);

@@ -155,9 +155,11 @@ impl Source for Reel {
             return;
         };
         let socket = self.sockets.capd.clone();
-        let decision = match reponse {
-            Reponse::Accepte => "allow",
-            Reponse::Refuse => "deny",
+        // La portée suit la réponse : « cette fois » ou « toute la mission » (ADR 0041).
+        let (decision, portee) = match reponse {
+            Reponse::Accepte => ("allow", "once"),
+            Reponse::AccepteMission => ("allow", "task"),
+            Reponse::Refuse => ("deny", "once"),
         };
         // La réponse part sur un fil à part : trancher ne doit pas retenir l'image suivante, et un
         // `capd` lent ne doit pas geler l'écran de quelqu'un qui vient d'appuyer sur une touche.
@@ -172,7 +174,7 @@ impl Source for Reel {
                 match appeler(
                     &socket,
                     "approval.resolve",
-                    serde_json::json!({ "id": id, "decision": decision }),
+                    serde_json::json!({ "id": id, "decision": decision, "scope": portee }),
                 )
                 .await
                 {

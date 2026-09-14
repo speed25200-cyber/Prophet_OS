@@ -75,7 +75,9 @@ tests visuels. Les commandes de capture et de démarrage figurent dans le README
 Ctrl+Entrée envoie une demande au moteur choisi ; Entrée seule insère une ligne. La conversation
 se déroule sur un fil réseau séparé, reste navigable pendant la génération et dispose d'une
 interruption. Les réponses partielles restent marquées comme telles. La nouvelle conversation
-écarte les événements tardifs de la précédente. Les décisions capd ont des boutons explicites.
+écarte les événements tardifs de la précédente. Les décisions capd ont des boutons explicites :
+refuser, autoriser cette fois, autoriser pour toute la mission (portée `task` de l'ADR 0041 :
+la même action ne redemandera pas).
 Une erreur de transmission d'approbation est encore journalisée ; son acquittement visible dans
 l'interface reste à intégrer.
 
