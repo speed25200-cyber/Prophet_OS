@@ -1474,7 +1474,20 @@ tranche au moment où cela arrive. Le workflow reste donc à déclenchement manu
 
 ## Backlog (hors tâche courante, à ne pas faire maintenant)
 
-_Vide._
+- **Atelier logiciel : produire un programme à la demande, par prompt ou par la voix.** Les
+  briques existent — `proc.exec` élève au niveau 2 tout programme hors liste blanche, le
+  manifeste impose `code_execution = "microvm"`, le niveau 2 est prouvé sur l'hôte de la CI —
+  mais l'image installée n'embarque ni Firecracker ni les images d'invité (`tools/install-
+  isolation.sh microvm` les télécharge des artefacts publics de Firecracker) : un contexte
+  « logiciel » y échouerait à la première exécution. À faire dans l'ordre : empaqueter un noyau
+  et une racine d'invité (avec Python) dans le flake, les poser sous `/var/lib/prophet/microvm`
+  à l'installation, puis le contexte (`fs.write ~/Documents/Prophet/outils/**`, `proc.exec`
+  `sh` et `python3`, niveau 0 au catalogue comme les autres). La preuve exige KVM, donc l'hôte.
+- **Mesures sur matériel réel** : carte graphique (option Vulkan de l'ADR 0037, vitesse et
+  mémoire vidéo), micro et sortie audio, énergie au repos de la surface. Rien n'a jamais
+  tourné hors machine virtuelle.
+- **Les vrais clients** : Claude Code et Codex connectés par l'humain dans leur profil Prophet,
+  puis l'atelier des agents rejoué avec eux (`needs_claude_login`, `needs_chatgpt_login`).
 
 ## Incidents (demandes de violation des invariants, refusées)
 
