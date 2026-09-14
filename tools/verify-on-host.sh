@@ -196,8 +196,11 @@ tests_marques() {
 }
 
 # Répond : ce marqueur a-t-il son matériel ici ? 0 = oui, 1 = non (avec la raison sur stdout).
+# Un marqueur peut être suivi d'une description (`needs_codex_login : PROPHET_TEST_CLIENT…`) :
+# seul son premier mot le classe.
 materiel_pour() {
-  case "$1" in
+  local marqueur="${1%%[ :]*}"
+  case "$marqueur" in
     needs_gvisor)
       [ "$GVISOR" = "1" ] && return 0
       echo "gVisor absent"; return 1 ;;
