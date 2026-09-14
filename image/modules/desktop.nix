@@ -28,6 +28,7 @@ Codex
 Navigateur
 X
 Éditeur
+Outils
 ${lib.optionalString cfg.suite.enable ''
 LibreOffice
 GIMP
@@ -46,6 +47,32 @@ Déconnexion'
         printf '%s\n' "$entrees"
         exit 0
       fi
+      # Les outils : les programmes que l'atelier logiciel a écrits à la demande et que l'humain
+      # a publiés dans ~/Documents/Prophet/outils (ADR 0031, 0038) — un fichier Python ou shell,
+      # ou un dossier qui porte un main.py / main.sh. Nommés par leur fichier, sans extension.
+      outils="$HOME/Documents/Prophet/outils"
+      outils_disponibles() {
+        local f b
+        [ -d "$outils" ] || return 0
+        for f in "$outils"/*.py "$outils"/*.sh "$outils"/*/main.py "$outils"/*/main.sh; do
+          [ -f "$f" ] || continue
+          case "$f" in
+            */main.py|*/main.sh) basename -- "$(dirname -- "$f")" ;;
+            *) b=$(basename -- "$f"); printf '%s\n' "''${b%.*}" ;;
+          esac
+        done | sort -u
+      }
+      outil_programme() {
+        local nom="$1" c
+        for c in "$outils/$nom.py" "$outils/$nom.sh" "$outils/$nom/main.py" "$outils/$nom/main.sh"; do
+          if [ -f "$c" ]; then printf '%s\n' "$c"; return 0; fi
+        done
+        return 1
+      }
+      if [ "$app" = outils ] && [ "''${2:-}" = --liste ]; then
+        outils_disponibles
+        exit 0
+      fi
       if [ "$(id -un)" != "$human" ] || [ -z "''${WAYLAND_DISPLAY:-}" ]; then
         echo "Ouvrez une session graphique avec le compte $human." >&2
         exit 1
@@ -58,7 +85,7 @@ Déconnexion'
           'Claude Code') app=claude-code ;; Codex) app=codex ;;
           'Claude Code · mission') app=claude-code-mission ;;
           Fichiers) app=fichiers ;; Terminal) app=terminal ;;
-          Navigateur) app=navigateur ;; X) app=x ;; Éditeur) app=editeur ;;
+          Navigateur) app=navigateur ;; X) app=x ;; Éditeur) app=editeur ;; Outils) app=outils ;;
           LibreOffice) app=libreoffice ;; GIMP) app=gimp ;; Inkscape) app=inkscape ;;
           Blender) app=blender ;; FreeCAD) app=freecad ;; 'Lecteur PDF') app=pdf ;; Vidéo) app=video ;;
           'Montage vidéo') app=montage ;; Photo) app=photo ;;
@@ -124,6 +151,33 @@ ${lib.optionalString cfg.suite.enable ''
           # tmpfiles crée l'espace Prophet à chaque démarrage ; ceci n'est qu'un secours.
           mkdir -p -- "$HOME/Documents/Prophet"
           launch ${pkgs.mousepad}/bin/mousepad "''${2:-}"
+          ;;
+        outils)
+          # Un outil publié s'ouvre dans un terminal qui reste ouvert, dans son dossier, sous
+          # l'identité de l'humain — comme un programme qu'il aurait écrit lui-même : c'est le
+          # sien depuis qu'il l'a examiné et publié. L'agent, lui, ne l'exécute qu'en microVM.
+          # Un nom en second argument ouvre cet outil ; sinon, le choix parmi ceux qui existent.
+          swaymsg 'workspace "2: Atelier"' >/dev/null
+          nom="''${2:-}"
+          if [ -z "$nom" ]; then
+            liste=$(outils_disponibles)
+            if [ -z "$liste" ]; then
+              printf '%s\n' "Aucun outil publié : demandez-en un à l'atelier logiciel." |
+                fuzzel --dmenu --lines=1 --prompt='Outils  ' >/dev/null || true
+              exit 0
+            fi
+            nom=$(printf '%s\n' "$liste" | fuzzel --dmenu --prompt='Outil  ') || exit 0
+          fi
+          if ! programme=$(outil_programme "$nom"); then
+            echo "Outil inconnu : $nom (dans $outils)" >&2
+            exit 2
+          fi
+          case "$programme" in
+            *.py) interprete=${pkgs.python3}/bin/python3 ;;
+            *) interprete=${pkgs.bash}/bin/sh ;;
+          esac
+          launch foot --hold --working-directory="$(dirname -- "$programme")" \
+            --app-id=org.prophet.Outil --title="Outil · $nom" "$interprete" "$programme"
           ;;
         claude-code)
           swaymsg 'workspace "2: Atelier"' >/dev/null

@@ -355,7 +355,9 @@ Celle de `d7ee0c4` (annulation corrigée, voix qui tranche) est verte partout �
 les approbations et l'annulation par PID, la mission locale réelle et le système installé
 tiennent — sauf les « sept services » : le sous-test sandbox créait son répertoire de travail
 dans `/tmp`, que sandboxd, sous `PrivateTmp`, ne voit pas ; il vit désormais dans l'état du
-service (`ffd88d2`), et les sept services ont repris leur vert (17:00 UTC). Le rapport
+service (`ffd88d2`), et les sept services ont repris leur vert (17:00 UTC). Le modèle joint
+désormais son motif à une demande d'approbation (`c160cee`), et le lanceur du bureau ouvre
+les outils que l'atelier logiciel a produits et que l'humain a publiés (« Outils »). Le rapport
 du jour :
 [clients principaux](reports/clients-principaux-2026-09-14.md).
 
@@ -1596,8 +1598,9 @@ tranche au moment où cela arrive. Le workflow reste donc à déclenchement manu
   Corrigé (ADR 0031, complément) : la mission reste au niveau 0, chaque commande s'élève seule,
   capd juge la commande à son niveau, et la microVM — sans réseau, sur une copie de l'espace de
   travail examinée avant publication — n'exige plus de décision par commande. L'hôte de la CI
-  joue cet essai ; restent le lancement des outils produits depuis le lanceur du bureau et
-  d'autres interpréteurs dans la racine.
+  joue cet essai. Les outils publiés s'ouvrent depuis le lanceur du bureau (« Outils » :
+  `~/Documents/Prophet/outils`, terminal sous l'identité de l'humain, ADR 0038 complément) ;
+  restent d'autres interpréteurs dans la racine, et le lancement sous sandboxd.
 - **Les approbations, de bout en bout — fait (ADR 0041).** Une action que capd refuse faute
   de décision humaine est soumise à l'humain par le registre lui-même (journal
   `approval.requested`, identifiant rendu au modèle), `approval.wait` attend la décision (45 s

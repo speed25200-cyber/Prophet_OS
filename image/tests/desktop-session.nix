@@ -268,9 +268,24 @@ pkgs.testers.runNixOSTest {
 
         with subtest("le lanceur connaît le navigateur partagé et l'application X"):
             entries = machine.succeed("su - pilot -c 'prophet-ouvrir --liste'").split("\n")
-            for entry in ["Navigateur", "X", "Éditeur", "ChatGPT", "Claude Code", "Claude Code · mission", "Codex", "Supervision"]:
+            for entry in ["Navigateur", "X", "Éditeur", "Outils", "ChatGPT", "Claude Code", "Claude Code · mission", "Codex", "Supervision"]:
                 assert entry in entries, entries
             machine.succeed("test -x ${pkgs.chromium}/bin/chromium")
+
+        with subtest("un outil publié par l'atelier logiciel s'ouvre depuis le lanceur"):
+            # L'atelier logiciel écrit dans ~/Documents/Prophet/outils, que l'humain publie après
+            # examen ; ici l'humain y dépose lui-même un programme, comme après une publication.
+            # Sans outil, la liste est vide ; avec, l'outil se nomme par son fichier.
+            assert machine.succeed("su - pilot -c 'prophet-ouvrir outils --liste'").strip() == ""
+            machine.succeed("su - pilot -c " + q("mkdir -p /home/pilot/Documents/Prophet/outils && printf 'print(\"BONJOUR DE L OUTIL 4242\")\\n' > /home/pilot/Documents/Prophet/outils/bonjour.py"))
+            outils = machine.succeed("su - pilot -c 'prophet-ouvrir outils --liste'").split("\n")
+            assert "bonjour" in outils, outils
+            machine.fail("su - pilot -c " + q("prophet-ouvrir outils inconnu"))
+            machine.succeed("su - pilot -c " + q("swaymsg exec " + q("prophet-ouvrir outils bonjour")))
+            outil = window("org.prophet.Outil")
+            assert machine.succeed(f"readlink /proc/{int(outil['pid'])}/cwd").strip() == "/home/pilot/Documents/Prophet/outils", outil
+            wait_text(r"BONJOUR\s+DE\s+L\s+OUTIL\s+4242", timeout=timedelta(seconds=60))
+            machine.screenshot("bureau-outil")
 
         with subtest("un agent écrit dans l'éditeur du bureau par son arbre d'accessibilité"):
             # L'adaptateur de la session répond, sur un socket que seul agentd peut appeler.

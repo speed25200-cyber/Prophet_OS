@@ -88,3 +88,15 @@ qui, sous `reboot=k`, fait sortir le moniteur.
   ce qui manque ; l'hôte de la CI, lui, exerce le contrat.
 - La racine embarque Python 3 : c'est le langage des outils qu'un agent écrit à la demande.
   D'autres interpréteurs s'ajoutent au même endroit, au prix de leur fermeture.
+
+## Complément (14 septembre 2026) : les outils publiés s'ouvrent depuis le lanceur
+
+Un outil que l'atelier a écrit et que l'humain a examiné puis publié est dans
+`~/Documents/Prophet/outils`. Le lanceur du bureau le propose sous « Outils » (un fichier
+`.py` ou `.sh`, ou un dossier portant un `main.py` / `main.sh`, nommé par son fichier) et
+l'ouvre dans un terminal qui reste affiché, dans son dossier, sous l'identité de l'humain :
+c'est son programme, comme s'il l'avait écrit — l'agent, lui, ne l'exécute qu'en microVM.
+`prophet-ouvrir outils --liste` les nomme sans session graphique ; `prophet-ouvrir outils
+<nom>` en ouvre un. Le test du bureau dépose un outil, le voit listé, l'ouvre et lit sa sortie
+à l'écran. Reste : le lancer sous sandboxd (niveau 1) quand le service saura relayer un
+terminal, et le proposer par la voix.

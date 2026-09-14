@@ -181,7 +181,12 @@ encore ouverte sur disque installé.
 | Fermer la session avec confirmation | **Super + Maj + E** |
 | Console de secours | **Ctrl + Alt + F2** ; retour à l'écran graphique avec **Ctrl + Alt + F1** |
 
-Le lanceur propose **ChatGPT**, **Claude Code**, **Codex**, les fichiers et le navigateur.
+Le lanceur propose **ChatGPT**, **Claude Code**, **Codex**, les fichiers, le navigateur et
+**Outils** : les programmes que l'atelier logiciel a écrits à votre demande et que vous avez
+publiés dans `~/Documents/Prophet/outils` (un fichier `.py` ou `.sh`, ou un dossier avec un
+`main.py`), ouverts dans un terminal qui reste affiché, sous votre identité — ils sont à vous
+depuis que vous les avez examinés et publiés ; l'agent, lui, ne les exécute qu'en microVM.
+`prophet-ouvrir outils --liste` les nomme, `prophet-ouvrir outils <nom>` en ouvre un.
 Claude Code et Codex s'ouvrent dans `~/Documents/Prophet`, avec des profils privés propres
 au pilote et au propriétaire. Leur espace passe en onglets pour conserver une largeur lisible.
 Le terminal reste ouvert après l'arrêt du client afin de garder son diagnostic à l'écran ;
