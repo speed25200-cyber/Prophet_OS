@@ -391,7 +391,10 @@ fn niveau_deux_demarre_une_microvm() {
         caps.missing_for(2).join(", ")
     );
     let manager = Manager::new(helper().display().to_string());
-    let spec = SandboxSpec::new(2, "/bin/true", "/").env("PATH", "/bin");
+    // Un espace de travail vide : le disque confié à l'invité en est fait (ADR 0038).
+    let travail = tempfile::tempdir().unwrap();
+    let spec =
+        SandboxSpec::new(2, "/bin/true", travail.path().display().to_string()).env("PATH", "/bin");
     let debut = std::time::Instant::now();
     let mut handle = manager.run("task:test", &spec).unwrap();
     let ecoule = debut.elapsed();
@@ -405,6 +408,74 @@ fn niveau_deux_demarre_une_microvm() {
     let _ = manager.kill(&mut handle);
 }
 
+/// Le contrat de l'invité (ADR 0038), de bout en bout : un programme Python lit un fichier de
+/// l'espace de travail, dit une phrase sur la console, en écrit un autre, rend un code ; l'hôte
+/// lit la console entre les marques, rapatrie le disque, et le fichier écrit est là.
+#[test]
+#[ignore = "needs_kvm"]
+fn le_niveau_deux_execute_un_programme_et_rapatrie_ses_fichiers() {
+    use std::io::Read as _;
+    let caps = Capabilities::probe();
+    assert!(
+        caps.supports(2),
+        "niveau 2 inatteignable : il manque {}",
+        caps.missing_for(2).join(", ")
+    );
+    let travail = tempfile::tempdir().unwrap();
+    std::fs::write(travail.path().join("entree.txt"), "3 et 4").unwrap();
+    let manager = Manager::new(helper().display().to_string());
+    let spec = SandboxSpec::new(2, "/usr/bin/python3", travail.path().display().to_string())
+        .args([
+            "-c",
+            "import sys\na, b = open('entree.txt').read().split(' et ')\nprint('somme', int(a) + int(b))\nopen('resultat.txt', 'w').write('fait')\nsys.exit(7)",
+        ])
+        .env("PATH", "/usr/bin:/bin");
+    let debut = std::time::Instant::now();
+    let mut handle = manager.run("task:test", &spec).unwrap();
+    assert_eq!(handle.level, 2);
+    let vm = handle
+        .microvm
+        .clone()
+        .expect("une microVM a un disque de travail");
+    let mut console = String::new();
+    if let Some(child) = handle_child(&mut handle)
+        && let Some(out) = child.stdout.as_mut()
+    {
+        let _ = out.read_to_string(&mut console);
+    }
+    let code_moniteur = handle.wait().unwrap();
+    let duree = debut.elapsed();
+    eprintln!("microVM : {duree:?}, moniteur {code_moniteur:?}");
+    assert_eq!(
+        code_moniteur,
+        Some(0),
+        "le moniteur doit sortir quand l'invité redémarre\n{console}"
+    );
+    let lu = sandboxd::invite::lire_console(&console);
+    assert!(lu.fin_vue, "l'invité n'a pas dit sa fin :\n{console}");
+    assert_eq!(lu.erreur, None, "{console}");
+    assert_eq!(lu.code, Some(7), "{console}");
+    assert!(
+        lu.sortie.contains("somme 7"),
+        "sortie lue : {:?}",
+        lu.sortie
+    );
+    sandboxd::invite::rapatrier(&vm.disque, travail.path()).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(travail.path().join("resultat.txt")).unwrap(),
+        "fait"
+    );
+    assert_eq!(
+        std::fs::read_to_string(travail.path().join("entree.txt")).unwrap(),
+        "3 et 4"
+    );
+    let _ = std::fs::remove_dir_all(&vm.base);
+    assert!(
+        duree < std::time::Duration::from_secs(20),
+        "trop lent : {duree:?}"
+    );
+}
+
 #[test]
 #[ignore = "needs_kvm"]
 fn le_niveau_deux_ne_retombe_jamais_sur_le_niveau_zero() {
@@ -412,7 +483,8 @@ fn le_niveau_deux_ne_retombe_jamais_sur_le_niveau_zero() {
     // l'exécuter en niveau 0, donc promettre une isolation qui n'a pas lieu.
     let caps = Capabilities::probe();
     let manager = Manager::new(helper().display().to_string());
-    let spec = SandboxSpec::new(2, "/bin/true", "/");
+    let travail = tempfile::tempdir().unwrap();
+    let spec = SandboxSpec::new(2, "/bin/true", travail.path().display().to_string());
     match manager.run("task:test", &spec) {
         Ok(handle) => assert_eq!(
             handle.level, 2,

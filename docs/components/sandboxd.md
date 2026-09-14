@@ -13,7 +13,7 @@ Tout processus non fiable tourne sous ce daemon, au niveau requis. Il est le seu
 |---|---|---|
 | 0 | espaces de noms, Landlock, seccomp, cgroups v2 | un noyau ≥ 5.13 et des espaces de noms utilisables |
 | 1 | gVisor (`runsc`) | `runsc` installé |
-| 2 | microVM Firecracker | `/dev/kvm` **ouvrable**, `firecracker`, et des images d'invité — sur la machine installée, l'invité du dépôt (`invite-microvm` : noyau publié par Firecracker, racine busybox + Python, ADR 0038), nommé à sandboxd par `PROPHET_MICROVM_KERNEL` et `PROPHET_MICROVM_ROOTFS` |
+| 2 | microVM Firecracker | `/dev/kvm` **ouvrable**, `firecracker`, e2fsprogs (`mkfs.ext4`, `debugfs`), et des images d'invité — sur la machine installée, l'invité du dépôt (`invite-microvm` : noyau publié par Firecracker, racine busybox + Python, ADR 0038), nommé à sandboxd par `PROPHET_MICROVM_KERNEL` et `PROPHET_MICROVM_ROOTFS`. Le répertoire de travail part dans un disque ext4 avec `.prophet/exec.sh`, l'invité l'exécute, la console porte la sortie entre « PROPHET_INVITE_PRET » et « PROPHET_INVITE_FIN code=N », et le disque revient |
 
 ## Méthodes
 

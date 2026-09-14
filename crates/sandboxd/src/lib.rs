@@ -14,6 +14,7 @@
 
 pub mod caps;
 pub mod confine;
+pub mod invite;
 pub mod launch;
 pub mod spec;
 

@@ -23,6 +23,17 @@ pub struct Launched {
     /// Seul le niveau 0 en a besoin : gVisor et Firecracker créent eux-mêmes leur isolation, et
     /// le gestionnaire n'a rien à écrire dans leurs espaces de noms.
     pub needs_handshake: bool,
+    /// Au niveau 2 : ce que le moniteur a reçu et ce qu'il faudra rapatrier (ADR 0038).
+    pub microvm: Option<MicrovmRun>,
+}
+
+/// Une microVM lancée : son dossier de travail sur l'hôte et le disque confié à l'invité.
+#[derive(Debug, Clone)]
+pub struct MicrovmRun {
+    /// Dossier temporaire du moniteur : configuration, sockets, disque.
+    pub base: std::path::PathBuf,
+    /// L'image ext4 de l'espace de travail, montée par l'invité en `/dev/vdb`.
+    pub disque: std::path::PathBuf,
 }
 
 /// Erreur de lancement.
@@ -113,6 +124,7 @@ fn launch_confined(
     Ok(Launched {
         child,
         needs_handshake: true,
+        microvm: None,
     })
 }
 
@@ -142,6 +154,7 @@ fn launch_gvisor(runsc: &str, spec: &SandboxSpec) -> Result<Launched, LaunchErro
     Ok(Launched {
         child,
         needs_handshake: false,
+        microvm: None,
     })
 }
 
@@ -154,6 +167,7 @@ pub fn microvm_config(
     images: &MicrovmImages,
     spec: &SandboxSpec,
     vsock_path: &str,
+    disque_de_travail: Option<&str>,
 ) -> serde_json::Value {
     // `console=ttyS0` rend la sortie de l'invité lisible ; `reboot=k panic=1` fait qu'un invité en
     // panique s'arrête au lieu de rester en vie sans rien faire.
@@ -161,19 +175,30 @@ pub fn microvm_config(
         "console=ttyS0 reboot=k panic=1 pci=off prophet.workdir={} prophet.program={}",
         spec.workdir, spec.program
     );
+    let mut drives = vec![serde_json::json!({
+        "drive_id": "rootfs",
+        "path_on_host": images.rootfs,
+        "is_root_device": true,
+        // La racine reste en lecture seule : ce que la tâche écrit va dans son espace de
+        // travail, monté à part, et reste donc annulable.
+        "is_read_only": true
+    })];
+    if let Some(disque) = disque_de_travail {
+        // L'espace de travail, second disque (`/dev/vdb` dans l'invité), inscriptible : c'est
+        // le seul lieu où le programme écrit, et il revient sur l'hôte après (ADR 0038).
+        drives.push(serde_json::json!({
+            "drive_id": "travail",
+            "path_on_host": disque,
+            "is_root_device": false,
+            "is_read_only": false
+        }));
+    }
     serde_json::json!({
         "boot-source": {
             "kernel_image_path": images.kernel,
             "boot_args": cmdline
         },
-        "drives": [{
-            "drive_id": "rootfs",
-            "path_on_host": images.rootfs,
-            "is_root_device": true,
-            // La racine reste en lecture seule : ce que la tâche écrit va dans son espace de
-            // travail, monté à part, et reste donc annulable.
-            "is_read_only": true
-        }],
+        "drives": drives,
         "machine-config": {
             "vcpu_count": 2,
             "mem_size_mib": 1024,
@@ -205,7 +230,23 @@ fn launch_microvm(
     let _ = std::fs::remove_file(&api_socket);
     let _ = std::fs::remove_file(&vsock_path);
 
-    let config = microvm_config(images, spec, &vsock_path.display().to_string());
+    // Le disque de travail : le répertoire de travail de la tâche, et le script que l'invité
+    // exécute (ADR 0038). Sans e2fsprogs sur l'hôte, pas de niveau 2 — dit tel quel.
+    let disque = base.join("travail.ext4");
+    crate::invite::disque_de_travail(
+        Path::new(&spec.workdir),
+        &crate::invite::script_exec(spec),
+        &disque,
+    )
+    .map_err(|raison| LaunchError::MicrovmMortNe {
+        raison: format!("disque de travail : {raison}"),
+    })?;
+    let config = microvm_config(
+        images,
+        spec,
+        &vsock_path.display().to_string(),
+        Some(&disque.display().to_string()),
+    );
     std::fs::write(&config_path, serde_json::to_vec_pretty(&config)?)?;
 
     let mut child = Command::new(firecracker)
@@ -225,6 +266,7 @@ fn launch_microvm(
     Ok(Launched {
         child,
         needs_handshake: false,
+        microvm: Some(MicrovmRun { base, disque }),
     })
 }
 
@@ -319,7 +361,13 @@ mod tests {
             rootfs: "/var/lib/prophet/microvm/rootfs.ext4".to_owned(),
         };
         let spec = SandboxSpec::new(2, "/usr/bin/python3", "/work").args(["script.py"]);
-        let config = microvm_config(&images, &spec, "/tmp/vsock.sock");
+        let config = microvm_config(&images, &spec, "/tmp/vsock.sock", Some("/tmp/travail.ext4"));
+        assert_eq!(config["drives"][1]["drive_id"], "travail");
+        assert_eq!(config["drives"][1]["path_on_host"], "/tmp/travail.ext4");
+        assert_eq!(config["drives"][1]["is_read_only"], false);
+        assert_eq!(config["drives"][1]["is_root_device"], false);
+        let sans = microvm_config(&images, &spec, "/tmp/vsock.sock", None);
+        assert_eq!(sans["drives"].as_array().map(Vec::len), Some(1));
 
         assert_eq!(config["boot-source"]["kernel_image_path"], images.kernel);
         assert_eq!(config["drives"][0]["is_root_device"], true);

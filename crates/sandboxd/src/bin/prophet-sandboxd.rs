@@ -148,21 +148,52 @@ impl Handler for Isolation {
                     handle
                 };
                 let rendu = tokio::task::block_in_place(|| {
-                    let pid = poignee.blocking_lock().pid;
+                    let (pid, microvm, workdir) = {
+                        let p = poignee.blocking_lock();
+                        (p.pid, p.microvm.clone(), p.workdir.clone())
+                    };
                     let sortie = executer_bornee(
                         &self.manager,
                         &poignee,
                         std::time::Duration::from_secs(delai),
                         borne,
                     );
+                    let mut stdout = String::from_utf8_lossy(&sortie.stdout).into_owned();
+                    let mut stderr = String::from_utf8_lossy(&sortie.stderr).into_owned();
+                    let mut code = sortie.code;
+                    if let Some(vm) = microvm {
+                        // Au niveau 2, la console de l'invité est la sortie du moniteur : on y
+                        // lit la sortie du programme et son code, puis le disque de travail
+                        // revient dans le répertoire de la tâche (ADR 0038).
+                        let console = sandboxd::invite::lire_console(&stdout);
+                        if let Err(raison) =
+                            sandboxd::invite::rapatrier(&vm.disque, std::path::Path::new(&workdir))
+                        {
+                            tracing::warn!(raison = %raison, "disque de travail non rapatrié");
+                            stderr
+                                .push_str(&format!("\nespace de travail non rapatrié : {raison}"));
+                        }
+                        let _ = std::fs::remove_dir_all(&vm.base);
+                        if console.fin_vue {
+                            code = console.code;
+                        } else {
+                            code = None;
+                            stderr.push_str("\nl'invité n'a pas dit sa fin ; sa console :\n");
+                            stderr.push_str(&stdout);
+                        }
+                        if let Some(erreur) = console.erreur {
+                            stderr.push_str(&format!("\ninvité : {erreur}"));
+                        }
+                        stdout = console.sortie;
+                    }
                     Ok::<_, Error>(json!({
                         "task": tache,
                         "pid": pid,
                         "level": niveau,
-                        "exit_code": sortie.code,
+                        "exit_code": code,
                         "timed_out": sortie.timed_out,
-                        "stdout": String::from_utf8_lossy(&sortie.stdout),
-                        "stderr": String::from_utf8_lossy(&sortie.stderr),
+                        "stdout": stdout,
+                        "stderr": stderr,
                         "truncated": sortie.truncated,
                     }))
                 })?;

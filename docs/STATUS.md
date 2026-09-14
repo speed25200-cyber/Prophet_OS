@@ -1437,9 +1437,16 @@ console série « PROPHET_INVITE_PRET » puis « PROPHET_INVITE_FIN code=N ») ;
 le sert à sandboxd avec Firecracker sur le chemin du service, et l'hôte de la CI l'emploie pour
 les essais de niveau 2. Prouvé ici sous KVM imbriqué : l'invité démarre, dit ses deux lignes,
 redémarre, et le moniteur sort avec le code 0 en 1,1 s, trois fois sur trois (88 Mo de racine,
-41 Mo de noyau). Ce qui manque encore : le contrat d'exécution côté hôte (l'espace de
-travail sur un second disque, la console lue jusqu'à la fin, les fichiers rapatriés) ; c'est
-la prochaine marche vers l'atelier logiciel. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
+41 Mo de noyau). Puis le contrat côté hôte (`sandboxd::invite`) : le répertoire de
+travail part dans un disque ext4 avec `.prophet/exec.sh` (`mkfs.ext4 -d`, `debugfs`, sans
+privilège), l'invité l'exécute, la console est lue entre les marques, le code en est tiré, le
+disque revient (`debugfs rdump`). **Prouvé ici sous KVM** : un programme Python lit
+`entree.txt`, dit « somme 7 », écrit `resultat.txt`, sort avec le code 7 ; l'hôte lit les
+deux et retrouve le fichier — 1,8 s de bout en bout, démarrage seul en 56 ms. Le niveau 2
+exécute pour de vrai, et un contexte « Atelier logiciel » du catalogue s'appuie dessus
+(`proc.exec` `python3` et `sh` en microVM, écriture dans `outils`). La CI n'a de KVM que sur
+l'hôte du travail « isolation », qui joue ces essais ; en machine virtuelle, le contexte est
+proposé et son exécution refusée en le disant. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
 que Fontconfig reproche.
 Le rouge de ChatGPT est lu : Fontconfig dit « Cannot load default config file: File not
 found: /etc/fonts/fonts.conf » depuis un renderer de Chromium, dans le bac à sable de
@@ -1496,15 +1503,10 @@ tranche au moment où cela arrive. Le workflow reste donc à déclenchement manu
 
 ## Backlog (hors tâche courante, à ne pas faire maintenant)
 
-- **Atelier logiciel : produire un programme à la demande, par prompt ou par la voix.** Les
-  briques existent — `proc.exec` élève au niveau 2 tout programme hors liste blanche, le
-  manifeste impose `code_execution = "microvm"`, le niveau 2 est prouvé sur l'hôte de la CI —
-  mais l'image installée n'embarque ni Firecracker ni les images d'invité (`tools/install-
-  isolation.sh microvm` les télécharge des artefacts publics de Firecracker) : un contexte
-  « logiciel » y échouerait à la première exécution. À faire dans l'ordre : empaqueter un noyau
-  et une racine d'invité (avec Python) dans le flake, les poser sous `/var/lib/prophet/microvm`
-  à l'installation, puis le contexte (`fs.write ~/Documents/Prophet/outils/**`, `proc.exec`
-  `sh` et `python3`, niveau 0 au catalogue comme les autres). La preuve exige KVM, donc l'hôte.
+- **Atelier logiciel, la suite.** L'invité est dans l'image et le niveau 2 exécute (ADR 0038,
+  contexte « logiciel »). Restent : une mission réelle de bout en bout sur une machine à KVM
+  (le modèle local écrit un outil, l'exécute, le résultat revient à l'humain), le lancement
+  des outils produits depuis le lanceur du bureau, et d'autres interpréteurs dans la racine.
 - **Mesures sur matériel réel** : carte graphique (option Vulkan de l'ADR 0037, vitesse et
   mémoire vidéo), micro et sortie audio, énergie au repos de la surface. Rien n'a jamais
   tourné hors machine virtuelle.

@@ -69,6 +69,10 @@ pub struct SandboxHandle {
     pub level: u8,
     /// Identifiant de processus.
     pub pid: i32,
+    /// Répertoire de travail de la tâche, tel que la description le donne.
+    pub workdir: String,
+    /// Au niveau 2 : la microVM lancée, son dossier et son disque de travail (ADR 0038).
+    pub microvm: Option<crate::launch::MicrovmRun>,
     state: SandboxState,
     child: Option<Child>,
 }
@@ -182,6 +186,7 @@ impl Manager {
                     autre => SandboxError::Confine(autre.to_string()),
                 }
             })?;
+        let microvm = launched.microvm.clone();
         let mut child = launched.child;
         let pid = i32::try_from(child.id()).unwrap_or(0);
 
@@ -213,6 +218,8 @@ impl Manager {
             task: task.to_owned(),
             level: spec.level,
             pid,
+            workdir: spec.workdir.clone(),
+            microvm,
             state: SandboxState::Running,
             child: Some(child),
         })

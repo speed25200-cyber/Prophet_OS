@@ -105,6 +105,33 @@ let
         budget.default = { tokens = 30000; wall_time = "180s"; approvals = 3; };
       };
     }
+    # L'atelier logiciel (ADR 0031, 0038) : écrire un outil à la demande et l'exécuter en
+    # microVM. `proc.exec` élève tout programme hors liste blanche au niveau 2, que sandboxd
+    # n'accorde que si KVM, Firecracker et l'invité sont là ; sinon, il le dit et ne lance rien.
+    # Ce que l'agent écrit va dans `outils`, à examiner avant publication comme le reste.
+    {
+      id = "logiciel";
+      name = "Atelier logiciel";
+      description = "Écrire un petit programme à la demande dans ~/Documents/Prophet/outils et l'exécuter dans une microVM pour le vérifier (Python 3, shell). La machine doit offrir la virtualisation (KVM) ; sinon l'exécution est refusée en le disant.";
+      scopes = [ "~/Documents/Prophet" ];
+      manifest = {
+        agent = {
+          id = "org.prophet.logiciel";
+          version = "1.0.0";
+          name = "Atelier logiciel";
+          publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        };
+        model = modele;
+        sandbox = { min_level = 0; code_execution = "microvm"; };
+        capabilities.max = {
+          "fs.read" = [ "~/Documents/Prophet/**" ];
+          "fs.write" = [ "~/Documents/Prophet/outils/**" ];
+          "proc.exec" = [ "python3" "sh" ];
+          "tool.call" = [ "fs.read" "doc.read" "fs.write" "proc.exec" "proc.kill" ];
+        };
+        budget.default = { tokens = 40000; wall_time = "300s"; approvals = 3; };
+      };
+    }
     # L'atelier : les clients officiels de l'humain comme rôles du relais (ADR 0034, 0035).
     # Claude Code réfléchit, Codex code, Claude Code relit ce que Codex a produit (un autre
     # regard que l'auteur), le modèle local exécute ; chacun n'est proposé que si

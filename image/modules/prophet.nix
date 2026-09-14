@@ -213,7 +213,7 @@ in
         # Le niveau 2 sur la machine installée (ADR 0038) : le moniteur Firecracker sur le
         # chemin du service, et l'invité — noyau et racine — dans le magasin, nommé par les
         # variables que sandboxd lit. Sans KVM, sandboxd le dit et le niveau 2 reste refusé.
-        extra.path = [ pkgs.firecracker ];
+        extra.path = [ pkgs.firecracker pkgs.e2fsprogs ];
         extra.environment = {
           PROPHET_MICROVM_KERNEL = "${inviteMicrovm}/vmlinux";
           PROPHET_MICROVM_ROOTFS = "${inviteMicrovm}/rootfs.squashfs";
