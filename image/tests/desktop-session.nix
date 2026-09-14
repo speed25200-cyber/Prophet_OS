@@ -299,7 +299,15 @@ pkgs.testers.runNixOSTest {
             window("org.xfce.mousepad")
             prophet = "su - pilot -c " + q("prophet --json task ")
             def appel(outil, args):
-                return json.loads(machine.succeed(prophet[:-1] + "call essai-bureau " + outil + " " + json.dumps(args) + "'"))
+                brut = machine.succeed(prophet[:-1] + "call essai-bureau " + outil + " " + json.dumps(args) + "'")
+                reponse = json.loads(brut)
+                # Une réponse sans contenu structuré est un refus ou une panne de l'outil : la
+                # dire, avec les journaux du service et de l'adaptateur, plutôt qu'un KeyError.
+                if "structured" not in reponse:
+                    print("réponse de " + outil + " sans contenu structuré : " + brut)
+                    print(machine.succeed("journalctl -u prophet-agentd --no-pager -n 40; ls -la /run/prophet/; id agentd"))
+                    print(machine.succeed("su - pilot -c " + q(session + "journalctl --user -u prophet-supd --no-pager -n 40") + " || true"))
+                return reponse
             machine.succeed("su - pilot -c " + q("prophet task prepare --client --profile bureau --id essai-bureau 'Écrire bonjour dans le document'"))
             machine.succeed("su - pilot -c " + q("prophet task attach essai-bureau --client test"))
             apps = None
