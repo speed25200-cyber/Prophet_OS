@@ -217,6 +217,21 @@ impl Supervision {
                     }
                 }
                 voice::Ordre::Resultat => self.missions.announce_now(),
+                // La décision montrée, tranchée par la voix, cette fois (ADR 0041).
+                voice::Ordre::Accorder | voice::Ordre::Refuser => {
+                    if scene.decision.is_some() {
+                        *reponse = Some(if ordre == voice::Ordre::Accorder {
+                            Reponse::Accepte
+                        } else {
+                            Reponse::Refuse
+                        });
+                        self.examen = None;
+                    } else {
+                        self.preparation.report_error(
+                            "« accorde » / « refuse » : aucune décision n'attend.".to_owned(),
+                        );
+                    }
+                }
                 voice::Ordre::Intention => {}
             }
         }

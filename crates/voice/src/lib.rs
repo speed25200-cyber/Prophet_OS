@@ -602,9 +602,9 @@ pub fn resume_du_resultat(result: &serde_json::Value) -> String {
 }
 
 /// Ce que l'humain demande après le mot d'activation : une intention à préparer (le cas
-/// ordinaire), ou l'un de trois ordres brefs qui portent sur la mission en cours de
-/// préparation ou dernièrement préparée : la préparer (l'atelier, où l'humain relit l'objectif
-/// avant de l'envoyer), la lancer (son approbation, dite), entendre son résultat.
+/// ordinaire), ou l'un de cinq ordres brefs : préparer l'objectif (l'atelier, où l'humain
+/// relit avant d'envoyer), lancer la mission préparée (son approbation, dite), entendre son
+/// résultat, accorder ou refuser la décision que le système attend de lui (ADR 0041).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ordre {
     /// Une intention : le texte devient un objectif.
@@ -615,6 +615,10 @@ pub enum Ordre {
     Lancer,
     /// « résultat », « où en est » : entendre le résultat.
     Resultat,
+    /// « accorde », « autorise », « d'accord » : accorder la décision en attente, cette fois.
+    Accorder,
+    /// « refuse », « n'autorise pas » : refuser la décision en attente.
+    Refuser,
 }
 
 /// Reconnaît un ordre bref en tête de phrase, tel que Whisper l'écrit (casse, accents et
@@ -663,6 +667,15 @@ pub fn ordre_vocal(intent: &str) -> Ordre {
         "c est fini",
         "qu est ce que ca donne",
     ];
+    const ACCORDER: [&str; 6] = [
+        "accorde",
+        "autorise",
+        "d accord",
+        "accepte",
+        "j accepte",
+        "oui accorde",
+    ];
+    const REFUSER: [&str; 4] = ["refuse", "je refuse", "n autorise pas", "interdis"];
     let commence = |motifs: &[&str]| {
         motifs
             .iter()
@@ -675,6 +688,10 @@ pub fn ordre_vocal(intent: &str) -> Ordre {
         Ordre::Preparer
     } else if mots <= 5 && commence(&RESULTAT) {
         Ordre::Resultat
+    } else if mots <= 4 && commence(&ACCORDER) {
+        Ordre::Accorder
+    } else if mots <= 4 && commence(&REFUSER) {
+        Ordre::Refuser
     } else {
         Ordre::Intention
     }
@@ -706,11 +723,24 @@ mod tests {
         ] {
             assert_eq!(ordre_vocal(resultat), Ordre::Resultat, "{resultat}");
         }
+        for accorder in [
+            "Accorde.",
+            "Autorise !",
+            "D'accord",
+            "J'accepte",
+            "Accorde-le",
+        ] {
+            assert_eq!(ordre_vocal(accorder), Ordre::Accorder, "{accorder}");
+        }
+        for refuser in ["Refuse.", "Je refuse", "N'autorise pas", "Interdis !"] {
+            assert_eq!(ordre_vocal(refuser), Ordre::Refuser, "{refuser}");
+        }
         for intention in [
             "Écris une note de réunion dans mes documents.",
             "Lance une recherche sur les tarifs de l'électricité en 2026 et résume-la.",
             "Prépare une note de réunion pour demain matin avec les trois points.",
             "Résume le résultat de la réunion dans une note.",
+            "Autorise les employés à poser leurs congés dans le nouveau formulaire.",
         ] {
             assert_eq!(ordre_vocal(intention), Ordre::Intention, "{intention}");
         }

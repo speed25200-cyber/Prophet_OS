@@ -701,6 +701,8 @@ fn listen(
             .map(|_| "« prépare » : dites votre demande, elle est préparée aussitôt.\n".to_owned()),
             voice::Ordre::Lancer => lancer_par_la_voix(&tools, derniere.as_deref(), reply, as_json),
             voice::Ordre::Resultat => dire_le_resultat(&tools, derniere.as_deref(), reply, as_json),
+            voice::Ordre::Accorder => trancher_par_la_voix(&tools, true, reply, as_json),
+            voice::Ordre::Refuser => trancher_par_la_voix(&tools, false, reply, as_json),
         };
         match resultat {
             Ok(text) => out.push_str(&text),
@@ -727,6 +729,46 @@ fn dire_si_demande(
 
 /// « Prophète, lance la mission » : la dernière mission préparée dans cette écoute est lancée ;
 /// c'est la décision de l'humain, dite, qui vaut approbation du plan.
+/// « Accorde » / « refuse » : la plus ancienne décision en attente est tranchée, cette fois
+/// seulement, et dite (ADR 0041). Sans décision en attente, l'OS le dit.
+fn trancher_par_la_voix(
+    tools: &voice::Tools,
+    accorder: bool,
+    reply: Option<Option<&std::path::Path>>,
+    as_json: bool,
+) -> anyhow::Result<String> {
+    let socket = socket_capd();
+    let demandes = capd_rpc(&socket, "approval.pending", serde_json::json!({}))?;
+    let Some(demande) = demandes.as_array().and_then(|l| l.first()).cloned() else {
+        dire_si_demande(tools, reply, "Aucune décision n'attend.")?;
+        return Ok("aucune décision en attente.\n".to_owned());
+    };
+    let id = demande["id"].as_str().unwrap_or_default().to_owned();
+    let resume = demande["summary"]
+        .as_str()
+        .unwrap_or("cette action")
+        .to_owned();
+    let tranchee = capd_rpc(
+        &socket,
+        "approval.resolve",
+        serde_json::json!({
+            "id": id,
+            "decision": if accorder { "allow" } else { "deny" },
+            "scope": "once"
+        }),
+    )?;
+    let phrase = if accorder {
+        format!("Accordé : {resume}.")
+    } else {
+        format!("Refusé : {resume}.")
+    };
+    dire_si_demande(tools, reply, &phrase)?;
+    if as_json {
+        return Ok(format!("{}\n", serde_json::to_string_pretty(&tranchee)?));
+    }
+    Ok(format!("{phrase}\n"))
+}
+
 fn lancer_par_la_voix(
     tools: &voice::Tools,
     derniere: Option<&str>,

@@ -46,4 +46,6 @@ ait rien vu. Le superviseur, c'est pourtant l'humain.
 - Limites : la demande porte l'action et la cible, pas les arguments — le résumé dit « appeler
   tel outil » ou « tel outil sur telle cible » ; le modèle ne peut pas y ajouter son propre
   résumé. Un client officiel qui attend par sa séance doit réitérer `approval.wait` toutes les
-  45 s. La surface tranche ; la CLI aussi (`prophet cap approvals`, `approve`, `deny`, `rules`).
+  45 s. La surface tranche ; la CLI aussi (`prophet cap approvals`, `approve`, `deny`, `rules`) ;
+  et la voix : « Prophète, accorde » / « refuse » tranche la décision montrée (surface) ou la
+  plus ancienne en attente (`prophet listen`), cette fois seulement.

@@ -602,6 +602,8 @@ mod tests {
             voice::Ordre::Preparer,
             voice::Ordre::Lancer,
             voice::Ordre::Resultat,
+            voice::Ordre::Accorder,
+            voice::Ordre::Refuser,
         ] {
             preparation.tx.send(Reply::Order(ordre)).unwrap();
         }
@@ -609,6 +611,8 @@ mod tests {
         assert_eq!(preparation.take_order(), Some(voice::Ordre::Preparer));
         assert_eq!(preparation.take_order(), Some(voice::Ordre::Lancer));
         assert_eq!(preparation.take_order(), Some(voice::Ordre::Resultat));
+        assert_eq!(preparation.take_order(), Some(voice::Ordre::Accorder));
+        assert_eq!(preparation.take_order(), Some(voice::Ordre::Refuser));
         assert!(preparation.take_order().is_none());
         assert_eq!(preparation.intent, "Objectif");
     }
