@@ -1430,7 +1430,7 @@ application ou un outil (`cc5d07f`, ADR 0036) ; l'installeur relève la machine 
 d'effacer le disque et `prophet status` relit ce relevé (`aa35d8a`, `28863a7`) ; le
 sous-test sandbox des sept services vit dans l'état du service (`ffd88d2`) ; le guide
 d'installation dit ce qui est vrai (`97c5492`). CI verte des deux côtés sur `c160cee` ;
-`d6cd159` verte sauf le test Outils (corrigé) ; `580a929` **verte des deux côtés** (19:35 UTC) : le bureau installé ouvre un outil publié et lit sa sortie, l'installeur relève la machine.
+`d6cd159` verte sauf le test Outils (corrigé) ; `580a929` **verte des deux côtés** (19:35 UTC) : le bureau installé ouvre un outil publié et lit sa sortie, l'installeur relève la machine ; `8d43dd3` (`prophet status` relit le relevé) verte des deux côtés aussi (20:30 UTC). La [matrice matérielle](matrice-materielle.md) dit ce que l'image embarque et ce qui en a été vu.
 
 **Bloqué.** Rien n'a jamais démarré sur un vrai PC (écran, réseau, micro, micrologiciel) ;
 les vrais Claude Code et Codex n'ont jamais tourné dans une mission avec un compte ; le
