@@ -293,7 +293,8 @@ Dit franchement, parce que vous aurez effacé un disque pour l'essayer.
   l'hôte de la CI.** Il exige la virtualisation matérielle (KVM), qu'une machine virtuelle sans
   virtualisation imbriquée n'offre pas ; `prophet status` dit quels niveaux sont disponibles et
   ce qui manque sur la machine.
-- **La matrice matérielle reste à établir.** Les démarrages en VM, UEFI comme BIOS, ne valident
+- **La matrice matérielle reste à établir** ([ce que l'image embarque, et ce qui en a été
+  vu](matrice-materielle.md)). Les démarrages en VM, UEFI comme BIOS, ne valident
   pas votre carte graphique, votre réseau ni votre micrologiciel. Le système installé embarque
   désormais les micrologiciels redistribuables et le matériel que l'installeur détecte, et met
   les Radeon HD 7000/8000 sous `amdgpu` pour avoir Vulkan (ADR 0032) ; que votre carte, votre

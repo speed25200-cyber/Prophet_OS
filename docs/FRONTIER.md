@@ -36,7 +36,9 @@ qu'avec une commande reproductible et le résultat de l'exécution correspondant
   redimensionnement, accessibilité, mouvement réduit et absence de blocage pendant l'inférence.
   Captures des états réels et mesures des temps de rendu, mémoire et consommation au repos.
 - [ ] Matrice matérielle publiée : Intel/AMD, GPU supportés, mémoire minimale, réseau et firmware.
-  Ne pas confondre le rendu logiciel de la CI avec l'accélération d'inférence.
+  Ne pas confondre le rendu logiciel de la CI avec l'accélération d'inférence. Déclarée dans
+  [matrice-materielle.md](matrice-materielle.md) avec une colonne « Vu » ; non cochée tant que
+  cette colonne ne dit « non » nulle part d'essentiel — rien n'a été vu sur un vrai PC.
 - [ ] Version installable reproductible, documentation correspondant au binaire, tests de bout en
   bout bloquants, comparaison avec une base Linux utilisant les mêmes modèles et les mêmes tâches.
   Mesurer réussite, latences médiane/p95, tokens, RAM/VRAM, énergie et interventions humaines.
