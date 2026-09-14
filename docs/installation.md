@@ -214,6 +214,15 @@ prophet task cancel <id>                               # coupe : la séance est 
 
 Un client non connecté est refusé à la préparation, en disant comment se connecter.
 
+Dans un contexte, les rôles ont leurs paliers de modèles (ADR 0040) : la réflexion et le code
+au palier `opus` de Claude Code, la relecture à Codex puis au palier `sonnet`, les étapes simples
+au palier `haiku` — le lanceur passe le palier au client par son option de modèle. Pour en
+changer, dans la configuration de la machine (`image/machine/`) :
+
+```nix
+prophet.localEngine.paliers = { reflect = "opus"; code = "opus"; review = "sonnet"; execute = "haiku"; };
+```
+
 `prophet provider ls` distingue clients présents, connexion et exécution agentique disponible.
 Codex et Claude Code sont des dépendances obligatoires du nixpkgs épinglé. Gemini CLI est
 également fourni lorsque ce nixpkgs le propose. Les sondes utilisent les commandes des clients,
