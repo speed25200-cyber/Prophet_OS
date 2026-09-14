@@ -1478,10 +1478,15 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
             if !arguments.is_object() {
                 anyhow::bail!("arguments : objet JSON attendu");
             }
-            let result = task_rpc(
+            // Un outil travaille pour de vrai : l'arbre d'accessibilité d'une application, une
+            // page web, un document. Deux secondes, le délai d'une sonde, ne lui suffisent
+            // pas — le scénario du bureau installé l'a montré sur `ui.tree` (« pas de réponse
+            // en 2 s »). Une minute : le service et l'adaptateur bornent chacun leur part.
+            let result = task_rpc_sous(
                 &socket_agentd(),
                 "task.call",
                 serde_json::json!({"id":id, "name":tool, "arguments":arguments}),
+                DELAI_D_OUTIL,
             )?;
             if as_json {
                 return Ok(format!("{}\n", serde_json::to_string_pretty(&result)?));
@@ -1714,6 +1719,8 @@ fn home() -> std::path::PathBuf {
 /// là est, du point de vue de celui qui regarde son écran, un service en panne — et l'afficher
 /// ainsi est plus utile qu'une invite qui ne revient jamais.
 const DELAI_DE_SONDE: std::time::Duration = std::time::Duration::from_secs(2);
+/// Ce qu'on accorde à un outil appelé dans une séance depuis le terminal.
+const DELAI_D_OUTIL: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Lesquels des services répondent, et pourquoi les autres ne répondent pas.
 ///
@@ -1803,14 +1810,22 @@ async fn sonde_http(socket: &std::path::Path) -> Result<(), String> {
 fn sous_delai<T>(
     travail: impl std::future::Future<Output = Result<T, String>>,
 ) -> Result<T, String> {
+    sous_delai_de(travail, DELAI_DE_SONDE)
+}
+
+/// Comme [`sous_delai`], avec le délai qu'on veut.
+fn sous_delai_de<T>(
+    travail: impl std::future::Future<Output = Result<T, String>>,
+    delai: std::time::Duration,
+) -> Result<T, String> {
     let execution = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
     execution.block_on(async {
-        tokio::time::timeout(DELAI_DE_SONDE, travail)
+        tokio::time::timeout(delai, travail)
             .await
-            .map_err(|_| format!("pas de réponse en {} s", DELAI_DE_SONDE.as_secs()))?
+            .map_err(|_| format!("pas de réponse en {} s", delai.as_secs()))?
     })
 }
 
@@ -1842,12 +1857,25 @@ fn task_rpc(
     method: &str,
     params: serde_json::Value,
 ) -> anyhow::Result<serde_json::Value> {
-    sous_delai(async {
-        let client = prophet_ipc::Client::connect(socket)
-            .await
-            .map_err(|e| format!("agentd indisponible : {e}"))?;
-        client.call(method, params).await.map_err(|e| e.message)
-    })
+    task_rpc_sous(socket, method, params, DELAI_DE_SONDE)
+}
+
+/// Comme [`task_rpc`], avec le délai qu'on veut.
+fn task_rpc_sous(
+    socket: &std::path::Path,
+    method: &str,
+    params: serde_json::Value,
+    delai: std::time::Duration,
+) -> anyhow::Result<serde_json::Value> {
+    sous_delai_de(
+        async {
+            let client = prophet_ipc::Client::connect(socket)
+                .await
+                .map_err(|e| format!("agentd indisponible : {e}"))?;
+            client.call(method, params).await.map_err(|e| e.message)
+        },
+        delai,
+    )
     .map_err(anyhow::Error::msg)
 }
 

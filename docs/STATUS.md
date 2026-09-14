@@ -1383,8 +1383,11 @@ capd et l'agent disent `mousepad`. L'adaptateur ramène désormais un identifian
 inversé à son dernier segment (`supd::app_name`), pour la liste comme pour la recherche —
 confirmé par la CI (`1f022b3`) : l'éditeur est trouvé, et le pas suivant, `ui.tree`, échouait
 dans le scénario lui-même : les arguments JSON n'étaient pas cités pour le shell de l'humain,
-`{"app": "mousepad"}` arrivait en deux mots et la commande sortait en erreur d'usage. Cité ;
-à confirmer par la CI.
+`{"app": "mousepad"}` arrivait en deux mots et la commande sortait en erreur d'usage. Cité
+(`da485fc`), et le pas suivant : `ui.tree` répond, mais pas en deux secondes, le délai que la
+CLI accorde à toute requête — « pas de réponse en 2 s ». Un outil appelé dans une séance depuis
+le terminal a désormais une minute (`prophet task call`) ; le service et l'adaptateur bornent
+chacun leur part. À confirmer par la CI.
 
 Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le
 dernier mot : le job `isolation` de l'intégration continue installe gVisor, Firecracker et les
