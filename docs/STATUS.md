@@ -355,7 +355,7 @@ Celle de `d7ee0c4` (annulation corrigée, voix qui tranche) est verte partout �
 les approbations et l'annulation par PID, la mission locale réelle et le système installé
 tiennent — sauf les « sept services » : le sous-test sandbox créait son répertoire de travail
 dans `/tmp`, que sandboxd, sous `PrivateTmp`, ne voit pas ; il vit désormais dans l'état du
-service (`ffd88d2`). Le rapport
+service (`ffd88d2`), et les sept services ont repris leur vert (17:00 UTC). Le rapport
 du jour :
 [clients principaux](reports/clients-principaux-2026-09-14.md).
 

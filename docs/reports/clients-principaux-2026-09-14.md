@@ -87,7 +87,7 @@ logiciel de bout en bout — l'hôte de la CI a joué l'essai du client qui écr
 l'exécute en microVM —, disque de travail corrigé) : verte des deux côtés (15:06 UTC). CI de
 `d7ee0c4` (annulation vérifiée par PID, voix qui tranche) : verte partout sauf les « sept
 services », dont le sous-test sandbox posait son répertoire de travail dans un `/tmp` que
-sandboxd ne voit pas (`PrivateTmp`) — corrigé dans `ffd88d2`, poussé à 16:14 UTC.
+sandboxd ne voit pas (`PrivateTmp`) — corrigé dans `ffd88d2` (sept services verts à 17:00 UTC).
 
 ## Ce qui n'est pas prouvé
 
