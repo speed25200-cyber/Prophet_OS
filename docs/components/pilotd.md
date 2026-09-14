@@ -16,8 +16,11 @@
 
 ## Comment agentd s'en sert
 
-`task.options` interroge le lanceur (trois secondes au plus) et ne propose un rôle `driver:` que
-si le client est prêt. `task.delegate {role}` résolu en `driver:<client>` prépare la sous-mission
+`task.options` interroge le lanceur (trois secondes au plus), propose les clients prêts en tête
+des modèles de chaque contexte — ce sont les modèles principaux — et ne propose un rôle
+`driver:` que si le client est prêt. Une mission préparée sur un client (`task.prepare {model:
+"codex"}`) est lancée par `task.start` exactement comme une délégation, sans parent : `pilot.run`,
+séance rejointe par le pont, conclusion par le service si le client part sans se retirer. `task.delegate {role}` résolu en `driver:<client>` prépare la sous-mission
 pour une séance d'outils (jeton délégué par capd, filiation, budget prélevé, rôle, même
 propriétaire), puis appelle `pilot.run` et attend. Le client rejoint la séance par le pont
 (`task.attach`, sous l'identité de l'humain, propriétaire de la mission), appelle ses outils

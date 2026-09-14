@@ -143,12 +143,36 @@ impl Handler for Agents {
                     .ok_or_else(|| {
                         Error::new(ErrorCode::InvalidParams, "Profil de mission inconnu.")
                     })?;
-                let reference = format!("local:{}", request.model);
+                // Un client officiel se nomme comme un modèle (`codex`, `claude-code`) : c'est
+                // alors lui qui mène la mission, lancé dans la session par le lanceur de
+                // pilotes, et il doit être connecté (ADR 0035).
+                let driver = agentd::preparation::driver_name(&request.model).map(str::to_owned);
+                let reference = match &driver {
+                    Some(d) => format!("driver:{d}"),
+                    None => format!("local:{}", request.model),
+                };
                 if !profile.manifest.model.preferred.contains(&reference) {
                     return Err(Error::new(
                         ErrorCode::PolicyDenied,
                         "Modèle non admis par ce profil.",
                     ));
+                }
+                if let Some(d) = &driver {
+                    if self.pilot.is_none() {
+                        return Err(Error::new(
+                            ErrorCode::Conflict,
+                            "Ce contexte confie la mission à un client officiel, et aucun lanceur de pilotes de session n'est configuré.",
+                        ));
+                    }
+                    let statut = pilot_status(self.pilot.as_deref()).await;
+                    if !ready_drivers(statut.as_ref()).iter().any(|r| r == d) {
+                        return Err(Error::new(
+                            ErrorCode::Conflict,
+                            format!(
+                                "Le client {d} n'est pas connecté : ouvrez-le depuis le lanceur et connectez-vous (prophet provider login {d})."
+                            ),
+                        ));
+                    }
                 }
                 // Un contexte web sans navigateur qui répond serait un plan qui échoue au
                 // premier outil, une fois la mission lancée : on le dit avant d'émettre un jeton.
@@ -180,14 +204,16 @@ impl Handler for Agents {
                         "Cette référence existe déjà. Relisez son plan.",
                     ));
                 }
-                // Pour un client MCP, le modèle est celui du client : le moteur local peut
-                // être absent, et le modèle du profil n'a pas à y être découvert.
-                let models = if request.client {
+                // Pour un client MCP ou un client officiel, le modèle est celui du client :
+                // le moteur local peut être absent, et le modèle du profil n'a pas à y être
+                // découvert.
+                let sans_moteur = request.client || driver.is_some();
+                let models = if sans_moteur {
                     self.local_models().await.unwrap_or_default()
                 } else {
                     self.local_models().await?
                 };
-                if !request.client && !models.contains(&request.model) {
+                if !sans_moteur && !models.contains(&request.model) {
                     return Err(Error::new(
                         ErrorCode::Conflict,
                         "Le modèle choisi n'est plus disponible.",
@@ -217,6 +243,7 @@ impl Handler for Agents {
                 })??;
                 let availability = Availability {
                     local_models: models,
+                    logged_in_drivers: driver.iter().cloned().collect(),
                     ..Default::default()
                 };
                 let scopes: Vec<&str> = profile.scopes.iter().map(String::as_str).collect();
@@ -331,7 +358,22 @@ impl Handler for Agents {
                 commun::repondre(tache)
             }
 
-            "task.start" => self.start_local(commun::texte(&params, "id")?).await,
+            "task.start" => {
+                let id = commun::texte(&params, "id")?;
+                // Un plan sur un client officiel démarre par le lanceur de pilotes (ADR 0035) ;
+                // un plan sur un modèle local, par le moteur du service.
+                let driver = {
+                    let runtime = self.runtime.lock().await;
+                    runtime
+                        .task(&id)
+                        .and_then(|t| t.driver.clone())
+                        .and_then(|d| d.strip_prefix("driver:").map(str::to_owned))
+                };
+                match driver {
+                    Some(driver) => self.start_pilote(id, driver, pair.uid).await,
+                    None => self.start_local(id).await,
+                }
+            }
 
             "task.inspect" => {
                 let id = commun::texte(&params, "id")?;
@@ -345,7 +387,12 @@ impl Handler for Agents {
                 let (inspection, owner, home) = {
                     let runtime = self.runtime.lock().await;
                     let inspection = runtime
-                        .inspect(&id, self.local_endpoint.is_some(), has_worker)
+                        .inspect(
+                            &id,
+                            self.local_endpoint.is_some(),
+                            self.pilot.is_some(),
+                            has_worker,
+                        )
                         .map_err(runtime_erreur)?;
                     (
                         inspection,
@@ -890,6 +937,96 @@ impl Agents {
         }
         self.vider_le_journal().await;
         tracing::warn!(tache = %id, chemin, motif, "publication refusée par capd");
+    }
+
+    /// Lance une mission dont le plan désigne un client officiel : le lanceur de pilotes de la
+    /// session ouvre le client, non modifié, dans la mission ; le client la rejoint par le pont
+    /// (`task.attach`), y appelle ses outils, se retire ; un fil du service attend sa fin et
+    /// conclut ce qu'il aurait laissé ouvert (ADR 0035). La réponse revient aussitôt : la mission
+    /// se suit par `task.inspect`, comme une mission locale.
+    async fn start_pilote(&self, id: String, driver: String, uid: u32) -> Result<Value, Error> {
+        let pilot_socket = self.pilot.clone().ok_or_else(|| {
+            Error::new(
+                ErrorCode::Conflict,
+                "aucun lanceur de pilotes de session configuré : ce plan ne peut pas démarrer ici",
+            )
+        })?;
+        let (intent, wall_time_s) = {
+            let runtime = self.runtime.lock().await;
+            if !runtime.is_owner(&id, uid) {
+                return Err(Error::new(
+                    ErrorCode::PolicyDenied,
+                    "Seul le propriétaire de la mission la lance.",
+                ));
+            }
+            let task = runtime
+                .task(&id)
+                .ok_or_else(|| Error::new(ErrorCode::NotFound, "mission inconnue"))?;
+            if task.state != agentd::State::Planned {
+                return Err(Error::new(
+                    ErrorCode::Conflict,
+                    format!("cette mission est {:?}, pas planifiée", task.state),
+                ));
+            }
+            (task.intent.clone(), task.budget.limits.wall_time_s.max(1))
+        };
+        // Le client lancé compte comme un travail, sous une clé à lui : la séance qu'il ouvrira
+        // par `task.attach` prend la clé de la mission, et un second lancement est refusé.
+        let cle = cle_de_pilote(&id);
+        {
+            let mut jobs = self
+                .jobs
+                .lock()
+                .map_err(|_| Error::new(ErrorCode::InternalError, "travailleurs indisponibles"))?;
+            if jobs.len() >= 2 || jobs.contains_key(&id) || jobs.contains_key(&cle) {
+                return Err(Error::new(
+                    ErrorCode::Conflict,
+                    "mission déjà lancée ou capacité de travail atteinte",
+                ));
+            }
+            jobs.insert(cle, Arc::new(AtomicBool::new(false)));
+        }
+        let requete = pilotd::RunRequest {
+            task: id.clone(),
+            driver: driver.clone(),
+            intent,
+            wall_time_s,
+        };
+        let runtime = self.runtime.clone();
+        let etat = self.etat.clone();
+        let seances = self.seances.clone();
+        let jobs = self.jobs.clone();
+        let mission = id.clone();
+        let pilote = driver.clone();
+        tokio::task::spawn_blocking(move || {
+            use mcp_system::protocol::ErrorCode as Code;
+            let run = bloquer(async {
+                let client = Client::connect(&pilot_socket).await.map_err(|e| {
+                    (
+                        Code::SandboxError,
+                        format!("lanceur de pilotes injoignable : {e}"),
+                    )
+                })?;
+                let brut = client
+                    .call(
+                        pilotd::METHOD_RUN,
+                        serde_json::to_value(&requete).unwrap_or_default(),
+                    )
+                    .await
+                    .map_err(|e| (Code::SandboxError, format!("{pilote} : {}", e.message)))?;
+                serde_json::from_value::<pilotd::RunResult>(brut).map_err(|e| {
+                    (
+                        Code::SandboxError,
+                        format!("réponse illisible du lanceur : {e}"),
+                    )
+                })
+            })
+            .map_err(|(_, message)| message);
+            conclure_pilote(&runtime, &etat, &seances, &jobs, &mission, &pilote, run);
+        });
+        Ok(
+            json!({"id": id, "state": "planned", "driver": format!("driver:{driver}"), "launched": true}),
+        )
     }
 
     async fn start_local(&self, id: String) -> Result<Value, Error> {
@@ -1488,6 +1625,62 @@ fn deleguer(
         "result": result,
         "note": "La sous-mission a travaillé dans son propre espace ; ses changements sont à examiner et à appliquer comme les vôtres.",
     }))
+}
+
+/// La clé, parmi les travaux du service, du client officiel lancé pour une mission.
+fn cle_de_pilote(id: &str) -> String {
+    format!("pilote:{id}")
+}
+
+/// Le client est parti : ce qu'il a laissé ouvert est conclu avec son texte ; s'il n'a jamais
+/// rejoint la mission, elle échoue en le disant. Commun au lancement d'une mission sur un client
+/// et à la délégation d'un rôle.
+fn conclure_pilote(
+    runtime: &Arc<Mutex<Runtime>>,
+    etat: &std::path::Path,
+    seances: &Seances,
+    jobs: &Arc<std::sync::Mutex<BTreeMap<String, Arc<AtomicBool>>>>,
+    id: &str,
+    driver: &str,
+    run: Result<pilotd::RunResult, String>,
+) -> (String, Option<String>) {
+    let (client_text, launch_error) = match run {
+        Ok(result) => (result.text, None),
+        Err(message) => (String::new(), Some(message)),
+    };
+    let seance = seances.lock().ok().and_then(|mut all| all.remove(id));
+    if let Ok(mut all) = jobs.lock() {
+        all.remove(id);
+        all.remove(&cle_de_pilote(id));
+    }
+    if let Some(seance) = seance
+        && let Ok(mut guard) = seance.lock()
+        && let Some(taken) = guard.take()
+    {
+        taken.finish(Some(client_text.clone()).filter(|t| !t.is_empty()));
+    }
+    let mut runtime = runtime.blocking_lock();
+    if let Some(mut task) = runtime.task(id).cloned()
+        && !task.state.is_terminal()
+    {
+        task.state = agentd::State::Failed;
+        task.history.push(agentd::State::Failed);
+        task.reason = Some(launch_error.clone().unwrap_or_else(|| {
+            format!("le client {driver} s'est terminé sans rejoindre la mission")
+        }));
+        let resume = json!({
+            "state": task.state,
+            "reason": task.reason,
+            "budget": task.budget,
+            "usage": task.usage,
+            "role": task.role,
+            "driver": task.driver,
+            "text": client_text,
+        });
+        runtime.publish_local(task, Some(resume));
+    }
+    let _ = ecrire(etat, &runtime.etat());
+    (client_text, launch_error)
 }
 
 /// Une sous-mission confiée à un client officiel (ADR 0035) : préparée ici pour une séance

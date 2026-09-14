@@ -143,9 +143,14 @@ impl Preparation {
                             .attempt
                             .as_ref()
                             .ok_or("Préparation sans référence.".to_owned())?;
+                        // Le modèle demandé est un modèle local ou un client officiel, nommé
+                        // sans préfixe ; le plan dit lequel il a pris (ADR 0035).
+                        let attendu_local = format!("local:{}", request.model);
+                        let attendu_client = format!("driver:{}", request.model);
                         if plan.task != request.id
                             || plan.intent != request.intent
-                            || plan.choice.reference != format!("local:{}", request.model)
+                            || (plan.choice.reference != attendu_local
+                                && plan.choice.reference != attendu_client)
                         {
                             return Err("Le plan reçu ne correspond pas à votre demande.".into());
                         }

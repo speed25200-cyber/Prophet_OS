@@ -53,6 +53,22 @@ Codex.
   Codex ne sont pas installés sur la machine de construction et leur connexion appartient à
   l'humain : leur exécution réelle est un essai `needs_claude_login` / `needs_chatgpt_login`,
   à mener sur une machine où l'humain s'est connecté.
+- Complément du 14 septembre 2026 — **les clients sont les modèles principaux.** L'humain a
+  tranché : Claude et ChatGPT mènent, le modèle local n'est qu'un secours. `task.prepare` admet
+  donc un client officiel comme modèle d'une mission de premier niveau, nommé comme un modèle
+  (`codex`, `claude-code`, ou `driver:codex`) : le profil doit l'admettre, le lanceur doit le
+  dire connecté (sinon la préparation le refuse en disant comment se connecter), le plan se fait
+  sur `driver:<client>` sans découverte du moteur local ; `task.start` le lance alors par le
+  lanceur, comme une délégation mais sans parent — le client rejoint la mission par le pont,
+  travaille sous son jeton, se retire, et un fil du service conclut ce qu'il aurait laissé
+  ouvert. `task.options` propose les clients connectés en tête des modèles de chaque contexte,
+  et tous les contextes de l'image les préfèrent (`driver:claude-code`, `driver:codex`, puis le
+  local) ; les rôles suivent : Claude Code réfléchit et relit, Codex code et exécute. Sans
+  lanceur ou sans client connecté, rien ne change : le modèle local reste proposé et lançable,
+  ce qui garde les essais de la CI sans clients. Preuve : le test `une_mission_demarre_
+  directement_sur_le_client_officiel_connecte` (faux Codex, vrais services : préparation sur
+  `codex`, lancement, écriture par la séance, texte revenu, moteur local jamais sollicité) et
+  son contraire sans lanceur.
 - Limites : le client n'est pas confiné par la séance (ADR 0026) ; l'argument `-c` de Codex
   pour ses serveurs MCP est construit d'après sa documentation et non vérifié sur le binaire ;
   Gemini n'a pas de configuration MCP raccordée ; le parent ne voit du client que son texte

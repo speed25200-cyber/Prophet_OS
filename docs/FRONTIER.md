@@ -198,6 +198,10 @@ avec les vrais services ; l'exécution des vrais clients exige une connexion que
 fait. Le critère « clients officiels exécutés dans le confinement requis » progresse (lancement
 par le service via la session, événements réduits au texte final) sans être coché : le client
 n'est pas confiné, et ses événements et demandes de permission ne sont pas traduits.
+Depuis le 14 septembre (complément de l'ADR 0035), les clients sont les modèles principaux :
+une mission de premier niveau se prépare et se lance directement sur `codex` ou `claude-code`,
+le catalogue les propose en tête, tous les contextes de l'image les préfèrent, et le modèle
+local n'est qu'un secours.
 
 Le même jour, l'image sert deux modèles en mode routeur (Qwen3-1.7B en réflexion, Qwen3-0.6B
 en exécution, ADR 0034), et la [parole](adr/0036-la-parole-de-l-humain.md) entre dans le

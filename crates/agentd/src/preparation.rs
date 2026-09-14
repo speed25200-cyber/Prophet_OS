@@ -29,6 +29,27 @@ pub fn is_official_driver(reference: &str) -> bool {
         .is_some_and(|d| OFFICIAL_DRIVERS.contains(&d))
 }
 
+/// Le nom qu'un humain lit pour un modèle proposé : les clients officiels par leur nom
+/// d'usage et leur éditeur, un modèle local par son identifiant.
+#[must_use]
+pub fn model_label(model: &str) -> String {
+    match driver_name(model) {
+        Some("claude-code") => "Claude Code (Anthropic)".to_owned(),
+        Some("codex") => "Codex (ChatGPT)".to_owned(),
+        Some("gemini") => "Gemini (Google)".to_owned(),
+        _ => model.to_owned(),
+    }
+}
+
+/// Le nom d'un client officiel derrière un modèle demandé pour une mission : `codex`,
+/// `driver:codex` ; rien pour un modèle local. Les clients sont les modèles principaux
+/// (ADR 0035) : l'humain les nomme comme il nomme un modèle local.
+#[must_use]
+pub fn driver_name(model: &str) -> Option<&str> {
+    let nom = model.strip_prefix("driver:").unwrap_or(model);
+    OFFICIAL_DRIVERS.contains(&nom).then_some(nom)
+}
+
 /// Un nom d'application tel que l'adaptateur de session l'identifie : minuscules, chiffres,
 /// point, tiret, soulignement ; ni joker ni chemin, pour qu'un droit désigne une application.
 fn is_app_name(pattern: &str) -> bool {
@@ -69,7 +90,10 @@ pub struct ProfileView {
     pub name: String,
     /// Usage annoncé.
     pub description: String,
-    /// Modèles du profil effectivement découverts auprès du moteur du service.
+    /// Modèles proposés pour une mission : les clients officiels que le lanceur de la session
+    /// dit connectés, par leur nom (`claude-code`, `codex`), d'abord — ce sont les modèles
+    /// principaux (ADR 0035) —, puis les modèles du profil découverts auprès du moteur du
+    /// service, le secours.
     pub models: Vec<String>,
     /// Modèles que le profil admet, découverts ou non : un client MCP n'a pas besoin du moteur.
     #[serde(default)]
@@ -192,14 +216,29 @@ impl Profile {
             id: self.id.clone(),
             name: self.name.clone(),
             description: self.description.clone(),
+            // Les clients officiels connectés d'abord — ce sont les modèles principaux —,
+            // puis les modèles locaux découverts, dans l'ordre du profil (ADR 0035).
             models: self
                 .manifest
                 .model
                 .preferred
                 .iter()
-                .filter_map(|r| r.strip_prefix("local:"))
-                .filter(|m| models.iter().any(|v| v == m))
-                .map(str::to_owned)
+                .filter_map(|reference| {
+                    reference
+                        .strip_prefix("driver:")
+                        .and_then(|d| drivers.iter().any(|v| v == d).then(|| d.to_owned()))
+                })
+                .chain(
+                    self.manifest
+                        .model
+                        .preferred
+                        .iter()
+                        .filter_map(|reference| {
+                            reference
+                                .strip_prefix("local:")
+                                .and_then(|m| models.iter().any(|v| v == m).then(|| m.to_owned()))
+                        }),
+                )
                 .collect(),
             preferred: self
                 .manifest
@@ -373,7 +412,9 @@ impl Profile {
                 (Res::Task, Act::Spawn) if is_app_name(&grant.pattern) => {}
                 // Un programme par son nom, jamais « tout » ni un chemin relatif.
                 (Res::Proc, Act::Exec) if is_app_name(&grant.pattern) => {}
-                (Res::Tool, Act::Call) if execs && grant.pattern == "proc.exec" => {}
+                // Qui lance un programme nommé peut l'arrêter : `proc.kill` va avec `proc.exec`.
+                (Res::Tool, Act::Call)
+                    if execs && matches!(grant.pattern.as_str(), "proc.exec" | "proc.kill") => {}
                 (Res::Tool, Act::Call) if spawns && grant.pattern == "task.delegate" => {}
                 _ => {
                     return Err(

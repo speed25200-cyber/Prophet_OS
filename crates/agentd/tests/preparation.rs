@@ -479,3 +479,54 @@ fn le_catalogue_refuse_les_profils_hors_perimetre_et_accepte_une_ecriture_plus_e
     std::fs::write(&path, json!([profile, profile]).to_string()).unwrap();
     assert!(agentd::preparation::load(&path).is_err());
 }
+
+#[test]
+fn les_clients_officiels_sont_des_modeles_nommes_et_lisibles() {
+    use agentd::preparation::{driver_name, model_label};
+    assert_eq!(driver_name("driver:codex"), Some("codex"));
+    assert_eq!(driver_name("claude-code"), Some("claude-code"));
+    assert_eq!(driver_name("local:qwen3-1.7b"), None);
+    assert_eq!(driver_name("qwen3-1.7b"), None);
+    assert_eq!(model_label("codex"), "Codex (ChatGPT)");
+    assert_eq!(model_label("driver:claude-code"), "Claude Code (Anthropic)");
+    assert_eq!(model_label("qwen3-1.7b"), "qwen3-1.7b");
+}
+
+#[test]
+fn le_catalogue_admet_un_atelier_logiciel_qui_lance_et_arrete_des_programmes_nommes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("profiles.json");
+    let example: Value =
+        serde_json::from_str(include_str!("../../../examples/missions/note-locale.json")).unwrap();
+    // Le contexte « Atelier logiciel » de l'image (ADR 0038) : écrire un outil, l'exécuter en
+    // microVM, l'arrêter. Un catalogue refusé empêche agentd de démarrer : ce test garde la
+    // forme exacte du profil de l'image.
+    let mut logiciel = json!({"id":"logiciel","name":"Atelier logiciel","description":"Outils","manifest":example["manifest"],"scopes":["~/Documents/Prophet"]});
+    logiciel["manifest"]["sandbox"] = json!({"min_level": 0, "code_execution": "microvm"});
+    logiciel["manifest"]["capabilities"]["max"] = json!({
+        "fs.read": ["~/Documents/Prophet/**"],
+        "fs.write": ["~/Documents/Prophet/outils/**"],
+        "proc.exec": ["python3", "sh"],
+        "tool.call": ["fs.read", "doc.read", "fs.write", "proc.exec", "proc.kill"]
+    });
+    std::fs::write(&path, json!([logiciel]).to_string()).unwrap();
+    let loaded = agentd::preparation::load(&path).unwrap();
+    assert!(
+        loaded[0]
+            .view(&[], &[])
+            .grants
+            .iter()
+            .any(|g| g == "proc.exec sur python3"),
+        "{:?}",
+        loaded[0].view(&[], &[]).grants
+    );
+    // Arrêter sans pouvoir lancer n'a pas de sens ; « tout programme » non plus.
+    let mut sans_exec = logiciel.clone();
+    sans_exec["manifest"]["capabilities"]["max"]["proc.exec"] = json!([]);
+    std::fs::write(&path, json!([sans_exec]).to_string()).unwrap();
+    assert!(agentd::preparation::load(&path).is_err());
+    let mut tout = logiciel.clone();
+    tout["manifest"]["capabilities"]["max"]["proc.exec"] = json!(["*"]);
+    std::fs::write(&path, json!([tout]).to_string()).unwrap();
+    assert!(agentd::preparation::load(&path).is_err());
+}

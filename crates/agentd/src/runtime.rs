@@ -544,6 +544,7 @@ impl Runtime {
         &self,
         id: &str,
         local_configured: bool,
+        pilot_configured: bool,
         has_worker: bool,
     ) -> Result<Inspection, RuntimeError> {
         let task = self
@@ -552,15 +553,28 @@ impl Runtime {
             .ok_or_else(|| RuntimeError::Unknown(id.into()))?
             .clone();
         let plan = self.plans.get(id).cloned();
-        let start_reason = if !local_configured {
-            Some("Le moteur local du service n'est pas configuré.".into())
-        } else if plan.is_none() {
-            Some("Aucun plan conservé : cette mission doit être recréée.".into())
-        } else if plan
+        // Un plan sur un client officiel démarre par le lanceur de pilotes de la session ; un
+        // plan sur un modèle local, par le moteur du service (ADR 0035).
+        let sur_client = plan
             .as_ref()
-            .is_none_or(|p| !p.choice.reference.starts_with("local:") || p.sandbox_level != 0)
-        {
+            .is_some_and(|p| p.choice.reference.starts_with("driver:"));
+        let start_reason = if plan.is_none() {
+            Some("Aucun plan conservé : cette mission doit être recréée.".into())
+        } else if plan.as_ref().is_some_and(|p| p.sandbox_level != 0) {
             Some("Ce plan nécessite un pilote isolé qui reste à raccorder.".into())
+        } else if sur_client && !pilot_configured {
+            Some(
+                "Ce plan attend un client officiel ; aucun lanceur de pilotes n'est configuré."
+                    .into(),
+            )
+        } else if !sur_client && !local_configured {
+            Some("Le moteur local du service n'est pas configuré.".into())
+        } else if !sur_client
+            && plan
+                .as_ref()
+                .is_some_and(|p| !p.choice.reference.starts_with("local:"))
+        {
+            Some("Ce plan nécessite un pilote qui reste à raccorder.".into())
         } else {
             None
         };

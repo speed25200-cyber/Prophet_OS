@@ -14,10 +14,21 @@ let
   # routeur, le grand réfléchit, le petit exécute ; sans lui, un seul modèle fait tout.
   relais = cfg.executeWeights != null;
   modelesLocaux = [ "local:${cfg.model}" ] ++ lib.optional relais "local:${cfg.executeModel}";
-  modele = { preferred = modelesLocaux; } // lib.optionalAttrs relais {
+  # Les clients officiels de l'humain — Claude Code (Anthropic) et Codex (OpenAI) — sont les
+  # modèles principaux de tout contexte (ADR 0035, complément du 14 septembre) : le service les
+  # propose d'abord quand le lanceur de la session les dit connectés, et une mission préparée sur
+  # l'un d'eux est lancée par ce lanceur, sans le moteur local. Le modèle local n'est qu'un
+  # secours, hors ligne ou sans compte connecté ; il ferme chaque liste. Les rôles suivent :
+  # Claude Code réfléchit et relit, Codex code et exécute, chacun n'étant proposé que connecté.
+  clients = [ "driver:claude-code" "driver:codex" ];
+  modele = {
+    preferred = clients ++ modelesLocaux;
+    privacy = "local-preferred";
     roles = {
-      reflect = [ "local:${cfg.model}" ];
-      execute = [ "local:${cfg.executeModel}" "local:${cfg.model}" ];
+      reflect = [ "driver:claude-code" "driver:codex" "local:${cfg.model}" ];
+      code = [ "driver:codex" "driver:claude-code" "local:${cfg.model}" ];
+      review = [ "driver:claude-code" "driver:codex" "local:${cfg.model}" ];
+      execute = [ "driver:codex" ] ++ lib.optional relais "local:${cfg.executeModel}" ++ [ "local:${cfg.model}" ];
     };
   };
   profiles = pkgs.writeText "prophet-mission-profiles.json" (builtins.toJSON [
@@ -132,16 +143,16 @@ let
         budget.default = { tokens = 40000; wall_time = "300s"; approvals = 3; };
       };
     }
-    # L'atelier : les clients officiels de l'humain comme rôles du relais (ADR 0034, 0035).
-    # Claude Code réfléchit, Codex code, Claude Code relit ce que Codex a produit (un autre
-    # regard que l'auteur), le modèle local exécute ; chacun n'est proposé que si
-    # le lanceur de la session le dit connecté, sinon le rôle retombe sur le modèle local. Les
-    # clients rejoignent leur sous-mission par une séance d'outils, sous un jeton délégué par
-    # capd ; l'OS ne touche jamais à leurs identifiants.
+    # L'atelier : les clients officiels de l'humain travaillent ensemble par le relais (ADR
+    # 0034, 0035). Claude Code réfléchit, Codex code, Claude Code relit ce que Codex a produit
+    # (un autre regard que l'auteur), Codex exécute les étapes simples ; chacun n'est proposé
+    # que si le lanceur de la session le dit connecté, sinon le rôle retombe sur le modèle
+    # local. Les clients rejoignent leur sous-mission par une séance d'outils, sous un jeton
+    # délégué par capd ; l'OS ne touche jamais à leurs identifiants.
     {
       id = "atelier";
       name = "Atelier des agents";
-      description = "Faire avancer Claude Code, Codex et le modèle local ensemble sur un objectif dans ~/Documents/Prophet : la réflexion à Claude Code, le code à Codex, la relecture du code à Claude Code, les étapes simples au modèle local, chacun dans sa propre mission contrôlée. Les clients doivent être connectés dans leur profil Prophet.";
+      description = "Faire avancer Claude Code et Codex ensemble sur un objectif dans ~/Documents/Prophet : la réflexion à Claude Code, le code à Codex, la relecture du code à Claude Code, les étapes simples à Codex, chacun dans sa propre mission contrôlée ; le modèle local ne sert que de secours. Les clients doivent être connectés dans leur profil Prophet.";
       scopes = [ "~/Documents/Prophet" ];
       manifest = {
         agent = {
@@ -150,16 +161,7 @@ let
           name = "Atelier des agents";
           publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
         };
-        model = {
-          preferred = [ "driver:claude-code" "driver:codex" ] ++ modelesLocaux;
-          privacy = "local-preferred";
-          roles = {
-            reflect = [ "driver:claude-code" "local:${cfg.model}" ];
-            code = [ "driver:codex" "driver:claude-code" "local:${cfg.model}" ];
-            review = [ "driver:claude-code" "driver:codex" "local:${cfg.model}" ];
-            execute = lib.optional relais "local:${cfg.executeModel}" ++ [ "local:${cfg.model}" ];
-          };
-        };
+        model = modele;
         sandbox.min_level = 0;
         capabilities.max = {
           "fs.read" = [ "~/Documents/Prophet/**" ];

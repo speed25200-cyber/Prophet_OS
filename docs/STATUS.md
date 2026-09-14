@@ -286,6 +286,18 @@ de Codex : un autre fournisseur que l'auteur relit, au prix d'une lecture. Manif
 `task.delegate` et consignes testés en unitaire ; l'image porte le rôle. Et `pilot.status` est
 servi d'un cache rafraîchi en arrière-plan (toutes les 60 s, après chaque lancement) : le
 catalogue n'attend plus les sondes des clients.
+Le 14 septembre encore, sur la décision de l'humain — « les modèles principaux seront ChatGPT et
+Claude, oublie le local » — : les clients officiels deviennent les modèles principaux de toute
+mission (complément de l'ADR 0035). `task.prepare` admet `codex` ou `claude-code` comme modèle
+d'une mission de premier niveau, si le profil l'admet et si le lanceur de la session le dit
+connecté (sinon il dit comment se connecter) ; `task.start` la lance par le lanceur, sans le
+moteur local, et un fil du service la conclut si le client part sans se retirer. Le catalogue
+propose les clients connectés en tête des modèles ; tous les contextes de l'image les préfèrent,
+le modèle local n'étant plus qu'un secours (hors ligne, sans compte), et les rôles suivent
+(Claude Code réfléchit et relit, Codex code et exécute). Prouvé avec les vrais services et un
+faux Codex : préparation sur `codex`, lancement, écriture par la séance, texte revenu, moteur
+local jamais sollicité ; et refusé sans lanceur. Ce que cela ne prouve pas : le vrai Codex et le
+vrai Claude Code, qui exigent la connexion de l'humain sur une machine installée.
 
 La CI de `ddf6e89` (relais et lanceur de pilotes) réussit `check`, l'isolation, le protocole du
 moteur, la surface, les sept services sous systemd, l'installeur, l'ISO et son démarrage, la
@@ -1446,7 +1458,18 @@ deux et retrouve le fichier — 1,8 s de bout en bout, démarrage seul en 56 ms.
 exécute pour de vrai, et un contexte « Atelier logiciel » du catalogue s'appuie dessus
 (`proc.exec` `python3` et `sh` en microVM, écriture dans `outils`). La CI n'a de KVM que sur
 l'hôte du travail « isolation », qui joue ces essais ; en machine virtuelle, le contexte est
-proposé et son exécution refusée en le disant. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
+proposé et son exécution refusée en le disant. Le premier passage en CI (`dcf25fd`) a échoué
+sur cet hôte : son répertoire temporaire est sous `/home`, que la racine squashfs de l'invité,
+en lecture seule, ne laissait pas créer (« espace de travail non monté ») — ici, sous `/tmp`,
+cela passait. L'invité pose désormais une surcouche overlay en mémoire sur sa racine et monte
+l'espace de travail au chemin de l'hôte, quel qu'il soit ; rejoué ici avec un répertoire sous
+`/root`, absent de la racine, avant de repasser par la CI. Le même passage a fait tomber
+« les sept services » : le catalogue de l'image portait `proc.kill` parmi les outils de
+l'atelier logiciel, que le contrôle des profils n'admettait pas, et agentd, qui refuse un
+catalogue fautif plutôt que de le servir, ne démarrait plus — la CI l'a dit, pas le poste de
+construction, où le catalogue n'est qu'évalué. Le contrôle admet désormais `proc.kill` avec
+`proc.exec` (qui lance un programme nommé peut l'arrêter), et un test garde la forme exacte de
+ce profil. Le contrôle des polices de ChatGPT, seul rouge restant, imprime désormais ce
 que Fontconfig reproche.
 Le rouge de ChatGPT est lu : Fontconfig dit « Cannot load default config file: File not
 found: /etc/fonts/fonts.conf » depuis un renderer de Chromium, dans le bac à sable de

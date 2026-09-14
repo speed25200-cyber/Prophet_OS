@@ -15,8 +15,8 @@
 |---|---|
 | `task.spawn` | Planifie, demande le jeton à capd, persiste et rend le plan |
 | `task.options` | Rend les profils configurés (`web` s'ils exigent le navigateur), leurs modèles réellement disponibles et l'état du navigateur piloté |
-| `task.prepare` | Prépare une intention avec un profil du service, sans génération ni exécution ; refuse un contexte web sans navigateur qui répond ; `client: true` dispense du moteur local pour une mission destinée à un client MCP |
-| `task.start` | Lance en arrière-plan une mission locale native de niveau 0 |
+| `task.prepare` | Prépare une intention avec un profil du service, sans génération ni exécution ; `model` nomme un modèle local découvert ou un client officiel connecté (`claude-code`, `codex` — les modèles principaux, ADR 0035) ; refuse un contexte web sans navigateur qui répond ; `client: true` dispense du moteur local pour une mission destinée à un client MCP |
+| `task.start` | Lance en arrière-plan une mission de niveau 0 : sur le moteur local du service, ou, si le plan désigne un client officiel, par le lanceur de pilotes de la session (le client rejoint la mission par le pont, la réponse revient aussitôt, la mission se suit par `task.inspect`) |
 | `task.list` | Rend les tâches et leurs budgets observés |
 | `task.status` | Rend une tâche par identifiant |
 | `task.inspect` | Rend tâche, plan, résultat et commandes possibles, sans jeton |
@@ -58,7 +58,9 @@ sous l'identité du service ; voir les limites de l'[ADR 0023](../adr/0023-appro
 
 `task.prepare` prend uniquement `{id, intent, profile, model}`. Son utilisateur provient du pair
 Unix. `PROPHET_MISSION_PROFILES` fixe les manifestes et périmètres au démarrage ; les modèles sont
-redécouverts au moment de préparer. Le modèle du dialogue ne fournit aucune autorité à ce chemin.
+redécouverts au moment de préparer. Un client officiel demandé comme modèle doit être admis par
+le profil et dit connecté par le lanceur de pilotes ; sinon la préparation le refuse en disant
+comment se connecter (`prophet provider login <client>`). Le modèle du dialogue ne fournit aucune autorité à ce chemin.
 Une référence déjà connue est refusée et se relit par `task.inspect`. Le plan devient exécutable
 par une commande distincte après examen. Le catalogue est une configuration locale de confiance,
 pas une validation des signatures d'éditeurs. Voir l'[ADR 0015](../adr/0015-intention-et-profils-de-mission.md).

@@ -4,6 +4,10 @@
 //! de l'humain, le client rejoint la séance, écrit, se retire, et son texte revient au parent
 //! avec le compte par modèle.
 //!
+//! Et, depuis le 14 septembre, un client officiel comme modèle principal d'une mission (complément
+//! de l'ADR 0035) : l'humain nomme `codex` comme modèle, `task.prepare` fait le plan sur lui,
+//! `task.start` le lance par le lanceur, sans que le moteur local soit sollicité.
+//!
 //! Vrais capd, ledger, agentd, `prophet-pilotd` et CLI ; un moteur simulé pour le parent, et
 //! un client de remplacement (un script) à la place de Codex, qui n'est pas installé ici et
 //! dont la connexion appartient à l'humain. Le vrai Codex suit exactement le même chemin par
@@ -15,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use prophet_daemon::essai::{Daemon, binaire_voisin};
-use prophet_ipc::Client;
+use prophet_ipc::{Client, ErrorCode};
 use serde_json::{Value, json};
 
 const AGENTD: &str = env!("CARGO_BIN_EXE_prophet-agentd");
@@ -264,6 +268,10 @@ impl Chain {
             .call("task.start", json!({"id":id}))
             .await
             .unwrap();
+        self.attendre(id).await
+    }
+
+    async fn attendre(&self, id: &str) -> Value {
         for _ in 0..600 {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let info = self
@@ -351,6 +359,124 @@ async fn le_role_code_lance_le_client_officiel_dans_une_seance_et_son_texte_revi
         "{parent}"
     );
     assert_eq!(parent["task"]["usage"]["local:modele-controle"]["turns"], 2);
+}
+
+#[tokio::test]
+async fn une_mission_demarre_directement_sur_le_client_officiel_connecte() {
+    let chain = Chain::new(vec![], true).await;
+    // Le catalogue propose Codex comme modèle de l'atelier, avant le modèle local du service.
+    let options = chain.client.call("task.options", json!({})).await.unwrap();
+    let atelier = options["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "atelier")
+        .unwrap();
+    assert_eq!(
+        atelier["models"],
+        json!(["codex", "modele-controle"]),
+        "{atelier}"
+    );
+    // Un client que le profil n'admet pas reste refusé, connecté ou non.
+    let refus = chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"direct-claude","intent":"Écris ~/docs/code.txt","profile":"atelier","model":"claude-code"}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refus.code, ErrorCode::PolicyDenied, "{refus:?}");
+    // Le nom nu ou préfixé désigne le même client.
+    let plan = chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"direct-codex-prefixe","intent":"Écris ~/docs/code.txt","profile":"atelier","model":"driver:codex"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(plan["choice"]["reference"], "driver:codex", "{plan}");
+    let plan = chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"direct-codex","intent":"Écris ~/docs/code.txt","profile":"atelier","model":"codex"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(plan["choice"]["reference"], "driver:codex", "{plan}");
+    let avant = chain
+        .client
+        .call("task.inspect", json!({"id":"direct-codex"}))
+        .await
+        .unwrap();
+    assert_eq!(avant["can_start"], true, "{avant}");
+    assert_eq!(avant["task"]["driver"], "driver:codex");
+    let lancee = chain
+        .client
+        .call("task.start", json!({"id":"direct-codex"}))
+        .await
+        .unwrap();
+    assert_eq!(lancee["driver"], "driver:codex", "{lancee}");
+    assert_eq!(lancee["launched"], true);
+    let info = chain.attendre("direct-codex").await;
+    assert_eq!(info["task"]["state"], "done", "{info}");
+    assert_eq!(info["task"]["driver"], "driver:codex");
+    assert_eq!(info["task"]["parent"], Value::Null);
+    // Le client a travaillé par sa séance : un appel d'outil, compté sous son nom, sans tokens.
+    assert_eq!(info["task"]["usage"]["client:codex"]["turns"], 1, "{info}");
+    assert_eq!(
+        info["result"]["text"],
+        "Code écrit par le faux Codex : Écris ~/docs/code.txt"
+    );
+    assert_eq!(info["result"]["execution"], "mcp-client");
+    let code = chain
+        .dir
+        .path()
+        .join("home/.prophet/tasks/direct-codex/work/docs/code.txt");
+    assert_eq!(std::fs::read_to_string(&code).unwrap(), "fn main() {}");
+    // Le moteur du service n'a jamais été sollicité : le client est le modèle.
+    assert!(chain.asked.lock().unwrap().is_empty(), "{:?}", chain.asked);
+    // La mission finie, une autre peut se lancer sur le même client.
+    chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"direct-codex-2","intent":"Écris ~/docs/code.txt","profile":"atelier","model":"codex"}),
+        )
+        .await
+        .unwrap();
+    chain
+        .client
+        .call("task.start", json!({"id":"direct-codex-2"}))
+        .await
+        .unwrap();
+    let info = chain.attendre("direct-codex-2").await;
+    assert_eq!(info["task"]["state"], "done", "{info}");
+}
+
+#[tokio::test]
+async fn sans_lanceur_le_client_n_est_pas_propose_et_une_mission_sur_lui_est_refusee() {
+    let chain = Chain::new(vec![], false).await;
+    let options = chain.client.call("task.options", json!({})).await.unwrap();
+    let atelier = options["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "atelier")
+        .unwrap();
+    assert_eq!(atelier["models"], json!(["modele-controle"]), "{atelier}");
+    let refus = chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"sans-lanceur","intent":"Écris ~/docs/code.txt","profile":"atelier","model":"codex"}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refus.code, ErrorCode::Conflict, "{refus:?}");
+    assert!(refus.message.contains("lanceur"), "{}", refus.message);
 }
 
 #[tokio::test]

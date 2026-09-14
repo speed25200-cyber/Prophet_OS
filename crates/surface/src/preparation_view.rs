@@ -174,8 +174,11 @@ fn form(ui: &mut egui::Ui, preparation: &mut Preparation, compact: bool) {
             if let Some(profile)=preparation.selected().cloned() {
                 caption(ui,&profile.scopes.join(" · "));
                 ui.add_space(4.0);
-                egui::ComboBox::from_id_salt("mission-model").width(ui.available_width().min(440.0)).selected_text(if preparation.model.is_empty(){"Aucun modèle disponible"}else{&preparation.model}).show_ui(ui,|ui| {
-                    for model in &profile.models {ui.selectable_value(&mut preparation.model,model.clone(),model);}
+                // Les clients officiels — Claude Code, Codex — sont les modèles principaux et se
+                // lisent par leur nom d'usage ; un modèle local, par son identifiant (ADR 0035).
+                let libelle=if preparation.model.is_empty(){"Aucun modèle disponible".to_owned()}else{agentd::preparation::model_label(&preparation.model)};
+                egui::ComboBox::from_id_salt("mission-model").width(ui.available_width().min(440.0)).selected_text(libelle).show_ui(ui,|ui| {
+                    for model in &profile.models {ui.selectable_value(&mut preparation.model,model.clone(),agentd::preparation::model_label(model));}
                 });
             }
         });
