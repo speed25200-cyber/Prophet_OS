@@ -60,6 +60,12 @@ Elle lit le système. Quand un daemon ne répond pas, **sa part du champ se vide
 d'isolation dit pourquoi. Elle ne garde pas la dernière image connue : l'écran montrerait des
 tâches en train de courir alors que plus rien ne tourne — faux, et crédible, la pire combinaison.
 
+Le détail d'une mission nomme qui la mène par son nom d'usage — « Codex (ChatGPT) », « Claude
+Code (Anthropic) », ou l'identifiant du modèle local — et, sous « Confiées », les sous-missions
+qu'elle a déléguées : à qui, quoi, où chacune en est. C'est le relais vu par l'humain : chaque
+sous-mission part de l'espace de cette mission et y rapporte son travail (ADR 0034, 0035,
+0039).
+
 Une scène d'exemple reste accessible par `--demonstration`, avec ce mot inscrit dans l'image.
 `--capture` seul ne fabrique plus de tâches. `--observation` conserve l'ancien renderer pour ses
 tests visuels. Les commandes de capture et de démarrage figurent dans le README du crate.

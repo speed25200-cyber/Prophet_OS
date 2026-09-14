@@ -588,6 +588,7 @@ impl Supervision {
         let accent = Accent::de(ui.ctx());
         if self.missions.connected() {
             crate::mission_details::draw(ui, c, &mut self.missions, &mut self.detail_tab);
+            crate::mission_details::confiees(ui, c, &scene.courants);
             if let Some(d) = scene.decision.as_ref().filter(|d| d.tache == c.tache) {
                 ui.add_space(12.0);
                 ui.label(titre(&d.question, 20.0));

@@ -732,3 +732,85 @@ fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::Trail
         "États conservés par le service ; appels relus dans le journal, avec leur cible contrôlée et leur issue.",
     );
 }
+
+/// Les sous-missions d'une mission : leurs identifiants sont les siens suivis d'un rang
+/// (`m.1`, `m.2`, et `m.1.1` pour une petite-fille).
+pub(crate) fn enfants_de<'a>(id: &str, courants: &'a [Courant]) -> Vec<&'a Courant> {
+    let prefixe = format!("{id}.");
+    courants
+        .iter()
+        .filter(|k| k.tache.starts_with(&prefixe))
+        .collect()
+}
+
+/// Le relais vu par l'humain : à qui cette mission a confié quoi, et où chacun en est — Claude
+/// Code qui relit, Codex qui code, le modèle local qui exécute (ADR 0034, 0035, 0039).
+pub(crate) fn confiees(ui: &mut egui::Ui, c: &Courant, courants: &[Courant]) {
+    let enfants = enfants_de(&c.tache, courants);
+    if enfants.is_empty() {
+        return;
+    }
+    let accent = Accent::de(ui.ctx());
+    ui.add_space(12.0);
+    sheet(ui).show(ui, |ui| {
+        heading(ui, "Confiées", 18.0);
+        small(
+            ui,
+            "Chacune part de l'espace de cette mission et y rapporte son travail.",
+        );
+        for enfant in enfants {
+            ui.horizontal_wrapped(|ui| {
+                let (etat, couleur) = enfant
+                    .task_state
+                    .map_or(("en cours", DISCRET), |s| status(s, &accent));
+                ui.label(RichText::new(etat).color(couleur).size(12.0));
+                small(
+                    ui,
+                    format!(
+                        "· {} · {}",
+                        agentd::preparation::reference_label(&enfant.agent),
+                        limited(&enfant.intitule, 90)
+                    ),
+                );
+            });
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scene::Etat;
+
+    fn courant(id: &str, agent: &str) -> Courant {
+        Courant {
+            tache: id.to_owned(),
+            intitule: format!("mission {id}"),
+            agent: agent.to_owned(),
+            etat: Etat::Court,
+            debit: 0.0,
+            budget_consomme: 0.0,
+            etapes: 0,
+            task_state: None,
+            task_revision: 0,
+        }
+    }
+
+    #[test]
+    fn les_sous_missions_sont_celles_dont_l_identifiant_prolonge_le_sien() {
+        let courants = vec![
+            courant("duo", "driver:codex"),
+            courant("duo.1", "driver:claude-code"),
+            courant("duo.1.1", "local:qwen3-1.7b"),
+            courant("duo-bis", "driver:codex"),
+            courant("autre.1", "driver:codex"),
+        ];
+        let enfants: Vec<&str> = enfants_de("duo", &courants)
+            .iter()
+            .map(|c| c.tache.as_str())
+            .collect();
+        assert_eq!(enfants, ["duo.1", "duo.1.1"]);
+        assert!(enfants_de("autre", &courants).len() == 1);
+        assert!(enfants_de("duo-bis", &courants).is_empty());
+    }
+}
