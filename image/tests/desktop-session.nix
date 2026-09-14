@@ -370,12 +370,17 @@ pkgs.testers.runNixOSTest {
             wait_text("Ouvrir", timeout=timedelta(seconds=30))
             machine.screenshot("bureau-lanceur")
             machine.send_key("esc")
-            machine.wait_until_fails("pgrep -u pilot -x fuzzel", timeout=30)
+            machine.wait_until_fails("pgrep -u pilot -x fuzzel", timeout=timedelta(seconds=30))
+            # Les fenêtres à conserver sont celles d'à présent : l'éditeur ouvert par l'agent
+            # s'est ajouté depuis le relevé du verrouillage (comparé à ce relevé-là, le
+            # scénario installé échouait ici, une fois le parcours du bureau enfin passé).
+            avant_annulation = window_ids()
             machine.send_key("meta_l-shift-e")
             wait_text("Annuler", timeout=timedelta(seconds=30))
             machine.send_key("ret")
-            machine.wait_until_fails("pgrep -u pilot -x fuzzel", timeout=30)
-            assert window_ids() == after
+            machine.wait_until_fails("pgrep -u pilot -x fuzzel", timeout=timedelta(seconds=30))
+            apres_annulation = window_ids()
+            assert apres_annulation == avant_annulation, (avant_annulation, apres_annulation)
             machine.send_key("meta_l-shift-e")
             wait_text("Annuler", timeout=timedelta(seconds=30))
             machine.send_key("down")
@@ -388,7 +393,7 @@ pkgs.testers.runNixOSTest {
             machine.send_chars("essai-bureau")
             machine.send_key("ret")
             reopened = window("org.prophet.Supervision")
-            assert reopened["pid"] != surface["pid"]
+            assert reopened["pid"] != surface["pid"], (reopened, surface)
             wait_text("Vos missions", timeout=timedelta(seconds=60), variants=True)
             machine.screenshot("bureau-nouvelle-session")
     finally:

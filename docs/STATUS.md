@@ -1387,7 +1387,11 @@ dans le scénario lui-même : les arguments JSON n'étaient pas cités pour le s
 (`da485fc`), et le pas suivant : `ui.tree` répond, mais pas en deux secondes, le délai que la
 CLI accorde à toute requête — « pas de réponse en 2 s ». Un outil appelé dans une séance depuis
 le terminal a désormais une minute (`prophet task call`) ; le service et l'adaptateur bornent
-chacun leur part. À confirmer par la CI.
+chacun leur part. Verdict (`59224e7`) : **le parcours du bureau passe entièrement** sur le
+système installé — champ trouvé dans l'arbre d'accessibilité, « bonjour » écrit, enregistré
+par le menu, thunar refusé par capd, séance close. Le sous-test suivant, déconnexion annulée,
+comparait alors les fenêtres au relevé pris au verrouillage, avant l'ouverture de l'éditeur ;
+il compare désormais à l'instant. À confirmer par la CI.
 
 Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le
 dernier mot : le job `isolation` de l'intégration continue installe gVisor, Firecracker et les
