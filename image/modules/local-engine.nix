@@ -201,15 +201,23 @@ in {
     # agentd lit seulement le contexte partagé et conserve son travail dans une racine privée.
     # Les ACL ne donnent pas accès aux autres contenus privés du home. Les fichiers dont le
     # propriétaire retire explicitement la lecture restent refusés au moment de la capture.
+    #
+    # Le masque est écrit à chaque fois (`m::r-x`), et ce n'est pas un détail. Un répertoire
+    # 0700 qui reçoit une entrée `u:agentd:r-x` se lit ensuite 0750 : le masque tient lieu de
+    # bits de groupe. Au démarrage suivant, l'activation de NixOS (`homeMode`) et les lignes
+    # `d … 0700` ci-dessous voient 0750, remettent 0700, et ce chmod ramène le masque à `---` ;
+    # `a+` ne recalcule pas un masque qui existe déjà, et agentd perd sa traversée — sur le
+    # système installé, qui démarre au moins deux fois, `user:agentd:r-x #effective:---` sur
+    # les trois niveaux, lu en CI le 14 septembre 2026. Un masque explicite survit à ce cycle.
     systemd.tmpfiles.rules = [
       "a+ /var/lib/prophet - - - - u:prophet-model:--x"
-      "a+ ${home} - - - - u:agentd:r-x"
+      "a+ ${home} - - - - u:agentd:r-x,m::r-x"
       "d ${home}/Documents 0700 ${owner} users -"
-      "a+ ${home}/Documents - - - - u:agentd:r-x"
+      "a+ ${home}/Documents - - - - u:agentd:r-x,m::r-x"
       "d ${home}/Documents/Prophet 0700 ${owner} users -"
-      "a+ ${home}/Documents/Prophet - - - - u:agentd:r-x,d:u:agentd:r-x"
+      "a+ ${home}/Documents/Prophet - - - - u:agentd:r-x,m::r-x,d:u:agentd:r-x,d:m::r-x"
       "d ${home}/.prophet 0700 ${owner} users -"
-      "a+ ${home}/.prophet - - - - u:agentd:r-x"
+      "a+ ${home}/.prophet - - - - u:agentd:r-x,m::r-x"
       "d ${home}/.prophet/tasks 0700 agentd prophet-system -"
     ];
 

@@ -1353,6 +1353,16 @@ page ne s'ouvre jamais, et la limite du pilote de test n'atteignait pas un pytho
 d'agentd quand il porte le navigateur (le `CapabilityBoundingSet` vide fait qu'il ne peut que
 retirer), et un `timeout` côté invité dans le sous-test. À confirmer par la CI.
 
+Le parcours du système installé (UEFI) échouait, une fois le verrouillage passé, sur un
+fichier créé par l'humain dans Documents/Prophet que le service ne lisait pas. Les
+diagnostics ajoutés au scénario l'ont dit (`27b55a9`) : `user:agentd:r-x #effective:---` et
+`mask::---` sur /home/pilot, Documents et Documents/Prophet. Un répertoire 0700 muni d'une
+entrée `u:agentd:r-x` se lit 0750 (le masque tient lieu de bits de groupe) ; au démarrage
+suivant, `homeMode` et les lignes `d … 0700` de tmpfiles remettent 0700, ce chmod ramène le
+masque à `---`, et `a+` ne recalcule pas un masque qui existe déjà. Le système installé
+démarre au moins deux fois (construction de l'image, puis l'essai) ; l'ISO, une. Correctif :
+les ACL écrivent leur masque (`m::r-x`, `d:m::r-x`). À confirmer par la CI.
+
 Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le
 dernier mot : le job `isolation` de l'intégration continue installe gVisor, Firecracker et les
 images d'invité sur un coureur Ubuntu muni de KVM, et y exerce les quatre tests matériels. C'est
