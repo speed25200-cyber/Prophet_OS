@@ -42,7 +42,7 @@ impl SystemTool for Tool {
                     "intent": {"type": "string", "description": "Objectif complet et autonome de la sous-mission"},
                     "profile": {"type": "string", "description": "Contexte du catalogue, parmi ceux que votre mission peut confier"},
                     "role": {"type": "string", "enum": ["reflect", "execute", "code", "review"], "description": "Rôle voulu : le modèle le moins coûteux que le contexte admet pour ce rôle est choisi ; review fait juger un travail rendu par un autre regard, sans le refaire"},
-                    "model": {"type": "string", "description": "Modèle local demandé explicitement ; sinon celui du rôle, sinon le vôtre"}
+                    "model": {"type": "string", "description": "Modèle demandé explicitement : un modèle local, ou un client officiel connecté (codex, claude-code) ; sinon celui du rôle, sinon le vôtre"}
                 },
                 "required": ["intent", "profile"],
                 "additionalProperties": false

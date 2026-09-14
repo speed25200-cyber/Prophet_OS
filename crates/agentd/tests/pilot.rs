@@ -612,6 +612,63 @@ async fn codex_mene_la_mission_et_confie_la_relecture_a_claude_code() {
     assert!(chain.asked.lock().unwrap().is_empty(), "{:?}", chain.asked);
 }
 
+/// Un client officiel se nomme comme un modèle dans `task.delegate {model}` ; un client que le
+/// contexte n'admet pas est une erreur d'argument que le modèle corrige, pas un refus.
+#[tokio::test]
+async fn un_modele_nomme_dans_une_delegation_peut_etre_un_client_officiel() {
+    let chain = Chain::new(
+        vec![
+            tool_call(
+                "task.delegate",
+                json!({"intent":"Écris ~/docs/code.txt","profile":"atelier","model":"codex"}),
+            ),
+            fin("Codex, nommé, a écrit ; je conclus."),
+        ],
+        true,
+    )
+    .await;
+    let parent = chain
+        .run("modele-codex", "Faire écrire du code par Codex")
+        .await;
+    assert_eq!(parent["task"]["state"], "done", "{parent}");
+    let child = chain
+        .client
+        .call("task.inspect", json!({"id":"modele-codex.1"}))
+        .await
+        .unwrap();
+    assert_eq!(child["task"]["state"], "done", "{child}");
+    assert_eq!(child["task"]["driver"], "driver:codex");
+    assert_eq!(child["task"]["role"], "code");
+    assert_eq!(
+        child["result"]["text"],
+        "Code écrit par le faux Codex : Écris ~/docs/code.txt"
+    );
+    assert_eq!(
+        *chain.asked.lock().unwrap(),
+        vec!["modele-controle", "modele-controle"]
+    );
+
+    let chain = Chain::new(
+        vec![
+            tool_call(
+                "task.delegate",
+                json!({"intent":"Écris ~/docs/code.txt","profile":"atelier","model":"gemini"}),
+            ),
+            fin("Gemini n'est pas admis ; je conclus sans lui."),
+        ],
+        true,
+    )
+    .await;
+    let parent = chain.run("modele-gemini", "Essayer Gemini").await;
+    assert_eq!(parent["task"]["state"], "done", "{parent}");
+    let refus = chain
+        .client
+        .call("task.inspect", json!({"id":"modele-gemini.1"}))
+        .await
+        .unwrap_err();
+    assert_eq!(refus.code, ErrorCode::NotFound, "{refus:?}");
+}
+
 #[tokio::test]
 async fn sans_lanceur_le_client_n_est_pas_propose_et_une_mission_sur_lui_est_refusee() {
     let chain = Chain::new(vec![], false).await;

@@ -1367,7 +1367,7 @@ fn deleguer(
     })?;
     // L'enfant : son identifiant, l'utilisateur et le propriétaire du parent, le modèle du
     // parent à défaut d'un autre.
-    let (child_id, user, owner, parent_model) = {
+    let (child_id, user, owner, parent_model, parent_driver) = {
         let runtime = ctx.runtime.blocking_lock();
         let parent = runtime
             .task(parent_id)
@@ -1382,18 +1382,25 @@ fn deleguer(
                 .as_deref()
                 .and_then(|d| d.strip_prefix("local:"))
                 .map(str::to_owned),
+            parent
+                .driver
+                .as_deref()
+                .and_then(|d| d.strip_prefix("driver:"))
+                .map(str::to_owned),
         )
     };
     // Un rôle demandé désigne le modèle que le contexte visé admet pour ce rôle, parmi ceux que
     // le moteur sert en ce moment ; un modèle nommé explicitement l'emporte s'il est admis.
     // Un nom que le contexte n'admet pas est une erreur d'argument que le modèle peut corriger
     // (en nommant un rôle), pas un refus de politique qui arrête la mission (ADR 0034).
+    // Un modèle nommé est un modèle local ou un client officiel (`codex`, `claude-code`) : les
+    // clients sont les modèles principaux (ADR 0035).
     let admitted = |m: &str| {
-        profile
-            .manifest
-            .model
-            .preferred
-            .contains(&format!("local:{m}"))
+        let preferred = &profile.manifest.model.preferred;
+        match agentd::preparation::driver_name(m) {
+            Some(d) => preferred.contains(&format!("driver:{d}")),
+            None => preferred.contains(&format!("local:{m}")),
+        }
     };
     let explication = || {
         format!(
@@ -1403,7 +1410,11 @@ fn deleguer(
                 .model
                 .preferred
                 .iter()
-                .filter_map(|r| r.strip_prefix("local:"))
+                .map(|r| {
+                    r.strip_prefix("local:")
+                        .or_else(|| r.strip_prefix("driver:"))
+                        .unwrap_or(r)
+                })
                 .collect::<Vec<_>>()
                 .join(", "),
             profile
@@ -1429,6 +1440,42 @@ fn deleguer(
                 explication()
             ),
         ));
+    }
+    // Un client officiel nommé, ou, à défaut de modèle et de rôle, le client qui mène la mission
+    // parente : la sous-mission est une séance que ce client rejoint, lancé par le lanceur de
+    // pilotes de la session (ADR 0035). Il doit être connecté.
+    let client = explicit
+        .as_deref()
+        .and_then(agentd::preparation::driver_name)
+        .map(str::to_owned)
+        .or_else(|| {
+            (explicit.is_none() && request.role.is_none())
+                .then(|| parent_driver.clone().filter(|d| admitted(d)))
+                .flatten()
+        });
+    if let Some(driver) = client {
+        let pilot = ctx.pilot.clone();
+        let status = bloquer(async move { Ok(pilot_status(pilot.as_deref()).await) })?;
+        if !ready_drivers(status.as_ref()).contains(&driver) {
+            return Err((
+                Code::Invalid,
+                format!(
+                    "Le client {driver} n'est pas connecté dans la session ; {}.",
+                    explication()
+                ),
+            ));
+        }
+        return deleguer_pilote(
+            ctx,
+            parent_id,
+            parent_token,
+            &request,
+            profile,
+            &driver,
+            &child_id,
+            &user,
+            owner,
+        );
     }
     let role_model = match (&explicit, &request.role) {
         (None, Some(role)) => {

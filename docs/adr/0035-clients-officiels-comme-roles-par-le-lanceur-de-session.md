@@ -78,7 +78,9 @@ Codex.
   publié ; le relecteur juge donc ce que l'auteur cite dans l'intention (ou ce qui est déjà
   publié), pas l'espace de travail du parent. Donner à l'enfant une vue en lecture de l'espace
   du parent est la prochaine marche du relais — faite le jour même par l'ADR 0039 : l'enfant
-  part de l'espace du parent et son travail y revient.
+  part de l'espace du parent et son travail y revient. Et `task.delegate {model}` nomme aussi
+  un client (`codex`, `claude-code`), s'il est admis par le contexte et connecté ; une
+  sous-mission sans modèle ni rôle confiée par un client va à ce même client.
 - Limites : le client n'est pas confiné par la séance (ADR 0026) ; l'argument `-c` de Codex
   pour ses serveurs MCP est construit d'après sa documentation et non vérifié sur le binaire ;
   Gemini n'a pas de configuration MCP raccordée ; le parent ne voit du client que son texte
