@@ -36,7 +36,13 @@ marques (les lignes du noyau écartées), le code du programme en est tiré, et 
 rapatrié par `debugfs rdump` dans le répertoire de travail — ce que le programme a écrit ou
 modifié revient, ce qu'il a effacé reste, le répertoire étant annulable par ailleurs. Le
 programme est cherché dans l'invité par son nom (`python3` de l'hôte est `/bin/python3`
-là-bas) ; la racine ne s'image jamais, et un répertoire de plus de 2 Gio est refusé.
+là-bas) ; la racine ne s'image jamais, et un répertoire de plus de 2 Gio est refusé. L'espace
+de travail se monte dans l'invité au chemin qu'il a sur l'hôte, quel qu'il soit : la racine
+squashfs étant en lecture seule, l'invité pose au démarrage une surcouche en mémoire sur elle
+(`overlay`, dessus en tmpfs) et y exécute le programme par `chroot` — la première version ne
+pouvait créer que sous `/tmp`, et l'essai de l'hôte de la CI, dont le répertoire temporaire
+est sous `/home`, l'a montré (« espace de travail non monté »). Sans overlay dans le noyau,
+l'invité garde sa racine telle quelle et le dit de la même façon.
 
 L'hôte de l'intégration continue, qui a KVM, construit l'invité et l'emploie pour les essais
 de niveau 2, à la place de la racine Ubuntu téléchargée.

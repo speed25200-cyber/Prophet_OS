@@ -27,6 +27,20 @@ let
     mount -t sysfs sys /sys
     mount -t devtmpfs dev /dev 2>/dev/null || true
     mount -t tmpfs tmp /tmp
+    # La racine est en lecture seule ; l'espace de travail doit pourtant se monter au chemin
+    # qu'il a sur l'hôte, quel qu'il soit (/tmp/…, /home/…, /var/…). Une surcouche en mémoire
+    # sur la racine (overlay) rend ce chemin créable ; le programme s'exécute dans cette
+    # surcouche. Sans overlay dans le noyau, la racine reste telle quelle et seuls les chemins
+    # déjà présents (/tmp) sont possibles.
+    racine=/
+    mkdir -p /tmp/haut /tmp/ouvrage /tmp/racine
+    if mount -t overlay overlay -o lowerdir=/,upperdir=/tmp/haut,workdir=/tmp/ouvrage /tmp/racine 2>/dev/null; then
+      racine=/tmp/racine
+      mount -t proc proc "$racine/proc"
+      mount -t sysfs sys "$racine/sys"
+      mount -t devtmpfs dev "$racine/dev" 2>/dev/null || true
+      mount -t tmpfs tmp "$racine/tmp"
+    fi
     echo "PROPHET_INVITE_PRET"
     programme=""
     travail=""
@@ -38,8 +52,7 @@ let
     done
     code=0
     if [ -n "$travail" ] && [ -b /dev/vdb ]; then
-      mkdir -p "$travail"
-      if ! mount -t ext4 /dev/vdb "$travail"; then
+      if ! mkdir -p "$racine$travail" || ! mount -t ext4 /dev/vdb "$racine$travail"; then
         echo "PROPHET_INVITE_ERREUR espace de travail non monté"
         code=125
       fi
@@ -47,8 +60,12 @@ let
     # Le programme et ses arguments viennent d'un fichier de l'espace de travail, écrit par
     # sandboxd ; la ligne de commande du noyau ne porte que le chemin du programme, sans ses
     # arguments ni son environnement.
-    if [ "$code" = 0 ] && [ -n "$travail" ] && [ -f "$travail/.prophet/exec.sh" ]; then
-      cd "$travail" && sh "$travail/.prophet/exec.sh"
+    if [ "$code" = 0 ] && [ -n "$travail" ] && [ -f "$racine$travail/.prophet/exec.sh" ]; then
+      if [ "$racine" = / ]; then
+        cd "$travail" && sh "$travail/.prophet/exec.sh"
+      else
+        chroot "$racine" /bin/sh -c 'cd "$1" && exec sh "$1/.prophet/exec.sh"' sh "$travail"
+      fi
       code=$?
     elif [ "$code" = 0 ] && [ -n "$programme" ] && [ -x "$programme" ]; then
       "$programme"
@@ -56,7 +73,7 @@ let
     fi
     echo "PROPHET_INVITE_FIN code=$code"
     sync
-    [ -n "$travail" ] && umount "$travail" 2>/dev/null
+    [ -n "$travail" ] && umount "$racine$travail" 2>/dev/null
     # `poweroff` laisse ce noyau en « System halted », moniteur ouvert ; avec `reboot=k`, un
     # redémarrage passe par le contrôleur clavier, que Firecracker traduit en sortie du moniteur.
     reboot -f
@@ -74,7 +91,7 @@ runCommand "prophet-invite-microvm" {
 } ''
   mkdir -p racine/bin racine/sbin racine/proc racine/sys racine/dev racine/tmp racine/etc racine/nix/store
   cp ${pkgsStatic.busybox}/bin/busybox racine/bin/busybox
-  for applet in sh mount umount cat echo ls mkdir rm cp mv sleep env grep sed reboot poweroff sync test; do
+  for applet in sh mount umount cat echo ls mkdir rm cp mv sleep env grep sed reboot poweroff sync test chroot; do
     ln -s busybox "racine/bin/$applet"
   done
   # Le noyau lance /sbin/init avant /init : que ce soit le même script, et non l'init de busybox,
