@@ -41,6 +41,16 @@ pub fn model_label(model: &str) -> String {
     }
 }
 
+/// Le nom qu'un humain lit pour la référence d'un plan (`driver:codex`, `local:qwen3-1.7b`) :
+/// le client par son nom d'usage, le modèle local par son identifiant.
+#[must_use]
+pub fn reference_label(reference: &str) -> String {
+    match reference.strip_prefix("local:") {
+        Some(local) => local.to_owned(),
+        None => model_label(reference),
+    }
+}
+
 /// Le nom d'un client officiel derrière un modèle demandé pour une mission : `codex`,
 /// `driver:codex` ; rien pour un modèle local. Les clients sont les modèles principaux
 /// (ADR 0035) : l'humain les nomme comme il nomme un modèle local.

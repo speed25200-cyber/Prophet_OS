@@ -490,6 +490,10 @@ fn les_clients_officiels_sont_des_modeles_nommes_et_lisibles() {
     assert_eq!(model_label("codex"), "Codex (ChatGPT)");
     assert_eq!(model_label("driver:claude-code"), "Claude Code (Anthropic)");
     assert_eq!(model_label("qwen3-1.7b"), "qwen3-1.7b");
+    use agentd::preparation::reference_label;
+    assert_eq!(reference_label("driver:codex"), "Codex (ChatGPT)");
+    assert_eq!(reference_label("local:qwen3-1.7b"), "qwen3-1.7b");
+    assert_eq!(reference_label("prophet-agent"), "prophet-agent");
 }
 
 #[test]

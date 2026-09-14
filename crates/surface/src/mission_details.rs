@@ -136,11 +136,14 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
         let (label, color) = status(info.task.state, &accent);
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(label).color(color).size(13.0));
+            // Qui mène la mission, lisible : « Codex (ChatGPT) », « qwen3-1.7b » (ADR 0035).
             small(
                 ui,
                 format!(
                     "· {}",
-                    info.task.driver.as_deref().unwrap_or(&info.task.agent)
+                    agentd::preparation::reference_label(
+                        info.task.driver.as_deref().unwrap_or(&info.task.agent)
+                    )
                 ),
             );
             if info.can_cancel
