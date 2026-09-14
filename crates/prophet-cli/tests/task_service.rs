@@ -486,6 +486,36 @@ fn liste_du_service_lisible_sans_acces_aux_captures() {
 }
 
 #[test]
+fn le_detail_nomme_qui_mene_la_mission_et_qui_l_a_confiee() {
+    let mut confiee = inspection();
+    confiee["task"]["driver"] = json!("driver:claude-code");
+    confiee["task"]["parent"] = json!("duo");
+    confiee["task"]["role"] = json!("review");
+    let rendu = success(invoke(
+        &["task", "show", "task:service"],
+        "task.inspect",
+        json!({"id":"task:service"}),
+        confiee,
+    ));
+    assert!(
+        rendu.contains("Menée par : Claude Code (Anthropic)"),
+        "{rendu}"
+    );
+    assert!(rendu.contains("Confiée par la mission duo"), "{rendu}");
+    assert!(rendu.contains("Rôle dans le relais : review"), "{rendu}");
+    let mut locale = inspection();
+    locale["task"]["driver"] = json!("local:qwen3-1.7b");
+    let rendu = success(invoke(
+        &["task", "show", "task:service"],
+        "task.inspect",
+        json!({"id":"task:service"}),
+        locale,
+    ));
+    assert!(rendu.contains("Menée par : qwen3-1.7b"), "{rendu}");
+    assert!(!rendu.contains("Confiée par"), "{rendu}");
+}
+
+#[test]
 fn detail_et_diff_proviennent_de_la_meme_inspection_que_la_surface() {
     for action in ["show", "diff"] {
         let output = success(invoke(

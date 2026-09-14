@@ -208,6 +208,7 @@ prophet task options                                   # contextes, modèles, cl
 prophet task prepare --profile documents --model codex "Résumer les notes de la semaine"
 prophet task start <id>                                # Codex est lancé dans la mission, sous votre identité
 prophet task inspect <id>                              # son avancement, puis son résultat
+prophet task cancel <id>                               # coupe : la séance est conclue, le client tué
 ```
 
 Un client non connecté est refusé à la préparation, en disant comment se connecter.

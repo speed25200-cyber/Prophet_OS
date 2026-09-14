@@ -1241,6 +1241,19 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                 "Mission {id} : {}\nÉtat : {:?}\n",
                 inspection.task.intent, inspection.task.state
             );
+            // Qui la mène, par son nom d'usage — un client officiel ou un modèle local — et,
+            // pour une sous-mission, qui la lui a confiée (ADR 0035, 0039).
+            if let Some(driver) = &inspection.task.driver {
+                out.push_str(&format!(
+                    "Menée par : {}\n",
+                    agentd::preparation::reference_label(driver)
+                ));
+            }
+            if let Some(parent) = &inspection.task.parent {
+                out.push_str(&format!(
+                    "Confiée par la mission {parent} : son travail y est revenu et se publie avec elle.\n"
+                ));
+            }
             if let Some(publication) = inspection.publication {
                 out.push_str(&format!(
                     "Publication : {}\n",
