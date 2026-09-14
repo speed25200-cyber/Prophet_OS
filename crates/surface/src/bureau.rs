@@ -128,6 +128,11 @@ impl Bureau {
     ) -> (egui::FullOutput, Option<Reponse>) {
         self.atelier.actualiser();
         self.supervision.missions.update();
+        // Une décision qui attend l'humain se dit, une fois : il peut l'accorder ou la refuser
+        // de vive voix sans regarder l'écran (ADR 0036, 0041).
+        self.supervision
+            .missions
+            .dire_la_decision(scene.decision.as_ref());
         if let Some(texte) = self.supervision.missions.take_announcement()
             && let Some(voix) = self.voix.clone()
         {

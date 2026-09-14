@@ -102,7 +102,8 @@ relit ; « Écouter « Prophète » » écoute en continu par tranches, et seule
 par le mot d'activation compte : une intention rejoint l'objectif, « prépare » l'envoie, « lance
 la mission » lance la mission choisie, « résultat » fait dire où elle en est, « accorde » ou
 « refuse » tranche la décision montrée, « ouvre … » ouvre par le lanceur une application du
-bureau ou un outil publié (« ouvre l'outil bonjour »). Si Piper et une
+bureau ou un outil publié (« ouvre l'outil bonjour »). Une décision qui arrive est dite, une
+fois (question, conséquence, motif du modèle, « dites accorde ou refuse »). Si Piper et une
 voix sont là, la fin d'une mission qu'on regarde courir est dite, une fois ; « Voix : lue /
 muette » dans la barre des missions coupe cette lecture. Tout est local ; chaque tranche
 enregistrée est effacée après transcription.

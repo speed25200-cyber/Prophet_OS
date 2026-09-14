@@ -1640,7 +1640,8 @@ tranche au moment où cela arrive. Le workflow reste donc à déclenchement manu
   (`prophet cap approvals` / `approve` / `deny` / `rules`), la surface accorde aussi pour toute
   la mission, et la voix tranche (« accorde », « refuse »). Le modèle joint son motif à la
   demande (`approval.wait {reason}` → `approval.explain`), que la surface et la CLI montrent
-  comme un dire du modèle, à part de ce que le système sait de l'action.
+  comme un dire du modèle, à part de ce que le système sait de l'action ; l'atelier dit une
+  décision qui arrive, une fois, motif compris, pour qu'on tranche sans regarder l'écran.
 - **Arrêter un client lancé — fait.** `task.cancel` d'une mission menée par un client conclut
   sa séance puis demande `pilot.stop {task}` au lanceur, qui tue le client et tout son groupe
   de processus (les clients sont lancés meneurs de groupe ; le délai tue de même). Prouvé dans

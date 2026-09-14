@@ -158,6 +158,8 @@ pub struct Missions {
     announced: HashSet<String>,
     /// La phrase à dire, prise par l'application à la prochaine image.
     announcement: Option<String>,
+    /// La décision déjà dite (mission et question) : une demande ne se dit qu'une fois.
+    decision_dite: Option<String>,
     tx: Sender<Reply>,
     rx: Receiver<Reply>,
 }
@@ -184,6 +186,7 @@ impl Default for Missions {
             announce: crate::preparation::speech_ready(),
             announced: HashSet::new(),
             announcement: None,
+            decision_dite: None,
             tx,
             rx,
         }
@@ -393,6 +396,26 @@ impl Missions {
         self.announcement.take()
     }
 
+    /// Une décision qui attend l'humain se dit, une fois, si la lecture est active (ADR 0036,
+    /// 0041) : la question, sa conséquence, le motif du modèle s'il en a donné un, et ce
+    /// qu'on peut répondre à la voix. Une phrase déjà en attente passe d'abord ; la décision
+    /// sera dite à l'image suivante. Sans décision, la suivante pourra se dire.
+    pub fn dire_la_decision(&mut self, decision: Option<&crate::scene::Decision>) {
+        let Some(d) = decision else {
+            self.decision_dite = None;
+            return;
+        };
+        let cle = format!("{}\0{}", d.tache, d.question);
+        if !self.announce
+            || self.decision_dite.as_deref() == Some(cle.as_str())
+            || self.announcement.is_some()
+        {
+            return;
+        }
+        self.announcement = Some(phrase_de_decision(d));
+        self.decision_dite = Some(cle);
+    }
+
     /// « Résultat » : dire maintenant où en est la mission choisie, même si la lecture des
     /// fins est coupée — c'est une demande explicite.
     pub fn announce_now(&mut self) {
@@ -549,8 +572,78 @@ pub(crate) fn rpc(socket: PathBuf, method: &str, params: Value) -> Result<Value,
     })
 }
 
+/// Ce que l'OS dit d'une décision qui attend : la question, sa conséquence, le motif du
+/// modèle s'il en a donné un, et ce que la voix peut répondre.
+#[must_use]
+pub fn phrase_de_decision(d: &crate::scene::Decision) -> String {
+    let mut phrase = format!(
+        "Décision demandée par la mission {}. {} {}",
+        d.tache,
+        d.question.trim_end_matches(['.', '?', '!', ' ']),
+        d.consequence
+    );
+    if let Some(motif) = d.motif.as_deref().filter(|m| !m.trim().is_empty()) {
+        phrase.push_str(&format!(" Le modèle dit : {}", motif.trim()));
+        if !motif.trim().ends_with(['.', '!', '?']) {
+            phrase.push('.');
+        }
+    }
+    phrase.push_str(" Dites « accorde » ou « refuse ».");
+    phrase
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn une_decision_qui_attend_se_dit_une_fois_avec_le_motif_du_modele() {
+        let mut missions = Missions::default();
+        missions.set_announce(true);
+        let decision = crate::scene::Decision {
+            question: "Envoyer le paiement ?".to_owned(),
+            consequence: "L'argent part et ne revient pas.".to_owned(),
+            motif: Some("le tarif expire ce soir".to_owned()),
+            tache: "t1".to_owned(),
+            depuis_secondes: 3,
+            irreversible: true,
+        };
+        missions.dire_la_decision(Some(&decision));
+        assert_eq!(
+            missions.take_announcement().as_deref(),
+            Some(
+                "Décision demandée par la mission t1. Envoyer le paiement L'argent part et ne revient pas. Le modèle dit : le tarif expire ce soir. Dites « accorde » ou « refuse »."
+            )
+        );
+        // La même décision, image après image, ne se redit pas ; l'attente qui s'allonge non plus.
+        let plus_tard = crate::scene::Decision {
+            depuis_secondes: 40,
+            ..decision.clone()
+        };
+        missions.dire_la_decision(Some(&plus_tard));
+        assert!(missions.take_announcement().is_none());
+        // Une autre question se dit ; sans motif, la phrase n'en invente pas.
+        let autre = crate::scene::Decision {
+            question: "Supprimer le dossier ?".to_owned(),
+            motif: None,
+            ..decision.clone()
+        };
+        missions.dire_la_decision(Some(&autre));
+        let dite = missions.take_announcement().unwrap();
+        assert!(
+            dite.starts_with("Décision demandée par la mission t1. Supprimer le dossier"),
+            "{dite}"
+        );
+        assert!(!dite.contains("Le modèle dit"), "{dite}");
+        // Plus de décision, puis la même revient : elle se redit.
+        missions.dire_la_decision(None);
+        missions.dire_la_decision(Some(&decision));
+        assert!(missions.take_announcement().is_some());
+        // Lecture coupée : rien n'est dit.
+        missions.set_announce(false);
+        missions.dire_la_decision(None);
+        missions.dire_la_decision(Some(&decision));
+        assert!(missions.take_announcement().is_none());
+    }
+
     use super::*;
 
     fn inspection(id: &str, state: State) -> Inspection {

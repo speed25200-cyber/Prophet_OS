@@ -72,7 +72,10 @@ distant ; et la parole ne donne aucun droit, elle produit un texte que l'humain 
   l'outil bonjour », « lance l'outil somme ») ouvre par le lanceur du bureau une application
   ou un outil publié par son nom (`voice::arguments_du_lanceur`), et dans l'atelier « prépare »
   envoie l'objectif que l'humain a relu ; toute autre phrase est une intention, y compris une
-  phrase longue qui commence par « lance » ou « ouvre ». En ligne de commande, l'intention est préparée
+  phrase longue qui commence par « lance » ou « ouvre ». Dans l'autre sens, l'atelier dit une
+  décision qui attend — la question, sa conséquence, le motif du modèle, « dites accorde ou
+  refuse » —, une fois par décision, quand la lecture est active : l'humain peut trancher sans
+  regarder l'écran. En ligne de commande, l'intention est préparée
   aussitôt ; dans l'atelier, elle rejoint l'objectif, et les ordres vont à la supervision, qui
   prépare le brouillon, lance la mission choisie ou fait dire où elle en est. Un refus (rien
   de préparé, mission non lançable) se lit sous le brouillon.
