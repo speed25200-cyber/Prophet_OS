@@ -15,6 +15,8 @@ enum Reply {
     Listening(bool),
     /// Un ordre bref dit après le mot d'activation : préparer, lancer, entendre le résultat.
     Order(voice::Ordre),
+    /// Une tranche entendue sans le mot d'activation : ce que l'OS a compris, pour le dire.
+    Heard(String),
 }
 
 /// Préparation séparée du dialogue : aucun modèle ne décide du profil ou des droits.
@@ -40,6 +42,8 @@ pub struct Preparation {
     wake: String,
     /// Ordres dits pendant l'écoute, pris par la supervision dans l'ordre.
     orders: std::collections::VecDeque<voice::Ordre>,
+    /// La dernière tranche entendue sans le mot d'activation.
+    heard: Option<String>,
     tx: Sender<Reply>,
     rx: Receiver<Reply>,
 }
@@ -62,6 +66,7 @@ impl Default for Preparation {
             listening: None,
             wake: "prophète".into(),
             orders: std::collections::VecDeque::new(),
+            heard: None,
             tx,
             rx,
         }
@@ -179,6 +184,7 @@ impl Preparation {
                     }
                 }
                 Reply::Order(ordre) => self.orders.push_back(ordre),
+                Reply::Heard(text) => self.heard = Some(text),
             }
         }
     }
@@ -262,6 +268,9 @@ impl Preparation {
                                 ordre => tx.send(Reply::Order(ordre)),
                             };
                             ctx.request_repaint();
+                        } else if !transcript.text.trim().is_empty() {
+                            let _ = tx.send(Reply::Heard(transcript.text));
+                            ctx.request_repaint();
                         }
                     }
                     Err(e) => {
@@ -290,6 +299,12 @@ impl Preparation {
     /// Le prochain ordre dit pendant l'écoute, s'il y en a un ; chacun n'est rendu qu'une fois.
     pub fn take_order(&mut self) -> Option<voice::Ordre> {
         self.orders.pop_front()
+    }
+
+    /// La dernière tranche entendue sans le mot d'activation, telle que Whisper l'a écrite.
+    #[must_use]
+    pub fn last_heard(&self) -> Option<&str> {
+        self.heard.as_deref()
     }
 
     /// Conserve un choix présent ; ne reprend pas un modèle d'un autre profil par accident.
@@ -610,8 +625,13 @@ mod tests {
         let ordre = temp.path().join("ordre.wav");
         let lance = temp.path().join("lance.wav");
         tools.speak("Il fait beau aujourd'hui.", &bruit).unwrap();
+        // La même phrase que l'essai de la CLI, que le coureur d'intégration continue entend
+        // bien ; « écris une note dans mes documents », plus court, y était entendu de travers.
         tools
-            .speak("Prophète, écris une note dans mes documents.", &ordre)
+            .speak(
+                "Prophète, écris une note de réunion dans mes documents.",
+                &ordre,
+            )
             .unwrap();
         tools.speak("Prophète, lance la mission.", &lance).unwrap();
         let compteur = temp.path().join("appels");
@@ -643,8 +663,15 @@ mod tests {
         preparation.listen_with(&ctx, tools, 1);
         assert!(preparation.listening());
         let debut = std::time::Instant::now();
-        while debut.elapsed() < std::time::Duration::from_secs(60) {
+        let mut entendu = Vec::new();
+        while debut.elapsed() < std::time::Duration::from_secs(90) {
             preparation.update();
+            if let Some(texte) = preparation.last_heard()
+                && entendu.last().map(String::as_str) != Some(texte)
+            {
+                eprintln!("entendu sans le mot : « {texte} »");
+                entendu.push(texte.to_owned());
+            }
             if preparation.intent.to_lowercase().contains("note") {
                 break;
             }
@@ -653,7 +680,7 @@ mod tests {
         let intent = preparation.intent.to_lowercase();
         assert!(
             intent.contains("note") && intent.contains("documents"),
-            "objectif « {intent} », erreur : {:?}",
+            "objectif « {intent} », erreur : {:?}, entendu sans le mot : {entendu:?}",
             preparation.error()
         );
         assert!(!intent.contains("beau"), "{intent}");

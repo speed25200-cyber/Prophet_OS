@@ -426,10 +426,11 @@ pub fn after_wake_word(text: &str, wake: &str) -> Option<String> {
     }
 }
 
-/// Deux mots normalisés se valent si, une fois « ph » ramené à « f » et les lettres doublées
-/// réduites, ils sont égaux, ou ne diffèrent que par une lettre substituée, ou par une lettre
-/// de plus à la fin. Whisper entend « Profète », « Profette » ou « prophet » pour « Prophète » ;
-/// il n'entend pas « prophétie », qui reste distinct.
+/// Deux mots normalisés se valent si, une fois « ph » ramené à « f », « ai » et « ei » à « e »
+/// (le même son en français) et les lettres doublées réduites, ils sont égaux, ou ne diffèrent
+/// que par une lettre substituée, ou par une lettre de plus à la fin. Whisper entend
+/// « Profète », « Profette », « Profaite » ou « prophet » pour « Prophète » ; il n'entend pas
+/// « prophétie », qui reste distinct.
 fn close_enough(heard: &str, wanted: &str) -> bool {
     let sound = |w: &str| -> Vec<char> {
         let mut out: Vec<char> = Vec::new();
@@ -438,6 +439,9 @@ fn close_enough(heard: &str, wanted: &str) -> bool {
             let c = if c == 'p' && chars.peek() == Some(&'h') {
                 chars.next();
                 'f'
+            } else if (c == 'a' || c == 'e') && chars.peek() == Some(&'i') {
+                chars.next();
+                'e'
             } else {
                 c
             };
@@ -792,6 +796,11 @@ mod tests {
         assert_eq!(
             after_wake_word("Profette, résume le rapport", "prophète").as_deref(),
             Some("résume le rapport")
+        );
+        // Et « Profaite » (entendu pour « Prophète, écris une note dans mes documents »).
+        assert_eq!(
+            after_wake_word("Profaite et crée note dans mes documents.", "prophète").as_deref(),
+            Some("et crée note dans mes documents.")
         );
         assert_eq!(after_wake_word("Profond, résume", "prophète"), None);
     }
