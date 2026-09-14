@@ -195,6 +195,14 @@ publiés dans `~/Documents/Prophet/outils` (un fichier `.py` ou `.sh`, ou un dos
 `main.py`), ouverts dans un terminal qui reste affiché, sous votre identité — ils sont à vous
 depuis que vous les avez examinés et publiés ; l'agent, lui, ne les exécute qu'en microVM.
 `prophet-ouvrir outils --liste` les nomme, `prophet-ouvrir outils <nom>` en ouvre un.
+
+Le système installé porte aussi la suite de l'humain, dans le même lanceur : **LibreOffice**,
+**GIMP**, **Inkscape**, **Blender**, **FreeCAD**, un lecteur PDF (Evince), la vidéo (mpv), le
+montage vidéo (Kdenlive) et la photo (darktable), dans l'espace Atelier ; un agent lit et pilote
+LibreOffice et les applications GTK par leur accessibilité (contexte « bureau », ADR 0027),
+Blender non. Dit franchement : l'intégration continue construit et démarre le système **sans**
+cette suite (`prophet-ci`), pour ne pas payer ses gigaoctets ; ces applications n'ont donc
+jamais été ouvertes par un test, et l'installation les télécharge en plus du système.
 Claude Code et Codex s'ouvrent dans `~/Documents/Prophet`, avec des profils privés propres
 au pilote et au propriétaire. Leur espace passe en onglets pour conserver une largeur lisible.
 Le terminal reste ouvert après l'arrêt du client afin de garder son diagnostic à l'écran ;
