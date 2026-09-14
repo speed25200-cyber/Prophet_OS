@@ -333,12 +333,13 @@ impl Tool for WaitApproval {
         ToolSpec {
             name: "approval.wait".into(),
             description:
-                "Attend la décision humaine sur une demande, au plus timeout_s secondes (45 au plus). Rend allowed, denied, expired, ou pending s'il faut attendre encore : réessayez alors l'attente, puis l'appel refusé.".into(),
+                "Attend la décision humaine sur une demande, au plus timeout_s secondes (45 au plus). Dites en reason, en une phrase, pourquoi vous voulez cette action : l'humain le lit avant de trancher. Rend allowed, denied, expired, ou pending s'il faut attendre encore : réessayez alors l'attente, puis l'appel refusé.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "id": {"type": "string"},
-                    "timeout_s": {"type": "integer"}
+                    "timeout_s": {"type": "integer"},
+                    "reason": {"type": "string", "description": "Pourquoi cette action, en une phrase, pour l'humain qui tranche"}
                 },
                 "required": ["id"],
                 "additionalProperties": false

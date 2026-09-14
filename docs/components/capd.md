@@ -19,6 +19,7 @@ politique Cedar qui l'autorise : les deux doivent dire oui.
 | `approval.request` | Soumet à un humain une action refusée faute de décision |
 | `approval.pending` | Les demandes en attente, les plus anciennes d'abord |
 | `approval.status` | L'état d'une demande, en attente ou tranchée depuis moins d'une heure (ADR 0041) |
+| `approval.explain` | Joint à une demande en attente le motif du modèle (`reason`, une phrase, 400 caractères au plus) |
 | `approval.rules` | Les règles permanentes issues des décisions de portée `task` ou `agent` |
 | `approval.resolve` | Tranche une demande ; portée `once` (défaut), `task` ou `agent` |
 | `approval.expire` | Retire les demandes périmées |

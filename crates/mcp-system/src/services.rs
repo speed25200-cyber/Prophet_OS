@@ -66,6 +66,16 @@ impl Authority for Services {
             .ok()
             .and_then(|v| serde_json::from_value(v).ok())
     }
+
+    fn explain_approval(&self, id: &str, reason: &str) -> Option<capd::Approval> {
+        rpc(
+            &self.capd,
+            "approval.explain",
+            json!({ "id": id, "reason": reason }),
+        )
+        .ok()
+        .and_then(|v| serde_json::from_value(v).ok())
+    }
 }
 
 impl Journal for Services {

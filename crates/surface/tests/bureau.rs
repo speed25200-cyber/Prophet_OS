@@ -327,6 +327,7 @@ fn la_decision_exige_un_examen_puis_un_choix_explicite_aux_trois_tailles() {
         scene.decision = Some(surface::scene::Decision {
             question: "Autoriser cette action sur les fichiers sélectionnés ?".into(),
             consequence: "Les fichiers sélectionnés seront modifiés après votre accord.".into(),
+            motif: None,
             tache: "test".into(),
             depuis_secondes: 12,
             irreversible: false,

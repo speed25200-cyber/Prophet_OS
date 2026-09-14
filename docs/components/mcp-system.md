@@ -28,7 +28,9 @@ et l'[essai avec Qwen3 réel](../reports/mcp-fichiers-2026-09-13.md).
 
 Quand capd refuse un appel faute de décision humaine, le registre soumet la demande lui-même
 (`approval.request`, avec la requête exacte jugée et un résumé), la consigne au journal et rend
-`ApprovalRequired` avec l'identifiant ; `approval.wait {id, timeout_s}` attend la décision (45 s
-au plus par appel) et rend `allowed`, `denied`, `expired` ou `pending` ; le modèle réessaie
+`ApprovalRequired` avec l'identifiant ; `approval.wait {id, timeout_s, reason}` joint le motif
+du modèle à la demande — pourquoi il veut cette action, que l'humain lit avec la question —
+puis attend la décision (45 s au plus par appel) et rend `allowed`, `denied`, `expired` ou
+`pending` ; le modèle réessaie
 alors le même appel, qu'une décision « une fois » laisse passer une fois, et qu'une décision
 de tâche ou d'agent couvre durablement. Voir l'[ADR 0041](../adr/0041-les-approbations-de-bout-en-bout.md).

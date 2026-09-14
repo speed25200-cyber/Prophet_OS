@@ -83,7 +83,7 @@ pub fn briefing(role: Option<&str>, contexts: &[Context]) -> Option<String> {
         return None;
     }
     let mut text = String::from(
-        "Vous travaillez dans Prophet OS, au sein d'un relais de modèles où chaque rôle coûte différemment. Si un outil répond « décision humaine demandée », attendez-la avec approval.wait (l'identifiant est rendu), puis réessayez le même appel ; une décision refusée ne se rediscute pas. ",
+        "Vous travaillez dans Prophet OS, au sein d'un relais de modèles où chaque rôle coûte différemment. Si un outil répond « décision humaine demandée », attendez-la avec approval.wait (l'identifiant est rendu ; dites en reason, en une phrase, pourquoi vous voulez cette action : l'humain le lit avant de trancher), puis réessayez le même appel ; une décision refusée ne se rediscute pas. ",
     );
     match role {
         Some("reflect") => text.push_str(

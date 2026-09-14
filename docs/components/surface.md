@@ -89,6 +89,9 @@ restent à raccorder. Voir l'ADR 0008 et les exigences FRONTIER.
 
 Une seule décision est montrée à la fois, la plus ancienne. Faire patienter quelqu'un est déjà
 désagréable ; changer d'avis sur ce qu'on lui demande pendant qu'il patiente le serait davantage.
+Sous la question et sa conséquence, le motif que le modèle a donné en attendant (« Le modèle
+dit : « … » », ADR 0041) : un dire du modèle, montré comme tel, à part de ce que le système
+sait de l'action.
 
 La parole (ADR 0036), si la machine a un modèle de whisper.cpp : « Dicter (6 s) » sous
 l'objectif écoute le micro puis transcrit en local, le texte rejoint l'objectif que l'humain

@@ -655,6 +655,7 @@ fn demonstration(avec_decision: bool) -> Scene {
             question: "Envoyer le paiement de 87,40 € à SNCF Connect ?".to_owned(),
             consequence: "L'argent part. Aucune annulation n'est possible depuis Prophet OS."
                 .to_owned(),
+            motif: Some("Le tarif de 87,40 € expire ce soir ; demain il sera de 112 €.".to_owned()),
             tache: "t-4813".to_owned(),
             depuis_secondes: 14,
             irreversible: true,

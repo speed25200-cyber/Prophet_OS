@@ -483,6 +483,7 @@ mod tests {
             action: "tool.call".into(),
             target: "mail.send".into(),
             summary: "Envoyer le rapport Q3 à marie@exemple.fr".into(),
+            reason: None,
             irreversible: true,
             external: true,
             created: now(),

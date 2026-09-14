@@ -48,6 +48,7 @@ fn scene(avec_decision: bool) -> Scene {
         decision: avec_decision.then(|| Decision {
             question: "Envoyer le paiement ?".to_owned(),
             consequence: "L'argent part.".to_owned(),
+            motif: None,
             tache: "t2".to_owned(),
             depuis_secondes: 14,
             irreversible: true,
@@ -209,6 +210,7 @@ fn rendre_a_champ_constant(avec_decision: bool) -> Vec<u8> {
         scene.decision = Some(Decision {
             question: "Envoyer le paiement ?".to_owned(),
             consequence: "L'argent part.".to_owned(),
+            motif: None,
             tache: "t2".to_owned(),
             depuis_secondes: 14,
             irreversible: true,
@@ -240,6 +242,7 @@ fn une_decision_fait_reculer_le_champ() {
     avec_decision.decision = Some(Decision {
         question: "Envoyer le paiement ?".to_owned(),
         consequence: "L'argent part.".to_owned(),
+        motif: None,
         tache: "t2".to_owned(),
         depuis_secondes: 14,
         irreversible: true,

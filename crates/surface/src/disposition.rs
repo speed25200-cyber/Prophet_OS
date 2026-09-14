@@ -188,6 +188,7 @@ mod tests {
             decision: decision.then(|| Decision {
                 question: "Envoyer ?".to_owned(),
                 consequence: "Le message part.".to_owned(),
+                motif: None,
                 tache: "t0".to_owned(),
                 depuis_secondes: 8,
                 irreversible: true,

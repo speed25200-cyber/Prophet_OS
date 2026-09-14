@@ -65,6 +65,11 @@ pub struct Approval {
     pub target: String,
     /// Résumé lisible, destiné à l'humain qui décide en cinq secondes.
     pub summary: String,
+    /// Le motif que le modèle a donné, s'il en a donné un : pourquoi il veut cette action, en
+    /// une phrase, pour l'humain qui tranche (ADR 0041). Il vient du modèle : c'est un dire,
+    /// pas une preuve, et la surface le montre comme tel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     /// L'action est-elle irréversible ?
     pub irreversible: bool,
     /// A-t-elle un effet hors de la machine ?
@@ -128,6 +133,8 @@ pub const DEFAULT_TTL_HOURS: i64 = 24;
 /// Durée pendant laquelle une demande tranchée reste lisible (`status`) et, pour une décision
 /// « une fois », attend la demande identique qui la consommera.
 pub const RESOLVED_TTL_HOURS: i64 = 1;
+/// Longueur maximale du motif d'un modèle : une phrase, pas un plaidoyer.
+pub const REASON_MAX_CHARS: usize = 400;
 
 /// File d'approbations et règles permanentes.
 #[derive(Debug, Default)]
@@ -178,6 +185,7 @@ impl Approvals {
             action: request.action,
             target: request.target,
             summary: request.summary,
+            reason: None,
             irreversible: request.irreversible,
             external: request.external,
             created: now,
@@ -210,6 +218,21 @@ impl Approvals {
         }
         self.pending.insert(approval.id.clone(), approval.clone());
         approval
+    }
+
+    /// Joint à une demande en attente le motif que le modèle donne — pourquoi il veut cette
+    /// action —, borné à une phrase ; rend la demande ainsi complétée. `None` si la demande
+    /// est inconnue ou déjà tranchée, ou si le motif est vide : un motif ne se rediscute pas
+    /// après coup, et le vide ne dit rien à l'humain.
+    pub fn explain(&mut self, id: &str, reason: &str) -> Option<Approval> {
+        let motif = reason.trim();
+        if motif.is_empty() {
+            return None;
+        }
+        let approval = self.pending.get_mut(id)?;
+        let borne: String = motif.chars().take(REASON_MAX_CHARS).collect();
+        approval.reason = Some(borne);
+        Some(approval.clone())
     }
 
     /// L'état d'une demande : en attente, ou tranchée récemment.
@@ -349,6 +372,65 @@ mod tests {
         assert!(
             file.rules().is_empty(),
             "une décision ponctuelle ne crée pas de règle"
+        );
+    }
+
+    #[test]
+    fn le_modele_joint_son_motif_a_la_demande_en_attente() {
+        let mut file = Approvals::new();
+        let demande = file.request(requete(), now());
+        assert_eq!(demande.reason, None, "sans motif à la création");
+
+        // Le motif se joint, borné, et se lit avec la demande — en attente comme tranchée.
+        let long = "x".repeat(REASON_MAX_CHARS + 50);
+        assert!(file.explain(&demande.id, &long).is_some());
+        let expliquee = file
+            .explain(&demande.id, "  Le rapport doit partir avant midi.  ")
+            .expect("la demande attend");
+        assert_eq!(
+            expliquee.reason.as_deref(),
+            Some("Le rapport doit partir avant midi.")
+        );
+        assert_eq!(
+            file.status(&demande.id).unwrap().reason,
+            expliquee.reason,
+            "le motif se lit par l'état"
+        );
+        assert!(
+            file.explain(&demande.id, "   ").is_none(),
+            "le vide ne dit rien"
+        );
+        assert!(file.explain("inconnue", "motif").is_none());
+
+        let tranchee = file
+            .resolve(&demande.id, Decision::Allow, ApprovalScope::Once, now())
+            .unwrap();
+        assert_eq!(
+            tranchee.reason, expliquee.reason,
+            "le motif suit la décision"
+        );
+        assert!(
+            file.explain(&demande.id, "trop tard").is_none(),
+            "une demande tranchée ne se rediscute pas"
+        );
+        // Une autre action (la même serait tranchée par la décision « une fois » qui attend) :
+        // un motif trop long est coupé, pas refusé.
+        let autre = file.request(
+            Request {
+                target: "mail.send.autre".into(),
+                ..requete()
+            },
+            now(),
+        );
+        assert_eq!(
+            file.explain(&autre.id, &long)
+                .unwrap()
+                .reason
+                .unwrap()
+                .chars()
+                .count(),
+            REASON_MAX_CHARS,
+            "un motif trop long est coupé, pas refusé"
         );
     }
 

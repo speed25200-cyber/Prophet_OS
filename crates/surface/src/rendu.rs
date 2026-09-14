@@ -481,6 +481,18 @@ impl Rendu {
                         },
                         couleur(theme::texte_discret()),
                     ));
+                    if let Some(motif) = &d.motif {
+                        sorties.push(self.bloc(
+                            &format!("Le modèle dit : « {motif} »"),
+                            14.0,
+                            Weight::NORMAL,
+                            Rect {
+                                y: interieur.y + 140.0,
+                                ..interieur
+                            },
+                            couleur(theme::texte_discret()),
+                        ));
+                    }
                     sorties.push(self.bloc(
                         "  ENTRÉE pour accepter          ÉCHAP pour refuser  ",
                         14.0,

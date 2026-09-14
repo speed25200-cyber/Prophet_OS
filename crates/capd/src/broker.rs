@@ -433,6 +433,15 @@ impl Broker {
         self.approvals.status(id)
     }
 
+    /// Joint le motif du modèle à une demande en attente (ADR 0041).
+    pub fn explain_approval(
+        &mut self,
+        id: &str,
+        reason: &str,
+    ) -> Option<crate::approvals::Approval> {
+        self.approvals.explain(id, reason)
+    }
+
     /// Crée une demande d'approbation pour une action refusée faute de décision humaine.
     pub fn request_approval(
         &mut self,

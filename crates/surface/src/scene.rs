@@ -51,6 +51,9 @@ pub struct Decision {
     pub question: String,
     /// Ce qui arrivera si l'on accepte. Dit avant, jamais après.
     pub consequence: String,
+    /// Le motif que le modèle a donné, s'il en a donné un : pourquoi il veut agir. Un dire du
+    /// modèle, montré comme tel.
+    pub motif: Option<String>,
     /// La tâche qui demande.
     pub tache: String,
     /// Depuis combien de secondes elle attend.
@@ -194,6 +197,7 @@ impl Scene {
         if let Some(d) = &self.decision {
             d.question.hash(&mut h);
             d.consequence.hash(&mut h);
+            d.motif.hash(&mut h);
             d.tache.hash(&mut h);
             d.depuis_secondes.hash(&mut h);
             d.irreversible.hash(&mut h);
@@ -303,6 +307,7 @@ mod tests {
         scene.decision = Some(Decision {
             question: "Envoyer le message à quatre destinataires ?".to_owned(),
             consequence: "Le message part et ne peut pas être rappelé.".to_owned(),
+            motif: None,
             tache: "t1".to_owned(),
             depuis_secondes: 12,
             irreversible: true,
@@ -345,6 +350,7 @@ mod tests {
         decision.decision = Some(Decision {
             question: "?".to_owned(),
             consequence: "!".to_owned(),
+            motif: None,
             tache: "t1".to_owned(),
             depuis_secondes: 1,
             irreversible: false,

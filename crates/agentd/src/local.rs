@@ -201,6 +201,10 @@ impl Authority for Control {
         self.services.approval_status(id)
     }
 
+    fn explain_approval(&self, id: &str, reason: &str) -> Option<capd::Approval> {
+        self.services.explain_approval(id, reason)
+    }
+
     fn check(&self, token: &Token, request: &CheckRequest, now: OffsetDateTime) -> Decision {
         let target = std::path::Path::new(&request.target);
         if self.check_live().is_err()

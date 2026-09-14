@@ -94,6 +94,12 @@ pub trait Authority: Send + Sync {
     fn approval_status(&self, _id: &str) -> Option<Approval> {
         None
     }
+
+    /// Joint le motif du modèle à une demande en attente ; `None` si elle est inconnue, déjà
+    /// tranchée, ou si l'autorité ne répond pas.
+    fn explain_approval(&self, _id: &str, _reason: &str) -> Option<Approval> {
+        None
+    }
 }
 
 impl Authority for Mutex<Broker> {
@@ -118,6 +124,12 @@ impl Authority for Mutex<Broker> {
 
     fn approval_status(&self, id: &str) -> Option<Approval> {
         self.lock().ok().and_then(|b| b.approval_status(id))
+    }
+
+    fn explain_approval(&self, id: &str, reason: &str) -> Option<Approval> {
+        self.lock()
+            .ok()
+            .and_then(|mut b| b.explain_approval(id, reason))
     }
 }
 
@@ -457,7 +469,7 @@ impl Registry {
                     .step(context.step),
                 )?;
                 let detail = format!(
-                    "décision humaine demandée ({}) : attendez-la avec approval.wait, puis réessayez le même appel",
+                    "décision humaine demandée ({}) : attendez-la avec approval.wait en disant pourquoi (reason), puis réessayez le même appel",
                     approval.id
                 );
                 let mut result = CallResult::error(ErrorCode::ApprovalRequired, detail.clone());
@@ -474,7 +486,9 @@ impl Registry {
     }
 
     /// Attend la décision humaine sur une demande, au plus `timeout_s` secondes (45 par défaut
-    /// et au plus : un client qui attend par sa séance a son propre délai) ; rend l'état.
+    /// et au plus : un client qui attend par sa séance a son propre délai) ; rend l'état. Le
+    /// motif que le modèle donne (`reason`) est joint à la demande avant d'attendre : l'humain
+    /// le lit avec la question.
     fn attendre_approbation(&self, args: &Value) -> CallResult {
         let Some(id) = args
             .get("id")
@@ -488,6 +502,14 @@ impl Registry {
             .and_then(Value::as_u64)
             .unwrap_or(45)
             .clamp(1, 45);
+        if let Some(motif) = args
+            .get("reason")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+        {
+            // Une demande déjà tranchée ne prend plus de motif : l'attente le dira par l'état.
+            let _ = self.authority.explain_approval(id, motif);
+        }
         let debut = std::time::Instant::now();
         loop {
             let Some(approval) = self.authority.approval_status(id) else {
@@ -514,6 +536,7 @@ impl Registry {
                 "id": id,
                 "state": etat,
                 "summary": approval.summary,
+                "reason": approval.reason,
             }));
         }
     }

@@ -210,7 +210,7 @@ prophet task prepare --profile atelier --model claude-code@opus "Concevoir l'out
 prophet task start <id>                                # Codex est lancé dans la mission, sous votre identité
 prophet task inspect <id>                              # son avancement, puis son résultat
 prophet task cancel <id>                               # coupe : la séance est conclue, le client tué
-prophet cap approvals                                  # ce qui attend votre décision (ADR 0041)
+prophet cap approvals                                  # ce qui attend votre décision, avec le motif du modèle (ADR 0041)
 prophet cap approve <id> --scope task                  # accorder, pour toute la mission ; `prophet cap deny <id>` refuse
 ```
 

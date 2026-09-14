@@ -419,7 +419,7 @@ fn cap(action: &CapAction, as_json: bool) -> anyhow::Result<String> {
             let mut out = String::from("Décisions en attente\n");
             for d in &liste {
                 out.push_str(&format!(
-                    "  {}\n      {} — {} sur {} (mission {}){}\n      accorder : prophet cap approve {} [--scope task] · refuser : prophet cap deny {}\n",
+                    "  {}\n      {} — {} sur {} (mission {}){}\n{}      accorder : prophet cap approve {} [--scope task] · refuser : prophet cap deny {}\n",
                     d["id"].as_str().unwrap_or("?"),
                     d["summary"].as_str().unwrap_or(""),
                     d["action"].as_str().unwrap_or("?"),
@@ -434,6 +434,10 @@ fn cap(action: &CapAction, as_json: bool) -> anyhow::Result<String> {
                         (false, true) => " · hors de la machine",
                         (false, false) => "",
                     },
+                    d["reason"]
+                        .as_str()
+                        .map(|m| format!("      le modèle dit : « {m} »\n"))
+                        .unwrap_or_default(),
                     d["id"].as_str().unwrap_or("?"),
                     d["id"].as_str().unwrap_or("?"),
                 ));

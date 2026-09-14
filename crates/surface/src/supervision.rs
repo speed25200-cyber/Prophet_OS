@@ -714,6 +714,17 @@ impl Supervision {
                     ui.add_space(4.0);
                     hud::etiquette(ui, "ACTION IRRÉVERSIBLE", ATTENTE);
                 }
+                // Le motif du modèle, s'il en a donné un : un dire, montré comme tel, à part
+                // de ce que le système sait de l'action.
+                if let Some(motif) = &d.motif {
+                    ui.add_space(10.0);
+                    ui.label(
+                        RichText::new(format!("Le modèle dit : « {motif} »"))
+                            .size(14.0)
+                            .italics()
+                            .color(DISCRET),
+                    );
+                }
                 ui.add_space(10.0);
                 petit(
                     ui,
@@ -884,8 +895,12 @@ impl Supervision {
 fn empreinte_decision(scene: &Scene) -> Option<String> {
     scene.decision.as_ref().map(|d| {
         format!(
-            "{}\0{}\0{}\0{}",
-            d.tache, d.question, d.consequence, d.irreversible
+            "{}\0{}\0{}\0{}\0{}",
+            d.tache,
+            d.question,
+            d.consequence,
+            d.irreversible,
+            d.motif.as_deref().unwrap_or_default()
         )
     })
 }

@@ -84,7 +84,10 @@ nommé, `pilot.stop`) : **les deux chaînes entièrement vertes** (14 sept. 12:4
 comprise. CI de `0d3fa49` (« Confiées », mission en main, second essai UEFI) : verte des deux côtés
 (13:20 UTC). CI de `ead38a8` (paliers de modèles) : verte des deux côtés (14:05 UTC). CI de `478736a` (atelier
 logiciel de bout en bout — l'hôte de la CI a joué l'essai du client qui écrit un outil et
-l'exécute en microVM —, disque de travail corrigé) : verte des deux côtés (15:06 UTC).
+l'exécute en microVM —, disque de travail corrigé) : verte des deux côtés (15:06 UTC). CI de
+`d7ee0c4` (annulation vérifiée par PID, voix qui tranche) : verte partout sauf les « sept
+services », dont le sous-test sandbox posait son répertoire de travail dans un `/tmp` que
+sandboxd ne voit pas (`PrivateTmp`) — corrigé dans `ffd88d2`, poussé à 16:14 UTC.
 
 ## Ce qui n'est pas prouvé
 

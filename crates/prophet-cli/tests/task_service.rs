@@ -742,7 +742,7 @@ fn les_decisions_humaines_se_prennent_depuis_le_terminal() {
         "id": "apr_1", "task": "duo", "agent": "org.prophet.atelier", "action": "tool.call",
         "target": "http.fetch", "summary": "Appeler http.fetch", "irreversible": true,
         "external": true, "created": "2026-09-14T14:00:00Z", "expires": "2026-09-15T14:00:00Z",
-        "state": "pending"
+        "state": "pending", "reason": "Le rapport doit partir avant midi."
     });
     let rendu = success(invoke(
         &["cap", "approvals"],
@@ -754,6 +754,10 @@ fn les_decisions_humaines_se_prennent_depuis_le_terminal() {
     assert!(rendu.contains("Appeler http.fetch"), "{rendu}");
     assert!(
         rendu.contains("irréversible, hors de la machine"),
+        "{rendu}"
+    );
+    assert!(
+        rendu.contains("le modèle dit : « Le rapport doit partir avant midi. »"),
         "{rendu}"
     );
     assert!(rendu.contains("prophet cap approve apr_1"), "{rendu}");

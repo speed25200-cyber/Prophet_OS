@@ -44,8 +44,11 @@ ait rien vu. Le superviseur, c'est pourtant l'humain.
   appel passe une fois puis redemande ; une décision de tâche couvre toute la tâche ; un refus
   est définitif).
 - Limites : la demande porte l'action et la cible, pas les arguments — le résumé dit « appeler
-  tel outil » ou « tel outil sur telle cible » ; le modèle ne peut pas y ajouter son propre
-  résumé. Un client officiel qui attend par sa séance doit réitérer `approval.wait` toutes les
-  45 s. La surface tranche ; la CLI aussi (`prophet cap approvals`, `approve`, `deny`, `rules`) ;
+  tel outil » ou « tel outil sur telle cible ». Le modèle y joint son motif — pourquoi il veut
+  cette action, en une phrase — par `approval.wait {id, reason}` (`approval.explain` dans
+  capd, borné à 400 caractères, sur une demande en attente seulement) ; la surface le montre
+  comme un dire du modèle (« Le modèle dit : … »), à part de ce que le système sait de
+  l'action, et la CLI de même. Un client officiel qui attend par sa séance doit réitérer
+  `approval.wait` toutes les 45 s. La surface tranche ; la CLI aussi (`prophet cap approvals`, `approve`, `deny`, `rules`) ;
   et la voix : « Prophète, accorde » / « refuse » tranche la décision montrée (surface) ou la
   plus ancienne en attente (`prophet listen`), cette fois seulement.

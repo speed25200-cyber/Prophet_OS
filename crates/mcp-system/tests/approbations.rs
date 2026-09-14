@@ -111,12 +111,21 @@ fn appel(registry: &Registry, context: &ToolContext) -> CallResult {
 }
 
 fn attendre(registry: &Registry, context: &ToolContext, id: &str, timeout_s: u64) -> Value {
-    let r = registry.call(
-        "approval.wait",
-        &json!({"id": id, "timeout_s": timeout_s}),
-        context,
-        OffsetDateTime::now_utc(),
-    );
+    attendre_en_disant(registry, context, id, timeout_s, None)
+}
+
+fn attendre_en_disant(
+    registry: &Registry,
+    context: &ToolContext,
+    id: &str,
+    timeout_s: u64,
+    motif: Option<&str>,
+) -> Value {
+    let mut args = json!({"id": id, "timeout_s": timeout_s});
+    if let Some(motif) = motif {
+        args["reason"] = json!(motif);
+    }
+    let r = registry.call("approval.wait", &args, context, OffsetDateTime::now_utc());
     assert!(!r.is_error, "{r:?}");
     r.structured.unwrap()
 }
@@ -135,9 +144,26 @@ fn une_action_engageante_attend_l_humain_puis_passe_une_fois_accordee() {
     assert_eq!(structure["summary"], "Appeler essai.envoi");
     assert_eq!(broker.lock().unwrap().approvals().pending().len(), 1);
 
-    // Attendre : toujours en attente au bout d'une seconde.
-    let etat = attendre(&registry, &context, &id, 1);
+    // Attendre, en disant pourquoi : toujours en attente au bout d'une seconde, et le motif
+    // du modèle est joint à la demande, que l'humain lit avec la question.
+    let etat = attendre_en_disant(
+        &registry,
+        &context,
+        &id,
+        1,
+        Some("Le rapport doit partir avant midi."),
+    );
     assert_eq!(etat["state"], "pending", "{etat}");
+    assert_eq!(
+        etat["reason"], "Le rapport doit partir avant midi.",
+        "{etat}"
+    );
+    assert_eq!(
+        broker.lock().unwrap().approvals().pending()[0]
+            .reason
+            .as_deref(),
+        Some("Le rapport doit partir avant midi.")
+    );
 
     // L'humain tranche, une fois, sur un autre fil : l'attente le voit.
     let juge = broker.clone();

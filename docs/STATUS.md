@@ -351,7 +351,11 @@ microVM, les sept services ont repris leur vert. Celle de `345b1d1` (approbation
 décisions) a un rouge à `check` qui est le mien : le test d'annulation vérifiait la mort de
 l'attente du faux client par un `pgrep` sur toute la machine, et le coureur avait un autre
 `sleep 30` ; le faux client écrit désormais le PID de son attente, que le test regarde seul.
-Le rapport
+Celle de `d7ee0c4` (annulation corrigée, voix qui tranche) est verte partout — `check` joue
+les approbations et l'annulation par PID, la mission locale réelle et le système installé
+tiennent — sauf les « sept services » : le sous-test sandbox créait son répertoire de travail
+dans `/tmp`, que sandboxd, sous `PrivateTmp`, ne voit pas ; il vit désormais dans l'état du
+service (`ffd88d2`). Le rapport
 du jour :
 [clients principaux](reports/clients-principaux-2026-09-14.md).
 
@@ -1602,8 +1606,9 @@ tranche au moment où cela arrive. Le workflow reste donc à déclenchement manu
   (`approval.status`) et consomme une décision « une fois » à la demande identique suivante.
   Prouvé avec un vrai broker et un outil irréversible et externe ; la CLI tranche aussi
   (`prophet cap approvals` / `approve` / `deny` / `rules`), la surface accorde aussi pour toute
-  la mission, et la voix tranche (« accorde », « refuse »). Reste : un résumé enrichi par le
-  modèle.
+  la mission, et la voix tranche (« accorde », « refuse »). Le modèle joint son motif à la
+  demande (`approval.wait {reason}` → `approval.explain`), que la surface et la CLI montrent
+  comme un dire du modèle, à part de ce que le système sait de l'action.
 - **Arrêter un client lancé — fait.** `task.cancel` d'une mission menée par un client conclut
   sa séance puis demande `pilot.stop {task}` au lanceur, qui tue le client et tout son groupe
   de processus (les clients sont lancés meneurs de groupe ; le délai tue de même). Prouvé dans

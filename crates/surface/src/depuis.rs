@@ -103,6 +103,7 @@ pub fn scene(
         .map(|a| Decision {
             question: a.summary.clone(),
             consequence: consequence(a),
+            motif: a.reason.clone(),
             tache: a.task.clone(),
             depuis_secondes: (maintenant - a.created)
                 .whole_seconds()
@@ -181,6 +182,7 @@ mod tests {
             action: action.to_owned(),
             target: "SNCF Connect".to_owned(),
             summary: "Payer le billet ?".to_owned(),
+            reason: None,
             irreversible,
             external: true,
             created: creee,
@@ -322,6 +324,26 @@ mod tests {
             decision.depuis_secondes >= 299,
             "l'attente doit être dite telle qu'elle est, obtenu {}",
             decision.depuis_secondes
+        );
+    }
+
+    #[test]
+    fn le_motif_du_modele_est_montre_avec_la_question() {
+        let maintenant = OffsetDateTime::now_utc();
+        let mut avec_motif = approbation("a1", "Payer", true, 10);
+        avec_motif.reason = Some("Le billet est moins cher aujourd'hui.".to_owned());
+        let scene = scene(
+            &[],
+            &[avec_motif],
+            1,
+            None,
+            "14:37".to_owned(),
+            "jeudi".to_owned(),
+            maintenant,
+        );
+        assert_eq!(
+            scene.decision.unwrap().motif.as_deref(),
+            Some("Le billet est moins cher aujourd'hui.")
         );
     }
 
