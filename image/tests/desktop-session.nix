@@ -301,9 +301,11 @@ pkgs.testers.runNixOSTest {
             def appel(outil, args):
                 brut = machine.succeed(prophet[:-1] + "call essai-bureau " + outil + " " + json.dumps(args) + "'")
                 reponse = json.loads(brut)
-                # Une réponse sans contenu structuré est un refus ou une panne de l'outil : la
-                # dire, avec les journaux du service et de l'adaptateur, plutôt qu'un KeyError.
-                if "structured" not in reponse:
+                # Une réponse sans contenu structuré (`structuredContent`, le nom du protocole
+                # MCP, que ce scénario écrivait « structured » sans l'avoir jamais atteint) est
+                # un refus ou une panne de l'outil : la dire, avec les journaux du service et de
+                # l'adaptateur, plutôt qu'un KeyError.
+                if "structuredContent" not in reponse:
                     print("réponse de " + outil + " sans contenu structuré : " + brut)
                     print(machine.succeed("journalctl -u prophet-agentd --no-pager -n 40; ls -la /run/prophet/; id agentd"))
                     print(machine.succeed("su - pilot -c " + q(session + "journalctl --user -u prophet-supd --no-pager -n 40") + " || true"))
@@ -313,14 +315,14 @@ pkgs.testers.runNixOSTest {
             apps = None
             for _ in range(30):
                 apps = appel("ui.apps", {})
-                if any(a["app"] == "mousepad" for a in apps["structured"]["apps"]):
+                if any(a["app"] == "mousepad" for a in apps["structuredContent"]["apps"]):
                     break
                 machine.sleep(1)
-            assert apps and any(a["app"] == "mousepad" for a in apps["structured"]["apps"]), apps
+            assert apps and any(a["app"] == "mousepad" for a in apps["structuredContent"]["apps"]), apps
             champ = None
             for _ in range(30):
                 arbre = appel("ui.tree", {"app": "mousepad"})
-                assert arbre["structured"]["provenance"] == "accessibility", arbre
+                assert arbre["structuredContent"]["provenance"] == "accessibility", arbre
                 def chercher(n):
                     if n.get("role") == "field" and n.get("actionable"):
                         return n
@@ -329,7 +331,7 @@ pkgs.testers.runNixOSTest {
                         if trouve:
                             return trouve
                     return None
-                champ = chercher(arbre["structured"]["tree"]["root"])
+                champ = chercher(arbre["structuredContent"]["tree"]["root"])
                 if champ:
                     break
                 machine.sleep(1)
@@ -337,7 +339,7 @@ pkgs.testers.runNixOSTest {
             ecrit = appel("ui.act", {"app": "mousepad", "action": "set_field", "node": champ["id"], "value": "bonjour"})
             assert not ecrit["isError"], ecrit
             arbre = appel("ui.tree", {"app": "mousepad"})
-            relu = chercher(arbre["structured"]["tree"]["root"])
+            relu = chercher(arbre["structuredContent"]["tree"]["root"])
             assert relu and relu.get("value") == "bonjour", relu
             def menu(n, nom):
                 if n.get("role") == "item" and n.get("name", "").strip().lower() == nom:
@@ -347,7 +349,7 @@ pkgs.testers.runNixOSTest {
                     if trouve:
                         return trouve
                 return None
-            save = menu(arbre["structured"]["tree"]["root"], "save")
+            save = menu(arbre["structuredContent"]["tree"]["root"], "save")
             assert save, arbre
             clic = appel("ui.act", {"app": "mousepad", "action": "click", "node": save["id"]})
             assert not clic["isError"], clic

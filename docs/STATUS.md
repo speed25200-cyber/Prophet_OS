@@ -1368,7 +1368,11 @@ entrée `u:agentd:r-x` se lit 0750 (le masque tient lieu de bits de groupe) ; au
 suivant, `homeMode` et les lignes `d … 0700` de tmpfiles remettent 0700, ce chmod ramène le
 masque à `---`, et `a+` ne recalcule pas un masque qui existe déjà. Le système installé
 démarre au moins deux fois (construction de l'image, puis l'essai) ; l'ISO, une. Correctif :
-les ACL écrivent leur masque (`m::r-x`, `d:m::r-x`). À confirmer par la CI.
+les ACL écrivent leur masque (`m::r-x`, `d:m::r-x`) — confirmé par la CI (`14cffce`) : le
+service lit le fichier de l'humain. Le scénario est alors allé plus loin qu'il n'était jamais
+allé, jusqu'à `ui.apps` dans la séance, et a trébuché sur lui-même : il lisait `structured` là
+où le protocole MCP écrit `structuredContent` (réponse brute imprimée par `eefdef4`, quatre
+applications vues par l'adaptateur, dont l'éditeur). Corrigé ; à confirmer par la CI.
 
 Le conteneur de construction n'a ni KVM, ni Nix, ni Landlock, ni cgroups v2. Ce n'est plus le
 dernier mot : le job `isolation` de l'intégration continue installe gVisor, Firecracker et les
