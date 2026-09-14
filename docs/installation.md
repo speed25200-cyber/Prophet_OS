@@ -1,8 +1,8 @@
 # Installer Prophet OS sur un PC
 
-**Version de développement.** Le bureau passe son parcours en VM ; la variante installée reste
-à valider après une erreur KVM/SMM locale. ChatGPT conserve
-un échec de compatibilité connu. Les résultats d'une ancienne révision ne valident pas l'image
+**Version de développement.** Le bureau et sa variante installée passent leur parcours en
+machine virtuelle, dans l'intégration continue ; rien n'a encore démarré sur un vrai PC. ChatGPT
+conserve un échec de compatibilité connu. Les résultats d'une ancienne révision ne valident pas l'image
 courante. Consultez [STATUS.md](STATUS.md) et [FRONTIER.md](FRONTIER.md) avant tout essai.
 
 Ce document suppose que vous partez d'un PC sous Windows dont vous acceptez de perdre tout le
@@ -274,14 +274,17 @@ Dit franchement, parce que vous aurez effacé un disque pour l'essayer.
 - **La supervision reste incomplète.** L'atelier présente les missions réelles, leur résultat
   et les versions des fichiers proposées. L'application approuvée de ces changements et leur
   annulation robuste ne sont pas encore raccordées. Les conversations restent en mémoire.
-- **Le parcours sur disque installé reste à valider.** Le test du bureau réussit la connexion,
-  les fenêtres, le verrouillage et la reconnexion. Sa variante installée s'arrête localement
-  sur une erreur KVM/SMM avant les services. Aucun client cloud authentifié n'est validé.
+- **Le parcours sur disque installé passe en CI, pas encore sur un vrai PC.** Le test du bureau
+  et sa variante installée réussissent la connexion, les fenêtres, le verrouillage et la
+  reconnexion, en machine virtuelle. Aucun client cloud authentifié n'est validé : Claude Code
+  et Codex n'ont jamais tourné dans une mission avec un vrai compte, seuls des clients de
+  remplacement l'ont fait sur le même chemin.
 - **La bascule A/B n'est pas exercée.** Les deux racines sont créées et le système sait démarrer
   sur la première ; le service de mise à jour qui écrit dans la seconde est une esquisse.
-- **Le niveau 2 d'isolation exige des images d'invité** qui ne sont pas dans l'image installée.
-  `prophet status` dira quels niveaux sont disponibles et ce qui manque. Le niveau annoncé
-  dépend des exécutables, des images et des mécanismes réellement accessibles sur la machine.
+- **Le niveau 2 d'isolation (microVM) est dans l'image (ADR 0038), mais n'a tourné que sur
+  l'hôte de la CI.** Il exige la virtualisation matérielle (KVM), qu'une machine virtuelle sans
+  virtualisation imbriquée n'offre pas ; `prophet status` dit quels niveaux sont disponibles et
+  ce qui manque sur la machine.
 - **La matrice matérielle reste à établir.** Les démarrages en VM, UEFI comme BIOS, ne valident
   pas votre carte graphique, votre réseau ni votre micrologiciel. Le système installé embarque
   désormais les micrologiciels redistribuables et le matériel que l'installeur détecte, et met
