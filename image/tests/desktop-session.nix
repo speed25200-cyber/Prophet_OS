@@ -277,13 +277,18 @@ pkgs.testers.runNixOSTest {
             # examen ; ici l'humain y dépose lui-même un programme, comme après une publication.
             # Sans outil, la liste est vide ; avec, l'outil se nomme par son fichier.
             assert machine.succeed("su - pilot -c 'prophet-ouvrir outils --liste'").strip() == ""
-            machine.succeed("su - pilot -c " + q("mkdir -p /home/pilot/Documents/Prophet/outils && printf 'print(\"BONJOUR DE L OUTIL 4242\")\\n' > /home/pilot/Documents/Prophet/outils/bonjour.py"))
+            # L'outil écrit un témoin dans son répertoire courant : c'est ainsi qu'on sait où le
+            # lanceur l'a ouvert. Le terminal, lui, garde son propre répertoire — lire celui du
+            # processus de la fenêtre ne disait rien de l'outil (vu en CI le 14 septembre 2026).
+            machine.succeed("su - pilot -c " + q("mkdir -p /home/pilot/Documents/Prophet/outils && printf 'import os\\nopen(\"temoin.txt\", \"w\").write(os.getcwd())\\nprint(\"BONJOUR DE L OUTIL 4242\")\\n' > /home/pilot/Documents/Prophet/outils/bonjour.py"))
             outils = machine.succeed("su - pilot -c 'prophet-ouvrir outils --liste'").split("\n")
             assert "bonjour" in outils, outils
             machine.fail("su - pilot -c " + q("prophet-ouvrir outils inconnu"))
             machine.succeed("su - pilot -c " + q("swaymsg exec " + q("prophet-ouvrir outils bonjour")))
-            outil = window("org.prophet.Outil")
-            assert machine.succeed(f"readlink /proc/{int(outil['pid'])}/cwd").strip() == "/home/pilot/Documents/Prophet/outils", outil
+            window("org.prophet.Outil")
+            machine.wait_until_succeeds("test -s /home/pilot/Documents/Prophet/outils/temoin.txt", timeout=30)
+            temoin = machine.succeed("cat /home/pilot/Documents/Prophet/outils/temoin.txt").strip()
+            assert temoin == "/home/pilot/Documents/Prophet/outils", temoin
             wait_text(r"BONJOUR\s+DE\s+L\s+OUTIL\s+4242", timeout=timedelta(seconds=60))
             machine.screenshot("bureau-outil")
 
