@@ -67,7 +67,8 @@ distant ; et la parole ne donne aucun droit, elle produit un texte que l'humain 
   coupée à la phrase avant 360 caractères) que Piper lit ; le dit est aussi écrit.
 - En écoute continue, des ordres brefs après le mot d'activation (`voice::ordre_vocal`, quatre
   mots au plus) portent sur la mission en cours : « lance la mission » la lance (l'approbation
-  de l'humain, dite), « résultat » fait dire son résultat, et dans l'atelier « prépare »
+  de l'humain, dite), « résultat » fait dire son résultat, « accorde » / « refuse » tranchent
+  la décision que le système attend (ADR 0041), et dans l'atelier « prépare »
   envoie l'objectif que l'humain a relu ; toute autre phrase est une intention, y compris une
   phrase longue qui commence par « lance ». En ligne de commande, l'intention est préparée
   aussitôt ; dans l'atelier, elle rejoint l'objectif, et les ordres vont à la supervision, qui

@@ -31,7 +31,8 @@ prophet voice --listen --prepare documents --reply   # écoute continue : « Pro
 
 En écoute continue (`--listen`), seules les phrases qui commencent par le mot d'activation
 (`--wake`, « prophète » par défaut, casse, accents et ponctuation ignorés) déclenchent une
-action ; le reste de la phrase est l'intention. Deux ordres brefs font exception : « lance la
+action ; le reste de la phrase est l'intention. Des ordres brefs font exception — « accorde » et
+« refuse » tranchent la décision que le système attend (ADR 0041) — : « lance la
 mission » lance la dernière mission préparée dans cette écoute, « résultat » fait dire son
 résultat. Chaque tranche est effacée après transcription.
 

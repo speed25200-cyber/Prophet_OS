@@ -94,7 +94,8 @@ La parole (ADR 0036), si la machine a un modèle de whisper.cpp : « Dicter (6 s
 l'objectif écoute le micro puis transcrit en local, le texte rejoint l'objectif que l'humain
 relit ; « Écouter « Prophète » » écoute en continu par tranches, et seule une phrase qui commence
 par le mot d'activation compte : une intention rejoint l'objectif, « prépare » l'envoie, « lance
-la mission » lance la mission choisie, « résultat » fait dire où elle en est. Si Piper et une
+la mission » lance la mission choisie, « résultat » fait dire où elle en est, « accorde » ou
+« refuse » tranche la décision montrée. Si Piper et une
 voix sont là, la fin d'une mission qu'on regarde courir est dite, une fois ; « Voix : lue /
 muette » dans la barre des missions coupe cette lecture. Tout est local ; chaque tranche
 enregistrée est effacée après transcription.
