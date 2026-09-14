@@ -36,6 +36,12 @@ leurs identifiants ; ce qui est prouvé ; ce qui ne l'est pas.
   coder, `@sonnet` pour relire après Codex, `@haiku` pour exécuter ; le lanceur passe le palier
   au client par `--model` (Claude Code) ou `-m` (Codex, Gemini) ; réglables par
   `prophet.localEngine.paliers`. C'est l'économie de tokens demandée, chez les clients.
+- **L'atelier logiciel de bout en bout** (`6f777e6`, `478736a`) : un client écrit un outil Python
+  dans l'espace de la mission, l'exécute par `proc.exec` — en microVM, par le vrai sandboxd —,
+  la sortie et le fichier écrit par l'outil reviennent. L'essai a révélé que le contexte ne
+  pouvait pas démarrer (mission montée au niveau 2 par le planificateur, approbation par
+  commande que rien ne pouvait donner) : corrigé, ADR 0031 complété. Puis un coureur à
+  virtualisation imbriquée a montré un disque de travail sans assez d'inodes : corrigé.
 - **Deux rouges de la CI corrigés** : l'invité microVM monte l'espace de travail au chemin de
   l'hôte par une surcouche overlay (`4ade307` ; l'hôte de la CI a son répertoire temporaire
   sous `/home`, que la racine squashfs ne laissait pas créer) ; le contrôle des profils admet
@@ -58,6 +64,7 @@ des scripts de remplacement lancés par le vrai lanceur, sur le même chemin que
 | Sous-tâche depuis l'espace du parent, rapport (modifié, supprimé, ajouté), périmètre hors du parent laissé chez l'enfant, publication du parent, parent fermé refusé | `crates/sfs/tests/workspace.rs` |
 | Niveau 2 depuis un répertoire absent de la racine de l'invité (`/root`) : 4 s la première fois, 1,8 s ensuite | `crates/sandboxd/tests/enforcement.rs` (`needs_kvm`) |
 | Catalogue de l'image (`proc.kill`) chargé | `crates/agentd/tests/preparation.rs` ; job « sept services » |
+| Un client écrit `somme.py`, l'exécute en microVM (niveau 2, vrai sandboxd), « somme 7 » et `resultat.txt` reviennent — 2,9 s | `crates/agentd/tests/pilot.rs` (`needs_kvm`) |
 
 CI de `a5ac295` : tout vert — `check`, isolation sur l'hôte (les trois essais `needs_kvm` avec
 l'invité à surcouche), parole, surface, ChatGPT, moteur, mission locale réelle, installeur,
