@@ -1578,9 +1578,14 @@ tranche au moment où cela arrive. Le workflow reste donc à déclenchement manu
   annulée, et une autre sur le même client se lance et finit aussitôt.
 - **Les vrais clients.** Tout ce qui précède est prouvé avec des clients de remplacement sur le
   même chemin (pont, séance, CLI). Le vrai Claude Code et le vrai Codex, connectés par l'humain
-  sur une machine installée, restent l'essai `needs_claude_login` / `needs_chatgpt_login` à
-  mener : la forme de leur sortie finale (`final_text`), leur configuration MCP et leur
-  comportement face aux refus de capd sont construits d'après leur documentation.
+  sur une machine installée, restent à voir : la forme de leur sortie finale (`final_text`),
+  leur configuration MCP, l'acceptation des paliers de modèles et leur comportement face aux
+  refus de capd sont construits d'après leur documentation. L'essai est écrit et attend
+  l'humain : `needs_codex_login_un_vrai_client_rejoint_une_mission_et_ecrit_un_fichier`
+  (`PROPHET_TEST_CLIENT=codex PROPHET_TEST_PILOT_STATE=$HOME/.local/state/prophet cargo test -p
+  agentd --test pilot -- --ignored needs_codex_login`, dans sa session) — le vrai lanceur, sans
+  remplacement, sur son profil connecté ; une mission préparée sur le client, rejointe, un
+  fichier écrit par `fs.write`, le résultat vérifié.
 - **Mesures sur matériel réel** : carte graphique (option Vulkan de l'ADR 0037, vitesse et
   mémoire vidéo), micro et sortie audio, énergie au repos de la surface. Rien n'a jamais
   tourné hors machine virtuelle.

@@ -108,8 +108,32 @@ fn faux_claude(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathB
     script
 }
 
+/// Le lanceur de pilotes de la chaîne : aucun, avec des clients de remplacement, ou le vrai
+/// lanceur sans remplacement, sur le profil privé où l'humain s'est connecté.
+enum Pilote {
+    Aucun,
+    Faux,
+    Reel {
+        client: String,
+        etat: std::path::PathBuf,
+    },
+}
+
 impl Chain {
     async fn new(script: Vec<Value>, with_pilot: bool) -> Self {
+        Self::demarrer(
+            script,
+            if with_pilot {
+                Pilote::Faux
+            } else {
+                Pilote::Aucun
+            },
+        )
+        .await
+    }
+
+    async fn demarrer(script: Vec<Value>, pilote: Pilote) -> Self {
+        let with_pilot = !matches!(pilote, Pilote::Aucun);
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
@@ -206,6 +230,13 @@ impl Chain {
         atelier["capabilities"]["max"]["task.spawn"] = json!(["atelier"]);
         atelier["capabilities"]["max"]["tool.call"] =
             json!(["fs.read", "fs.write", "task.delegate"]);
+        if let Pilote::Reel { client, .. } = &pilote {
+            // Le vrai client, et le temps qu'il lui faut.
+            atelier["model"]["preferred"] =
+                json!([format!("driver:{client}"), "local:modele-controle"]);
+            atelier["model"]["roles"] = json!({ "execute": ["local:modele-controle"] });
+            atelier["budget"]["default"]["wall_time"] = json!("600s");
+        }
         // Le code revient à Codex s'il est connecté, sinon au modèle local.
         // La relecture demande à Claude Code son palier « sonnet » (ADR 0040) : le catalogue
         // l'admet parce que le profil admet le client.
@@ -248,22 +279,35 @@ impl Chain {
                 "claude-code": {"program": claude.display().to_string(), "args": ["{intent}"]}
             })
             .to_string();
+            let pont = binaire_voisin("prophet-mcp").display().to_string();
+            let etat_des_pilotes = match &pilote {
+                Pilote::Reel { etat, .. } => etat.clone(),
+                _ => dir.path().join("pilot-state"),
+            };
+            let mut env: Vec<(&str, String)> = vec![
+                ("PROPHET_PILOT_SOCKET", pilot_socket.display().to_string()),
+                ("PROPHET_PILOT_ALLOW_OWNER", "1".to_owned()),
+                (
+                    "PROPHET_PILOT_STATE",
+                    etat_des_pilotes.display().to_string(),
+                ),
+                ("PROPHET_AGENTD_SOCKET", agent_socket.display().to_string()),
+                ("PROPHET_MCP_BRIDGE", pont),
+                ("HOME", home.display().to_string()),
+                (
+                    "XDG_RUNTIME_DIR",
+                    dir.path().join("run").display().to_string(),
+                ),
+            ];
+            if matches!(pilote, Pilote::Faux) {
+                env.push(("PROPHET_PILOT_CLIENTS", clients));
+            }
+            let env_refs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
             let pilot = Daemon::lancer_avec(
                 binaire_voisin("prophet-pilotd").to_str().unwrap(),
                 &pilot_socket,
                 &dir.path().join("pilot-state"),
-                &[
-                    ("PROPHET_PILOT_SOCKET", pilot_socket.to_str().unwrap()),
-                    ("PROPHET_PILOT_ALLOW_OWNER", "1"),
-                    ("PROPHET_PILOT_CLIENTS", &clients),
-                    (
-                        "PROPHET_PILOT_STATE",
-                        dir.path().join("pilot-state").to_str().unwrap(),
-                    ),
-                    ("PROPHET_AGENTD_SOCKET", agent_socket.to_str().unwrap()),
-                    ("HOME", home.to_str().unwrap()),
-                    ("XDG_RUNTIME_DIR", dir.path().join("run").to_str().unwrap()),
-                ],
+                &env_refs,
             );
             drop(pilot.joindre().await);
             daemons.push(pilot);
@@ -323,7 +367,11 @@ impl Chain {
     }
 
     async fn attendre(&self, id: &str) -> Value {
-        for _ in 0..600 {
+        self.attendre_pendant(id, 60).await
+    }
+
+    async fn attendre_pendant(&self, id: &str, secondes: u64) -> Value {
+        for _ in 0..(secondes * 10) {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let info = self
                 .client
@@ -768,6 +816,80 @@ async fn annuler_une_mission_menee_par_un_client_le_tue_sur_le_champ() {
         "{:?}",
         debut.elapsed()
     );
+    assert!(chain.asked.lock().unwrap().is_empty());
+}
+
+/// Le vrai client, sur une machine où l'humain s'est connecté : le lanceur le dit connecté, une
+/// mission se prépare sur lui, il la rejoint par le pont, écrit un fichier avec l'outil
+/// `fs.write` et se retire. Se lance comme l'humain, dans sa session :
+/// `PROPHET_TEST_CLIENT=codex PROPHET_TEST_PILOT_STATE=$HOME/.local/state/prophet cargo test
+/// -p agentd --test pilot -- --ignored needs_codex_login`. Ce que cela prouve, et que rien
+/// d'autre ne prouve : le comportement du vrai client sur le chemin que les faux ont validé.
+#[tokio::test]
+#[ignore = "needs_codex_login : PROPHET_TEST_CLIENT (codex ou claude-code) et PROPHET_TEST_PILOT_STATE (racine des profils privés où l'humain s'est connecté, ~/.local/state/prophet), sous l'identité de l'humain"]
+async fn needs_codex_login_un_vrai_client_rejoint_une_mission_et_ecrit_un_fichier() {
+    let client =
+        std::env::var("PROPHET_TEST_CLIENT").expect("PROPHET_TEST_CLIENT : codex ou claude-code");
+    let etat =
+        std::path::PathBuf::from(std::env::var("PROPHET_TEST_PILOT_STATE").expect(
+            "PROPHET_TEST_PILOT_STATE : racine des profils privés (~/.local/state/prophet)",
+        ));
+    let chain = Chain::demarrer(
+        vec![],
+        Pilote::Reel {
+            client: client.clone(),
+            etat,
+        },
+    )
+    .await;
+    let options = chain.client.call("task.options", json!({})).await.unwrap();
+    let etat_du_client = options["pilot"]["drivers"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .find(|d| d["driver"] == client)
+        .unwrap_or(Value::Null);
+    assert_eq!(
+        etat_du_client["connection"], "connected",
+        "le lanceur ne dit pas {client} connecté : {etat_du_client}"
+    );
+    chain
+        .client
+        .call(
+            "task.prepare",
+            json!({
+                "id": "reel",
+                "intent": "Avec l'outil fs.write du serveur MCP « prophet », écris le fichier ~/docs/bonjour.txt contenant exactement le mot bonjour, puis termine en disant « fait ».",
+                "profile": "atelier",
+                "model": client
+            }),
+        )
+        .await
+        .unwrap();
+    chain
+        .client
+        .call("task.start", json!({"id":"reel"}))
+        .await
+        .unwrap();
+    let info = chain.attendre_pendant("reel", 600).await;
+    eprintln!("{info}");
+    assert_eq!(info["task"]["state"], "done", "{info}");
+    assert_eq!(info["task"]["driver"], format!("driver:{client}"));
+    assert!(
+        info["task"]["usage"][format!("client:{client}")]["turns"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1,
+        "le client n'a appelé aucun outil par la séance : {info}"
+    );
+    let fichier = chain
+        .dir
+        .path()
+        .join("home/.prophet/tasks/reel/work/docs/bonjour.txt");
+    let contenu = std::fs::read_to_string(&fichier).unwrap_or_default();
+    assert!(contenu.to_lowercase().contains("bonjour"), "{contenu:?}");
+    // Le moteur du service n'a servi à rien : le client est le modèle.
     assert!(chain.asked.lock().unwrap().is_empty());
 }
 

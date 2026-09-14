@@ -223,6 +223,17 @@ changer, dans la configuration de la machine (`image/machine/`) :
 prophet.localEngine.paliers = { reflect = "opus"; code = "opus"; review = "sonnet"; execute = "haiku"; };
 ```
 
+Tout cela est prouvé avec des clients de remplacement ; le vrai client, lui, ne peut l'être que
+par vous, une fois connecté. Une commande le fait, dans votre session, depuis le dépôt :
+
+```sh
+PROPHET_TEST_CLIENT=codex PROPHET_TEST_PILOT_STATE=$HOME/.local/state/prophet   cargo test -p agentd --test pilot -- --ignored needs_codex_login
+```
+
+Elle prépare une mission sur le client, le laisse la rejoindre, écrire un fichier par l'outil
+`fs.write`, se retirer, et vérifie le résultat. Son journal dit ce que le client a fait ou
+refusé.
+
 `prophet provider ls` distingue clients présents, connexion et exécution agentique disponible.
 Codex et Claude Code sont des dépendances obligatoires du nixpkgs épinglé. Gemini CLI est
 également fourni lorsque ce nixpkgs le propose. Les sondes utilisent les commandes des clients,
