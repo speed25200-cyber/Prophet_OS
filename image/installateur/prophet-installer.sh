@@ -161,10 +161,6 @@ inventaire() {
     pilote=$(basename "$(readlink -f "$c/device/driver")")
     pilotes="${pilotes:+$pilotes, }$pilote"
   done
-  CARTE=""
-  if command -v vulkaninfo >/dev/null 2>&1; then
-    CARTE=$(vulkaninfo --summary 2>/dev/null | grep -E '^[[:space:]]*deviceName' | grep -viE 'llvmpipe|lavapipe|swiftshader' | head -n 1 | sed 's/^[^=]*=[[:space:]]*//') || true
-  fi
   if [ -n "$CARTE" ]; then
     printf '  carte graphique : %s (pilote %s), Vulkan — le bureau et les modèles locaux l'"'"'utiliseront\n' "$CARTE" "${pilotes:-?}"
   elif [ -n "$pilotes" ]; then
@@ -215,6 +211,14 @@ inventaire() {
   fi
 }
 
+# La carte graphique, vue par Vulkan, se calcule ici et non dans `inventaire` : la fonction
+# tourne dans un sous-shell (`$(…)`), et ce qu'elle y pose ne survit pas — l'étape de
+# l'accélération, plus bas, lisait une variable absente et l'installeur mourait après la
+# détection du matériel (vu dans une VM le 15 septembre 2026).
+CARTE=""
+if command -v vulkaninfo >/dev/null 2>&1; then
+  CARTE=$(vulkaninfo --summary 2>/dev/null | grep -E '^[[:space:]]*deviceName' | grep -viE 'llvmpipe|lavapipe|swiftshader' | head -n 1 | sed 's/^[^=]*=[[:space:]]*//') || true
+fi
 titre "Ce que cette machine offre"
 echo
 INVENTAIRE=$(inventaire)
