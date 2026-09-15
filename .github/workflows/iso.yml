@@ -218,9 +218,10 @@ jobs:
           verifier "mot de passe haché en 0600" '[ "$(sudo stat -c %a /mnt/etc/prophet/motdepasse)" = 600 ] && sudo test -s /mnt/etc/prophet/motdepasse'
           verifier "matériel détecté" 'sudo grep -q boot.initrd.availableKernelModules /mnt/etc/prophet/source/image/machine/hardware-configuration.nix'
           verifier "relevé de la machine" 'sudo grep -q "processeur : " /mnt/etc/prophet/source/image/machine/inventaire.txt'
-          # Le coureur a démarré en UEFI : pas de fichier d'amorçage BIOS ; sans UEFI, il le dirait.
+          # Le dépôt porte un amorcage.nix par défaut (UEFI) ; l'installeur ne le réécrit que sur
+          # une machine sans UEFI. Le coureur a l'UEFI : le fichier doit rester celui du dépôt.
           if [ -d /sys/firmware/efi ]; then
-            verifier "amorçage UEFI : pas de réglage BIOS écrit" 'sudo test ! -e /mnt/etc/prophet/source/image/machine/amorcage.nix'
+            verifier "amorçage UEFI : le réglage du dépôt, pas BIOS" 'sudo test -f /mnt/etc/prophet/source/image/machine/amorcage.nix && ! sudo grep -q "firmware = \"bios\"" /mnt/etc/prophet/source/image/machine/amorcage.nix'
           else
             verifier "amorçage BIOS écrit" 'sudo grep -q "prophet.boot.firmware = \"bios\"" /mnt/etc/prophet/source/image/machine/amorcage.nix'
           fi
