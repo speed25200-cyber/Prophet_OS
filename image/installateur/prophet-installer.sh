@@ -400,9 +400,13 @@ info "la machine."
 echo
 
 mkdir -p "$CIBLE/etc/prophet"
-cp -r "$DEPOT" "$CIBLE/etc/prophet/source"
-# Le dépôt vient du magasin Nix, en lecture seule ; la copie doit accepter les deux fichiers de la
+# `-L` : sur le support, /etc/prophet/source est un lien vers le magasin Nix ; sans lui, `cp`
+# copiait le lien et non le dépôt, et le `chmod` qui suit échouait sur le magasin en lecture
+# seule — l'installation s'interrompait après le formatage (vu dans une VM le 15 septembre
+# 2026, jamais en CI, dont l'essai de l'installeur s'arrête au montage). `--no-preserve=mode` :
+# les fichiers du magasin sont en lecture seule, la copie doit accepter les deux fichiers de la
 # machine qu'on écrit ci-dessous.
+cp -rL --no-preserve=mode "$DEPOT" "$CIBLE/etc/prophet/source"
 chmod -R u+w "$CIBLE/etc/prophet/source"
 
 # Le haché, et lui seul. `install -m 0600` pose le mode à la création : l'écrire puis le corriger
