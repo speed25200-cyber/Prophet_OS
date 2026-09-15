@@ -1434,10 +1434,15 @@ graphique relevée par l'inventaire était posée dans un sous-shell et n'exista
 de l'accélération (`8dc0c2e`, faute de la veille). Sur un vrai PC, les deux laissaient un
 disque formaté et rien d'installé. L'installeur a désormais `--sans-installation`, et le
 travail « Installeur sur disque en boucle » joue tout ce qui précède `nixos-install` sur un
-disque neuf et vérifie ce qui est posé. L'installation elle-même, dans la VM : la fermeture
-complète pèse 21 Gio et le réseau de la VM donne 0,7 Mio/s ; l'essai continue avec la
-configuration `prophet-ci` et la fermeture construite sur l'hôte, servie à la VM en cache
-local. Rapport à suivre.
+disque neuf et vérifie ce qui est posé. **L'installation a abouti** (configuration
+`prophet-ci`, fermeture construite sur l'hôte et servie en cache local, `nixos-install` en
+13 min) et **le système installé a démarré sur le disque seul** : GRUB, phrase de passe des
+volumes chiffrés, écran de connexion, sept services actifs, `prophet status`, relevé de
+l'installeur relu. Une troisième faute : sans accélération graphique, la session mourait en
+silence — wlroots refuse le rendu logiciel tant qu'on ne le lui permet pas (`16e8bab`) ; avec
+la permission, la supervision s'affiche, le lanceur et le terminal aussi. Ce qui reste hors de
+preuve : le matériel réel, l'UEFI dans cette VM, la configuration complète. Voir le
+[rapport](reports/installation-vm-2026-09-15.md).
 
 ### Fin de session du 14 septembre 2026, soir
 

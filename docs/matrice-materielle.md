@@ -15,7 +15,7 @@ disque (`docs/installation.md`, section 3) dit, depuis la clé, ce qu'une machin
 | x86-64, Intel ou AMD | noyau NixOS, microcode Intel et AMD mis à jour au démarrage | VM (le processeur du coureur de la CI, virtualisé) |
 | Virtualisation matérielle (VT-x, AMD-V) | modules `kvm-intel`, `kvm-amd`, `vhost_vsock` ; sans elle, le niveau 2 d'isolation (microVM Firecracker) est refusé et dit | hôte CI (niveau 2 joué) ; VM sans KVM imbriqué : refus vérifié |
 | Mémoire | 8 Gio au minimum pour le bureau et un modèle local ; en dessous, l'installeur le dit | VM du bureau à 4 Gio |
-| Disque | 80 Gio au minimum : deux racines de 24, 32 d'état chiffré, le reste en données chiffrées ; SATA (chipsets AMD, Intel, NVIDIA, VIA, SiI de 2010 et après), NVMe, USB (UHCI à xHCI), lecteurs de cartes SDHCI et Realtek dans l'initrd | VM (virtio) ; disque en boucle pour l'installeur |
+| Disque | 80 Gio au minimum : deux racines de 24, 32 d'état chiffré, le reste en données chiffrées ; SATA (chipsets AMD, Intel, NVIDIA, VIA, SiI de 2010 et après), NVMe, USB (UHCI à xHCI), lecteurs de cartes SDHCI et Realtek dans l'initrd | VM (virtio) ; disque en boucle pour l'installeur ; installation complète et redémarrage avec phrase de passe dans QEMU le 15 septembre 2026 |
 
 ## Affichage
 
@@ -25,7 +25,7 @@ disque (`docs/installation.md`, section 3) dit, depuis la clé, ce qu'une machin
 | AMD Radeon GCN 3 et après, RDNA | `amdgpu` | Vulkan par RADV | non |
 | Intel HD/Iris/Xe (Broadwell et après) | `i915` / `xe`, `intel-media-driver` | Vulkan par ANV | non |
 | NVIDIA | `nouveau` (pilote libre du noyau) | affichage ; Vulkan seulement pour les cartes que NVK couvre ; **pas de pilote propriétaire** (incompatible avec le verrouillage du noyau visé) | non |
-| Aucune carte reconnue | — | rendu logiciel (llvmpipe) : le bureau tourne, lentement ; les modèles locaux sur processeur | VM (c'est le mode de la CI) |
+| Aucune carte reconnue, ou carte sans nœud de rendu | — | rendu logiciel (llvmpipe) : le bureau tourne, lentement ; les modèles locaux sur processeur | VM (c'est le mode de la CI) ; système installé sur `bochs-drm` dans QEMU le 15 septembre 2026, bureau affiché une fois le rendu logiciel permis (`16e8bab`) |
 
 Le rendu et la consommation de la surface sur une carte réelle restent à mesurer (ADR 0037).
 
@@ -51,7 +51,7 @@ Le rendu et la consommation de la surface sur une carte réelle restent à mesur
 | Élément | Dans l'image | Vu |
 |---|---|---|
 | UEFI | systemd-boot, sans éditeur | VM (OVMF) |
-| BIOS / CSM | GRUB sur la partition d'amorçage BIOS, toujours créée | VM (SeaBIOS) |
+| BIOS / CSM | GRUB sur la partition d'amorçage BIOS, toujours créée | VM (SeaBIOS) ; installé et redémarré ainsi dans une VM QEMU le 15 septembre 2026 |
 | Secure Boot | **non pris en charge** : chargeur non signé ; l'installeur le dit s'il le voit activé | — |
 | TPM 2 | `tpm2-tss` ; enrôlement de la phrase de passe après l'installation (`systemd-cryptenroll`) | non |
 | Verrouillage du noyau | annoncé, **inactif** (voir `docs/installation.md`) | VM (constaté inactif) |
