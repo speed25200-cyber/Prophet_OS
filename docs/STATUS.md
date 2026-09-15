@@ -1442,7 +1442,8 @@ l'installeur relu. Une troisième faute : sans accélération graphique, la sess
 silence — wlroots refuse le rendu logiciel tant qu'on ne le lui permet pas (`16e8bab`) ; avec
 la permission, la supervision s'affiche, le lanceur et le terminal aussi. Ce qui reste hors de
 preuve : le matériel réel, l'UEFI dans cette VM, la configuration complète. Voir le
-[rapport](reports/installation-vm-2026-09-15.md).
+[rapport](reports/installation-vm-2026-09-15.md). CI de `adee017` (les trois correctifs, la
+sonde HTTPS, l'étape « Tout faire sauf nixos-install ») : **verte des deux côtés** (10:30 UTC).
 
 ### Fin de session du 14 septembre 2026, soir
 
