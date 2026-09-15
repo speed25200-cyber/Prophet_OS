@@ -26,6 +26,7 @@ set -euo pipefail
 DISQUE=""
 CHIFFRER=1
 JUSQU_AU_MONTAGE=0
+SANS_INSTALLATION=0
 DEPOT="${PROPHET_SOURCE:-/iso/prophet}"
 CIBLE=/mnt
 
@@ -47,6 +48,10 @@ Usage : prophet-installer --disque /dev/DISQUE [options]
   --jusqu-au-montage   préparer le disque puis s'arrêter, sans installer le système
                        (pour inspecter la disposition avant de s'engager, et pour que
                        l'intégration continue puisse exercer la partie qui touche au disque)
+  --sans-installation  tout faire sauf nixos-install : disque, dépôt copié, mot de passe
+                       haché, matériel détecté, relevé — puis s'arrêter (pour l'intégration
+                       continue, qui n'a pas de NixOS sous la main mais peut vérifier tout le
+                       reste ; c'est là que deux fautes ont échappé à la CI le 15 septembre 2026)
   --aide               ce message
 
 La confirmation n'est jamais contournable : le nom du disque doit être recopié, et la phrase de
@@ -63,6 +68,7 @@ while [ $# -gt 0 ]; do
     --sans-chiffrement) CHIFFRER=0; shift ;;
     --source) DEPOT="${2:-}"; shift 2 ;;
     --jusqu-au-montage) JUSQU_AU_MONTAGE=1; shift ;;
+    --sans-installation) SANS_INSTALLATION=1; shift ;;
     --aide|-h) usage; exit 0 ;;
     *) usage; mourir "argument inconnu : $1" ;;
   esac
@@ -470,6 +476,15 @@ if [ "$AMORCAGE" = "bios" ]; then
 }
 FIN
   vert "✓ GRUB sera posé sur $DISQUE_STABLE"
+fi
+
+if [ "$SANS_INSTALLATION" = "1" ]; then
+  titre "Système préparé, arrêt demandé avant nixos-install"
+  echo
+  info "Sous $CIBLE : le dépôt (en écriture), le mot de passe haché, le matériel détecté, le"
+  info "relevé de la machine et le mode d'amorçage. Rien n'est installé. Relancez sans"
+  info "--sans-installation pour poser le système, ou démontez $CIBLE si vous renoncez."
+  exit 0
 fi
 
 # La racine est montée en lecture seule par `immutable.nix` une fois installée ; pendant

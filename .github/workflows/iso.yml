@@ -181,6 +181,47 @@ jobs:
           [ "$manque" = "0" ] || { echo "::error::la disposition ne correspond pas à immutable.nix"; exit 1; }
           echo "la disposition correspond à ce que le système attend au démarrage"
 
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+
+      - name: Tout faire sauf nixos-install
+        run: |
+          # Jusqu'au 15 septembre 2026, ce travail s'arrêtait au montage ; deux fautes vivaient
+          # juste après — la copie du dépôt qui prenait le lien vers le magasin au lieu de son
+          # contenu, et une variable posée dans un sous-shell — et n'ont été vues qu'en machine
+          # virtuelle, disque déjà formaté. Ici, tout ce qui précède nixos-install est joué sur
+          # un disque neuf : dépôt copié en écriture, mot de passe haché, matériel détecté par
+          # nixos-generate-config (venu de nixpkgs), relevé de la machine, mode d'amorçage.
+          sudo umount -R /mnt 2>/dev/null || true
+          sudo cryptsetup close prophet-home 2>/dev/null || true
+          sudo cryptsetup close prophet-state 2>/dev/null || true
+          truncate -s 100G /tmp/entier.img
+          ENTIER=$(sudo losetup --find --show --partscan /tmp/entier.img)
+          OUTILS=$(nix build --no-link --print-out-paths nixpkgs#nixos-install-tools)
+          REPONSES="$ENTIER"$'\n'"phrase-de-passe-de-test"$'\n'"phrase-de-passe-de-test"$'\n'"mot-de-passe-de-test"$'\n'"mot-de-passe-de-test"
+          set +e
+          printf '%s\n' "$REPONSES" | sudo env PATH="$OUTILS/bin:$PATH" ./image/installateur/prophet-installer.sh --disque "$ENTIER" --source "$PWD" --sans-installation >/tmp/entier.txt 2>&1
+          code=$?
+          set -e
+          cat /tmp/entier.txt
+          [ "$code" -eq 0 ] || { echo "::error::l'installeur a échoué avant nixos-install (code $code)"; exit 1; }
+          grep -q "arrêt demandé avant nixos-install" /tmp/entier.txt || { echo "::error::l'installeur ne s'est pas arrêté là où on le lui demandait"; exit 1; }
+          echo "--- ce qui est posé sous /mnt ---"
+          manque=0
+          verifier() { if eval "$2"; then echo "  ✓ $1"; else echo "  ✗ $1"; manque=1; fi; }
+          verifier "le dépôt copié, pas un lien" '[ -d /mnt/etc/prophet/source ] && [ ! -L /mnt/etc/prophet/source ]'
+          verifier "flake.nix du dépôt" 'sudo test -f /mnt/etc/prophet/source/flake.nix'
+          verifier "le dépôt en écriture" 'sudo test -w /mnt/etc/prophet/source/flake.nix'
+          verifier "mot de passe haché en 0600" '[ "$(sudo stat -c %a /mnt/etc/prophet/motdepasse)" = 600 ] && sudo test -s /mnt/etc/prophet/motdepasse'
+          verifier "matériel détecté" 'sudo grep -q boot.initrd.availableKernelModules /mnt/etc/prophet/source/image/machine/hardware-configuration.nix'
+          verifier "relevé de la machine" 'sudo grep -q "processeur : " /mnt/etc/prophet/source/image/machine/inventaire.txt'
+          verifier "mode d amorçage BIOS (le coureur n a pas d UEFI)" 'sudo grep -q "prophet.boot.firmware = \"bios\"" /mnt/etc/prophet/source/image/machine/amorcage.nix'
+          [ "$manque" = "0" ] || { echo "::error::ce qui précède nixos-install n est pas complet"; exit 1; }
+          echo "tout ce qui précède nixos-install est en place"
+
       - name: Ranger
         if: always()
         run: |

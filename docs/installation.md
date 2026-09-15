@@ -37,7 +37,7 @@ produite et vérifiez que **tous** ses travaux sont verts, à la seule exception
 
 | Travail | Ce qu'il garantit |
 |---|---|
-| Installeur sur disque en boucle | l'installeur formate, chiffre et monte pour de vrai, et refuse ce qu'il doit refuser — mauvaise confirmation, disque trop petit, mot de passe trop court |
+| Installeur sur disque en boucle | l'installeur formate, chiffre et monte pour de vrai, refuse ce qu'il doit refuser — mauvaise confirmation, disque trop petit, mot de passe trop court —, puis, sur un disque neuf, fait tout ce qui précède `nixos-install` : dépôt copié en écriture, mot de passe haché, matériel détecté, relevé de la machine, mode d'amorçage |
 | Construire l'ISO | l'image se construit, et chacun de ses fichiers est celui de la révision gravée |
 | Construire le système installé | chacun des sept services pointe vers un programme qui existe, le matériel détecté par `nixos-generate-config` et le mode BIOS composent avec la configuration, **et** `nixos-install` pose réellement ce système sur la disposition que l'installeur crée |
 | Voir l'image démarrer | la clé USB démarre jusqu'à l'invite, en UEFI (OVMF) **et** sans UEFI (SeaBIOS) |

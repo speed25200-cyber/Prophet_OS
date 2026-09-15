@@ -1421,6 +1421,24 @@ contraire pendant des heures, sur la foi d'un unique 404, et demandé trois fois
 modification qui n'était pas nécessaire. L'essai a rendu `204 No Content`. Le serveur n'est plus
 inatteint : le run `34703605599` y a tourné, et le secret `VPS_PASSWORD` est posé.
 
+### 15 septembre 2026, nuit et matin : l'ISO installée dans une machine virtuelle, deux fautes
+
+L'humain a demandé d'installer l'OS et de l'essayer. Fait dans QEMU avec KVM, sous WSL, avec
+l'ISO du run `34897838743` (révision `9abc822`), empreinte vérifiée, sous SeaBIOS (l'OVMF du
+magasin ne démarre pas dans ce QEMU ; la CI, elle, démarre l'ISO en UEFI avec un autre OVMF).
+Le support démarre en 30 s et ouvre une session sur la console série. **Deux fautes bloquantes,
+que la CI ne pouvait pas voir** parce que son essai de l'installeur s'arrête au montage :
+la copie du dépôt prenait le lien `/etc/prophet/source` vers le magasin au lieu de son
+contenu, et le `chmod` qui suit mourait sur le magasin en lecture seule (`762e30d`) ; la carte
+graphique relevée par l'inventaire était posée dans un sous-shell et n'existait plus à l'étape
+de l'accélération (`8dc0c2e`, faute de la veille). Sur un vrai PC, les deux laissaient un
+disque formaté et rien d'installé. L'installeur a désormais `--sans-installation`, et le
+travail « Installeur sur disque en boucle » joue tout ce qui précède `nixos-install` sur un
+disque neuf et vérifie ce qui est posé. L'installation elle-même, dans la VM : la fermeture
+complète pèse 21 Gio et le réseau de la VM donne 0,7 Mio/s ; l'essai continue avec la
+configuration `prophet-ci` et la fermeture construite sur l'hôte, servie à la VM en cache
+local. Rapport à suivre.
+
 ### Fin de session du 14 septembre 2026, soir
 
 **Fini.** Le motif du modèle joint à une demande d'approbation (`c160cee`, ADR 0041) ; le
