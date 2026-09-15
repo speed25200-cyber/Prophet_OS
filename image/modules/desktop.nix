@@ -273,6 +273,12 @@ ${lib.optionalString cfg.suite.enable ''
       # 2026). Chaque session repart donc d'une cible arrêtée et d'un compteur remis à zéro.
       systemctl --user stop sway-session.target 2>/dev/null || true
       systemctl --user reset-failed prophet-supervision.service 2>/dev/null || true
+      # Sans carte graphique utilisable — une machine virtuelle sans accélération, une carte
+      # que Mesa ne connaît pas —, EGL retombe sur le rendu logiciel, et wlroots refuse alors
+      # de démarrer tant qu'on ne le lui permet pas : la session mourait en silence et l'écran
+      # de connexion revenait, sans un mot (vu dans une VM QEMU le 15 septembre 2026). Avec une
+      # vraie carte, cette variable ne change rien ; sans, le bureau s'affiche, lentement.
+      export WLR_RENDERER_ALLOW_SOFTWARE=1
       sway --config /etc/prophet/sway.conf
       # À la sortie du compositeur, ce qui en dépendait s'arrête au lieu de tourner à vide.
       systemctl --user stop sway-session.target 2>/dev/null || true
