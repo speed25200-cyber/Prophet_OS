@@ -62,9 +62,8 @@ joue sur un disque neuf jusqu'à la veille de `nixos-install` (`770e4ed`).
 
 ## Comment refaire
 
-Les scripts vivent dans le dossier de travail de la session (`scratchpad/vm/`) : `build-cache.sh`
+Les scripts sont dans [`tools/essai-vm/`](../../tools/essai-vm/README.md) : `build-cache.sh`
 (construit la fermeture sur l'hôte, l'exporte en image ext4), `vm-install.py` (pilote
 l'installeur par la console série, ajuste l'installeur de l'ISO par un script sed), `vm-boot.sh`
-(démarre le disque installé), `vm-mon.py` (clavier, capture d'écran, OCR), `vm-test.py` et
-`tty2b.sh` (phrase de passe, connexion, requêtes sur tty2). À verser dans `tools/` une fois
-débarrassés de leurs chemins fixes.
+(démarre le disque installé), `vm-mon.py` (clavier, capture d'écran, OCR), `vm-test.py`,
+`tty2b.sh`, `regard.sh` et `eteindre.sh`.
