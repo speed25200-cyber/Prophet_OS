@@ -24,7 +24,6 @@ let
     coreutils
     gnugrep
     gnused
-    iputils # ping
     curl # joindre huggingface.co avant de promettre un modèle local
     nixos-install-tools # nixos-install, nixos-generate-config
     mkpasswd # le haché du mot de passe du compte, jamais le mot de passe

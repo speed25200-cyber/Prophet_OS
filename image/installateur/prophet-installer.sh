@@ -112,7 +112,10 @@ TAILLE_GIO=$(( TAILLE_OCTETS / 1024 / 1024 / 1024 ))
 [ "$TAILLE_GIO" -ge 80 ] || mourir "$DISQUE fait ${TAILLE_GIO} Gio ; il en faut au moins 80."
 vert "✓ disque de ${TAILLE_GIO} Gio"
 
-if [ "$JUSQU_AU_MONTAGE" = "0" ] && ! ping -c1 -W3 cache.nixos.org >/dev/null 2>&1; then
+# Rien n'est téléchargé quand on s'arrête avant nixos-install : les sondes réseau n'ont pas lieu.
+# Et c'est HTTPS qu'on sonde, pas ICMP : bien des réseaux (dont les coureurs de la CI) laissent
+# passer le premier et bloquent le second, et l'installeur disait alors le cache injoignable.
+if [ "$JUSQU_AU_MONTAGE" = "0" ] && [ "$SANS_INSTALLATION" = "0" ]    && ! curl -sSI --max-time 15 https://cache.nixos.org/nix-cache-info >/dev/null 2>&1; then
   rouge "cache.nixos.org est injoignable."
   info "L'installation télécharge le système depuis ce cache. Connectez la machine au réseau"
   info "(par câble, ou avec « nmtui » pour le Wi-Fi) puis relancez."
@@ -121,7 +124,7 @@ fi
 # Le modèle local par défaut (1,83 Go) vient de huggingface.co, à l'installation : sans lui, la
 # machine installée n'aurait d'agent qu'avec un compte ou une clé (ADR 0033). On le vérifie
 # avant d'effacer quoi que ce soit, comme le cache.
-if [ "$JUSQU_AU_MONTAGE" = "0" ] && ! curl -sSI --max-time 15 https://huggingface.co/ >/dev/null 2>&1; then
+if [ "$JUSQU_AU_MONTAGE" = "0" ] && [ "$SANS_INSTALLATION" = "0" ]    && ! curl -sSI --max-time 15 https://huggingface.co/ >/dev/null 2>&1; then
   rouge "huggingface.co est injoignable."
   info "Le modèle local par défaut s'y télécharge pendant l'installation. Vérifiez la"
   info "connexion, ou un pare-feu qui bloquerait ce site, puis relancez."
@@ -129,7 +132,7 @@ if [ "$JUSQU_AU_MONTAGE" = "0" ] && ! curl -sSI --max-time 15 https://huggingfac
 fi
 # Un « test && commande » en fin de ligne sortirait du script quand le test est faux, puisque la
 # ligne rend alors 1 et que `set -e` veille. La forme longue dit la même chose sans ce piège.
-if [ "$JUSQU_AU_MONTAGE" = "0" ]; then
+if [ "$JUSQU_AU_MONTAGE" = "0" ] && [ "$SANS_INSTALLATION" = "0" ]; then
   vert "✓ réseau, cache Nix et huggingface.co joignables"
 fi
 

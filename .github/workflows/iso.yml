@@ -218,7 +218,12 @@ jobs:
           verifier "mot de passe haché en 0600" '[ "$(sudo stat -c %a /mnt/etc/prophet/motdepasse)" = 600 ] && sudo test -s /mnt/etc/prophet/motdepasse'
           verifier "matériel détecté" 'sudo grep -q boot.initrd.availableKernelModules /mnt/etc/prophet/source/image/machine/hardware-configuration.nix'
           verifier "relevé de la machine" 'sudo grep -q "processeur : " /mnt/etc/prophet/source/image/machine/inventaire.txt'
-          verifier "mode d amorçage BIOS (le coureur n a pas d UEFI)" 'sudo grep -q "prophet.boot.firmware = \"bios\"" /mnt/etc/prophet/source/image/machine/amorcage.nix'
+          # Le coureur a démarré en UEFI : pas de fichier d'amorçage BIOS ; sans UEFI, il le dirait.
+          if [ -d /sys/firmware/efi ]; then
+            verifier "amorçage UEFI : pas de réglage BIOS écrit" 'sudo test ! -e /mnt/etc/prophet/source/image/machine/amorcage.nix'
+          else
+            verifier "amorçage BIOS écrit" 'sudo grep -q "prophet.boot.firmware = \"bios\"" /mnt/etc/prophet/source/image/machine/amorcage.nix'
+          fi
           [ "$manque" = "0" ] || { echo "::error::ce qui précède nixos-install n est pas complet"; exit 1; }
           echo "tout ce qui précède nixos-install est en place"
 
