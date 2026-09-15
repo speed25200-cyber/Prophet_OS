@@ -218,12 +218,14 @@ jobs:
           verifier "mot de passe haché en 0600" '[ "$(sudo stat -c %a /mnt/etc/prophet/motdepasse)" = 600 ] && sudo test -s /mnt/etc/prophet/motdepasse'
           verifier "matériel détecté" 'sudo grep -q boot.initrd.availableKernelModules /mnt/etc/prophet/source/image/machine/hardware-configuration.nix'
           verifier "relevé de la machine" 'sudo grep -q "processeur : " /mnt/etc/prophet/source/image/machine/inventaire.txt'
-          # Le dépôt porte un amorcage.nix par défaut (UEFI) ; l'installeur ne le réécrit que sur
-          # une machine sans UEFI. Le coureur a l'UEFI : le fichier doit rester celui du dépôt.
+          # Le dépôt porte un amorcage.nix par défaut (UEFI, vide — son commentaire cite le réglage
+          # BIOS, d'où le motif ancré hors commentaire) ; l'installeur ne le réécrit que sur une
+          # machine sans UEFI. Le coureur a l'UEFI : le fichier doit rester celui du dépôt.
+          AMORCAGE=/mnt/etc/prophet/source/image/machine/amorcage.nix
           if [ -d /sys/firmware/efi ]; then
-            verifier "amorçage UEFI : le réglage du dépôt, pas BIOS" 'sudo test -f /mnt/etc/prophet/source/image/machine/amorcage.nix && ! sudo grep -q "firmware = \"bios\"" /mnt/etc/prophet/source/image/machine/amorcage.nix'
+            verifier "amorçage UEFI : le réglage du dépôt, pas BIOS" 'sudo test -f "$AMORCAGE" && ! sudo grep -qE "^\s*prophet\.boot\.firmware = \"bios\"" "$AMORCAGE"'
           else
-            verifier "amorçage BIOS écrit" 'sudo grep -q "prophet.boot.firmware = \"bios\"" /mnt/etc/prophet/source/image/machine/amorcage.nix'
+            verifier "amorçage BIOS écrit" 'sudo grep -qE "^\s*prophet\.boot\.firmware = \"bios\"" "$AMORCAGE"'
           fi
           [ "$manque" = "0" ] || { echo "::error::ce qui précède nixos-install n est pas complet"; exit 1; }
           echo "tout ce qui précède nixos-install est en place"
