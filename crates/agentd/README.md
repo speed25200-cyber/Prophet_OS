@@ -24,6 +24,14 @@ Les adresses de services sont `PROPHET_CAPD_SOCKET`, `PROPHET_LEDGER_SOCKET`,
 l'état de chaque daemon, séparément. `PROPHET_BROWSER` nomme un navigateur Chromium pour les
 outils `web.*` ; sans lui, une mission n'a pas de navigateur.
 
+`PROPHET_JEV_SECRET` nomme le secret du coffre qui porte la clé de Jev et active le décideur
+rapide : routage des missions à la planification (`task.spawn`, `task.route`) et opérateur
+d'interface en cascade devant le modèle génératif, quand le jeton autorise `net.egress` sur
+`api.typesafe.ai` et que le manifeste n'est pas `local-only`. `PROPHET_JEV_MODEL` choisit le
+modèle. Le proxy de sortie doit déclarer l'hôte d'interrogation (`PROPHET_EGRESS_QUERY_HOSTS`).
+`cargo test -p agentd --test jev` exerce la chaîne avec un proxy simulé et, si un navigateur
+est présent, une page réelle opérée par Jev seul. Voir l'[ADR 0025](../../docs/adr/0025-jev-decideur-rapide.md).
+
 ## Préparer depuis l'interface
 
 `PROPHET_MISSION_PROFILES` désigne un fichier JSON de configuration chargé au démarrage.

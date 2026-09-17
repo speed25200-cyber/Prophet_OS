@@ -303,6 +303,7 @@ mod tests {
                 grants: vec![],
                 scopes: vec![],
                 limits: Default::default(),
+                route: None,
             }))))
             .unwrap();
         preparation.update();
@@ -344,6 +345,7 @@ mod tests {
                     limits: Default::default(),
                 }],
                 model_error: None,
+                jev: None,
             }),
             ..Default::default()
         };

@@ -16,12 +16,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use agentd::local::JevSetup;
 use agentd::runtime::PlanRequest;
 use agentd::{EtatPersistant, Publication, Runtime};
 use prophet_daemon as commun;
 use prophet_ipc::{Client, Error, ErrorCode, Handler, PeerIdentity, Server};
 use prophet_types::cap::{Grant, Token};
-use prophet_types::manifest::Manifest;
+use prophet_types::manifest::{Manifest, Privacy};
+use providers::jev::router::Route;
 use providers::selection::Availability;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
@@ -44,6 +46,8 @@ struct Agents {
     browser: Option<std::path::PathBuf>,
     /// Profils de navigation, un par tâche, dans l'état privé du service.
     browser_root: std::path::PathBuf,
+    /// Décideur rapide (Jev), configuré par l'administrateur ; absent par défaut.
+    jev: Option<JevSetup>,
     /// Où l'état est écrit entre deux démarrages.
     etat: std::path::PathBuf,
     pairs: commun::Pairs,
@@ -73,6 +77,7 @@ impl Handler for Agents {
                 commun::repondre(&agentd::preparation::Options {
                     profiles: self.profiles.iter().map(|p| p.view(&models)).collect(),
                     model_error,
+                    jev: self.jev.clone(),
                 })
             }
 
@@ -145,6 +150,7 @@ impl Handler for Agents {
                                 requested: &grants,
                                 scopes: &scopes,
                                 availability: &availability,
+                                route: None,
                             },
                             token,
                             OffsetDateTime::now_utc(),
@@ -192,6 +198,11 @@ impl Handler for Agents {
                 let jeton = self
                     .demander_un_jeton(&manifeste, &id, &utilisateur, &demandes)
                     .await?;
+                // Le routage est demandé hors du verrou du runtime : une décision distante ne
+                // doit pas bloquer les autres commandes du service.
+                let route = self
+                    .router(&manifeste, &disponible, &intention, &jeton)
+                    .await;
 
                 let maintenant = OffsetDateTime::now_utc();
                 let refs: Vec<&str> = perimetres.iter().map(String::as_str).collect();
@@ -207,6 +218,7 @@ impl Handler for Agents {
                                 requested: &demandes,
                                 scopes: &refs,
                                 availability: &disponible,
+                                route: route.as_ref(),
                             },
                             jeton,
                             maintenant,
@@ -221,6 +233,63 @@ impl Handler for Agents {
                 self.vider_le_journal().await;
                 tracing::info!(tache = %id, pilote = %plan.choice.reference, "tâche planifiée");
                 commun::repondre(&plan)
+            }
+
+            // Router sans planifier : quel modèle Jev choisirait pour cette intention, et
+            // pourquoi. Le jeton est éphémère, borné à l'hôte de Jev, et ne crée aucune tâche.
+            "task.route" => {
+                let intention = commun::texte(&params, "intent")?;
+                let manifeste: Manifest = lire(&params, "manifest")?;
+                manifeste
+                    .validate()
+                    .map_err(|e| Error::new(ErrorCode::InvalidParams, e.to_string()))?;
+                let disponible: Availability =
+                    optionnel(&params, "availability")?.unwrap_or_default();
+                let statique = providers::selection::choose(&manifeste, &disponible)
+                    .map_err(|e| Error::new(ErrorCode::NotFound, format!("{e:?}")))?;
+                if self.jev.is_none() {
+                    return commun::repondre(&Route::static_choice(
+                        statique,
+                        "Jev n'est pas configuré sur ce service",
+                    ));
+                }
+                if manifeste.model.privacy == Privacy::LocalOnly {
+                    return commun::repondre(&Route::static_choice(
+                        statique,
+                        "intention local-only : elle ne quitte pas la machine",
+                    ));
+                }
+                let utilisateur = format!("uid:{}", pair.uid);
+                let reference = format!(
+                    "route:{}",
+                    prophet_types::ids::Id::new(prophet_types::ids::Kind::Task)
+                );
+                let grants = vec![Grant::new(
+                    prophet_types::cap::Res::Net,
+                    prophet_types::cap::Act::Egress,
+                    providers::jev::HOST,
+                )];
+                let jeton = match self
+                    .jeton_avec_duree(&manifeste, &reference, &utilisateur, &grants, 120)
+                    .await
+                {
+                    Ok(jeton) => jeton,
+                    Err(erreur) => {
+                        return commun::repondre(&Route::static_choice(
+                            statique,
+                            format!(
+                                "le manifeste n'autorise pas la sortie vers {} : {}",
+                                providers::jev::HOST,
+                                erreur.message
+                            ),
+                        ));
+                    }
+                };
+                let route = self
+                    .router(&manifeste, &disponible, &intention, &jeton)
+                    .await
+                    .unwrap_or_else(|| Route::static_choice(statique, "routage impossible"));
+                commun::repondre(&route)
             }
 
             "task.list" => {
@@ -564,9 +633,10 @@ impl Agents {
         }
         let launch = {
             let mut runtime = self.runtime.lock().await;
+            let privacy = runtime.privacy(&id).unwrap_or_default();
             match runtime.begin_local(&id) {
                 Ok(launch) => match ecrire(&self.etat, &runtime.etat()) {
-                    Ok(()) => Ok(launch),
+                    Ok(()) => Ok((launch, privacy)),
                     Err(error) => {
                         let mut task = launch.0;
                         task.state = agentd::State::Failed;
@@ -582,7 +652,7 @@ impl Agents {
                 Err(error) => Err(runtime_erreur(error)),
             }
         };
-        let (task, token, plan, home) = match launch {
+        let ((task, token, plan, home), privacy) = match launch {
             Ok(value) => value,
             Err(error) => {
                 if let Ok(mut jobs) = self.jobs.lock() {
@@ -612,6 +682,8 @@ impl Agents {
             egress: self.egress.clone(),
             browser: self.browser.clone(),
             browser_root: self.browser_root.clone(),
+            jev: self.jev.clone(),
+            privacy,
             stop,
         };
         if let Err(error) = std::thread::Builder::new()
@@ -646,6 +718,44 @@ impl Agents {
             return Err(Error::new(ErrorCode::InternalError, error.to_string()));
         }
         Ok(json!({"started":id,"state":"running"}))
+    }
+
+    /// Demande à Jev, par le proxy et sous ce jeton, quel candidat admissible sert cette
+    /// intention. `None` quand Jev n'est pas en jeu : non configuré, intention `local-only`,
+    /// ou jeton sans sortie vers son hôte. La décision distante tourne sur un thread bloquant.
+    async fn router(
+        &self,
+        manifeste: &Manifest,
+        disponible: &Availability,
+        intention: &str,
+        jeton: &Token,
+    ) -> Option<Route> {
+        let jev = self.jev.clone()?;
+        if manifeste.model.privacy == Privacy::LocalOnly || !JevSetup::permitted_by(jeton) {
+            return None;
+        }
+        let transport =
+            providers::jev::egress::EgressTransport::new(self.egress.clone(), jeton, &jev.secret)
+                .ok()?;
+        let manifeste = manifeste.clone();
+        let disponible = disponible.clone();
+        let intention = intention.to_owned();
+        let route = tokio::task::spawn_blocking(move || {
+            providers::jev::router::Router::new(Arc::new(transport), &jev.model).route(
+                &manifeste,
+                &disponible,
+                &intention,
+            )
+        })
+        .await
+        .ok()?
+        .ok()?;
+        tracing::info!(
+            reference = %route.choice.reference,
+            decider = ?route.decider,
+            "intention routée"
+        );
+        Some(route)
     }
 
     /// Demande à `capd` le jeton racine de la tâche.
@@ -877,6 +987,12 @@ async fn main() -> anyhow::Result<()> {
     // n'est pas encore relayée par egress, et ce choix appartient à l'administrateur.
     let browser = std::env::var_os("PROPHET_BROWSER").map(std::path::PathBuf::from);
     let browser_root = commun::etat("agentd").join("navigateurs");
+    // Jev n'existe que si l'administrateur nomme le secret du coffre qui porte sa clé. Le
+    // service ne voit jamais cette clé : le proxy la substitue au dernier moment.
+    let jev = JevSetup::from_env();
+    if let Some(jev) = &jev {
+        tracing::info!(secret = %jev.secret, modele = %jev.model, "décideur Jev configuré");
+    }
     let profiles = std::env::var_os("PROPHET_MISSION_PROFILES")
         .map(|path| agentd::preparation::load(std::path::Path::new(&path)))
         .transpose()
@@ -930,6 +1046,7 @@ async fn main() -> anyhow::Result<()> {
             egress,
             browser,
             browser_root,
+            jev,
             etat: fichier_etat,
             pairs: commun::Pairs::detecter()?,
         }))

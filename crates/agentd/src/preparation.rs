@@ -51,6 +51,10 @@ pub struct Options {
     pub profiles: Vec<ProfileView>,
     /// Une panne ne doit pas être présentée comme un catalogue vide réussi.
     pub model_error: Option<String>,
+    /// Le décideur rapide du service, s'il est configuré : nom du secret et modèle, jamais
+    /// une valeur. Absent quand le service n'en a pas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jev: Option<crate::local::JevSetup>,
 }
 
 /// Intention explicite : le client ne fournit ni manifeste, ni identité, ni droits.

@@ -11,6 +11,9 @@ use mcp_system::services::Services;
 use prophet_types::cap::{Act, Decision, DenyReason, Res, Token};
 use prophet_types::driver::{DriverEvent, Limits, RunStatus, SandboxRequest, StartRequest};
 use prophet_types::ledger::{Actor, Draft, EventKind};
+use prophet_types::manifest::Privacy;
+use providers::jev::egress::EgressTransport;
+use providers::jev::operator::{Cascade, Goal, Operator, Trace};
 use providers::local::AsyncLocalModel;
 use providers::native::{ModelClient, ModelTurn, NativeDriver, Usage};
 use providers::{Driver, DriverError};
@@ -21,6 +24,50 @@ use crate::{State, Task, TaskPlan};
 
 /// Publie l'état et le résultat sous le verrou de persistance du service.
 pub type Publish = Arc<dyn Fn(Task, Option<Value>) -> Result<(), String> + Send + Sync>;
+
+/// Le décideur rapide, configuré par l'administrateur du service et jamais par un modèle :
+/// le nom du secret dans le coffre (jamais sa valeur) et le modèle Jev demandé.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct JevSetup {
+    /// Nom du secret que le proxy fait résoudre par le coffre.
+    pub secret: String,
+    /// Modèle Jev (`jev-latest` par défaut).
+    pub model: String,
+}
+
+impl JevSetup {
+    /// Lit la configuration du service : `PROPHET_JEV_SECRET` active Jev, `PROPHET_JEV_MODEL`
+    /// choisit le modèle. Sans secret, Jev n'existe pas pour ce service.
+    #[must_use]
+    pub fn from_env() -> Option<Self> {
+        let secret = std::env::var("PROPHET_JEV_SECRET")
+            .ok()
+            .filter(|s| !s.trim().is_empty())?;
+        Some(Self {
+            secret,
+            model: std::env::var("PROPHET_JEV_MODEL")
+                .ok()
+                .filter(|m| !m.trim().is_empty())
+                .unwrap_or_else(|| providers::jev::DEFAULT_MODEL.to_owned()),
+        })
+    }
+
+    /// Vrai si ce jeton autorise une sortie vers l'hôte de Jev. Sans ce grant, la première
+    /// décision serait refusée par le proxy ; autant ne pas la demander.
+    #[must_use]
+    pub fn permitted_by(token: &Token) -> bool {
+        token.grants.iter().any(|g| {
+            g.res == Res::Net
+                && g.act == Act::Egress
+                && prophet_types::pattern::matches(
+                    prophet_types::pattern::Family::Domain,
+                    &g.pattern,
+                    providers::jev::HOST,
+                    "",
+                )
+        })
+    }
+}
 
 /// Contexte construit exclusivement par agentd à partir de la tâche planifiée.
 pub struct Mission {
@@ -42,6 +89,10 @@ pub struct Mission {
     pub browser: Option<PathBuf>,
     /// Répertoire privé des profils de navigation, un par tâche.
     pub browser_root: PathBuf,
+    /// Décideur rapide du service, s'il est configuré.
+    pub jev: Option<JevSetup>,
+    /// Confidentialité du manifeste : une mission `local-only` n'envoie rien à Jev.
+    pub privacy: Privacy,
     /// Signal d'annulation. Le résultat final confirme l'arrêt.
     pub stop: Arc<AtomicBool>,
 }
@@ -159,22 +210,50 @@ impl ModelClient for Model {
     }
     fn next_turn(&mut self, history: &[Value]) -> Result<(ModelTurn, Usage), DriverError> {
         self.control.check_live().map_err(DriverError::Io)?;
-        let task = self.control.current();
-        if task.budget.spent.steps >= task.budget.limits.steps {
-            return Err(DriverError::BudgetExceeded(
-                "plafond d'étapes atteint".into(),
-            ));
-        }
         let result=self.runtime.block_on(async {
             tokio::select! {
                 result=self.client.next_turn(history)=>result,
                 error=async {loop {if let Err(error)=self.control.check_live(){break error;} tokio::time::sleep(Duration::from_millis(20)).await;}}=>Err(DriverError::Io(error)),
             }
         })?;
+        match result.turn {
+            Ok(turn) => Ok((turn, result.usage)),
+            Err(error) => {
+                // Une génération incomplète a consommé des tokens : ils sont imputés ici,
+                // puisque le compteur commun ne voit pas les tours invalides.
+                self.control
+                    .charge(result.usage)
+                    .map_err(DriverError::BudgetExceeded)?;
+                Err(error)
+            }
+        }
+    }
+}
+
+/// Le compteur commun : quel que soit le décideur — modèle génératif ou Jev —, chaque tour
+/// valide est compté en étapes et en tokens avant que son action ne soit exécutée, et le
+/// plafond d'étapes est vérifié avant de demander quoi que ce soit.
+struct Metered {
+    inner: Box<dyn ModelClient>,
+    control: Arc<Control>,
+}
+impl ModelClient for Metered {
+    fn model_name(&self) -> String {
+        self.inner.model_name()
+    }
+    fn next_turn(&mut self, history: &[Value]) -> Result<(ModelTurn, Usage), DriverError> {
+        self.control.check_live().map_err(DriverError::Io)?;
+        let task = self.control.current();
+        if task.budget.spent.steps >= task.budget.limits.steps {
+            return Err(DriverError::BudgetExceeded(
+                "plafond d'étapes atteint".into(),
+            ));
+        }
+        let (turn, usage) = self.inner.next_turn(history)?;
         self.control
-            .charge(result.usage)
+            .charge(usage)
             .map_err(DriverError::BudgetExceeded)?;
-        result.turn.map(|turn| (turn, result.usage))
+        Ok((turn, usage))
     }
 }
 
@@ -251,9 +330,20 @@ impl Mission {
         if self.task.budget.limits.tokens == 0 || self.task.budget.limits.steps == 0 {
             return Err("budget de mission nul".into());
         }
+        // Jev n'a la main que si tout est réuni : configuré par le service, un navigateur pour
+        // observer des arbres, une confidentialité qui admet un service distant, et un jeton qui
+        // autorise la sortie vers son hôte. Il n'obtient aucun droit de plus que le modèle.
+        let decider = self.jev.as_ref().filter(|_| {
+            self.browser.is_some()
+                && self.privacy != Privacy::LocalOnly
+                && JevSetup::permitted_by(&self.token)
+        });
         control.append(
             EventKind::ProviderStarted,
-            json!({"driver":self.plan.choice.reference}),
+            json!({
+                "driver": self.plan.choice.reference,
+                "decider": decider.map(|d| format!("jev:{}", d.model)),
+            }),
         )?;
         control.append(EventKind::TaskStarted, json!({"execution":"native-tools"}))?;
         let workspace = sfs::Workspace::begin_authorized(
@@ -320,12 +410,31 @@ impl Mission {
             .enable_all()
             .build()
             .map_err(|e| e.to_string())?;
+        let generative: Box<dyn ModelClient> = Box::new(Model {
+            client,
+            runtime,
+            control: control.clone(),
+            name: self.plan.choice.reference.clone(),
+        });
+        let (model, trace): (Box<dyn ModelClient>, Option<Arc<Mutex<Trace>>>) = match decider {
+            Some(setup) => {
+                let transport = EgressTransport::new(&self.egress, &self.token, &setup.secret)
+                    .map_err(|e| e.to_string())?;
+                let operator = Operator::new(
+                    Arc::new(transport),
+                    Goal::from_intent(&self.task.intent, None),
+                    &setup.model,
+                );
+                let cascade = Cascade::new(operator, generative);
+                let trace = cascade.trace();
+                (Box::new(cascade), Some(trace))
+            }
+            None => (generative, None),
+        };
         let mut driver = NativeDriver::new(
-            Box::new(Model {
-                client,
-                runtime,
+            Box::new(Metered {
+                inner: model,
                 control: control.clone(),
-                name: self.plan.choice.reference.clone(),
             }),
             Box::new(executor),
         );
@@ -374,9 +483,16 @@ impl Mission {
                         let review = workspace.seal_review().map_err(|e| e.to_string())?;
                         control.check_live()?;
                         let diff = review.diff();
-                        return Ok(
-                            json!({"text":text,"tool_calls":calls,"diff":diff,"review":review}),
-                        );
+                        let jev = trace
+                            .as_ref()
+                            .and_then(|t| t.lock().ok().map(|t| t.clone()));
+                        return Ok(json!({
+                            "text": text,
+                            "tool_calls": calls,
+                            "diff": diff,
+                            "review": review,
+                            "jev": jev,
+                        }));
                     }
                     DriverEvent::Done { reason, .. } => {
                         return Err(reason.unwrap_or_else(|| "pilote interrompu".into()));
