@@ -23,5 +23,5 @@ mod proxy;
 pub use detect::{Detector, Outbound, Signal, Thresholds};
 pub use identity::{AgentIdentity, HEADER as AGENT_HEADER};
 pub use inject::{InjectionError, Injector, Reference, reference_dans};
-pub use policy::{DenyReason, Policy, Verdict};
+pub use policy::{DenyReason, Policy, QueryHosts, Verdict, is_mutating};
 pub use proxy::{ParsedRequest, Proxy, ProxyError, RequestLog, parse_request};

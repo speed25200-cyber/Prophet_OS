@@ -42,6 +42,79 @@ pub enum DenyReason {
 /// Méthodes considérées comme modifiant l'état distant, donc irréversibles.
 pub const MUTATING_METHODS: &[&str] = &["POST", "PUT", "PATCH", "DELETE"];
 
+/// Hôtes d'interrogation : ceux dont un `POST` est une question, pas un effet.
+///
+/// La règle « `POST` modifie un état distant » est vraie pour envoyer, payer, poster ou
+/// supprimer ; elle est fausse pour une API de décision comme Jev, qui répond à un `POST` sans
+/// rien retenir ni rien faire. Demander une décision humaine à chaque question rendrait une
+/// boucle de décision inutilisable, et une approbation donnée cent fois par minute n'en serait
+/// plus une. L'administrateur nomme donc explicitement ces hôtes ; pour eux, et pour `POST`
+/// seulement, la requête est contrôlée comme une lecture : jeton, grant `net.egress` sur
+/// l'hôte, détection d'exfiltration sur le corps et journal restent entiers. `PUT`, `PATCH` et
+/// `DELETE` restent des modifications partout. Le motif `*` est refusé : il transformerait tous
+/// les `POST` de la machine en lectures.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueryHosts {
+    patterns: Vec<String>,
+}
+
+impl QueryHosts {
+    /// Lit une liste séparée par des virgules, telle qu'une configuration la donne.
+    ///
+    /// # Errors
+    /// Un motif n'est pas un nom de domaine valide, ou vaut `*`.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let mut patterns = Vec::new();
+        for raw in text.split(',') {
+            let pattern = raw.trim();
+            if pattern.is_empty() {
+                continue;
+            }
+            if pattern == "*" || pattern.starts_with("driver:") {
+                return Err(format!(
+                    "hôte d'interrogation refusé : {pattern} (un nom de domaine est requis)"
+                ));
+            }
+            prophet_types::pattern::validate(Family::Domain, pattern)
+                .map_err(|e| format!("hôte d'interrogation invalide : {e}"))?;
+            patterns.push(pattern.to_owned());
+        }
+        Ok(Self { patterns })
+    }
+
+    /// Aucun hôte déclaré.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.patterns.is_empty()
+    }
+
+    /// Les motifs déclarés.
+    #[must_use]
+    pub fn patterns(&self) -> &[String] {
+        &self.patterns
+    }
+
+    /// Vrai si cet hôte est un hôte d'interrogation.
+    #[must_use]
+    pub fn covers(&self, host: &str) -> bool {
+        self.patterns
+            .iter()
+            .any(|p| matches(Family::Domain, p, host, ""))
+    }
+}
+
+/// Cette requête modifie-t-elle un état distant ?
+///
+/// C'est la question que le proxy pose à capd sous les drapeaux `external` et `irreversible`.
+#[must_use]
+pub fn is_mutating(method: &str, host: &str, query_hosts: &QueryHosts) -> bool {
+    let method = method.to_ascii_uppercase();
+    if !MUTATING_METHODS.contains(&method.as_str()) {
+        return false;
+    }
+    !(method == "POST" && query_hosts.covers(host))
+}
+
 /// Politique appliquée à une tâche.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Policy {
@@ -252,5 +325,37 @@ mod tests {
             p.evaluate("exemple.fr", "GET", 0),
             Verdict::Deny { .. }
         ));
+    }
+
+    #[test]
+    fn un_post_vers_un_hote_d_interrogation_est_une_lecture_et_rien_d_autre() {
+        let hotes = QueryHosts::parse(" api.typesafe.ai, *.decisions.exemple.fr ,").unwrap();
+        assert_eq!(hotes.patterns().len(), 2);
+        assert!(!is_mutating("POST", "api.typesafe.ai", &hotes));
+        assert!(!is_mutating("post", "jev.decisions.exemple.fr", &hotes));
+        assert!(!is_mutating("GET", "api.typesafe.ai", &hotes));
+        // Seul POST est une interrogation ; les autres méthodes modifiantes le restent.
+        assert!(is_mutating("PUT", "api.typesafe.ai", &hotes));
+        assert!(is_mutating("DELETE", "api.typesafe.ai", &hotes));
+        assert!(is_mutating("PATCH", "api.typesafe.ai", &hotes));
+        // Un hôte non déclaré garde la règle ordinaire, même s'il ressemble.
+        assert!(is_mutating("POST", "typesafe.ai", &hotes));
+        assert!(is_mutating("POST", "api.typesafe.ai.evil.com", &hotes));
+        assert!(is_mutating(
+            "POST",
+            "api.typesafe.ai",
+            &QueryHosts::default()
+        ));
+    }
+
+    #[test]
+    fn les_hotes_d_interrogation_sont_des_domaines_jamais_tout() {
+        assert!(QueryHosts::parse("*").is_err());
+        assert!(QueryHosts::parse("api.typesafe.ai,*").is_err());
+        assert!(QueryHosts::parse("driver:claude-code").is_err());
+        assert!(QueryHosts::parse("pas un domaine").is_err());
+        assert!(QueryHosts::parse("localhost").is_err());
+        assert!(QueryHosts::parse("").unwrap().is_empty());
+        assert!(QueryHosts::parse("127.0.0.1").is_ok());
     }
 }

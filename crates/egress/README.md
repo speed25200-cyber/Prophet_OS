@@ -7,6 +7,11 @@ est-ce une exfiltration (volume, entropie, motifs de secrets), puis seulement le
 méthodes modifiantes exigent une décision humaine. Les secrets sont substitués au dernier
 moment, hors de portée du modèle, et jamais dans un tunnel (ADR 0007).
 
+Les hôtes d'interrogation (`PROPHET_EGRESS_QUERY_HOSTS`) sont ceux dont un `POST` est une
+question et non un effet, comme l'API de décision Jev : pour eux seulement, `POST` est contrôlé
+comme une lecture. Un amont `https://` en forme absolue est joint sous TLS terminé par le proxy,
+avec les racines de la machine, pour que la substitution reste possible (ADR 0025).
+
 Le client de l'outil `http.fetch` de `mcp-system` parle à ce socket. Voir le
 [contrat du service](../../docs/components/egress.md).
 

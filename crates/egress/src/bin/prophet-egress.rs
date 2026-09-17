@@ -21,11 +21,13 @@
 
 use std::sync::Arc;
 
-use egress::{Detector, Outbound, Policy, Proxy, RequestLog, parse_request};
+use egress::{Detector, Outbound, Policy, Proxy, QueryHosts, RequestLog, parse_request};
 use prophet_daemon as commun;
 use prophet_ipc::Client;
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
+use tokio::io::{
+    AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _, BufReader,
+};
 use tokio::net::{TcpStream, UnixListener, UnixStream};
 
 /// En-tête portant le jeton de la tâche. Interne : il ne sort jamais.
@@ -48,6 +50,13 @@ struct Sortie {
     /// Le coffre. Lui seul peut rendre une valeur, et seulement à ce processus.
     coffre: std::path::PathBuf,
     detecteur: Detector,
+    /// Hôtes dont un `POST` est une question et non un effet (`PROPHET_EGRESS_QUERY_HOSTS`).
+    hotes_d_interrogation: QueryHosts,
+    /// Racines de confiance pour joindre un amont en TLS. Le proxy termine TLS lui-même quand
+    /// une requête vise `https://` en forme absolue : c'est la seule façon de substituer un
+    /// secret dans une requête chiffrée, puisqu'un tunnel `CONNECT` ne laisse rien voir
+    /// (ADR-0007).
+    tls: Arc<rustls::ClientConfig>,
 }
 
 #[tokio::main]
@@ -75,11 +84,21 @@ async fn main() -> anyhow::Result<()> {
         |_| prophet_ipc::socket_path("vault"),
         std::path::PathBuf::from,
     );
+    // Une liste illisible arrête le service : une configuration qui ne se lit pas ne doit pas
+    // se transformer silencieusement en « aucun hôte », ni en « tous ».
+    let hotes_d_interrogation = std::env::var("PROPHET_EGRESS_QUERY_HOSTS")
+        .ok()
+        .map(|liste| QueryHosts::parse(&liste))
+        .transpose()
+        .map_err(anyhow::Error::msg)?
+        .unwrap_or_default();
+    let tls = racines_de_confiance()?;
 
     tracing::info!(
         socket = %socket.display(),
         capd = %capd.display(),
         coffre = %coffre.display(),
+        interrogation = ?hotes_d_interrogation.patterns(),
         "egress écoute ; rien ne sort sans un jeton que capd approuve"
     );
 
@@ -87,6 +106,8 @@ async fn main() -> anyhow::Result<()> {
         capd,
         coffre,
         detecteur: Detector::new(),
+        hotes_d_interrogation,
+        tls,
     });
 
     loop {
@@ -165,7 +186,8 @@ impl Sortie {
         //
         // L'hôte soumis au contrôle est `requete.host`, celui qu'a extrait l'analyseur — et c'est
         // exactement celui auquel le relais se connectera plus bas.
-        let modifiante = egress::policy::MUTATING_METHODS.contains(&requete.method.as_str());
+        let modifiante =
+            egress::is_mutating(&requete.method, &requete.host, &self.hotes_d_interrogation);
         let decision = self
             .demander_a_capd(&jeton, &requete.host, modifiante)
             .await;
@@ -252,7 +274,7 @@ impl Sortie {
             match self.substituer(&requete.host, &requete.headers).await {
                 Ok(entetes) => {
                     requete.headers = entetes;
-                    relayer_http(&requete, ecriture).await
+                    relayer_http(&requete, ecriture, &self.tls).await
                 }
                 Err(raison) => {
                     tracing::warn!(hote = %requete.host, %raison, "substitution refusée");
@@ -451,13 +473,39 @@ fn cible_relative(cible: &str) -> String {
     }
 }
 
-/// Relaie une requête HTTP en clair.
+/// Les racines TLS de la machine, lues une fois au démarrage.
+///
+/// Elles viennent du magasin système (`/etc/ssl/certs`, ou `SSL_CERT_FILE` s'il est défini),
+/// jamais d'une liste embarquée dans le programme : c'est l'administrateur de la machine qui
+/// décide à qui elle fait confiance, et c'est lui qui la met à jour.
+fn racines_de_confiance() -> anyhow::Result<Arc<rustls::ClientConfig>> {
+    let mut racines = rustls::RootCertStore::empty();
+    let natives = rustls_native_certs::load_native_certs();
+    let (ajoutees, ignorees) = racines.add_parsable_certificates(natives.certs);
+    for erreur in &natives.errors {
+        tracing::warn!(%erreur, "racine de confiance illisible");
+    }
+    if ajoutees == 0 {
+        tracing::warn!("aucune racine de confiance : aucun amont HTTPS ne pourra être joint");
+    } else {
+        tracing::info!(ajoutees, ignorees, "racines de confiance chargées");
+    }
+    Ok(Arc::new(
+        rustls::ClientConfig::builder()
+            .with_root_certificates(racines)
+            .with_no_client_auth(),
+    ))
+}
+
+/// Relaie une requête HTTP, en clair vers `http://`, sous TLS terminé ici vers `https://`.
 async fn relayer_http(
     requete: &egress::ParsedRequest,
     mut ecriture: tokio::net::unix::OwnedWriteHalf,
+    tls: &Arc<rustls::ClientConfig>,
 ) -> anyhow::Result<()> {
-    let port = port_de(&requete.target, 80);
-    let mut amont = match TcpStream::connect((requete.host.as_str(), port)).await {
+    let chiffre = requete.target.starts_with("https://");
+    let port = port_de(&requete.target, if chiffre { 443 } else { 80 });
+    let tcp = match TcpStream::connect((requete.host.as_str(), port)).await {
         Ok(flux) => flux,
         Err(erreur) => {
             ecriture
@@ -466,7 +514,39 @@ async fn relayer_http(
             return Ok(());
         }
     };
+    if chiffre {
+        let nom = match rustls_pki_types::ServerName::try_from(requete.host.clone()) {
+            Ok(nom) => nom,
+            Err(erreur) => {
+                ecriture
+                    .write_all(&reponse(502, "BadServerName", &erreur.to_string()))
+                    .await?;
+                return Ok(());
+            }
+        };
+        let connecteur = tokio_rustls::TlsConnector::from(Arc::clone(tls));
+        match connecteur.connect(nom, tcp).await {
+            Ok(amont) => transmettre(requete, amont, ecriture).await,
+            Err(erreur) => {
+                // Un certificat que la machine ne reconnaît pas ferme la sortie ; il ne la
+                // dégrade pas en clair.
+                ecriture
+                    .write_all(&reponse(502, "TlsFailed", &erreur.to_string()))
+                    .await?;
+                Ok(())
+            }
+        }
+    } else {
+        transmettre(requete, tcp, ecriture).await
+    }
+}
 
+/// Écrit la requête sur l'amont et recopie sa réponse octet pour octet.
+async fn transmettre<A: AsyncRead + AsyncWrite + Unpin>(
+    requete: &egress::ParsedRequest,
+    mut amont: A,
+    mut ecriture: tokio::net::unix::OwnedWriteHalf,
+) -> anyhow::Result<()> {
     let mut brut = format!(
         "{} {} HTTP/1.1\r\n",
         requete.method,

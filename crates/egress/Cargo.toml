@@ -21,12 +21,17 @@ ed25519-dalek = { workspace = true }
 base64 = { workspace = true }
 rand = { workspace = true }
 tracing = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+rustls-native-certs = { workspace = true }
+rustls-pki-types = { workspace = true }
 
 [dev-dependencies]
 prophet-daemon = { workspace = true, features = ["essai"] }
 tempfile = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
+rcgen = { workspace = true }
 
 [lints]
 workspace = true
