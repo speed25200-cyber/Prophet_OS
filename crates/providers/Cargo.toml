@@ -9,6 +9,8 @@ description = "Pilotes d'agents : clients officiels par abonnement, moteurs loca
 [dependencies]
 prophet-types = { workspace = true }
 capd = { workspace = true }
+sup = { workspace = true }
+base64 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -20,6 +22,7 @@ reqwest = { version = "0.13", default-features = false, features = ["blocking", 
 
 [dev-dependencies]
 tempfile = { workspace = true }
+ed25519-dalek = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 [lints]

@@ -47,6 +47,11 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 libc = "0.2"
 rustix = { version = "1.1.4", features = ["fs"] }
 tempfile = "3"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+rustls-native-certs = "0.8"
+rustls-pki-types = "1"
+rcgen = "0.13"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
