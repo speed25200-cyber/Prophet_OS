@@ -33,6 +33,26 @@ connecter à ce que dit un autre en-tête serait une passoire avec l'apparence d
 Marquer toute sortie comme ayant un effet externe ferait demander une décision humaine pour chaque
 lecture ; une approbation qu'on donne cent fois par jour n'est plus une approbation.
 
+## Les hôtes d'interrogation
+
+Une API de décision comme Jev répond à un `POST` sans rien retenir ni rien faire. Demander une
+décision humaine à chaque question rendrait une boucle de décision inutilisable. L'administrateur
+nomme donc ces hôtes dans `PROPHET_EGRESS_QUERY_HOSTS` (module NixOS `prophet.jev.queryHosts`),
+et pour eux, **pour `POST` seulement**, le proxy demande à capd une lecture (`external: false`)
+plutôt qu'une action externe. Tout le reste tient : jeton exigé, grant `net.egress` sur l'hôte,
+détection d'exfiltration sur le corps, journal. `PUT`, `PATCH` et `DELETE` restent des
+modifications partout. Le motif `*` est refusé et arrête le service : « tous les `POST` sont des
+lectures » ne doit pas pouvoir s'écrire par accident.
+
+## Le relais TLS
+
+Une requête en forme absolue `https://…` est relayée sous TLS **terminé par le proxy**, avec les
+racines de la machine (`/etc/ssl/certs`, ou `SSL_CERT_FILE`). C'est ce qui permet de substituer un
+secret dans une requête chiffrée : un tunnel `CONNECT` ne laisse rien voir ni rien remplacer
+(ADR-0007). Un certificat que la machine ne reconnaît pas ferme la sortie (`502 TlsFailed`) ;
+elle ne se dégrade jamais en clair. Le tunnel `CONNECT` reste disponible pour ce qui n'a pas
+besoin de secret.
+
 ## Quand `capd` n'est pas là
 
 **La sortie se ferme** : `503`, et rien ne part. Un broker injoignable est un « je ne sais pas », et
@@ -76,4 +96,5 @@ rend pas la main n'apprend rien et bloque le terminal.
 - Un corps plus grand que 8 Mio est refusé plutôt que relayé sans être regardé : un corps qu'on ne
   peut pas inspecter est exactement celui par lequel on exfiltrerait.
 - Dans un tunnel `CONNECT`, le contenu est chiffré de bout en bout : l'hôte est contrôlé et la
-  connexion journalisée, mais aucun secret ne peut y être substitué (ADR-0007).
+  connexion journalisée, mais aucun secret ne peut y être substitué (ADR-0007). Une requête
+  `https://` en forme absolue, elle, est relayée avec substitution.

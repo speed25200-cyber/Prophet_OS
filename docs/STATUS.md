@@ -333,6 +333,26 @@ complète, les clients authentifiés, l'application et l'undo, les autres famill
 la qualité graphique attendue et les mesures matérielles restent ouverts. Aucun critère
 complet de FRONTIER.md n'est coché.
 
+Jalon Jev du 17 septembre 2026, commits `65481d8` (providers), `ebaf48a` (egress), `5fc074b`
+(agentd), `76f092a` (CLI) et `f093c9a` (image), hors plan, décidé par l'[ADR 0025](adr/0025-jev-decideur-rapide.md) :
+le modèle de décision Jev (TypeSafe AI, ouvert le 15 septembre) route chaque mission vers le
+modèle génératif admissible qui lui convient et opère lui-même une page par son arbre SUP,
+en rendant la main au modèle génératif dès qu'il faut écrire. Sa clé reste dans le coffre,
+référencée par `prophet-secret:<nom>` et substituée par le proxy ; le proxy termine TLS vers
+l'amont et traite un `POST` vers un hôte d'interrogation déclaré comme une lecture. Jev est
+optionnel (`prophet.jev.enable`, `PROPHET_JEV_SECRET`) : sans lui, rien ne change.
+**Vérifications locales** : 26 tests unitaires `providers::jev`, 13 tests du daemon egress
+(dont amont TLS et hôtes d'interrogation), 3 tests agentd avec proxy simulé et **page réelle
+opérée sous Chromium sans aucun modèle génératif** (trois décisions, trois appels d'outil
+au journal, tokens imputés au budget) ; `cargo fmt`, `cargo clippy -D warnings`, construction
+des programmes et contrôles du dépôt réussis ; `cargo test --workspace` vert, sauf le test
+préexistant `un_fichier_de_configuration_ne_prouve_pas_une_connexion`, qui échoue avant comme
+après dans cet environnement où un client Claude Code connecté est installé. **Aucun appel
+à l'API réelle** : le protocole vient de la documentation et des clients ouverts, et le
+premier appel avec une clé reste à faire. Les outils `ui.*` ne sont pas encore offerts à
+l'opérateur, et la CI de cette révision reste à exécuter. Voir le
+[rapport](reports/jev-2026-09-17.md) et la [spécification](specs/jev-decisions.md).
+
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 
 Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'environnement de construction** ; le détail est dans `docs/reports/phase0.md` section 5.
@@ -428,6 +448,7 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 - [x] M8-T9 — Sélection de pilote (2026-09-12, 24b8338) — sélection expliquée, confidentialité locale respectée
 - [x] M8-T10 — CLI (2026-09-12, 24b8338) — `prophet provider ls|login`
 - [x] M8-T11 — Démo M8 (2026-09-12, 24b8338) — démonstration sur trois pilotes
+- [x] ADR 0025 — Décideur Jev (2026-09-17, 65481d8 · 5fc074b) — routage par appel et computer use par l'arbre, par le proxy, sans clé dans le chemin principal ; appel réel à l'API ouvert
 
 ### M9 — image bootable
 
