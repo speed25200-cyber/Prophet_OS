@@ -70,7 +70,7 @@ let
   ];
 in
 {
-  imports = [ ./local-engine.nix ];
+  imports = [ ./local-engine.nix ./jev.nix ];
 
   options.prophet = {
     enable = lib.mkEnableOption "les services de Prophet OS";
