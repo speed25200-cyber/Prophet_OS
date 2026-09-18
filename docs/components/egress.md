@@ -50,7 +50,9 @@ Une requête en forme absolue `https://…` est relayée sous TLS **terminé par
 racines de la machine (`/etc/ssl/certs`, ou `SSL_CERT_FILE`). C'est ce qui permet de substituer un
 secret dans une requête chiffrée : un tunnel `CONNECT` ne laisse rien voir ni rien remplacer
 (ADR-0007). Un certificat que la machine ne reconnaît pas ferme la sortie (`502 TlsFailed`) ;
-elle ne se dégrade jamais en clair. Le tunnel `CONNECT` reste disponible pour ce qui n'a pas
+elle ne se dégrade jamais en clair. Un amont qui n'accepte pas la connexion en quinze secondes
+ferme aussi la sortie (`502 Unreachable`), plutôt que de retenir l'appelant jusqu'au délai du
+noyau. Le tunnel `CONNECT` reste disponible pour ce qui n'a pas
 besoin de secret.
 
 ## Quand `capd` n'est pas là

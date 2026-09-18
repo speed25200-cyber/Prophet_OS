@@ -497,6 +497,23 @@ fn racines_de_confiance() -> anyhow::Result<Arc<rustls::ClientConfig>> {
     ))
 }
 
+/// Délai accordé à l'amont pour accepter la connexion. Sans lui, un hôte qui ne répond pas
+/// retiendrait l'appelant jusqu'au délai du noyau, plus de deux minutes : un proxy qui ne
+/// répond pas est pire qu'un proxy qui refuse.
+const DELAI_DE_CONNEXION: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Joint l'amont, ou dit pourquoi il ne l'a pas fait, dans un délai borné.
+async fn joindre_amont(hote: &str, port: u16) -> Result<TcpStream, String> {
+    match tokio::time::timeout(DELAI_DE_CONNEXION, TcpStream::connect((hote, port))).await {
+        Ok(Ok(flux)) => Ok(flux),
+        Ok(Err(erreur)) => Err(erreur.to_string()),
+        Err(_) => Err(format!(
+            "{hote}:{port} n'a pas accepté la connexion en {} s",
+            DELAI_DE_CONNEXION.as_secs()
+        )),
+    }
+}
+
 /// Relaie une requête HTTP, en clair vers `http://`, sous TLS terminé ici vers `https://`.
 async fn relayer_http(
     requete: &egress::ParsedRequest,
@@ -505,11 +522,11 @@ async fn relayer_http(
 ) -> anyhow::Result<()> {
     let chiffre = requete.target.starts_with("https://");
     let port = port_de(&requete.target, if chiffre { 443 } else { 80 });
-    let tcp = match TcpStream::connect((requete.host.as_str(), port)).await {
+    let tcp = match joindre_amont(&requete.host, port).await {
         Ok(flux) => flux,
         Err(erreur) => {
             ecriture
-                .write_all(&reponse(502, "Unreachable", &erreur.to_string()))
+                .write_all(&reponse(502, "Unreachable", &erreur))
                 .await?;
             return Ok(());
         }
@@ -578,11 +595,11 @@ async fn relayer_tunnel(
     mut ecriture: tokio::net::unix::OwnedWriteHalf,
 ) -> anyhow::Result<()> {
     let port = port_de(&requete.target, 443);
-    let amont = match TcpStream::connect((requete.host.as_str(), port)).await {
+    let amont = match joindre_amont(&requete.host, port).await {
         Ok(flux) => flux,
         Err(erreur) => {
             ecriture
-                .write_all(&reponse(502, "Unreachable", &erreur.to_string()))
+                .write_all(&reponse(502, "Unreachable", &erreur))
                 .await?;
             return Ok(());
         }
