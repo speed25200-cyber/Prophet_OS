@@ -20,6 +20,20 @@
 #   /etc/prophet/policies/           les politiques Cedar
 #   /var/lib/prophet/<daemon>/       l'état de chacun, en 0700
 #
+# ## Configurer un service
+#
+# Chaque unité lit `/etc/prophet/<daemon>.env` s'il existe (une variable par ligne). C'est là
+# que se règle ce que l'image règle par ses options NixOS. Pour le décideur Jev, par exemple :
+#
+#   echo 'PROPHET_JEV_SECRET=typesafe' | sudo tee /etc/prophet/agentd.env
+#   echo 'PROPHET_EGRESS_QUERY_HOSTS=api.typesafe.ai' | sudo tee /etc/prophet/egress.env
+#   sudo systemctl restart prophet-egress prophet-agentd
+#   prophet secret put typesafe --host api.typesafe.ai < /chemin/vers/la/cle
+#   prophet jev status
+#
+# La clé, elle, ne va jamais dans un fichier d'environnement : elle entre dans le coffre par
+# `prophet secret put`, et seul le proxy de sortie peut l'en faire sortir.
+#
 # ## Comment tout défaire
 #
 #   sudo ./tools/lancer-sur-l-hote.sh --retirer
@@ -173,6 +187,7 @@ RuntimeDirectory=prophet
 RuntimeDirectoryMode=0770
 RuntimeDirectoryPreserve=yes
 Environment=PATH=$CIBLE:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/etc/prophet/$nom.env
 
 NoNewPrivileges=yes
 ProtectSystem=strict

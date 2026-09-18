@@ -352,6 +352,15 @@ après dans cet environnement où un client Claude Code connecté est installé.
 premier appel avec une clé reste à faire. Les outils `ui.*` ne sont pas encore offerts à
 l'opérateur, et la CI de cette révision reste à exécuter. Voir le
 [rapport](reports/jev-2026-09-17.md) et la [spécification](specs/jev-decisions.md).
+**Suite du même soir** : une clé fournie pour le premier appel n'a pas pu servir, l'environnement
+de construction refusant `api.typesafe.ai` par sa politique réseau ; elle n'est écrite nulle
+part et doit être renouvelée, ayant transité par une conversation. L'essai a ajouté un test de
+**chaîne complète sans aucun faux** (capd, ledger, coffre, egress, agentd : refus du coffre
+sous un compte qui n'est pas `egress`, requête arrêtée, repli statique motivé en 0,3 s, secret
+absent du disque en clair), un délai de connexion de quinze secondes vers l'amont dans egress,
+et `EnvironmentFile=/etc/prophet/<daemon>.env` dans les unités de `tools/lancer-sur-l-hote.sh`
+avec la procédure Jev en tête du script. Le premier appel réel se fait sur un hôte où les
+daemons tournent sous leurs comptes, à la sortie libre vers `api.typesafe.ai`.
 
 Ce fichier est la source de vérité de l'avancement. L'agent constructeur prend la première tâche non cochée dont les dépendances sont cochées, et coche avec la date et le hash du commit.
 
