@@ -30,7 +30,12 @@ d'interface en cascade devant le modèle génératif, quand le jeton autorise `n
 `api.typesafe.ai` et que le manifeste n'est pas `local-only`. `PROPHET_JEV_MODEL` choisit le
 modèle. Le proxy de sortie doit déclarer l'hôte d'interrogation (`PROPHET_EGRESS_QUERY_HOSTS`).
 `cargo test -p agentd --test jev` exerce la chaîne avec un proxy simulé et, si un navigateur
-est présent, une page réelle opérée par Jev seul. Voir l'[ADR 0025](../../docs/adr/0025-jev-decideur-rapide.md).
+est présent, une page réelle opérée par Jev seul. Un test monte aussi toute la chaîne sans aucun
+faux — capd, ledger, coffre, proxy de sortie, agentd — et vérifie que, sous un compte qui n'est
+pas `egress`, le coffre refuse, le proxy arrête la requête et la route retombe en nommant la
+raison, sans que le secret n'apparaisse en clair sur disque. Le premier appel réel demande les
+comptes de service : `tools/lancer-sur-l-hote.sh` les crée et son en-tête explique comment
+activer Jev sur un hôte. Voir l'[ADR 0025](../../docs/adr/0025-jev-decideur-rapide.md).
 
 ## Préparer depuis l'interface
 

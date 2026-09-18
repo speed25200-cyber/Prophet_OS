@@ -15,6 +15,9 @@ use serde_json::{Value, json};
 
 const AGENTD: &str = env!("CARGO_BIN_EXE_prophet-agentd");
 
+/// Le proxy de sortie parle HTTP, pas JSON-RPC : on l'attend avec une requête, pas un `ping`.
+const SONDE: &[u8] = b"GET http://sonde.invalide/ HTTP/1.1\r\nHost: sonde.invalide\r\n\r\n";
+
 /// Une décision de Jev, calculée à partir de la demande reçue.
 type Decide = Arc<dyn Fn(&Value) -> Value + Send + Sync>;
 
@@ -606,4 +609,170 @@ async fn jev_opere_une_page_reelle_par_son_arbre_sans_aucun_modele_generatif() {
         !events.iter().any(|e| e.to_string().contains("Paris")),
         "le contenu ne va pas au journal"
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Toute la chaîne, sans aucun faux : capd, ledger, coffre, proxy de sortie et agentd.
+// ---------------------------------------------------------------------------------------------
+
+/// Toute la chaîne en processus, et l'API réelle au bout du proxy. Le seul endroit où la clé
+/// existe est le coffre : elle y entre par `vault.put`, comme par `prophet secret put`, bornée à
+/// l'hôte de Jev.
+struct RealChain {
+    dir: tempfile::TempDir,
+    _capd: Daemon,
+    _ledger: Daemon,
+    _vault: Daemon,
+    _egress: Daemon,
+    _agentd: Daemon,
+    agents: Client,
+}
+
+impl RealChain {
+    async fn new(cle: &str) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(home.join("docs")).unwrap();
+        let cap_socket = dir.path().join("cap.sock");
+        let ledger_socket = dir.path().join("ledger.sock");
+        let vault_socket = dir.path().join("vault.sock");
+        let egress_socket = dir.path().join("egress.sock");
+
+        let capd = Daemon::lancer_avec(
+            binaire_voisin("prophet-capd").to_str().unwrap(),
+            &cap_socket,
+            &dir.path().join("cap-state"),
+            &[("PROPHET_HOME", home.to_str().unwrap())],
+        );
+        drop(capd.joindre().await);
+        let ledger = Daemon::lancer(
+            binaire_voisin("prophet-ledger").to_str().unwrap(),
+            &ledger_socket,
+            &dir.path().join("ledger-state"),
+        );
+        drop(ledger.joindre().await);
+
+        let vault = Daemon::lancer(
+            binaire_voisin("prophet-vault").to_str().unwrap(),
+            &vault_socket,
+            &dir.path().join("vault-state"),
+        );
+        let coffre = vault.joindre().await;
+        coffre
+            .call(
+                "vault.put",
+                json!({
+                    "info": {
+                        "name": "typesafe",
+                        "domains": [providers::jev::HOST],
+                        "header": "Authorization",
+                        "description": "clé de l'API Jev"
+                    },
+                    "value": cle
+                }),
+            )
+            .await
+            .expect("le secret se dépose");
+        drop(coffre);
+
+        let egress = Daemon::lancer_avec(
+            binaire_voisin("prophet-egress").to_str().unwrap(),
+            &egress_socket,
+            &dir.path().join("egress-state"),
+            &[
+                ("PROPHET_CAPD_SOCKET", cap_socket.to_str().unwrap()),
+                ("PROPHET_VAULT_SOCKET", vault_socket.to_str().unwrap()),
+                ("PROPHET_EGRESS_QUERY_HOSTS", providers::jev::HOST),
+            ],
+        );
+        egress.attendre_reponse(SONDE).await;
+
+        let agentd = Daemon::lancer_avec(
+            AGENTD,
+            &dir.path().join("agents.sock"),
+            &dir.path().join("agent-state"),
+            &[
+                ("PROPHET_HOME", home.to_str().unwrap()),
+                ("PROPHET_CAPD_SOCKET", cap_socket.to_str().unwrap()),
+                ("PROPHET_LEDGER_SOCKET", ledger_socket.to_str().unwrap()),
+                ("PROPHET_EGRESS_SOCKET", egress_socket.to_str().unwrap()),
+                ("PROPHET_LOCAL_ENDPOINT", "http://127.0.0.1:1/v1"),
+                ("PROPHET_JEV_SECRET", "typesafe"),
+            ],
+        );
+        let agents = agentd.joindre().await;
+        Self {
+            dir,
+            _capd: capd,
+            _ledger: ledger,
+            _vault: vault,
+            _egress: egress,
+            _agentd: agentd,
+            agents,
+        }
+    }
+
+    /// Demande une route sans planifier, pour une intention qui a deux candidats admissibles.
+    async fn route(&self) -> Value {
+        let candidats = ["local:qwen3-1.7b", "local:qwen3-32b"];
+        self.agents
+            .call(
+                "task.route",
+                json!({
+                    "intent": "Refonds le module de paiement et migre ses tests d'intégration",
+                    "manifest": manifest(&candidats, "local-preferred", &[providers::jev::HOST]),
+                    "availability": {"local_models": ["qwen3-1.7b", "qwen3-32b"]}
+                }),
+            )
+            .await
+            .unwrap()
+    }
+
+    /// Vérifie que ces octets ne sont écrits en clair nulle part par les cinq services.
+    fn n_ecrit_nulle_part(&self, secret: &[u8]) {
+        fn parcourir(dir: &std::path::Path, secret: &[u8]) {
+            let Ok(entrees) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entree in entrees.flatten() {
+                let chemin = entree.path();
+                if chemin.is_dir() {
+                    parcourir(&chemin, secret);
+                } else if let Ok(octets) = std::fs::read(&chemin) {
+                    assert!(
+                        !octets
+                            .windows(secret.len())
+                            .any(|fenetre| fenetre == secret),
+                        "le secret apparaît en clair dans {}",
+                        chemin.display()
+                    );
+                }
+            }
+        }
+        parcourir(self.dir.path(), secret);
+    }
+}
+
+/// Le coffre ne révèle une valeur qu'au compte système `egress`, et ce test tourne sous un autre
+/// compte : le coffre refuse, le proxy arrête la requête avant qu'elle ne parte, et la route
+/// retombe sur la sélection statique en disant pourquoi — au lieu de partir avec la référence,
+/// ou de rester suspendue. C'est la chaîne de l'image, moins le compte ; avec lui, la même
+/// requête part vers l'API réelle (voir `tools/lancer-sur-l-hote.sh`).
+#[tokio::test]
+async fn sans_le_compte_du_proxy_la_route_retombe_proprement_sur_la_selection_statique() {
+    let secret = "valeur-que-personne-ici-ne-doit-lire";
+    let chain = RealChain::new(secret).await;
+    let route = tokio::time::timeout(std::time::Duration::from_secs(60), chain.route())
+        .await
+        .expect("une route retombe en un temps borné, elle ne reste pas suspendue");
+
+    assert_eq!(route["decider"], "static", "{route}");
+    assert_eq!(route["choice"]["reference"], "local:qwen3-1.7b", "{route}");
+    let raison = route["fallback_reason"].as_str().unwrap();
+    assert!(
+        raison.contains("SecretRefused"),
+        "le refus du coffre doit être nommé : {raison}"
+    );
+    assert!(route["probabilities"].is_null(), "{route}");
+    chain.n_ecrit_nulle_part(secret.as_bytes());
 }
