@@ -337,6 +337,15 @@ pub(crate) fn chrome(root: &mut egui::Ui, atelier: &mut Atelier, scene: &Scene, 
                         &mut atelier.mouvement_reduit,
                         RichText::new("Mouvement réduit").size(10.).color(DISCRET),
                     );
+                    // Le clavier suffit à tout : on le dit une fois, là où l'œil ne s'attarde pas.
+                    if !compact {
+                        ui.add_space(22.);
+                        hud::etiquette(
+                            ui,
+                            "CTRL K RECHERCHER · CTRL N OBJECTIF · CTRL 1–4 PAGES · ÉCHAP FERMER",
+                            EFFACE,
+                        );
+                    }
                 });
             });
         });
@@ -446,9 +455,11 @@ fn ligne(ui: &mut egui::Ui, c: &Courant, r: Rect, selected: bool, accent: &Accen
         &status.to_uppercase(),
         color,
     );
-    crate::instruments::monogramme(&p, pos2(r.right() - 58., r.center().y - 9.), &c.agent, 15.);
+    // Le nombre et son unité se lisent ensemble, loin du trait qui sépare les lignes et des
+    // crochets de la sélection.
+    crate::instruments::monogramme(&p, pos2(r.right() - 58., r.center().y - 6.), &c.agent, 15.);
     p.text(
-        pos2(r.right() - 12., r.center().y - 9.),
+        pos2(r.right() - 12., r.center().y - 6.),
         Align2::RIGHT_CENTER,
         format!("{}", c.etapes),
         FontId::new(15., hud::fin()),
@@ -456,7 +467,7 @@ fn ligne(ui: &mut egui::Ui, c: &Courant, r: Rect, selected: bool, accent: &Accen
     );
     hud::texte_espace(
         &p,
-        pos2(r.right() - 12., r.bottom() - 12.),
+        pos2(r.right() - 12., r.center().y + 11.),
         Align2::RIGHT_CENTER,
         "ÉTAPES",
         FontId::proportional(7.5),
@@ -523,19 +534,24 @@ pub(crate) fn liste(
 }
 
 /// L'espace vide : une seule plaque, à gauche, qui laisse le champ respirer à droite.
-pub(crate) fn empty(ui: &mut egui::Ui, compact: bool) {
+///
+/// L'objectif se tape ici même : Entrée, ou le bouton, ouvre sa préparation où l'humain
+/// choisit le contexte et le modèle, puis examine le plan. Taper ne soumet rien. Rend vrai
+/// quand l'humain demande à préparer.
+pub(crate) fn empty(ui: &mut egui::Ui, compact: bool, brouillon: &mut String) -> bool {
     let accent = Accent::de(ui.ctx());
+    let mut soumis = false;
     let width = if compact {
         ui.available_width()
     } else {
-        ui.available_width().min(640.)
+        ui.available_width().min(720.)
     };
     ui.allocate_ui_with_layout(
         vec2(width, ui.available_height()),
         egui::Layout::top_down(egui::Align::Min),
         |ui| {
-            hud::plaque(ui, &accent, if compact { 24 } else { 44 }, |ui| {
-                ui.set_width(width - if compact { 48. } else { 88. });
+            let plaque = hud::plaque(ui, &accent, if compact { 24 } else { 44 }, |ui| {
+                ui.set_width(width - if compact { 50. } else { 90. });
                 ui.horizontal(|ui| {
                     let (r, _) = ui.allocate_exact_size(vec2(26., 14.), egui::Sense::hover());
                     crate::glyphes::oeil(ui.painter(), r.center(), 22., accent.vif);
@@ -557,27 +573,70 @@ pub(crate) fn empty(ui: &mut egui::Ui, compact: bool) {
                     .size(15.)
                     .color(DISCRET),
                 );
-                ui.add_space(30.);
+                ui.add_space(24.);
+                let champ = hud::cadre_saisie(&accent)
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(brouillon)
+                                .id(egui::Id::new("intention-accueil"))
+                                .desired_width(f32::INFINITY)
+                                .frame(Frame::NONE)
+                                .font(FontId::proportional(16.))
+                                .hint_text("Décrivez le résultat attendu…")
+                                .char_limit(16_384),
+                        )
+                    })
+                    .inner;
+                let entree = champ.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                ui.add_space(10.);
+                ui.horizontal(|ui| {
+                    let pret = !brouillon.trim().is_empty();
+                    let bouton = ui
+                        .add_enabled_ui(pret, |ui| {
+                            hud::bouton(ui, "preparer-depuis-accueil", "Préparer  ↗", true, &accent)
+                        })
+                        .inner;
+                    if pret && (entree || bouton.clicked()) {
+                        soumis = true;
+                    }
+                    hud::etiquette(ui, "ENTRÉE POUR PRÉPARER · RIEN N'EST LANCÉ", EFFACE);
+                });
+                ui.add_space(26.);
                 let (line, _) = ui.allocate_exact_size(vec2(64., 1.), egui::Sense::hover());
                 ui.painter().rect_filled(line, 0, accent.vif);
-                ui.add_space(22.);
-                for (n, label, detail) in [
+                ui.add_space(18.);
+                let etapes = [
                     ("01", "Intention", "Ce que vous voulez obtenir, dans vos mots."),
                     ("02", "Plan à examiner", "Les accès et les limites, avant tout lancement."),
                     ("03", "Travail supervisé", "Vous lancez, vous voyez, vous pouvez arrêter."),
-                ] {
-                    ui.horizontal_top(|ui| {
-                        ui.label(RichText::new(n).family(hud::fin()).size(15.).color(accent.vif));
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(label).size(14.).color(ENCRE));
-                            ui.label(RichText::new(detail).size(12.).color(DISCRET));
-                        });
+                ];
+                let etape = |ui: &mut egui::Ui, (n, label, detail): (&str, &str, &str)| {
+                    ui.label(RichText::new(n).family(hud::fin()).size(15.).color(accent.vif));
+                    ui.label(RichText::new(label).size(14.).color(ENCRE));
+                    ui.label(RichText::new(detail).size(12.).color(DISCRET));
+                };
+                // Sur un grand écran, les trois étapes se lisent côte à côte, d'un seul regard.
+                if compact {
+                    for e in etapes {
+                        etape(ui, e);
+                        ui.add_space(6.);
+                    }
+                } else {
+                    // Les colonnes d'egui justifient le texte ; une description se lit en
+                    // drapeau, sans espaces étirés.
+                    ui.columns(3, |colonnes| {
+                        for (colonne, e) in colonnes.iter_mut().zip(etapes) {
+                            colonne.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                                etape(ui, e);
+                            });
+                        }
                     });
-                    ui.add_space(8.);
                 }
                 ui.add_space(18.);
                 hud::etiquette(ui, "AUCUNE MISSION REÇUE POUR LE MOMENT", EFFACE);
             });
+            hud::retenir(ui.ctx(), "espace-vide", plaque.response.rect);
         },
     );
+    soumis
 }

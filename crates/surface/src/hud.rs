@@ -132,6 +132,17 @@ pub(crate) fn plaque<R>(
     inner
 }
 
+/// Retient le rectangle d'une plaque nommée pour cette image : les parcours vérifient que les
+/// plaques tiennent dans leur colonne et dans l'écran. Rien n'est dessiné.
+pub(crate) fn retenir(ctx: &egui::Context, nom: &str, rect: egui::Rect) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(("plaque", nom)), rect));
+}
+
+/// Le rectangle retenu d'une plaque nommée, s'il a été dessiné.
+pub(crate) fn retenue(ctx: &egui::Context, nom: &str) -> Option<egui::Rect> {
+    ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new(("plaque", nom))))
+}
+
 /// Une lueur large et faible autour d'un point : ce qui est actif brille un peu au-delà de
 /// ses bords.
 pub(crate) fn lueur(p: &egui::Painter, center: Pos2, radius: f32, accent: &Accent) {

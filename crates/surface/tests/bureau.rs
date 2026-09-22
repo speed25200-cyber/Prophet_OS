@@ -895,3 +895,214 @@ fn l_atelier_est_une_nuit_dont_la_lumiere_prend_la_couleur_de_l_accent() {
     }
     assert_ne!(images[0], images[1], "changer d'accent change l'écran");
 }
+
+/// Deux missions reçues, pour que la liste et l'espace de mission se partagent la largeur.
+fn deux_missions() -> Scene {
+    use surface::scene::{Courant, Etat};
+    let mut scene = scene();
+    scene.courants = [("a", Etat::Court), ("b", Etat::Bloque)]
+        .into_iter()
+        .map(|(id, etat)| Courant {
+            tache: id.into(),
+            intitule: format!("Mission {id} dont le cadre doit tenir dans sa colonne"),
+            agent: "local:test".into(),
+            etat,
+            debit: 1.0,
+            budget_consomme: 0.4,
+            etapes: 12,
+            task_state: None,
+            task_revision: 0,
+        })
+        .collect();
+    scene
+}
+
+#[test]
+#[ignore = "needs_gpu"]
+fn l_espace_de_mission_tient_dans_la_colonne_des_commandes() {
+    let context = Contexte::hors_ecran().unwrap();
+    let scene = deux_missions();
+    for (width, height) in [(1280, 720), (1440, 1000), (1920, 1080)] {
+        let target = Cible::nouvelle(&context, width, height);
+        let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+        bureau.figer_transitions();
+        for focale in [false, true] {
+            if focale {
+                let events = click_widget(&bureau, "workspace-focus");
+                avec_scene(&mut bureau, &context, &target, &scene, events);
+            }
+            for _ in 0..3 {
+                avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+            }
+            let rect = |id: &str| {
+                bureau
+                    .ctx
+                    .read_response(egui::Id::new(id))
+                    .unwrap_or_else(|| panic!("{id} rendu à {width}×{height}"))
+                    .rect
+            };
+            // La plaque, telle qu'elle est finalement dessinée, s'arrête au bord de la colonne
+            // que les commandes de la page définissent : ni au-delà, ni en retrait.
+            let plaque = bureau
+                .plaque("espace-de-mission")
+                .expect("espace de mission dessiné");
+            let colonne = rect("preparer-mission").right();
+            assert!(
+                (plaque.right() - colonne).abs() <= 1.5,
+                "la plaque s'arrête à {:.1} px de la colonne à {width}×{height} (focale : {focale})",
+                plaque.right() - colonne
+            );
+            // Le bouton de l'inspecteur est aligné à droite dans la plaque, à sa marge.
+            assert!(rect("copier-reference").right() <= plaque.right() - 22.0);
+        }
+    }
+}
+
+fn touche(key: egui::Key, modifiers: Modifiers) -> Vec<Event> {
+    vec![Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    }]
+}
+
+#[test]
+#[ignore = "needs_gpu"]
+fn l_espace_vide_recoit_l_objectif_et_ouvre_sa_preparation() {
+    let context = Contexte::hors_ecran().unwrap();
+    for (width, height) in [(1440, 1000), (640, 900)] {
+        let target = Cible::nouvelle(&context, width, height);
+        let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+        bureau.figer_transitions();
+        for _ in 0..3 {
+            frame(&mut bureau, &context, &target, vec![]);
+        }
+        capture(&context, &target, "vide");
+        if width >= 1280 {
+            // Sur un grand écran, la plaque entière se lit sans défiler : la barre d'état
+            // (28 px) et la marge de la page (30 px) restent libres sous elle.
+            let plaque = bureau.plaque("espace-vide").expect("espace vide dessiné");
+            assert!(
+                plaque.bottom() <= height as f32 - 28.0 - 30.0 + 0.5,
+                "la plaque vide finit à {:.0} sur {height}",
+                plaque.bottom()
+            );
+        }
+        let events = click_widget(&bureau, "intention-accueil");
+        frame(&mut bureau, &context, &target, events);
+        assert!(
+            bureau
+                .ctx
+                .read_response(egui::Id::new("intention-accueil"))
+                .unwrap()
+                .has_focus(),
+            "le champ de l'accueil reçoit la saisie à {width}×{height}"
+        );
+        frame(
+            &mut bureau,
+            &context,
+            &target,
+            vec![Event::Text("Classer mes factures de septembre".into())],
+        );
+        // Rien n'est préparé en tapant : l'objectif reste un brouillon de l'accueil.
+        assert!(
+            bureau
+                .ctx
+                .read_response(egui::Id::new("mission-intent"))
+                .is_none()
+        );
+        frame(
+            &mut bureau,
+            &context,
+            &target,
+            touche(egui::Key::Enter, Modifiers::default()),
+        );
+        for _ in 0..2 {
+            frame(&mut bureau, &context, &target, vec![]);
+        }
+        assert!(
+            bureau
+                .ctx
+                .read_response(egui::Id::new("mission-intent"))
+                .is_some(),
+            "Entrée ouvre la préparation à {width}×{height}"
+        );
+        assert_eq!(
+            bureau.preparation().intent,
+            "Classer mes factures de septembre",
+            "la préparation reprend l'objectif saisi, sans rien soumettre"
+        );
+        assert!(bureau.preparation().attempted_id().is_none());
+    }
+}
+
+#[test]
+#[ignore = "needs_gpu"]
+fn le_clavier_ouvre_les_pages_et_la_preparation_sans_souris() {
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1280, 720);
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.figer_transitions();
+    for _ in 0..3 {
+        frame(&mut bureau, &context, &target, vec![]);
+    }
+    for (key, page) in [
+        (egui::Key::Num2, Page::Conversation),
+        (egui::Key::Num3, Page::Modeles),
+        (egui::Key::Num4, Page::Activite),
+        (egui::Key::Num1, Page::Accueil),
+    ] {
+        frame(&mut bureau, &context, &target, touche(key, Modifiers::CTRL));
+        assert_eq!(bureau.atelier.page, page, "Ctrl+{key:?}");
+    }
+    let preparation_ouverte = |bureau: &Bureau| {
+        bureau
+            .ctx
+            .read_response(egui::Id::new("mission-intent"))
+            .is_some()
+    };
+    frame(
+        &mut bureau,
+        &context,
+        &target,
+        touche(egui::Key::N, Modifiers::CTRL),
+    );
+    frame(&mut bureau, &context, &target, vec![]);
+    assert!(preparation_ouverte(&bureau), "Ctrl+N ouvre la préparation");
+    let champ = bureau
+        .ctx
+        .read_response(egui::Id::new("mission-intent"))
+        .unwrap();
+    assert!(champ.has_focus(), "l'objectif se tape aussitôt");
+    frame(
+        &mut bureau,
+        &context,
+        &target,
+        vec![Event::Text("Résumer le rapport".into())],
+    );
+    assert_eq!(bureau.preparation().intent, "Résumer le rapport");
+    // Échap quitte d'abord le champ, puis la préparation ; le brouillon est conservé.
+    frame(
+        &mut bureau,
+        &context,
+        &target,
+        touche(egui::Key::Escape, Modifiers::default()),
+    );
+    frame(&mut bureau, &context, &target, vec![]);
+    assert!(
+        preparation_ouverte(&bureau),
+        "le premier Échap rend le focus"
+    );
+    frame(
+        &mut bureau,
+        &context,
+        &target,
+        touche(egui::Key::Escape, Modifiers::default()),
+    );
+    frame(&mut bureau, &context, &target, vec![]);
+    assert!(!preparation_ouverte(&bureau), "le second Échap referme");
+    assert_eq!(bureau.preparation().intent, "Résumer le rapport");
+    assert_eq!(bureau.atelier.page, Page::Accueil);
+}

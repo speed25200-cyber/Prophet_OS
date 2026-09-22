@@ -22,6 +22,26 @@ pub struct Bureau {
     supervision: Supervision,
     /// La voix de l'OS, si Piper et une voix sont configurés : les fins de mission se disent.
     voix: Option<voice::Tools>,
+    /// Instant du dernier geste de l'humain (pointeur, clavier, défilement, toucher).
+    dernier_geste: Option<f64>,
+}
+
+/// Délai sans geste au-delà duquel le champ ralentit sa cadence.
+pub const ATTENTION: f64 = 30.0;
+
+/// La cadence du champ vivant : celle de l'écran tant que l'humain agit, la moitié sur un
+/// rastériseur logiciel ; au-delà de [`ATTENTION`] secondes sans geste, 20 images par seconde
+/// (10 en logiciel). Le mouvement suit l'horloge, pas le nombre d'images : l'état montré reste
+/// exact, seul son lissé baisse quand personne n'interagit.
+#[must_use]
+pub fn cadence_du_champ(logiciel: bool, sans_geste: f64) -> Duration {
+    let millis = match (logiciel, sans_geste > ATTENTION) {
+        (false, false) => 16,
+        (true, false) => 33,
+        (false, true) => 50,
+        (true, true) => 100,
+    };
+    Duration::from_millis(millis)
 }
 
 impl Bureau {
@@ -45,6 +65,7 @@ impl Bureau {
             voix: voice::Tools::from_env()
                 .ok()
                 .filter(voice::Tools::can_speak),
+            dernier_geste: None,
             champ: Champ::nouveau(&contexte.device, format, contexte.logiciel),
             logiciel: contexte.logiciel,
             rendu: egui_wgpu::Renderer::new(&contexte.device, format, Default::default()),
@@ -88,6 +109,14 @@ impl Bureau {
     /// Contrôleur de la mission sélectionnée, pour l'intégration native et ses essais.
     pub fn missions(&mut self) -> &mut crate::missions::Missions {
         &mut self.supervision.missions
+    }
+
+    /// Le rectangle d'une plaque à la dernière image, si elle était dessinée :
+    /// `espace-de-mission` ou `espace-vide`. Les parcours vérifient qu'elle tient dans sa
+    /// colonne et dans l'écran.
+    #[must_use]
+    pub fn plaque(&self, nom: &str) -> Option<egui::Rect> {
+        crate::hud::retenue(&self.ctx, nom)
     }
 
     /// Brouillon et catalogue de préparation de mission.
@@ -146,6 +175,22 @@ impl Bureau {
         let mut scene = scene.clone();
         self.supervision.missions.align_scene(&mut scene);
         let temps = input.time.unwrap_or(0.0);
+        let geste = input.events.iter().any(|e| {
+            matches!(
+                e,
+                egui::Event::PointerMoved(_)
+                    | egui::Event::PointerButton { .. }
+                    | egui::Event::MouseWheel { .. }
+                    | egui::Event::Key { .. }
+                    | egui::Event::Text(_)
+                    | egui::Event::Paste(_)
+                    | egui::Event::Touch { .. }
+            )
+        });
+        if geste || self.dernier_geste.is_none() {
+            self.dernier_geste = Some(temps);
+        }
+        let sans_geste = temps - self.dernier_geste.unwrap_or(temps);
         let mut decision = None;
         let atelier = &mut self.atelier;
         let supervision = &mut self.supervision;
@@ -163,9 +208,10 @@ impl Bureau {
             // Le champ avance à la cadence de l'écran tant qu'une mission progresse ; au repos,
             // la surveillance des services garde son propre rythme et rien ne se redessine.
             // Un rastériseur logiciel reçoit la moitié de cette cadence : le processeur
-            // dessine, et il a d'autres choses à faire pour les missions.
+            // dessine, et il a d'autres choses à faire pour les missions. Sans geste de
+            // l'humain depuis un moment, la cadence baisse encore (`cadence_du_champ`).
             self.ctx
-                .request_repaint_after(Duration::from_millis(if self.logiciel { 33 } else { 16 }));
+                .request_repaint_after(cadence_du_champ(self.logiciel, sans_geste));
         }
         (output, decision)
     }
@@ -259,4 +305,27 @@ fn polices() -> egui::FontDefinitions {
             .insert(egui::FontFamily::Name(name.into()), vec![name.into()]);
     }
     fonts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn le_champ_ralentit_quand_personne_n_agit_et_reprend_au_premier_geste() {
+        assert_eq!(cadence_du_champ(false, 0.0), Duration::from_millis(16));
+        assert_eq!(cadence_du_champ(true, 0.0), Duration::from_millis(33));
+        assert_eq!(
+            cadence_du_champ(false, ATTENTION),
+            Duration::from_millis(16)
+        );
+        assert_eq!(
+            cadence_du_champ(false, ATTENTION + 1.0),
+            Duration::from_millis(50)
+        );
+        assert_eq!(
+            cadence_du_champ(true, ATTENTION + 1.0),
+            Duration::from_millis(100)
+        );
+    }
 }

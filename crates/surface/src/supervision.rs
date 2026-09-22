@@ -26,6 +26,13 @@ pub(crate) struct Supervision {
     isolate: bool,
     query: String,
     apparence: Option<(String, bool)>,
+    /// L'objectif tapé dans l'espace vide, avant d'ouvrir sa préparation.
+    brouillon_accueil: String,
+    /// Le champ de l'objectif reçoit le clavier à la prochaine image.
+    focus_intent: bool,
+    /// Un widget avait le focus à l'image précédente : egui le retire dès qu'Échap arrive,
+    /// avant que les raccourcis ne soient lus.
+    focus_precedent: bool,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -254,6 +261,7 @@ impl Supervision {
             atelier.page = Page::Accueil;
         }
         let compact = root.available_width() < 900.0;
+        self.raccourcis(&ctx, atelier);
         if atelier.mouvement_reduit {
             ctx.all_styles_mut(|s| s.animation_time = 0.0);
         }
@@ -315,6 +323,9 @@ impl Supervision {
                     if crate::preparation_view::draw(ui, &mut self.preparation) {
                         self.composing = false;
                     }
+                    if std::mem::take(&mut self.focus_intent) {
+                        ui.memory_mut(|m| m.request_focus(egui::Id::new("mission-intent")));
+                    }
                 }),
                 Page::Accueil => largeur(ui, 1560.0, |ui| self.accueil(ui, scene)),
                 Page::Conversation => largeur(ui, 900.0, |ui| {
@@ -360,6 +371,7 @@ impl Supervision {
         if self.examen.is_some() {
             self.decision(&ctx, scene, reponse);
         }
+        self.focus_precedent = ctx.memory(|m| m.focused().is_some());
     }
 
     fn accueil(&mut self, ui: &mut egui::Ui, scene: &Scene) {
@@ -371,15 +383,11 @@ impl Supervision {
                 ui.label(titre("Vos missions", if compact { 28.0 } else { 34.0 }));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if action(ui, "preparer-mission", "Nouvel objectif  ↗").clicked() {
-                    self.composing = true;
-                    if self.preparation.attempted_id().is_some()
-                        && self.preparation.error().is_none()
-                        && !self.preparation.pending()
-                    {
-                        self.preparation.reset();
-                    }
-                    self.preparation.discover(ui.ctx());
+                if action(ui, "preparer-mission", "Nouvel objectif  ↗")
+                    .on_hover_text("Ctrl N")
+                    .clicked()
+                {
+                    self.ouvrir_la_preparation(ui.ctx());
                 }
             });
         });
@@ -493,9 +501,15 @@ impl Supervision {
         }
         if scene.courants.is_empty() {
             self.missions.select(None);
-            egui::ScrollArea::vertical()
+            let soumis = egui::ScrollArea::vertical()
                 .id_salt("supervision-vide")
-                .show(ui, |ui| crate::desk::empty(ui, compact));
+                .show(ui, |ui| {
+                    crate::desk::empty(ui, compact, &mut self.brouillon_accueil)
+                })
+                .inner;
+            if soumis {
+                self.preparer_depuis_l_accueil(ui.ctx());
+            }
             return;
         }
         let selection = self.selection.clone();
@@ -549,8 +563,14 @@ impl Supervision {
         } else {
             0.0
         };
+        // La rangée ajoute son espacement après la liste : il fait partie de l'intervalle.
         let gap = if show_list { 32.0 } else { 0.0 };
-        let detail_width = available - list_width - gap;
+        let spacing = if show_list {
+            ui.spacing().item_spacing.x
+        } else {
+            0.0
+        };
+        let detail_width = available - list_width - gap - spacing;
         let height = ui.available_height();
         ui.horizontal_top(|ui| {
             if show_list {
@@ -585,10 +605,13 @@ impl Supervision {
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             if let Some(c) = courant {
-                                plaque(ui, 22, |ui| {
-                                    ui.set_width(detail_width - 44.0);
+                                // Marges intérieures (2 × 22) et trait (2 × 1) de la plaque.
+                                let accent = Accent::de(ui.ctx());
+                                let espace = hud::plaque(ui, &accent, 22, |ui| {
+                                    ui.set_width(detail_width - 46.0);
                                     self.inspecteur(ui, c, scene);
                                 });
+                                hud::retenir(ui.ctx(), "espace-de-mission", espace.response.rect);
                             } else {
                                 ui.label("Aucune mission dans cette vue.");
                             }
@@ -596,6 +619,72 @@ impl Supervision {
                 },
             );
         });
+    }
+
+    /// Ouvre la préparation d'une mission : un brouillon réussi est remis à neuf, une
+    /// tentative en cours ou en erreur est gardée pour sa reprise. Rien n'est soumis ici.
+    fn ouvrir_la_preparation(&mut self, ctx: &egui::Context) {
+        self.composing = true;
+        self.focus_intent = true;
+        if self.preparation.attempted_id().is_some()
+            && self.preparation.error().is_none()
+            && !self.preparation.pending()
+        {
+            self.preparation.reset();
+        }
+        self.preparation.discover(ctx);
+    }
+
+    /// L'objectif tapé dans l'espace vide devient celui de la préparation, que l'humain relit
+    /// et complète avant de préparer le plan. Une tentative gardée pour sa reprise n'est pas
+    /// écrasée : le brouillon de l'accueil attend alors, intact.
+    fn preparer_depuis_l_accueil(&mut self, ctx: &egui::Context) {
+        if self.brouillon_accueil.trim().is_empty() {
+            return;
+        }
+        self.ouvrir_la_preparation(ctx);
+        if self.preparation.attempted_id().is_none() {
+            self.preparation.intent = std::mem::take(&mut self.brouillon_accueil)
+                .trim()
+                .to_owned();
+        }
+    }
+
+    /// Le clavier seul suffit : Ctrl+1 à 4 pour les pages, Ctrl+N pour un nouvel objectif,
+    /// Échap pour refermer l'examen ou la préparation. Échap ne ferme rien tant qu'un champ a
+    /// le focus : il lui rend d'abord la main. Refermer l'examen n'autorise ni ne refuse rien.
+    fn raccourcis(&mut self, ctx: &egui::Context, atelier: &mut Atelier) {
+        let pages = [
+            (egui::Key::Num1, Page::Accueil),
+            (egui::Key::Num2, Page::Conversation),
+            (egui::Key::Num3, Page::Modeles),
+            (egui::Key::Num4, Page::Activite),
+        ];
+        let saisie = self.focus_precedent || ctx.memory(|m| m.focused().is_some());
+        let (page, nouveau, echap) = ctx.input_mut(|i| {
+            (
+                pages
+                    .into_iter()
+                    .find(|(key, _)| i.consume_key(egui::Modifiers::CTRL, *key))
+                    .map(|(_, page)| page),
+                i.consume_key(egui::Modifiers::CTRL, egui::Key::N),
+                !saisie && i.key_pressed(egui::Key::Escape),
+            )
+        });
+        if let Some(page) = page {
+            atelier.page = page;
+        }
+        if nouveau {
+            atelier.page = Page::Accueil;
+            self.ouvrir_la_preparation(ctx);
+        }
+        if echap {
+            if self.examen.is_some() {
+                self.examen = None;
+            } else if self.composing && atelier.page == Page::Accueil {
+                self.composing = false;
+            }
+        }
     }
 
     fn liste(&mut self, ui: &mut egui::Ui, courants: &[&Courant], height: f32) {
@@ -636,8 +725,14 @@ impl Supervision {
         // Le cadran à droite, le titre à gauche : la mission se lit d'un seul regard.
         let cadran = if wide { 96.0 } else { 0.0 };
         ui.horizontal_top(|ui| {
+            // La colonne du titre laisse au cadran sa place et l'espacement qui l'en sépare.
+            let reserve = if wide {
+                cadran * 2.0 + 24.0 + ui.spacing().item_spacing.x
+            } else {
+                0.0
+            };
             ui.allocate_ui_with_layout(
-                vec2(ui.available_width() - cadran * 2.0 - 24.0, 0.0),
+                vec2(ui.available_width() - reserve, 0.0),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     ui.label(titre(&c.intitule, if wide { 34.0 } else { 26.0 }).line_height(Some(if wide { 40.0 } else { 31.0 })));
