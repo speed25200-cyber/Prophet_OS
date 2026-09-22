@@ -21,11 +21,11 @@ possède des contrôles de conflits et une reprise journalisée ; le créateur d
 [publie et annule](docs/reports/approbation-2026-09-13.md) ces versions depuis la CLI et
 l'atelier, par agentd. L'écriture sous l'identité humaine sur l'image installée et le
 confinement complet restent à intégrer.
-Le parcours du bureau réussit en VM. Sur disque installé, la CI vérifie le démarrage, l'intégrité,
-la session et les fichiers, puis échoue en relevant le processus bref de Claude Code sans réseau.
-Le parcours installé complet et la compatibilité stricte de ChatGPT restent à valider. Les critères
-de la version complète sont suivis dans
-[`docs/FRONTIER.md`](docs/FRONTIER.md).
+Le parcours du bureau réussit en VM. La CI de la branche de travail du 22 septembre (`d6e686f`)
+réussit l'installation sur disque et le démarrage du système installé en UEFI comme sans UEFI,
+les sept services sous systemd, la mission réelle Qwen3 sous NixOS et l'ouverture de ChatGPT
+sous NixOS et XWayland ; aucun PC réel n'a encore été essayé. Les critères de la version complète
+sont suivis dans [`docs/FRONTIER.md`](docs/FRONTIER.md).
 
 Le pilote local parle maintenant à un vrai serveur d'inférence. Une boucle avec Qwen3 sur CPU,
 appel d'outil et fichier vérifié, a été exercée ; le [rapport reproductible](docs/reports/local-inference-2026-09-12.md)
@@ -51,19 +51,29 @@ son arbre sémantique, en quelques centaines de millisecondes par décision, en 
 modèle génératif dès qu'il faut écrire. Sa clé reste dans le coffre, ses requêtes passent par le
 proxy de sortie, et il est optionnel : sans lui, tout fonctionne comme avant ([ADR 0042](docs/adr/0042-jev-decideur-rapide.md)).
 
-Le nouvel [atelier de supervision](docs/reports/atelier-2026-09-13.md) présente une galerie de
-missions et une Focale pour examiner le travail, avec recherche Ctrl+K et navigation compacte.
+L'atelier de supervision suit la [direction Réacteur](docs/reports/interface-reacteur-2026-09-13.md) :
+la nuit, un accent au choix, un champ dont les rubans avancent à la vitesse réelle des missions,
+et rien d'affiché qui ne vienne d'un service. Sa [seconde passe](docs/reports/reacteur-seconde-passe-2026-09-22.md)
+aligne les plaques au pixel, reçoit l'objectif dès l'écran vide, se pilote entièrement au clavier
+(Ctrl K, Ctrl N, Ctrl 1 à 4, Échap), dit le dernier geste de l'agent relu dans le journal, et
+ralentit son champ quand personne n'agit.
+
+Côté agents, une mission lit son propre état et son budget restant (`task.status`) et ses
+changements (`task.diff`) ; le catalogue des poids dit l'architecture, la quantification et la
+fenêtre de contexte de chaque modèle installé (`prophet model ls`) ; et un processus de la
+session humaine ne peut plus émettre de droit ni écrire au journal, qui reviennent aux
+services ([ADR 0044](docs/adr/0044-les-methodes-reservees-par-classe-de-pair.md)).
 
 Une [session humaine avec plusieurs applications](docs/reports/bureau-humain-2026-09-13.md) est
 intégrée dans la configuration d'image : connexion PAM, supervision, ChatGPT, Claude Code et Codex,
 terminal et fichiers. Le test du bureau vérifie aussi le verrouillage et la reconnexion.
-ChatGPT conserve un défaut de compatibilité bloquant ; ce bureau
-expérimental ne constitue pas encore une version entièrement fonctionnelle.
+Aucun compte ChatGPT, Claude ou Codex n'y a encore été connecté ; ce bureau ne constitue pas
+encore une version entièrement fonctionnelle.
 
-![Atelier natif — scène de démonstration explicitement identifiée](docs/images/atelier-galerie-1440.png)
+![Atelier Réacteur — scène de démonstration explicitement identifiée](docs/images/reacteur-galerie-1920.png)
 
-Les [instruments de l'atelier](docs/reports/instruments-2026-09-13.md) : anneaux de budget,
-monogrammes de pilote, bandes d'état et rail éclairé, rendus et vérifiés en rendu logiciel.
+Captures régénérées par `just captures`, en rendu logiciel ; la fluidité et la consommation sur
+une carte graphique réelle restent à mesurer avec `prophet-surface --mesure` et `--repos`.
 
 Captures, essais Wayland et limites : [rapport de l'espace natif](docs/reports/espace-natif-2026-09-12.md).
 
@@ -71,6 +81,7 @@ Captures, essais Wayland et limites : [rapport de l'espace natif](docs/reports/e
 prophet status          # ce que la machine sait faire, et ce qu'elle ne sait pas
 prophet provider ls     # pilotes disponibles et sessions d'abonnement
 prophet provider models # modèles du moteur local (port 8080 par défaut)
+prophet model ls        # poids installés : architecture, quantification, contexte
 prophet provider chat --model qwen3-0.6b "Bonjour /no_think"
 prophet task ls         # missions connues du service, y compris terminées
 prophet task show <id>  # plan, état et résultat conservés par agentd
@@ -126,4 +137,8 @@ Le script ne compte jamais un test ignoré comme réussi.
 | `memoryd` | mémoire cloisonnée par espace, épisodes dérivés du journal |
 | `app-editor` | application de référence publiant SUP nativement |
 | `shell`, `prophet-cli` | vues et binaire destinés à l'humain |
+| `surface` | atelier natif de supervision (Wayland, wgpu), direction Réacteur |
+| `pilotd`, `supd` | dans la session humaine : lanceur des clients officiels, accessibilité des applications |
+| `voice` | parole locale : transcription par whisper.cpp, voix par Piper |
+| `prophet-daemon` | ce que les daemons font de la même façon : socket, état, clés, classe des pairs |
 | `bench` | suite adversariale et mesure de coût |
