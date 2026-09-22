@@ -78,25 +78,36 @@ test-local-engine-vm:
 test-desktop:
     nix build .#checks.x86_64-linux.desktop-session --print-build-logs
 
-# Régénère les captures de l'atelier en rendu logiciel (llvmpipe suffit), dans docs/images.
-# Les captures de l'inspecteur relié aux services viennent des tests `surface --test missions`.
+# Le champ est complet pour montrer ce qu'une carte graphique trace ; les captures de
+# l'inspecteur relié aux services et des parcours du bureau viennent des tests `surface`.
+# Régénère les captures Réacteur de docs/images en rendu logiciel (llvmpipe suffit).
 captures:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo build -p surface --bin prophet-surface -p agentd -p capd -p ledger -p egress -p prophet-cli --bins
-    B=target/debug/prophet-surface
-    $B --capture docs/images/atelier-galerie-1440.png --demonstration --largeur 1440 --hauteur 1000 --mouvement-reduit
-    $B --capture docs/images/atelier-decision-1440.png --demonstration --decision --largeur 1440 --hauteur 1000 --mouvement-reduit
-    $B --capture docs/images/atelier-vide-1440.png --largeur 1440 --hauteur 1000 --mouvement-reduit --endpoint http://127.0.0.1:1/v1
-    $B --capture docs/images/atelier-compact-640.png --demonstration --largeur 640 --hauteur 900 --mouvement-reduit
-    $B --capture docs/images/atelier-modeles-1440.png --demonstration --page modeles --largeur 1440 --hauteur 1000 --mouvement-reduit
-    $B --capture docs/images/atelier-dialogue-1440.png --demonstration --page conversation --largeur 1440 --hauteur 1000 --mouvement-reduit
-    $B --capture docs/images/atelier-systeme-1440.png --demonstration --page activite --largeur 1440 --hauteur 1000 --mouvement-reduit
-    PROPHET_CAPTURE_DIR=docs/images cargo test -p surface --test bureau --test missions -- --include-ignored
-    mv docs/images/surface-atelier-focale-1440.png docs/images/atelier-focale-1440.png
-    mv docs/images/surface-atelier-recherche-1440.png docs/images/atelier-recherche-1440.png
-    rm -f docs/images/surface-atelier-mille-missions-1440.png
-    @echo "captures régénérées dans docs/images"
+    cargo build --release -p surface --bin prophet-surface
+    cargo build -p surface -p agentd -p capd -p ledger -p egress -p prophet-cli --bins
+    B="target/release/prophet-surface --champ-complet"
+    D=docs/images
+    $B --capture $D/reacteur-galerie-1920.png --demonstration
+    for a in or plasma jade nacre; do
+        $B --capture $D/reacteur-$a-1920.png --demonstration --accent $a
+    done
+    $B --capture $D/reacteur-vide-1440.png --largeur 1440 --hauteur 1000 --endpoint http://127.0.0.1:1/v1
+    $B --capture $D/reacteur-decision-1440.png --demonstration --decision --largeur 1440 --hauteur 1000
+    $B --capture $D/reacteur-examen-1440.png --demonstration --decision --examen --largeur 1440 --hauteur 1000
+    $B --capture $D/reacteur-compact-640.png --demonstration --largeur 640 --hauteur 900
+    $B --capture $D/reacteur-systeme-1440.png --demonstration --page activite --largeur 1440 --hauteur 1000
+    $B --capture $D/reacteur-dialogue-1440.png --demonstration --page conversation --largeur 1440 --hauteur 1000
+    $B --capture $D/reacteur-modeles-1440.png --demonstration --page modeles --largeur 1440 --hauteur 1000
+    T=$(mktemp -d)
+    PROPHET_CAPTURE_DIR=$T cargo test -p surface --test bureau --test missions -- --include-ignored
+    mv $T/surface-atelier-focale-1440.png $D/reacteur-focale-1440.png
+    mv $T/surface-atelier-recherche-1440.png $D/reacteur-recherche-1440.png
+    mv $T/surface-atelier-preparation-1280.png $D/reacteur-preparation-1280.png
+    cp $T/surface-mission-fichier-1440.png $D/reacteur-fichier-1440.png
+    mv $T/surface-mission-*.png $D/
+    rm -rf "$T"
+    echo "captures régénérées dans docs/images"
 
 # Démarre l'image dans QEMU.
 vm:

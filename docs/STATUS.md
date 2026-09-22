@@ -8,6 +8,10 @@
 > agentd ; l'écriture sous l'identité humaine sur l'image et le parcours installé
 > complet restent à établir. Voir le [dernier rapport de l'atelier](reports/atelier-2026-09-13.md)
 > et les exigences ouvertes, notamment la qualité graphique attendue et les sessions authentifiées.
+>
+> 22 septembre 2026 : la branche de travail réunit la ligne d'audit du 15 septembre et le
+> décideur Jev (ADR 0042), qui avaient divergé de `main` ; `just check` y est vert, et l'atelier
+> Réacteur reçoit sa seconde passe (ADR 0043). Voir la section du 22 septembre plus bas.
 
 Correctifs d'accès humain du 13 septembre, après `a6b831c` : la CLI consulte la liste,
 le détail et le diff d'agentd sans ouvrir ses captures privées. Deux régressions échouent
@@ -1450,6 +1454,38 @@ bouton de l'interface qui exige la branche par défaut, pas le déclenchement. J
 contraire pendant des heures, sur la foi d'un unique 404, et demandé trois fois à l'utilisateur une
 modification qui n'était pas nécessaire. L'essai a rendu `204 No Content`. Le serveur n'est plus
 inatteint : le run `34703605599` y a tourné, et le secret `VPS_PASSWORD` est posé.
+
+### 22 septembre 2026 : reprise, audit et seconde passe Réacteur
+
+L'humain a demandé de reprendre le projet et de tout auditer. Conteneur Ubuntu à 4 cœurs, sans
+Nix ni KVM ni carte graphique ; rendu par llvmpipe. Le [rapport](reports/reacteur-seconde-passe-2026-09-22.md)
+donne le détail.
+
+**Fini.**
+- Branches réunies (`d6e686f`) : avance rapide sur `codex/audit-wsl-20260913` (150 commits,
+  CI verte le 15), fusion de `claude/jev-prophet-os-integration-9viyyl` (Jev, 17-18 septembre),
+  reprise de `55491f0` ; ADR de Jev renuméroté 0042 (deux ADR 0025 existaient). Le test qui
+  opère une page réelle par Jev échouait sur l'arbre réuni : son faux proxy prenait pour des
+  décisions les pages que le navigateur piloté fait désormais passer par egress ; il les relaie.
+- `just check` ne pouvait réussir sans gitleaks : le repli relevait des fixtures d'essai. Elles
+  portent `gitleaks:allow`, que le repli respecte (`b32a5aa`).
+- Seconde passe Réacteur (`8d28a09`, ADR 0043) : plaque de mission alignée au pixel sur la
+  colonne des commandes (elle débordait de 10 à 22 px), objectif saisi dès l'écran vide,
+  Ctrl 1-4 / Ctrl N / Échap, cadence du champ réduite après 30 s sans geste (60 s de repos avec
+  trois missions actives : 118 % → 77 % d'un cœur sous llvmpipe). Trois parcours GPU nouveaux,
+  vus en échec avant correction. `just captures` produit les noms Réacteur ; captures régénérées.
+- `just check` : **828 réussis, 0 échec, 46 ignorés**, format, clippy, contrôles du dépôt et
+  secrets (repli). Parcours de la surface avec `--include-ignored` : 14 du bureau, 6 de rendu,
+  5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
+
+**Bloqué.** Rien n'est vérifiable ici sous Nix, en VM ou sur matériel : pas de KVM (M5-T4
+reste à écrire sur un coureur qui l'a), pas de carte graphique (fluidité et consommation
+réelles à mesurer avec `prophet-surface --mesure` et `--repos`). Le premier appel réel de Jev
+attend une clé. La CI de `d6e686f` tournait au moment d'écrire ces lignes.
+
+**Pour la session suivante.** Lire la CI de la branche ; mesurer la surface sur une carte
+graphique ; offrir aux missions locales l'introspection (`task.status` avec budget restant,
+`task.diff`), que `mcp-system` implémente mais qu'agentd n'enregistre pas.
 
 ### 15 septembre 2026, nuit et matin : l'ISO installée dans une machine virtuelle, deux fautes
 
