@@ -1232,7 +1232,8 @@ fn ouvrir_application(args: &[String]) -> bool {
 }
 
 fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
-    petit(ui, "CLIENTS OFFICIELS");
+    let accent = Accent::de(ui.ctx());
+    etiquette(ui, "CLIENTS OFFICIELS");
     ui.add_space(6.0);
     petit(
         ui,
@@ -1304,23 +1305,43 @@ fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
                     egui::Id::new(format!("client-open-{}", card.driver)),
                     egui::Sense::click(),
                 );
+                let nom = format!("Ouvrir {}", card.driver);
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &nom)
+                });
+                // Le vocabulaire des boutons du tableau de bord : coins francs, capitales
+                // espacées, fil d'accent qui s'avive au survol.
                 let p = ui.painter();
                 p.rect_filled(
                     button,
-                    8,
+                    3,
                     if response.hovered() {
                         VERRE_HAUT
                     } else {
                         CREUX
                     },
                 );
-                p.rect_stroke(button, 8, Stroke::new(1.0, TRAIT), egui::StrokeKind::Inside);
-                p.text(
+                p.rect_stroke(
+                    button,
+                    3,
+                    Stroke::new(
+                        1.0,
+                        if response.hovered() || response.has_focus() {
+                            accent.fil_vif
+                        } else {
+                            accent.fil
+                        },
+                    ),
+                    egui::StrokeKind::Inside,
+                );
+                hud::texte_espace(
+                    p,
                     button.center(),
                     Align2::CENTER_CENTER,
-                    "Ouvrir",
-                    FontId::proportional(12.0),
+                    "OUVRIR",
+                    FontId::proportional(10.5),
                     ENCRE,
+                    1.3,
                 );
                 if response
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
