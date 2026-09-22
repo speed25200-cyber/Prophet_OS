@@ -357,3 +357,162 @@ fn la_consigne_de_systeme_precede_l_intention_a_chaque_tour() {
         "user"
     );
 }
+
+/// Ce que llama-server rend quand l'historique ne tient pas dans sa fenêtre.
+fn debordement(n_prompt: u64, n_ctx: u64) -> Value {
+    json!({"error":{"code":400,
+        "message":"the request exceeds the available context size, try increasing it",
+        "type":"exceed_context_size_error","n_prompt_tokens":n_prompt,"n_ctx":n_ctx}})
+}
+
+/// Octets des résultats d'outils d'une requête envoyée au moteur.
+fn octets_des_resultats(requete: &Value) -> usize {
+    requete["body"]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["role"] == "tool")
+        .map(|m| m["content"].as_str().unwrap().len())
+        .sum()
+}
+
+#[test]
+fn un_historique_trop_long_pour_la_fenetre_du_moteur_est_resserre_puis_renvoye() {
+    use providers::local::{AsyncLocalModel, Condensation};
+    // Le dernier résultat lu est un fichier de 40 ko : aucune condensation des anciens ne
+    // suffit, c'est lui qu'il faut tronquer. Le moteur annonce une fenêtre de 4096 tokens.
+    let fichier = "ligne de journal assez ordinaire\n".repeat(1200);
+    let mut history = historique("bref");
+    history.push(
+        json!({"role":"assistant","tool_call":{"tool":"fs.read","arguments":{"path":"gros"}}}),
+    );
+    history.push(json!({"role":"tool","ok":true,"result":{"content":fichier}}));
+    let (url, server) = server(vec![
+        (400, debordement(12_400, 4096)),
+        (
+            200,
+            answer(
+                json!({"content":"Le journal commence par des lignes ordinaires."}),
+                "stop",
+            ),
+        ),
+        (
+            200,
+            answer(json!({"content":"Toujours ordinaire."}), "stop"),
+        ),
+    ]);
+    let model = AsyncLocalModel::new(&url, "m", Vec::new(), Duration::from_secs(5), 512)
+        .unwrap()
+        .with_condensation(Condensation::default());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let reply = runtime.block_on(model.next_turn(&history)).unwrap();
+    assert!(
+        matches!(reply.turn, Ok(ModelTurn::Final { .. })),
+        "{:?}",
+        reply.turn
+    );
+    // Au tour suivant, la fenêtre apprise sert d'emblée : pas de nouveau refus.
+    history.push(
+        json!({"role":"assistant","content":"Le journal commence par des lignes ordinaires."}),
+    );
+    history.push(json!({"role":"user","content":"Et ensuite ?"}));
+    let reply = runtime.block_on(model.next_turn(&history)).unwrap();
+    assert!(
+        matches!(reply.turn, Ok(ModelTurn::Final { .. })),
+        "{:?}",
+        reply.turn
+    );
+
+    let requetes = server.join().unwrap();
+    assert_eq!(requetes.len(), 3);
+    let (premiere, deuxieme, troisieme) = (&requetes[0], &requetes[1], &requetes[2]);
+    assert!(octets_des_resultats(premiere) > 40_000);
+    // 12 400 tokens pour 4096 : il faut retirer plus des deux tiers ; ce qui repart tient dans
+    // la fenêtre avec la place de la réponse, au rapport octets par token observé.
+    let par_token = premiere["body"]["messages"].to_string().len() as f64 / 12_400.0;
+    for requete in [deuxieme, troisieme] {
+        let envoye = requete["body"]["messages"].to_string().len() as f64;
+        assert!(
+            envoye / par_token < f64::from(4096 - 512),
+            "{envoye} octets"
+        );
+    }
+    // Le dernier résultat garde son début et dit au modèle ce qui s'est passé.
+    let messages = deuxieme["body"]["messages"].as_array().unwrap();
+    let dernier = messages.iter().rev().find(|m| m["role"] == "tool").unwrap();
+    let dernier = dernier["content"].as_str().unwrap();
+    assert!(dernier.contains("tronqué"), "{dernier}");
+    assert!(dernier.contains("fenêtre de contexte"), "{dernier}");
+    assert!(
+        dernier.contains("ligne de journal assez ordinaire"),
+        "{dernier}"
+    );
+    // L'intention, elle, n'est jamais touchée.
+    assert_eq!(messages[0]["content"], "Objectif");
+}
+
+#[test]
+fn un_historique_qui_ne_tient_jamais_rend_une_erreur_qui_le_dit() {
+    use providers::local::AsyncLocalModel;
+    // Une intention démesurée ne se tronque pas : rien ne peut être resserré, le tour n'est
+    // pas renvoyé pour rien, et l'erreur donne les nombres, jamais le contenu.
+    let intention = format!("secret-prive {}", "mot ".repeat(20_000));
+    let (url, server) = server(vec![(400, debordement(20_010, 4096))]);
+    let model = AsyncLocalModel::new(&url, "m", Vec::new(), Duration::from_secs(5), 512).unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let error = runtime
+        .block_on(model.next_turn(&[json!({"role":"user","content":intention})]))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("fenêtre de contexte"), "{error}");
+    assert!(error.contains("4096"), "{error}");
+    assert!(!error.contains("secret-prive"), "{error}");
+    assert_eq!(server.join().unwrap().len(), 1);
+}
+
+#[test]
+fn une_longue_mission_garde_la_place_du_dernier_resultat() {
+    use providers::local::{fit, tool_bytes};
+    // Quarante lectures d'un kilo-octet puis une dernière de 8 ko : les résumés des anciennes
+    // pèsent eux-mêmes trop ; ils se réduisent à leur issue, du plus ancien au plus récent,
+    // jusqu'à laisser au dernier résultat la place de son début.
+    let mut messages = vec![json!({"role":"user","content":"Objectif"})];
+    for i in 0..40 {
+        messages.push(json!({"role":"assistant","content":null,"tool_calls":[{"id":format!("c{i}"),"type":"function","function":{"name":"fs.read","arguments":"{}"}}]}));
+        messages.push(json!({"role":"tool","tool_call_id":format!("c{i}"),"content":json!({"ok":i != 3,"result":"a".repeat(1100)}).to_string()}));
+    }
+    messages.push(json!({"role":"tool","tool_call_id":"dernier","content":"é".repeat(4000)}));
+    let avant = tool_bytes(&messages);
+    let mut resserre = messages.clone();
+    assert!(fit(&mut resserre, 4096), "{}", tool_bytes(&resserre));
+    assert!(tool_bytes(&resserre) <= 4096);
+    assert!(avant > 40_000);
+    // Aucun message n'est retiré, l'intention ne change pas, les issues restent lisibles.
+    assert_eq!(resserre.len(), messages.len());
+    assert_eq!(resserre[0], messages[0]);
+    let ancien: Value = serde_json::from_str(resserre[8]["content"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        ancien["ok"], false,
+        "l'échec du quatrième appel se lit encore"
+    );
+    assert_eq!(ancien["condensed"], true);
+    let dernier = resserre.last().unwrap()["content"].as_str().unwrap();
+    assert!(
+        dernier.contains("tronqué") && dernier.contains("éé"),
+        "{dernier}"
+    );
+    assert!(dernier.len() >= 512);
+    // Déterministe, et sans effet sur ce qui tient déjà.
+    let mut encore = messages.clone();
+    assert!(fit(&mut encore, 4096));
+    assert_eq!(encore, resserre);
+    let mut deja = resserre.clone();
+    assert!(fit(&mut deja, 4096));
+    assert_eq!(deja, resserre);
+}

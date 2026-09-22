@@ -338,6 +338,8 @@ pub struct AsyncLocalModel {
     system: Option<String>,
     /// Condensation des anciens résultats d'outils avant envoi, si demandée.
     condensation: Option<Condensation>,
+    /// Fenêtre de contexte du moteur, apprise de son premier refus.
+    window: std::sync::Mutex<Option<Window>>,
 }
 
 /// Comment condenser l'historique envoyé au moteur : les résultats d'outils plus anciens que
@@ -407,6 +409,171 @@ pub fn condense(messages: &mut [Value], policy: Condensation) -> usize {
     saved
 }
 
+/// Taille laissée au moins au dernier résultat d'outil quand il faut le tronquer.
+const MIN_ROOM: usize = 512;
+/// Marge sur l'estimation des octets à retirer : les tokens d'un historique ne se comptent pas
+/// sans le tokeniseur du modèle, seulement au rapport que le moteur a laissé voir.
+pub(crate) const SAFETY: f64 = 1.3;
+/// Envois d'un même tour permis quand le moteur refuse un historique trop long.
+pub(crate) const MAX_FIT_ATTEMPTS: u32 = 3;
+/// Plafond d'un corps d'erreur lu pour y chercher le refus de fenêtre.
+pub(crate) const MAX_ERROR_BYTES: usize = 64 * 1024;
+
+fn tool_indexes(messages: &[Value]) -> Vec<usize> {
+    messages
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m["role"] == "tool")
+        .map(|(i, _)| i)
+        .collect()
+}
+
+fn content_len(message: &Value) -> usize {
+    message["content"].as_str().map_or(0, str::len)
+}
+
+/// Octets des résultats d'outils d'une liste de messages.
+#[must_use]
+pub fn tool_bytes(messages: &[Value]) -> usize {
+    tool_indexes(messages)
+        .into_iter()
+        .map(|i| content_len(&messages[i]))
+        .sum()
+}
+
+/// Ramène les résultats d'outils d'une liste de messages sous `budget` octets au total et rend
+/// vrai s'ils y tiennent.
+///
+/// Dans l'ordre : les anciens résultats sont condensés comme par [`condense`], puis réduits à
+/// leur taille et leur issue, du plus ancien au plus récent, tant qu'ils ne laissent pas
+/// [`MIN_ROOM`] octets au dernier ; le dernier, enfin, garde son début et dit au modèle qu'il a
+/// été tronqué et comment en lire moins. L'intention, la consigne et les appels ne changent pas.
+#[must_use]
+pub fn fit(messages: &mut [Value], budget: usize) -> bool {
+    if tool_bytes(messages) <= budget {
+        return true;
+    }
+    let _ = condense(
+        messages,
+        Condensation {
+            keep_last: 1,
+            max_bytes: MIN_ROOM,
+        },
+    );
+    let indexes = tool_indexes(messages);
+    let Some((&last, old)) = indexes.split_last() else {
+        return tool_bytes(messages) <= budget;
+    };
+    let mut others: usize = old.iter().map(|&i| content_len(&messages[i])).sum();
+    for &index in old {
+        if budget.saturating_sub(others) >= MIN_ROOM {
+            break;
+        }
+        let before = content_len(&messages[index]);
+        bare(&mut messages[index]);
+        others = others - before + content_len(&messages[index]);
+    }
+    truncate(
+        &mut messages[last],
+        budget.saturating_sub(others).max(MIN_ROOM),
+    );
+    tool_bytes(messages) <= budget
+}
+
+/// Réduit un ancien résultat à son issue et à sa taille d'origine, s'il y gagne.
+fn bare(message: &mut Value) {
+    let Some(content) = message["content"].as_str() else {
+        return;
+    };
+    let parsed = serde_json::from_str::<Value>(content).ok();
+    let ok = parsed
+        .as_ref()
+        .and_then(|v| v["ok"].as_bool())
+        .unwrap_or(true);
+    let bytes = parsed
+        .as_ref()
+        .filter(|v| v["condensed"] == true)
+        .and_then(|v| v["bytes"].as_u64())
+        .unwrap_or(content.len() as u64);
+    let bare = json!({"ok": ok, "condensed": true, "bytes": bytes}).to_string();
+    if bare.len() < content.len() {
+        message["content"] = Value::String(bare);
+    }
+}
+
+/// Garde le début d'un résultat dans `room` octets, avis compris.
+fn truncate(message: &mut Value, room: usize) {
+    let Some(content) = message["content"].as_str() else {
+        return;
+    };
+    if content.len() <= room {
+        return;
+    }
+    let total = content.len();
+    let digest = blake3::hash(content.as_bytes()).to_hex();
+    let notice = |shown: usize| {
+        format!(
+            "[Prophet OS : résultat tronqué pour tenir dans la fenêtre de contexte du moteur ; \
+             {shown} octets sur {total}, empreinte blake3:{digest}. Ne le relisez pas en entier : \
+             demandez-en moins, avec max_bytes ou une cible plus précise.]\n"
+        )
+    };
+    let mut shown = room.saturating_sub(notice(room).len()).min(total);
+    while !content.is_char_boundary(shown) {
+        shown -= 1;
+    }
+    let text = format!("{}{}", notice(shown), &content[..shown]);
+    message["content"] = Value::String(text);
+}
+
+/// Fenêtre de contexte d'un moteur : sa taille en tokens et le rapport octets par token observé
+/// sur l'historique qu'il a refusé.
+#[derive(Debug, Clone, Copy)]
+struct Window {
+    n_ctx: u64,
+    bytes_per_token: f64,
+}
+
+/// Refus d'un historique plus long que la fenêtre du moteur, avec ses nombres s'il les donne.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Overflow {
+    pub(crate) n_prompt: Option<u64>,
+    pub(crate) n_ctx: Option<u64>,
+}
+
+impl Overflow {
+    /// Lit le refus de llama-server (`exceed_context_size_error`) ; n'en garde que les nombres.
+    pub(crate) fn parse(body: &[u8]) -> Option<Self> {
+        let body: Value = serde_json::from_slice(body).ok()?;
+        let error = &body["error"];
+        let message = error["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        (error["type"] == "exceed_context_size_error" || message.contains("context size")).then(
+            || Self {
+                n_prompt: error["n_prompt_tokens"].as_u64(),
+                n_ctx: error["n_ctx"].as_u64(),
+            },
+        )
+    }
+
+    pub(crate) fn error(self) -> DriverError {
+        DriverError::Io(match (self.n_prompt, self.n_ctx) {
+            (Some(prompt), Some(ctx)) => format!(
+                "l'historique dépasse la fenêtre de contexte du moteur local ({prompt} tokens \
+                 pour {ctx}), même resserré"
+            ),
+            _ => "l'historique dépasse la fenêtre de contexte du moteur local, même resserré"
+                .to_owned(),
+        })
+    }
+}
+
+pub(crate) fn serialized_len(messages: &[Value]) -> usize {
+    serde_json::to_string(messages).map_or(0, |s| s.len())
+}
+
 /// Réponse dont les compteurs restent exploitables même si le tour est invalide.
 #[derive(Debug)]
 pub struct LocalReply {
@@ -464,6 +631,7 @@ impl AsyncLocalModel {
             max_tokens,
             system: None,
             condensation: None,
+            window: std::sync::Mutex::new(None),
         })
     }
 
@@ -499,10 +667,79 @@ impl AsyncLocalModel {
 
     /// Produit un tour ; son futur peut être abandonné pour interrompre l'inférence HTTP.
     ///
+    /// Si le moteur refuse l'historique parce qu'il dépasse sa fenêtre de contexte, les
+    /// résultats d'outils sont resserrés à la mesure qu'il donne et le tour renvoyé, jusqu'à
+    /// [`MAX_FIT_ATTEMPTS`] envois ; la fenêtre apprise sert ensuite d'emblée aux tours suivants.
+    /// L'historique de la boucle ne change pas : seul l'envoi est allégé.
+    ///
     /// # Errors
-    /// Moteur indisponible, réponse trop grande, incohérente ou incomplète.
+    /// Moteur indisponible, réponse trop grande, incohérente ou incomplète, historique qui ne
+    /// tient pas dans la fenêtre même resserré.
     pub async fn next_turn(&self, history: &[Value]) -> Result<LocalReply, DriverError> {
-        let mut body = json!({"model":self.model,"messages":self.outgoing(history)?,"stream":false,"max_tokens":self.max_tokens,"temperature":MISSION_TEMPERATURE});
+        let mut messages = self.outgoing(history)?;
+        self.fit_to_window(&mut messages, None);
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            let overflow = match self.send(&messages).await? {
+                Ok(reply) => return Ok(reply),
+                Err(overflow) => overflow,
+            };
+            let before = tool_bytes(&messages);
+            self.learn(&messages, overflow);
+            self.fit_to_window(&mut messages, Some(overflow));
+            if attempts >= MAX_FIT_ATTEMPTS || tool_bytes(&messages) >= before {
+                return Err(overflow.error());
+            }
+        }
+    }
+
+    /// Retient la fenêtre qu'un refus révèle, et le rapport octets par token de ce qui est parti.
+    fn learn(&self, messages: &[Value], overflow: Overflow) {
+        let (Some(n_prompt), Some(n_ctx)) = (overflow.n_prompt, overflow.n_ctx) else {
+            return;
+        };
+        if n_prompt == 0 || n_ctx == 0 {
+            return;
+        }
+        let window = Window {
+            n_ctx,
+            bytes_per_token: (serialized_len(messages) as f64 / n_prompt as f64).max(0.5),
+        };
+        if let Ok(mut slot) = self.window.lock() {
+            *slot = Some(window);
+        }
+    }
+
+    /// Resserre les résultats d'outils pour que l'historique tienne dans la fenêtre connue, en
+    /// laissant la place de la réponse ; sans fenêtre connue, un refus en retire la moitié.
+    fn fit_to_window(&self, messages: &mut [Value], overflow: Option<Overflow>) {
+        let window = self.window.lock().ok().and_then(|w| *w);
+        let results = tool_bytes(messages);
+        let budget = match (window, overflow) {
+            (Some(window), _) => {
+                let estimate = overflow.and_then(|o| o.n_prompt).map_or_else(
+                    || serialized_len(messages) as f64 / window.bytes_per_token,
+                    |n| n as f64,
+                );
+                let reserve = u64::from(self.max_tokens).min(window.n_ctx / 4);
+                let target = window.n_ctx.saturating_sub(reserve) as f64;
+                if estimate <= target {
+                    return;
+                }
+                let cut = ((estimate - target) * window.bytes_per_token * SAFETY).ceil();
+                // Borné par la taille des résultats : la conversion ne peut déborder.
+                results.saturating_sub(cut.min(results as f64) as usize)
+            }
+            (None, Some(_)) => results / 2,
+            (None, None) => return,
+        };
+        let _ = fit(messages, budget);
+    }
+
+    /// Un envoi : la réponse, le refus de fenêtre, ou l'erreur.
+    async fn send(&self, messages: &[Value]) -> Result<Result<LocalReply, Overflow>, DriverError> {
+        let mut body = json!({"model":self.model,"messages":messages,"stream":false,"max_tokens":self.max_tokens,"temperature":MISSION_TEMPERATURE});
         if !self.tools.is_empty() {
             body["tools"] = json!(
                 self.tools
@@ -524,26 +761,42 @@ impl AsyncLocalModel {
             .send()
             .await
             .map_err(transport)?;
-        if !response.status().is_success() {
+        let status = response.status();
+        if !status.is_success() {
+            // Seul le refus de fenêtre est lu, et seulement ses nombres : le corps d'une erreur
+            // peut reprendre l'historique, qui ne doit pas ressortir dans un message.
+            if status == reqwest::StatusCode::BAD_REQUEST
+                && let Ok(bytes) = read_body(&mut response, MAX_ERROR_BYTES).await
+                && let Some(overflow) = Overflow::parse(&bytes)
+            {
+                return Ok(Err(overflow));
+            }
             return Err(DriverError::Io(format!(
-                "le moteur local répond HTTP {}",
-                response.status()
+                "le moteur local répond HTTP {status}"
             )));
         }
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(transport)? {
-            if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES as usize {
-                return Err(invalid("réponse du moteur trop volumineuse"));
-            }
-            bytes.extend_from_slice(&chunk);
-        }
+        let bytes = read_body(&mut response, MAX_RESPONSE_BYTES as usize).await?;
         let body = serde_json::from_slice(&bytes)
             .map_err(|_| invalid("le moteur n'a pas rendu de JSON valide"))?;
-        Ok(LocalReply {
+        Ok(Ok(LocalReply {
             usage: response_usage(&body)?,
             turn: parse_turn(&body, &self.tools).map(|(turn, _)| turn),
-        })
+        }))
     }
+}
+
+pub(crate) async fn read_body(
+    response: &mut reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, DriverError> {
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(transport)? {
+        if bytes.len().saturating_add(chunk.len()) > limit {
+            return Err(invalid("réponse du moteur trop volumineuse"));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
 }
 
 fn invalid(message: &str) -> DriverError {

@@ -133,6 +133,19 @@ in pkgs.testers.runNixOSTest {
         persisted = json.loads(machine.succeed(f"runuser -u pilot -- python3 /etc/test-mission.py {ident}"))
         assert persisted == {key:proof[key] for key in ['result','review']}, persisted
         machine.succeed(f"python3 /etc/test-mission.py deny {ident}")
+    with subtest("le moteur refuse un historique plus long que sa fenêtre et en donne la mesure"):
+        # Le pilote local lit ce refus pour resserrer les résultats d'outils et renvoyer le tour
+        # (ADR 0034, complément du 22 septembre) : sa forme est vérifiée sur le moteur épinglé.
+        # Le refus précède toute évaluation : l'essai ne coûte que la tokenisation.
+        machine.succeed("python3 -c \"import json; print(json.dumps({'model':'qwen3-1.7b','messages':[{'role':'user','content':'mot '*12000}],'max_tokens':8}))\" > /tmp/trop-long.json")
+        status = machine.succeed("curl -s -o /tmp/refus.json -w '%{http_code}' -H 'Content-Type: application/json' --data @/tmp/trop-long.json http://127.0.0.1:8080/v1/chat/completions").strip()
+        refus = json.loads(machine.succeed("cat /tmp/refus.json"))
+        print(refus)
+        assert status == "400", (status, refus)
+        assert refus["error"]["type"] == "exceed_context_size_error", refus
+        assert refus["error"]["n_ctx"] == 4096, refus
+        assert refus["error"]["n_prompt_tokens"] > 4096, refus
+        machine.succeed("curl -fsS http://127.0.0.1:8080/health")
     with subtest("un contexte web du catalogue ouvre une page réelle par le navigateur piloté"):
         # Un témoin HTTP sur la boucle locale de la machine : la mission doit l'atteindre par le
         # navigateur de agentd, donc par le relais, egress et capd, sans autre route.
