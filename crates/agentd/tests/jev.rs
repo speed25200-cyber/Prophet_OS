@@ -469,30 +469,36 @@ async fn site() -> u16 {
     use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
+    // Une tâche par connexion : une connexion ouverte d'avance sans requête ne fait pas
+    // attendre la navigation.
     tokio::spawn(async move {
         loop {
             let Ok((stream, _)) = listener.accept().await else {
                 return;
             };
-            let mut reader = BufReader::new(stream);
-            let mut first = String::new();
-            let _ = reader.read_line(&mut first).await;
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.unwrap_or(0) == 0 || line == "\r\n" {
-                    break;
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stream);
+                let mut first = String::new();
+                if reader.read_line(&mut first).await.unwrap_or(0) == 0 {
+                    return;
                 }
-            }
-            let body = if first.contains("/horaires") {
-                "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><title>Horaires de Paris</title></head><body><h1>Horaires de Paris</h1><p>Prochain départ à 9 h.</p></body></html>"
-            } else {
-                "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><title>Réservation</title></head><body><h1>Réserver un billet</h1><label for=\"ville\">Ville</label><input id=\"ville\" name=\"ville\" type=\"text\"><a href=\"/horaires\">Voir les horaires</a></body></html>"
-            };
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            let _ = reader.get_mut().write_all(response.as_bytes()).await;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).await.unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                }
+                let body = if first.contains("/horaires") {
+                    "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><title>Horaires de Paris</title></head><body><h1>Horaires de Paris</h1><p>Prochain départ à 9 h.</p></body></html>"
+                } else {
+                    "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><title>Réservation</title></head><body><h1>Réserver un billet</h1><label for=\"ville\">Ville</label><input id=\"ville\" name=\"ville\" type=\"text\"><a href=\"/horaires\">Voir les horaires</a></body></html>"
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = reader.get_mut().write_all(response.as_bytes()).await;
+            });
         }
     });
     port

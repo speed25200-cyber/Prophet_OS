@@ -949,27 +949,35 @@ async fn temoin_web(recu: std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> u16 
     use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
+    // Une tâche par connexion : une connexion ouverte sans requête (un navigateur en ouvre
+    // d'avance) ne doit pas faire attendre celles qui en portent une. Elle n'est pas comptée.
     tokio::spawn(async move {
         loop {
             let Ok((stream, _)) = listener.accept().await else {
                 return;
             };
-            let mut reader = BufReader::new(stream);
-            let mut head = String::new();
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.unwrap_or(0) == 0 || line == "\r\n" {
-                    break;
+            let recu = recu.clone();
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stream);
+                let mut head = String::new();
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).await.unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                    head.push_str(&line);
                 }
-                head.push_str(&line);
-            }
-            recu.lock().unwrap().push(head);
-            let body = "<html><body><h1>Page témoin</h1><p>preuve-web</p></body></html>";
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            let _ = reader.get_mut().write_all(response.as_bytes()).await;
+                if head.is_empty() {
+                    return;
+                }
+                recu.lock().unwrap().push(head);
+                let body = "<html><body><h1>Page témoin</h1><p>preuve-web</p></body></html>";
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = reader.get_mut().write_all(response.as_bytes()).await;
+            });
         }
     });
     port

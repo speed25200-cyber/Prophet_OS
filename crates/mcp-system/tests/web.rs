@@ -71,22 +71,31 @@ fn serveur() -> u16 {
     use std::io::{Read as _, Write as _};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
+    // Une connexion par fil : Chromium ouvre des connexions spéculatives sans requête, et un
+    // serveur qui les lirait en série attendrait sur l'une pendant que la navigation attend
+    // derrière elle (`Page.navigate` sans réponse, vu en CI le 22 septembre 2026).
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { return };
-            let mut buffer = [0u8; 8192];
-            let n = stream.read(&mut buffer).unwrap_or(0);
-            let request = String::from_utf8_lossy(&buffer[..n]);
-            let body = if request.starts_with("POST") {
-                "<html><body><h1>Réservation confirmée</h1></body></html>"
-            } else {
-                PAGE
-            };
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            let _ = stream.write_all(response.as_bytes());
+            std::thread::spawn(move || {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+                let mut buffer = [0u8; 8192];
+                let n = stream.read(&mut buffer).unwrap_or(0);
+                if n == 0 {
+                    return;
+                }
+                let request = String::from_utf8_lossy(&buffer[..n]);
+                let body = if request.starts_with("POST") {
+                    "<html><body><h1>Réservation confirmée</h1></body></html>"
+                } else {
+                    PAGE
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            });
         }
     });
     port
