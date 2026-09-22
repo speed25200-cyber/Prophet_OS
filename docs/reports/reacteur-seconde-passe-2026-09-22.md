@@ -75,6 +75,15 @@ Captures du binaire en build release, `--champ-complet`, avant toute modificatio
   premier geste rétablit la pleine cadence.
 - `just captures` produit les noms `reacteur-*` que le rapport Réacteur cite ; `@echo` dans
   une recette shebang, qui aurait échoué, est corrigé.
+- L'en-tête de l'inspecteur relié aux services dit le **dernier geste de l'agent** (outil,
+  cible contrôlée, issue), relu dans le journal, et le donne à l'accessibilité ; une cible du
+  dossier de l'humain s'écrit à partir de `~`. Les instruments compacts laissent leur valeur à
+  droite de l'anneau au lieu de l'écrire à travers ses graduations.
+
+Côté agents, les missions et les séances d'outils offrent désormais **`task.status` avec le
+budget restant** et **`task.diff`** quand le profil les accorde : un agent sait ce qu'il lui
+reste d'étapes, de tokens et de secondes, et ce qu'il a déjà modifié, au lieu de découvrir le
+plafond en le heurtant. Les profils de l'image et des exemples les accordent.
 
 ![Après : l'espace de mission aligné](../images/reacteur-galerie-1920.png)
 
@@ -89,7 +98,8 @@ Captures du binaire en build release, `--champ-complet`, avant toute modificatio
 | Nouveau parcours `le_clavier_ouvre_les_pages_et_la_preparation_sans_souris` | échouait avant ; réussit, y compris Échap en deux temps et brouillon conservé |
 | `cargo test -p surface --test bureau --test rendu --test preparation --test branchement --test missions -- --include-ignored` | 14 + 6 + 1 + 2 + 5 réussis, aucun échec |
 | `cargo test -p surface --lib` | 75 réussis (dont la cadence du champ), 1 ignoré (`needs_voice_stack`) |
-| `just check` | voir STATUS, entrée du 22 septembre |
+| Nouveau parcours `l_agent_lit_son_budget_restant_et_ses_propres_changements` (vrais capd, ledger, agentd, modèle contrôlé) | échouait avant (« outil non proposé ») ; réussit : budget restant = plafond − consommé, diff de la note dans le travail |
+| `just check` | **829 réussis, 0 échec, 46 ignorés** ; format, clippy, contrôles du dépôt, secrets |
 
 Mesures en rendu logiciel, 1920 × 1080, scène de démonstration (5 missions, 3 actives) :
 

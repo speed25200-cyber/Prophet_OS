@@ -1474,7 +1474,19 @@ donne le détail.
   Ctrl 1-4 / Ctrl N / Échap, cadence du champ réduite après 30 s sans geste (60 s de repos avec
   trois missions actives : 118 % → 77 % d'un cœur sous llvmpipe). Trois parcours GPU nouveaux,
   vus en échec avant correction. `just captures` produit les noms Réacteur ; captures régénérées.
-- `just check` : **828 réussis, 0 échec, 46 ignorés**, format, clippy, contrôles du dépôt et
+- Introspection des missions (`d375136`) : `task.status`, enrichi du budget restant, et
+  `task.diff` sont offerts aux missions et aux séances d'outils dont le profil les accorde ;
+  le catalogue les admet, les profils de l'image et des exemples les accordent. Prouvé avec les
+  vrais services et un modèle contrôlé qui garde chaque requête.
+- L'en-tête de l'inspecteur dit le dernier geste de l'agent, relu dans le journal, et le
+  donne à l'accessibilité ; les instruments compacts ne chevauchent plus leurs graduations
+  (`c8550d4`).
+- La CI de `d6e686f` a vu `mcp-system::web` expirer sur `Page.navigate` : son serveur témoin
+  servait les connexions en série et attendait une connexion spéculative de Chromium. Les trois
+  pages témoins visitées par un navigateur servent désormais chaque connexion à part (`064b07b`).
+  Le reste de la CI générale de `d6e686f` est vert, dont la mission réelle Qwen3 sous NixOS et,
+  pour la première fois depuis des jours, ChatGPT sous NixOS.
+- `just check` : **829 réussis, 0 échec, 46 ignorés**, format, clippy, contrôles du dépôt et
   secrets (repli). Parcours de la surface avec `--include-ignored` : 14 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
 
@@ -1484,8 +1496,8 @@ réelles à mesurer avec `prophet-surface --mesure` et `--repos`). Le premier ap
 attend une clé. La CI de `d6e686f` tournait au moment d'écrire ces lignes.
 
 **Pour la session suivante.** Lire la CI de la branche ; mesurer la surface sur une carte
-graphique ; offrir aux missions locales l'introspection (`task.status` avec budget restant,
-`task.diff`), que `mcp-system` implémente mais qu'agentd n'enregistre pas.
+graphique ; écrire M5-T4 (pool d'instantanés Firecracker) sur un hôte KVM, la CI pouvant
+l'exercer sur son coureur ; faire le premier appel réel de Jev avec une clé déposée.
 
 ### 15 septembre 2026, nuit et matin : l'ISO installée dans une machine virtuelle, deux fautes
 
