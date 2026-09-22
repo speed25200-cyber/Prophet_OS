@@ -107,10 +107,25 @@ pour les membres déclarés — et réserve :
 sandboxd était un détour réel : il lançait pour tout membre un programme sous sa propre identité,
 de la classe des services, avec les montages et les sockets choisis par l'appelant. Et
 `/run/prophet`, en `0770`, laissait tout membre supprimer `capd.sock` pour en poser un faux ; il
-devient collant. Restent ouverts, et dits dans l'ADR : `task.spawn` d'agentd accepte un manifeste
-brut du compte de l'humain (c'est `prophet task new`), un processus de ce compte peut trancher
-une approbation comme l'humain, et une fenêtre étroite subsiste au redémarrage d'un daemon.
+devient collant. Un daemon retirait aussi son socket avant d'en créer un nouveau, et le
+retirait à l'arrêt : le nom de `capd.sock` était libre entre deux démarrages, assez pour qu'un
+guet le trouve 125 371 fois en deux cents démarrages. Il est désormais posé par renommage et
+reste en place à l'arrêt ; le guet ne le trouve plus libre. Restent ouverts, et dits dans
+l'ADR : `task.spawn` d'agentd accepte un manifeste brut du compte de l'humain (c'est
+`prophet task new`), et un processus de ce compte peut trancher une approbation comme l'humain.
 L'essai NixOS des services vérifie les refus sous le vrai compte de l'humain.
+
+## 5 bis. La fenêtre du moteur local
+
+L'image sert ses modèles avec 4 096 tokens de fenêtre, et `fs.read` rend jusqu'à 256 Kio :
+une seule lecture d'un fichier moyen faisait refuser l'historique par llama-server
+(`exceed_context_size_error`) et la mission échouait sur « HTTP 400 » ; la conversation de
+l'atelier, au bout d'une vingtaine d'échanges. Le pilote lit désormais ce refus — ses deux
+nombres, jamais le reste —, resserre ce qui part au moteur à sa mesure et renvoie le tour :
+résultats d'outils condensés puis tronqués avec un avis dans une mission, premiers messages
+oubliés dans une conversation, qui le dit. Pour que l'agent n'ait pas à tout relire,
+`fs.read` lit par morceaux (`offset`, `next_offset`, sans couper de caractère) et
+`fs.search` rend les lignes trouvées, numéro et extrait. Complément de l'ADR 0034.
 
 ## 6. Vérifications
 
@@ -124,7 +139,10 @@ L'essai NixOS des services vérifie les refus sous le vrai compte de l'humain.
 | Nouveau parcours `l_agent_lit_son_budget_restant_et_ses_propres_changements` (vrais capd, ledger, agentd, modèle contrôlé) | échouait avant (« outil non proposé ») ; réussit : budget restant = plafond − consommé, diff de la note dans le travail |
 | Catalogue des poids : cinq tests unitaires, `prophet model ls` sur un dossier synthétique, parcours GPU de la page Modèles | réussis |
 | Tables d'accès de capd, ledger, sandboxd, memoryd et classification des pairs | tests unitaires réussis ; essai NixOS sous le compte de l'humain en CI |
-| `just check` | **842 réussis, 0 échec, 47 ignorés** ; format, clippy, contrôles du dépôt, secrets |
+| Refus de fenêtre : mission resserrée puis renvoyée, fenêtre apprise au tour suivant, intention démesurée rendue en erreur chiffrée, longue mission (quarante résultats), conversation qui oublie ses débuts | tests contre des serveurs qui rendent le refus exact de llama-server, **échouaient** avant (« HTTP 400 ») ; réussissent |
+| `fs.read` par morceaux, `fs.search` par lignes | échouaient avant ; réussissent (morceaux recollés = texte exact, aucun caractère coupé) |
+| Guet du nom de socket pendant 200 démarrages | vu libre **125 371 fois** avant ; jamais après |
+| `just check` | **852 réussis, 0 échec, 47 ignorés** ; format, clippy, contrôles du dépôt, secrets |
 
 Mesures en rendu logiciel, 1920 × 1080, scène de démonstration (5 missions, 3 actives) :
 

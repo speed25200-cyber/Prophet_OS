@@ -1494,8 +1494,10 @@ donne le détail.
   lançait pour tout membre un programme sous sa propre identité, montages et sockets au choix
   de l'appelant (`sandbox.start` et `sandbox.run` reviennent désormais aux services), et
   `/run/prophet`, en `0770`, laissait tout membre supprimer `capd.sock` pour en poser un faux
-  (il devient collant, `1770`). L'essai NixOS des services vérifie tout cela sous le compte de
-  l'humain.
+  (il devient collant, `1770`). Un daemon retirait aussi son socket avant d'en recréer un et à
+  l'arrêt : le nom de `capd.sock` était libre entre deux démarrages ; il est désormais posé par
+  renommage et reste en place à l'arrêt (`08812ed`). L'essai NixOS des services vérifie tout
+  cela sous le compte de l'humain, capd arrêté compris.
 - Catalogue des poids (M8-T7) : `providers::weights` lit l'en-tête GGUF de chaque fichier sans
   charger les poids, bornes comprises contre un en-tête hostile ; `prophet model ls` et une
   plaque « Poids installés » de la page Modèles réunissent le dossier des poids et les fichiers
@@ -1512,7 +1514,7 @@ donne le détail.
 - CI de `6e1a152` et `c6e4979` (restriction de capd et du journal, essai des droits sous le
   compte de l'humain) : **verte des deux côtés**, dont les sept services sous systemd, la
   mission réelle Qwen3 sous NixOS, le système installé (UEFI et BIOS) et l'ISO.
-- `just check` : **851 réussis, 0 échec, 47 ignorés**, format, clippy, contrôles du dépôt et
+- `just check` : **852 réussis, 0 échec, 47 ignorés**, format, clippy, contrôles du dépôt et
   secrets (repli). Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
 
