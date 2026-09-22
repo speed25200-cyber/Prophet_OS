@@ -1707,8 +1707,10 @@ Les pilotes de clients officiels sont testés jusqu'à la limite de ce qui est v
 session, la surface). Émettre, déléguer ou vérifier un droit, demander une approbation, écrire ou
 sceller le journal reviennent aux services ; trancher une approbation revient à l'humain. Reste
 ouvert : un processus du compte de l'humain — un client officiel lancé par `prophet-pilotd`
-compris — peut encore trancher une approbation comme l'humain lui-même, et les autres daemons
-(agentd, vault, egress, sandboxd, memoryd) n'ont pas encore été passés au même crible.
+compris — peut encore trancher une approbation comme l'humain lui-même, et faire planifier par
+`task.spawn` une mission sous un manifeste de sa main (visible, journalisée, lancée à part) ;
+réserver l'humain aux profils du catalogue est à décider avec l'utilisateur. Les autres daemons
+(vault, egress, sandboxd, memoryd) n'ont pas encore été passés au même crible.
 
 **Les sept daemons tournent sous systemd**, dans une machine NixOS de test que `just test-vm`
 démarre et que l'intégration continue exerce : chacun sous son utilisateur, avec le durcissement

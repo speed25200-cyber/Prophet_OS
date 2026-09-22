@@ -61,8 +61,8 @@ ralentit son champ quand personne n'agit.
 Côté agents, une mission lit son propre état et son budget restant (`task.status`) et ses
 changements (`task.diff`) ; le catalogue des poids dit l'architecture, la quantification et la
 fenêtre de contexte de chaque modèle installé (`prophet model ls`) ; et un processus de la
-session humaine ne peut plus émettre de droit ni écrire au journal, qui reviennent aux
-services ([ADR 0044](docs/adr/0044-les-methodes-reservees-par-classe-de-pair.md)).
+session humaine n'obtient plus de droit qu'à travers une mission qu'agentd planifie et
+journalise, ni n'écrit au journal ([ADR 0044](docs/adr/0044-les-methodes-reservees-par-classe-de-pair.md)).
 
 Une [session humaine avec plusieurs applications](docs/reports/bureau-humain-2026-09-13.md) est
 intégrée dans la configuration d'image : connexion PAM, supervision, ChatGPT, Claude Code et Codex,

@@ -233,3 +233,14 @@ chaque poussée. Côté relais, un rôle `review` fait relire un travail rendu p
 — dans l'atelier des agents, Claude Code relit ce que Codex a codé — au prix d'une lecture, sans
 droit nouveau. Restent : la voix humaine sur un vrai micro, la sortie audio réelle, et
 l'exécution des vrais clients connectés par l'humain.
+
+Le 22 septembre, la [reprise](reports/reacteur-seconde-passe-2026-09-22.md) réunit la ligne
+d'audit et le décideur Jev ; la CI de la branche réunie réussit l'installation, le démarrage du
+système installé en UEFI comme sans UEFI, la mission réelle Qwen3 sous NixOS et l'ouverture de
+ChatGPT sous NixOS. Le critère d'interface progresse (plaques alignées au pixel et vérifiées,
+objectif saisi dès l'écran vide, navigation entière au clavier, dernier geste de l'agent,
+cadence du champ réduite sans geste, mesurée en rendu logiciel) ; celui des moteurs locaux gagne
+le catalogue des poids lu dans les en-têtes GGUF ; celui des permissions interservices gagne des
+méthodes réservées par classe de pair dans capd et le journal (ADR 0044), avec ce qu'elles
+laissent ouvert. Aucun critère complet n'est coché : ni PC réel, ni carte graphique, ni compte
+connecté n'ont été exercés.

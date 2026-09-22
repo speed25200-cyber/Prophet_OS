@@ -47,10 +47,15 @@ un pair non admis reçoit le refus d'avant.
 
 ## Conséquences
 
-Un processus de la session humaine n'émet plus de droit ni n'écrit au journal ; un service ne
-tranche plus une approbation à la place de l'humain. Ce qui reste ouvert, dit franchement : un
-processus de l'humain peut toujours **trancher** une approbation, comme l'humain lui-même par la
-CLI. Un client officiel lancé par `prophet-pilotd` sous cette identité, avec ses propres outils,
+Un processus de la session humaine n'obtient plus de jeton qu'à travers une mission qu'agentd
+planifie, journalise et montre à la supervision, et n'écrit plus au journal ; un service ne
+tranche plus une approbation à la place de l'humain. Ce qui reste ouvert, dit franchement :
+`task.spawn` d'agentd accepte encore un manifeste fourni par l'appelant, ce que fait `prophet
+task new` ; un processus du compte de l'humain peut donc faire planifier une mission sous un
+manifeste de sa main — visible et journalisée, lancée par une commande distincte. Ne l'ouvrir
+qu'aux profils du catalogue (`task.prepare`) pour l'humain est une décision à prendre avec
+l'utilisateur. Un processus de l'humain peut aussi toujours **trancher** une approbation, comme
+l'humain lui-même par la CLI. Un client officiel lancé par `prophet-pilotd` sous cette identité, avec ses propres outils,
 le pourrait donc s'il exécutait un programme qui appelle `approval.resolve` ; distinguer la
 surface d'un autre programme du même compte demande un chemin de confiance que l'OS n'a pas
 encore, ou le confinement du client que l'ADR 0026 laisse ouvert. Les autres daemons (agentd,
