@@ -228,7 +228,7 @@ mod tests {
     fn cle_dans_le_corps_detectee() {
         let signals = Detector::new().inspect(&requete(
             "https://exemple.fr/collect",
-            b"data=sk-ant-api03-abcdef",
+            b"data=sk-ant-api03-abcdef", // gitleaks:allow — fixture
             &[],
         ));
         assert!(matches!(signals[0], Signal::SecretPattern { .. }));
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn cle_dans_un_en_tete_detectee() {
-        let headers = vec![("X-Note".to_owned(), "AKIAIOSFODNN7EXAMPLE".to_owned())];
+        let headers = vec![("X-Note".to_owned(), "AKIAIOSFODNN7EXAMPLE".to_owned())]; // gitleaks:allow — fixture
         let signals = Detector::new().inspect(&requete("https://exemple.fr/", b"", &headers));
         assert!(Detector::should_block(&signals));
     }
@@ -256,7 +256,7 @@ mod tests {
     fn cle_privee_detectee() {
         let signals = Detector::new().inspect(&requete(
             "https://exemple.fr/",
-            b"-----BEGIN OPENSSH PRIVATE KEY-----",
+            b"-----BEGIN OPENSSH PRIVATE KEY-----", // gitleaks:allow — fixture
             &[],
         ));
         assert!(Detector::should_block(&signals));

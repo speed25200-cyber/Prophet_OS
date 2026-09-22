@@ -383,7 +383,7 @@ mod tests {
         let log = proxy().evaluate(&requete(
             "POST",
             "http://api.exemple.fr/collect",
-            b"note=sk-ant-api03-secret",
+            b"note=sk-ant-api03-secret", // gitleaks:allow — fixture
         ));
         assert!(
             matches!(

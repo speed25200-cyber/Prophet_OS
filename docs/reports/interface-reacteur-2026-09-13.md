@@ -70,7 +70,7 @@ session réelle de Claude, Codex ou Gemini.
 | `cargo test -p surface --test bureau --test rendu --test preparation --test branchement -- --include-ignored` (llvmpipe) | 20 réussis, aucun échec : 11 parcours du bureau, 6 tests du renderer historique, 1 de préparation, 2 de branchement |
 | `cargo test -p surface --test missions -- --include-ignored` (vrais capd, ledger, agentd, modèle HTTP contrôlé) | 5 réussis, aucun échec, en 28,04 s |
 | `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings` | réussis, aucun avertissement |
-| `just check` (équivalent manuel, Nix absent de cette session) | format, clippy, construction des programmes et `cargo test --workspace` : 428 réussis, 3 ignorés, **1 échec propre à cette session** (voir ci-dessous) ; `verifier-les-services`, `verifier-le-durcissement` et `verifier-la-doc-des-travaux` réussis ; la recherche de motifs de secrets sans gitleaks relève la chaîne d'essai `sk-ant-api03-secret` du test d'exfiltration d'egress, présente avant cette révision |
+| `just check` (équivalent manuel, Nix absent de cette session) | format, clippy, construction des programmes et `cargo test --workspace` : 428 réussis, 3 ignorés, **1 échec propre à cette session** (voir ci-dessous) ; `verifier-les-services`, `verifier-le-durcissement` et `verifier-la-doc-des-travaux` réussis ; la recherche de motifs de secrets sans gitleaks relève la chaîne d’essai du test d’exfiltration d’egress, présente avant cette révision |
 
 L'échec de `providers::official::tests::un_fichier_de_configuration_ne_prouve_pas_une_connexion`
 ne vient pas de cette révision, qui ne touche pas ce crate : la session de construction dispose
