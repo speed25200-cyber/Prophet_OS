@@ -238,6 +238,11 @@ in {
     environment.etc."prophet/mission-profiles.json".source = profiles;
     # Le dialogue et les missions doivent interroger le même serveur, même avec un port modifié.
     environment.sessionVariables.PROPHET_MODEL_ENDPOINT = endpoint;
+    # Les poids que le moteur sert : le modèle par défaut vit dans /nix/store (ADR 0033), hors
+    # de /var/lib/prophet/models ; `prophet model ls` et la page Modèles les lisent par ici.
+    environment.sessionVariables.PROPHET_WEIGHTS = lib.mkIf (cfg.weights != null)
+      (lib.concatStringsSep ":"
+        (map toString (lib.filter (w: w != null) [ cfg.weights cfg.executeWeights ])));
     systemd.services.prophet-agentd.environment = {
       PROPHET_LOCAL_ENDPOINT = endpoint;
       PROPHET_MISSION_PROFILES = "/etc/prophet/mission-profiles.json";

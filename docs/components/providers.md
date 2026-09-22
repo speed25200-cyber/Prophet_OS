@@ -109,6 +109,16 @@ de performance de ces clients dans Prophet OS installé n'est revendiquée ici.
 Le [rapport du paquet ChatGPT Linux](../reports/chatgpt-linux-2026-09-12.md) décrit la source
 épinglée, le runtime de compatibilité et la vérification graphique dédiée.
 
+## Catalogue des poids
+
+`providers::weights` lit l'en-tête GGUF de chaque fichier de poids — architecture, nom, taille
+annoncée, quantification (`general.file_type`), fenêtre de contexte et nombre de couches —
+sans charger les poids : les tableaux du tokeniseur sont sautés, chaque compte et chaque
+longueur est borné, un fichier corrompu ou fabriqué est refusé avec sa raison plutôt que de
+faire allouer ou boucler. Le catalogue d'une machine réunit le dossier des poids et les
+fichiers que `PROPHET_WEIGHTS` nomme ; le module du moteur local pose cette variable pour les
+poids qu'il sert. `prophet model ls` et la page Modèles de l'atelier le lisent.
+
 ## Paquet du moteur local et essai agentd
 
 `nix build .#llama-cpp` construit le moteur du nixpkgs épinglé avec un correctif du

@@ -810,7 +810,7 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 - [x] M8-T4 — Pilote `claude-code` (2026-09-12, 24b8338) — ligne de commande, environnement, détection de session
 - [x] M8-T5 — Pilote `codex` (2026-09-12, 24b8338) — pilote Codex CLI
 - [x] M8-T6 — Pilote `gemini` (2026-09-12, 24b8338) — pilote Gemini CLI
-- [ ] M8-T7 — Moteurs locaux — client HTTP, flux annulable, interface de conversation et essai Qwen3/CPU réalisés ; le 13 septembre, budgets de tokens par modèle, condensation du contexte et deux modèles servis par un llama-server en mode routeur, prouvés en relais réel (ADR 0034) ; le même jour, l'image sert deux modèles en mode routeur (Qwen3-1.7B en réflexion, Qwen3-0.6B en exécution, téléchargés à l'installation), préréglages vérifiés sur le vrai moteur et configuration évaluée ; restent le cycle de vie des poids, les budgets VRAM et la matrice GPU/modèles
+- [ ] M8-T7 — Moteurs locaux — client HTTP, flux annulable, interface de conversation et essai Qwen3/CPU réalisés ; le 13 septembre, budgets de tokens par modèle, condensation du contexte et deux modèles servis par un llama-server en mode routeur, prouvés en relais réel (ADR 0034) ; le même jour, l'image sert deux modèles en mode routeur (Qwen3-1.7B en réflexion, Qwen3-0.6B en exécution, téléchargés à l'installation), préréglages vérifiés sur le vrai moteur et configuration évaluée ; le 22 septembre, le catalogue des poids se lit dans l'en-tête GGUF de chaque fichier (`prophet model ls`, page Modèles : architecture, quantification, fenêtre de contexte) ; restent le téléchargement et la suppression gérés des poids, les budgets VRAM et la matrice GPU/modèles
 - [x] M8-T8 — Pilote `prophet-agent` (2026-09-12, 24b8338) — boucle native : points de reprise, fork, rejeu
 - [x] M8-T9 — Sélection de pilote (2026-09-12, 24b8338) — sélection expliquée, confidentialité locale respectée
 - [x] M8-T10 — CLI (2026-09-12, 24b8338) — `prophet provider ls|login`
@@ -1491,8 +1491,12 @@ donne le détail.
   journal. `cap.mint` et ses voisins, `ledger.append` et `ledger.seal` reviennent désormais aux
   services, `approval.resolve` à l'humain ; l'essai NixOS des services le vérifie sous le
   compte de l'humain (résultat attendu de la CI).
-- `just check` : **834 réussis, 0 échec, 46 ignorés**, format, clippy, contrôles du dépôt et
-  secrets (repli). Parcours de la surface avec `--include-ignored` : 14 du bureau, 6 de rendu,
+- Catalogue des poids (M8-T7) : `providers::weights` lit l'en-tête GGUF de chaque fichier sans
+  charger les poids, bornes comprises contre un en-tête hostile ; `prophet model ls` et une
+  plaque « Poids installés » de la page Modèles réunissent le dossier des poids et les fichiers
+  que `PROPHET_WEIGHTS` nomme, dont le modèle par défaut de l'image dans `/nix/store`.
+- `just check` : **841 réussis, 0 échec, 47 ignorés**, format, clippy, contrôles du dépôt et
+  secrets (repli). Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
 
 **Bloqué.** Rien n'est vérifiable ici sous Nix, en VM ou sur matériel : pas de KVM (M5-T4
