@@ -60,6 +60,38 @@ local), pour qu'un autre regard que celui de l'auteur passe sur ce qui compte, a
 lecture et non d'une seconde production. Le rôle n'ajoute aucun droit : la relecture reçoit
 les outils du contexte comme toute sous-mission, et capd tranche chaque appel.
 
+## Complément du 22 septembre 2026 : la fenêtre du moteur
+
+L'image sert ses modèles avec une fenêtre de 4 096 tokens, et `fs.read` rend jusqu'à 256 Kio :
+une seule lecture d'un fichier moyen suffisait à ce que llama-server refuse l'historique
+(`exceed_context_size_error`, HTTP 400) et que la mission échoue sur « le moteur local répond
+HTTP 400 ». Le pilote lit désormais ce refus, et seulement ses nombres (`n_prompt_tokens`,
+`n_ctx`), jamais le reste du corps. Il en déduit le rapport octets par token de ce qu'il vient
+d'envoyer, calcule ce qu'il faut retirer pour laisser la place de la réponse (le plafond de
+sortie, au plus le quart de la fenêtre), avec une marge de 30 %, puis resserre les résultats
+d'outils dans cet ordre : anciens condensés, anciens réduits à leur issue et leur taille, du
+plus ancien au plus récent, dernier tronqué à son début avec un avis qui dit au modèle d'en
+lire moins (`max_bytes`, une cible plus précise) plutôt que de le relire en entier. Trois envois
+au plus par tour ; la fenêtre apprise sert ensuite d'emblée. Un historique que rien ne peut
+resserrer (une intention démesurée) rend une erreur qui donne les deux nombres.
+
+La page Conversation de l'atelier heurtait la même limite au bout d'une vingtaine d'échanges.
+Là, rien n'est un résultat d'outil : le client oublie les plus anciens messages, à la même
+mesure, garde la consigne de système et la dernière question, reprend sur une question de
+l'humain, et la page dit combien de messages le modèle n'a pas relus. L'historique affiché
+ne change pas.
+
+Ce que l'essai NixOS du moteur vérifie sur le llama-server épinglé : le refus a bien cette
+forme, `n_ctx` et `n_prompt_tokens` compris. Le resserrement lui-même est prouvé contre des
+serveurs de test qui rendent ce refus ; une mission réelle qui lit un gros fichier coûterait
+environ 70 s de préremplissage sur le processeur de la CI, trop près du budget de 90 s du
+profil « Documents ».
+
+Écarté : interroger `/props` avant chaque mission (un aller-retour de plus, et un mode routeur
+qui ne dit la fenêtre d'un modèle qu'une fois chargé) ; compter les tokens nous-mêmes (il faudrait
+le tokeniseur de chaque modèle) ; retirer des messages entiers (le modèle perdrait la trace de
+ses propres appels, et le rejeu sa correspondance avec l'historique).
+
 ## Conséquences
 
 - Un profil peut dire « qwen3-1.7b réfléchit, qwen3-0.6b exécute » ; le catalogue d'exemple le

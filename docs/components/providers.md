@@ -119,6 +119,18 @@ faire allouer ou boucler. Le catalogue d'une machine réunit le dossier des poid
 fichiers que `PROPHET_WEIGHTS` nomme ; le module du moteur local pose cette variable pour les
 poids qu'il sert. `prophet model ls` et la page Modèles de l'atelier le lisent.
 
+## Fenêtre de contexte du moteur
+
+`AsyncLocalModel` lit le refus `exceed_context_size_error` de llama-server — ses deux nombres,
+jamais le reste du corps —, resserre les résultats d'outils de ce qui part au moteur
+(`local::fit` : anciens condensés, puis réduits à leur issue, dernier tronqué avec un avis) et
+renvoie le tour, trois envois au plus ; la fenêtre apprise sert ensuite d'emblée. La
+conversation en flux (`ChatClient`) oublie de même ses plus anciens messages, consigne et
+dernière question gardées, et `Completion::forgotten` dit combien ; la page Conversation
+l'affiche. Prouvé contre des serveurs de test qui rendent le refus exact de llama-server
+(`tests/local.rs`, `tests/stream.rs`) ; l'essai NixOS du moteur vérifie la forme de ce refus
+sur le moteur épinglé (ADR 0034, complément du 22 septembre).
+
 ## Paquet du moteur local et essai agentd
 
 `nix build .#llama-cpp` construit le moteur du nixpkgs épinglé avec un correctif du

@@ -105,7 +105,10 @@ terminée impute son compte à son parent, modèle par modèle. C'est la mesure 
 tours d'un client MCP sont comptés sous `client:<nom>`, sans tokens, le client ne rendant pas
 ses compteurs au service. Avant chaque envoi au moteur, les résultats d'outils plus anciens que
 les deux derniers et plus longs que 1 024 octets sont condensés (taille, empreinte, début) ;
-l'historique conservé par la boucle ne change pas.
+l'historique conservé par la boucle ne change pas. Si le moteur refuse l'historique parce qu'il
+dépasse sa fenêtre de contexte, le pilote resserre les résultats d'outils à la mesure du refus
+(le dernier garde son début et un avis) et renvoie le tour, trois envois au plus ; la fenêtre
+apprise sert ensuite d'emblée (ADR 0034, complément du 22 septembre).
 
 Le statut d'annulation final confirme la sortie du travailleur. Les fichiers déjà préparés
 restent dans le travail SFS. `result` expose le diff à une fin normale, sans appliquer les
