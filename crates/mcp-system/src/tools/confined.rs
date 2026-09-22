@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::fs::{File, Metadata};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
@@ -203,28 +203,68 @@ impl<'a> View<'a> {
     }
 
     fn read(&self, relative: &Path, max: usize) -> Result<(String, u64, bool, usize)> {
+        let chunk = self.read_from(relative, 0, max)?;
+        Ok((chunk.text, chunk.total, chunk.next.is_some(), chunk.read))
+    }
+
+    /// Lit au plus `max` octets à partir de `offset`, sans couper de caractère : un décalage
+    /// tombé au milieu d'un caractère reprend au suivant, et la lecture s'arrête avant un
+    /// caractère qui ne tiendrait pas entier.
+    fn read_from(&self, relative: &Path, offset: u64, max: usize) -> Result<Chunk> {
         if !self.permits(Act::Read, relative) {
             return Err(denied());
         }
-        let file = self.selected(relative, OFlags::RDONLY)?;
+        let mut file = self.selected(relative, OFlags::RDONLY)?;
         let metadata = file.metadata()?;
         if !metadata.is_file() || metadata.nlink() != 1 {
             return Err(denied());
         }
-        let mut bytes = Vec::with_capacity(max.min(metadata.len() as usize).saturating_add(1));
-        file.take(max as u64 + 1).read_to_end(&mut bytes)?;
-        let read = bytes.len();
-        let total = metadata.len().max(read as u64);
-        let mut text = String::from_utf8_lossy(&bytes[..bytes.len().min(max)]).into_owned();
-        let truncated = total > max as u64 || text.len() > max;
-        if text.len() > max {
-            let mut end = max;
-            while !text.is_char_boundary(end) {
-                end -= 1;
-            }
-            text.truncate(end);
+        if offset > 0 {
+            file.seek(SeekFrom::Start(offset))?;
         }
-        Ok((text, total, truncated, read))
+        let available = metadata.len().saturating_sub(offset) as usize;
+        // Trois octets de plus pour sauter une fin de caractère en tête, un pour savoir s'il
+        // reste quelque chose après le plafond.
+        let mut bytes = Vec::with_capacity(max.min(available).saturating_add(4));
+        file.take(max as u64 + 4).read_to_end(&mut bytes)?;
+        let read = bytes.len();
+        let skip = if offset > 0 {
+            bytes
+                .iter()
+                .take(3)
+                .take_while(|byte| is_continuation(**byte))
+                .count()
+        } else {
+            0
+        };
+        let body = &bytes[skip..];
+        let mut end = body.len().min(max);
+        while end > 0 && end < body.len() && is_continuation(body[end]) {
+            end -= 1;
+        }
+        let mut text = String::from_utf8_lossy(&body[..end]).into_owned();
+        // Des octets invalides s'élargissent en caractères de remplacement : la borne reste.
+        if text.len() > max {
+            let mut cut = max;
+            while !text.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            text.truncate(cut);
+        }
+        let start = offset + skip as u64;
+        let total = if read == 0 {
+            metadata.len()
+        } else {
+            metadata.len().max(offset + read as u64)
+        };
+        let consumed = start + end as u64;
+        Ok(Chunk {
+            text,
+            total,
+            read,
+            start,
+            next: (consumed < total).then_some(consumed),
+        })
     }
 
     fn names(&self, relative: &Path, budget: &mut Budget) -> Result<Vec<PathBuf>> {
@@ -377,6 +417,21 @@ pub(super) struct Reading {
     pub truncated: bool,
 }
 
+/// Un morceau de fichier texte lu à partir d'un décalage.
+struct Chunk {
+    text: String,
+    total: u64,
+    read: usize,
+    /// Décalage réel du premier octet rendu.
+    start: u64,
+    /// Décalage où reprendre, s'il reste à lire.
+    next: Option<u64>,
+}
+
+const fn is_continuation(byte: u8) -> bool {
+    byte & 0xC0 == 0x80
+}
+
 /// Lit les octets d'un fichier autorisé, pour les outils qui interprètent un format (documents,
 /// images, médias) sans rien exposer de plus que `fs.read`.
 pub(super) fn read_bytes(
@@ -450,10 +505,21 @@ fn run(
                     .ok_or_else(|| invalid("max_bytes doit être un entier positif ou nul"))?
                     .min(MAX_READ as u64) as usize,
             };
-            let (content, total, truncated, _) = view.read(&relative, max)?;
-            Ok(
-                json!({"path":logical, "content":content, "total_bytes":total, "truncated":truncated}),
-            )
+            let offset = match args.get("offset") {
+                None => 0,
+                Some(value) => value
+                    .as_u64()
+                    .ok_or_else(|| invalid("offset doit être un entier positif ou nul"))?,
+            };
+            let chunk = view.read_from(&relative, offset, max)?;
+            let mut result = json!({"path":logical, "content":chunk.text, "total_bytes":chunk.total, "truncated":chunk.next.is_some()});
+            if args.get("offset").is_some() {
+                result["offset"] = json!(chunk.start);
+            }
+            if let Some(next) = chunk.next {
+                result["next_offset"] = json!(next);
+            }
+            Ok(result)
         }
         Operation::Write => {
             let content = args

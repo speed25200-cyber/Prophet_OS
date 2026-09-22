@@ -219,6 +219,73 @@ fn un_plafond_fourni_par_le_modele_ne_supprime_pas_la_borne_de_lecture() {
 }
 
 #[test]
+fn un_gros_fichier_se_lit_par_morceaux_sans_couper_un_caractere() {
+    // Un agent dont la fenêtre ne tient pas 256 Kio lit la suite là où la lecture s'est
+    // arrêtée : `next_offset` le dit, et aucun morceau ne commence ni ne finit au milieu d'un
+    // caractère, même quand le plafond tombe dedans.
+    let m = monde(&["~/docs/**"]);
+    let texte = "Été à Noël, ça dure. ".repeat(400);
+    std::fs::write(m.home.join("docs/long.txt"), &texte).unwrap();
+    let mut relu = String::new();
+    let mut offset = 0u64;
+    let mut morceaux = 0;
+    loop {
+        let r = m.call(
+            "fs.read",
+            json!({"path":"~/docs/long.txt","offset":offset,"max_bytes":1001}),
+        );
+        assert!(!r.is_error, "{r:?}");
+        let d = r.structured.unwrap();
+        assert_eq!(d["total_bytes"], texte.len());
+        assert_eq!(d["offset"], offset);
+        let morceau = d["content"].as_str().unwrap();
+        assert!(morceau.len() <= 1001);
+        assert!(
+            !morceau.contains('\u{fffd}'),
+            "caractère coupé : {morceau:?}"
+        );
+        relu.push_str(morceau);
+        morceaux += 1;
+        if d["truncated"] == false {
+            assert!(d.get("next_offset").is_none() || d["next_offset"].is_null());
+            break;
+        }
+        let suivant = d["next_offset"].as_u64().unwrap();
+        assert!(suivant > offset);
+        offset = suivant;
+        assert!(morceaux < 100);
+    }
+    assert_eq!(relu, texte);
+    assert!(morceaux > 5);
+    // Un décalage au milieu d'un caractère reprend au caractère suivant, et le dit.
+    let milieu = texte.find('É').unwrap() as u64 + 1;
+    let d = m
+        .call(
+            "fs.read",
+            json!({"path":"~/docs/long.txt","offset":milieu,"max_bytes":16}),
+        )
+        .structured
+        .unwrap();
+    assert_eq!(d["offset"], milieu + 1);
+    assert!(d["content"].as_str().unwrap().starts_with("té à"));
+    // Au-delà de la fin : rien, sans erreur.
+    let d = m
+        .call(
+            "fs.read",
+            json!({"path":"~/docs/long.txt","offset":texte.len() + 10}),
+        )
+        .structured
+        .unwrap();
+    assert_eq!(d["content"], "");
+    assert_eq!(d["truncated"], false);
+    // Un décalage qui n'est pas un entier est refusé.
+    assert!(
+        m.call("fs.read", json!({"path":"~/docs/long.txt","offset":-1}),)
+            .is_error
+    );
+}
+
+#[test]
 fn la_liste_fusionne_les_entrees_du_home_et_les_ecritures_de_la_tache() {
     let m = monde(&["~/docs/**"]);
     std::fs::write(m.home.join("docs/original.txt"), "original").unwrap();

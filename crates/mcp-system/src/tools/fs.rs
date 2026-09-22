@@ -40,12 +40,13 @@ macro_rules! file_tool {
 file_tool!(
     Read,
     "fs.read",
-    "Lit un fichier texte autorisé, sans suivre de liens symboliques ni de liens physiques multiples. Rend au plus 256 Kio et signale la troncature.",
+    "Lit un fichier texte autorisé, sans suivre de liens symboliques ni de liens physiques multiples. Rend au plus 256 Kio à partir de `offset` et signale la troncature ; `next_offset` dit où reprendre pour lire la suite par morceaux.",
     "fs.read",
     Read,
     "path",
     json!({
-        "path":{"type":"string"}, "max_bytes":{"type":"integer","minimum":0,"description":"Plafond demandé, borné à 262144 octets."}
+        "path":{"type":"string"}, "max_bytes":{"type":"integer","minimum":0,"description":"Plafond demandé, borné à 262144 octets."},
+        "offset":{"type":"integer","minimum":0,"description":"Octet où commencer ; le `next_offset` d'une lecture tronquée."}
     })
 );
 file_tool!(

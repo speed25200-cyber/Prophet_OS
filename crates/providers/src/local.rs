@@ -515,7 +515,8 @@ fn truncate(message: &mut Value, room: usize) {
         format!(
             "[Prophet OS : résultat tronqué pour tenir dans la fenêtre de contexte du moteur ; \
              {shown} octets sur {total}, empreinte blake3:{digest}. Ne le relisez pas en entier : \
-             demandez-en moins, avec max_bytes ou une cible plus précise.]\n"
+             lisez-en moins à la fois (par exemple fs.read avec offset et max_bytes) ou une \
+             cible plus précise.]\n"
         )
     };
     let mut shown = room.saturating_sub(notice(room).len()).min(total);
