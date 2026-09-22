@@ -28,6 +28,18 @@ struct Isolation {
     pairs: commun::Pairs,
 }
 
+/// À qui chaque méthode s'ouvre (ADR 0044). Lancer un programme revient aux services : la
+/// spécification nomme les montages, les chemins inscriptibles et les sockets exposés, et le
+/// programme tourne sous l'identité de sandboxd, de la classe des services ; ouvert à la
+/// session humaine, `sandbox.run` lui rendrait ce que capd et le journal lui refusent. Geler,
+/// dégeler, arrêter et lire l'état restent ouverts : l'arrêt d'urgence de l'humain en dépend.
+fn acces(methode: &str) -> commun::Acces {
+    match methode {
+        "sandbox.start" | "sandbox.run" => commun::Acces::Services,
+        _ => commun::Acces::Tous,
+    }
+}
+
 impl Handler for Isolation {
     async fn call(
         &self,
@@ -36,9 +48,13 @@ impl Handler for Isolation {
         methode: String,
         params: Value,
     ) -> Result<Value, Error> {
-        if methode != "ping" && !self.pairs.autorise(pair) {
+        if methode != "ping" && !self.pairs.permet(pair, acces(&methode)) {
             tracing::warn!(uid = pair.uid, gid = pair.gid, %methode, "pair refusé");
-            return Err(self.pairs.refus());
+            return Err(if self.pairs.autorise(pair) {
+                self.pairs.refus_pour(&methode, acces(&methode))
+            } else {
+                self.pairs.refus()
+            });
         }
 
         match methode.as_str() {
@@ -422,4 +438,27 @@ async fn main() -> anyhow::Result<()> {
         }))
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests_acces {
+    use super::*;
+
+    #[test]
+    fn lancer_revient_aux_services_et_geler_a_tous() {
+        assert_eq!(acces("sandbox.start"), commun::Acces::Services);
+        assert_eq!(acces("sandbox.run"), commun::Acces::Services);
+        for methode in [
+            "sandbox.freeze_all",
+            "sandbox.freeze",
+            "sandbox.thaw",
+            "sandbox.kill",
+            "sandbox.status",
+            "sandbox.list",
+            "sandbox.capabilities",
+            "sandbox.min_level",
+        ] {
+            assert_eq!(acces(methode), commun::Acces::Tous, "{methode}");
+        }
+    }
 }
