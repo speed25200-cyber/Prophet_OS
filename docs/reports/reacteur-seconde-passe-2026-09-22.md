@@ -89,7 +89,30 @@ plafond en le heurtant. Les profils de l'image et des exemples les accordent.
 
 ![Après : l'écran vide reçoit l'objectif](../images/reacteur-vide-1440.png)
 
-## 5. Vérifications
+## 5. Le crible des méthodes par classe de pair
+
+Le compte de l'humain est membre de `prophet-system`, pour que sa session, la surface et la CLI
+joignent les daemons ; sous son identité tournent aussi Claude Code, Codex et tout ce qu'il
+lance. Un pair admis l'était pour toutes les méthodes. L'[ADR 0044](../adr/0044-les-methodes-reservees-par-classe-de-pair.md)
+classe désormais chaque pair par son groupe principal — service pour les sept daemons, humain
+pour les membres déclarés — et réserve :
+
+| Daemon | Aux services | À l'humain |
+|---|---|---|
+| capd | `cap.mint`, `cap.delegate`, `cap.check`, `approval.request`, `approval.explain`, `approval.expire` | `approval.resolve` |
+| ledger | `ledger.append`, `ledger.seal` | — |
+| sandboxd | `sandbox.start`, `sandbox.run` | — |
+| memoryd | `memory.remember` | — |
+
+sandboxd était un détour réel : il lançait pour tout membre un programme sous sa propre identité,
+de la classe des services, avec les montages et les sockets choisis par l'appelant. Et
+`/run/prophet`, en `0770`, laissait tout membre supprimer `capd.sock` pour en poser un faux ; il
+devient collant. Restent ouverts, et dits dans l'ADR : `task.spawn` d'agentd accepte un manifeste
+brut du compte de l'humain (c'est `prophet task new`), un processus de ce compte peut trancher
+une approbation comme l'humain, et une fenêtre étroite subsiste au redémarrage d'un daemon.
+L'essai NixOS des services vérifie les refus sous le vrai compte de l'humain.
+
+## 6. Vérifications
 
 | Contrôle | Résultat local |
 |---|---|
@@ -99,7 +122,9 @@ plafond en le heurtant. Les profils de l'image et des exemples les accordent.
 | `cargo test -p surface --test bureau --test rendu --test preparation --test branchement --test missions -- --include-ignored` | 14 + 6 + 1 + 2 + 5 réussis, aucun échec |
 | `cargo test -p surface --lib` | 75 réussis (dont la cadence du champ), 1 ignoré (`needs_voice_stack`) |
 | Nouveau parcours `l_agent_lit_son_budget_restant_et_ses_propres_changements` (vrais capd, ledger, agentd, modèle contrôlé) | échouait avant (« outil non proposé ») ; réussit : budget restant = plafond − consommé, diff de la note dans le travail |
-| `just check` | **829 réussis, 0 échec, 46 ignorés** ; format, clippy, contrôles du dépôt, secrets |
+| Catalogue des poids : cinq tests unitaires, `prophet model ls` sur un dossier synthétique, parcours GPU de la page Modèles | réussis |
+| Tables d'accès de capd, ledger, sandboxd, memoryd et classification des pairs | tests unitaires réussis ; essai NixOS sous le compte de l'humain en CI |
+| `just check` | **842 réussis, 0 échec, 47 ignorés** ; format, clippy, contrôles du dépôt, secrets |
 
 Mesures en rendu logiciel, 1920 × 1080, scène de démonstration (5 missions, 3 actives) :
 
