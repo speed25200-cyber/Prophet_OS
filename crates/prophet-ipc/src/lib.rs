@@ -17,7 +17,7 @@ mod server;
 
 pub use client::Client;
 pub use codec::{Error, ErrorCode, Notification, Request, Response, extract_auth};
-pub use server::{Handler, PeerIdentity, Server};
+pub use server::{Handler, PeerIdentity, Server, publish};
 
 /// Répertoire des sockets des daemons.
 pub const SOCKET_DIR: &str = "/run/prophet";

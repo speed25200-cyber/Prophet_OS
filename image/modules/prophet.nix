@@ -42,7 +42,8 @@ let
         # Le bit collant (`1770`) : chacun ne retire ou ne renomme que ses propres sockets. Sans
         # lui, un membre du groupe — l'humain, sa session, un client officiel qu'il lance — pouvait
         # supprimer `capd.sock` et poser un faux capd à sa place (ADR 0044). `supd` et la surface
-        # continuent d'y créer et d'y retirer les leurs.
+        # continuent d'y créer les leurs. Chaque socket y est posé par renommage et reste en place
+        # à l'arrêt : son nom n'est jamais libre (`prophet_ipc::publish`).
         RuntimeDirectoryMode = "1770";
         # Sans cette ligne, systemd supprime le répertoire quand l'un d'eux s'arrête — et emporte
         # les six autres sockets avec lui. Un `systemctl restart prophet-memoryd` couperait tout

@@ -122,3 +122,52 @@ async fn debit_dix_mille_allers_retours() {
     );
     eprintln!("10 000 allers-retours en {elapsed:?}");
 }
+
+#[tokio::test]
+async fn le_nom_du_socket_n_est_jamais_libre_entre_deux_demarrages() {
+    // Un membre du groupe qui guette le nom d'un daemon ne doit jamais le trouver libre : ni
+    // pendant qu'un nouveau démarrage remplace l'ancien socket, ni après l'arrêt du service.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("capd.sock");
+    let premier = Server::bind(&path).unwrap();
+    let guet = {
+        let path = path.clone();
+        std::thread::spawn(move || {
+            let fin = std::time::Instant::now() + std::time::Duration::from_millis(300);
+            let mut absences = 0u32;
+            while std::time::Instant::now() < fin {
+                if std::fs::symlink_metadata(&path).is_err() {
+                    absences += 1;
+                }
+            }
+            absences
+        })
+    };
+    let mut serveurs = vec![premier];
+    for _ in 0..200 {
+        serveurs.push(Server::bind(&path).unwrap());
+    }
+    assert_eq!(guet.join().unwrap(), 0, "le nom a été vu libre");
+    // Aucun nom temporaire ne reste à côté.
+    let noms: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(noms, vec![std::ffi::OsString::from("capd.sock")]);
+
+    // Arrêté, le service laisse son socket en place : le nom reste à lui, les clients sont
+    // refusés au lieu de joindre un autre, et le démarrage suivant le remplace.
+    drop(serveurs);
+    assert!(std::fs::symlink_metadata(&path).is_ok());
+    assert!(Client::connect(&path).await.is_err());
+    let suivant = Server::bind(&path).unwrap();
+    tokio::spawn(async move {
+        let _ = suivant.serve(Arc::new(Echo)).await;
+    });
+    let client = Client::connect(&path).await.unwrap();
+    assert_eq!(client.call("ping", json!({})).await.unwrap(), json!("pong"));
+    let mode = std::os::unix::fs::PermissionsExt::mode(
+        &std::fs::symlink_metadata(&path).unwrap().permissions(),
+    );
+    assert_eq!(mode & 0o777, 0o660);
+}

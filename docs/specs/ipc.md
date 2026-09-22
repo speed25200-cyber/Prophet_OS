@@ -6,7 +6,7 @@
 
 ## Transport
 
-- Sockets Unix de type flux, chemins `/run/prophet/<daemon>.sock`, mode `0660`, groupe `prophet-system`, dans un répertoire collant en `1770` ; les sockets destinés aux tâches (serveurs MCP) sont montés dans la sandbox de la tâche.
+- Sockets Unix de type flux, chemins `/run/prophet/<daemon>.sock`, mode `0660`, groupe `prophet-system`, dans un répertoire collant en `1770`. Un daemon crée son socket sous un nom temporaire puis le renomme sur son nom (`prophet_ipc::publish`) : le nom n'est jamais libre, ni au redémarrage ni à l'arrêt, où le socket reste en place et refuse les connexions ; les sockets destinés aux tâches (serveurs MCP) sont montés dans la sandbox de la tâche.
 - Un message = un objet JSON-RPC 2.0 sur une ligne terminée par `\n`. Taille maximale d'un message : 8 Mio (au-delà, `-32600`).
 - Multiplexage par `id`. Les flux sont des notifications répétées (`method` sans `id`) associées à un `run` ou `subscription`.
 

@@ -42,7 +42,12 @@ lancent tout sous un même compte, et l'administration par `root`.
   qu'au compte du proxy, et chaque requête d'egress passe sous un jeton que capd tranche.
 - `/run/prophet` devient collant (`1770`) : chacun n'y retire ou n'y renomme que ses propres
   sockets. Sans cela, un membre du groupe pouvait supprimer `capd.sock` et poser un faux capd
-  à sa place ; `supd` et la surface continuent d'y créer et d'y retirer les leurs.
+  à sa place ; `supd` et la surface continuent d'y créer les leurs.
+- Un socket est posé sous un nom temporaire puis renommé sur son nom (`prophet_ipc::publish`),
+  et un service arrêté ne retire plus le sien : entre deux démarrages, le nom n'est jamais
+  libre. Retirer puis recréer laissait un instant où un membre pouvait poser le sien, et un
+  arrêt laissait le nom libre jusqu'au démarrage suivant — egress et agentd auraient alors
+  interrogé un faux capd. Un nom qui appartient à un autre compte fait échouer le démarrage.
 
 Un pair admis d'une autre classe reçoit `-32001` avec le nom de la méthode et à qui elle revient ;
 un pair non admis reçoit le refus d'avant.
@@ -71,7 +76,6 @@ le pourrait donc s'il exécutait un programme qui appelle `approval.resolve` ; d
 surface d'un autre programme du même compte demande un chemin de confiance que l'OS n'a pas
 encore, ou le confinement du client que l'ADR 0026 laisse ouvert. agentd garde ses contrôles
 propres (créateur constaté pour publier, annuler, examiner).
-Reste aussi une fenêtre étroite au redémarrage d'un daemon, entre le retrait de son ancien socket
-et la création du nouveau, où un autre membre pourrait prendre le nom. L'essai NixOS des services
-vérifie, sous le compte de l'humain, la lecture permise, les refus de `cap.mint`,
-`ledger.append` et `sandbox.run`, et qu'il ne peut ni retirer ni renommer `capd.sock`.
+L'essai NixOS des services vérifie, sous le compte de l'humain, la lecture permise, les refus
+de `cap.mint`, `ledger.append` et `sandbox.run`, qu'il ne peut ni retirer ni renommer
+`capd.sock`, ni le remplacer pendant que capd est arrêté, et que capd repart sur son nom.

@@ -390,5 +390,23 @@ pkgs.testers.runNixOSTest {
         journal = machine.succeed("prophet log tail -n 20")
         print(journal)
         assert "task.created" in journal or "créée" in journal, journal
+
+    with subtest("arrêté, capd garde son nom, et le reprend d'un coup au démarrage"):
+        # Retirer puis recréer un socket laissait un instant où le nom était libre, et un
+        # service arrêté retirait le sien : un membre du groupe pouvait alors poser un faux capd
+        # que egress et agentd auraient interrogé. Le socket est désormais posé par renommage et
+        # reste en place à l'arrêt (ADR 0044). En dernier : les autres services en dépendent.
+        machine.succeed("systemctl stop prophet-capd.service")
+        machine.succeed("test -S /run/prophet/capd.sock")
+        machine.fail("su - prophet -c 'rm -f /run/prophet/capd.sock'")
+        machine.fail("su - prophet -c 'ln -sf /tmp/faux /run/prophet/capd.sock'")
+        machine.fail("su - prophet -c 'touch /run/prophet/faux && mv -f /run/prophet/faux /run/prophet/capd.sock'")
+        machine.succeed("rm -f /run/prophet/faux")
+        machine.succeed("test -S /run/prophet/capd.sock")
+        machine.succeed("systemctl start prophet-capd.service")
+        machine.wait_for_unit("prophet-capd.service")
+        machine.wait_until_succeeds("su - prophet -c 'prophet-essai-tache droits'", timeout=30)
+        restes = [n for n in machine.succeed("ls -A /run/prophet").split() if n.startswith(".")]
+        assert not restes, f"noms temporaires restés dans /run/prophet : {restes}"
   '';
 }

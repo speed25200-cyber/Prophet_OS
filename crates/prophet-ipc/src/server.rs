@@ -45,20 +45,14 @@ pub struct Server {
 }
 
 impl Server {
-    /// Ouvre un socket, en retirant un fichier résiduel et en posant le mode `0660`.
+    /// Ouvre un socket en mode `0660` sous `path`, en remplaçant d'un coup celui d'un démarrage
+    /// précédent (voir [`publish`]).
     ///
     /// # Erreurs
-    /// Si le socket ne peut pas être créé.
+    /// Si le socket ne peut pas être créé, ou si le nom appartient à un autre compte.
     pub fn bind(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let path = path.as_ref().to_path_buf();
-        if path.exists() {
-            std::fs::remove_file(&path)?;
-        }
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let listener = UnixListener::bind(&path)?;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o660))?;
+        let listener = publish(&path, |temporary| UnixListener::bind(temporary))?;
         Ok(Self { listener, path })
     }
 
@@ -85,10 +79,57 @@ impl Server {
     }
 }
 
-impl Drop for Server {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+/// Pose un socket sous `path` sans que le nom soit jamais libre (ADR 0044).
+///
+/// `bind` crée le socket sous un nom temporaire du même répertoire, qui reçoit le mode `0660`,
+/// puis un `rename` le met à la place de l'ancien d'un seul geste. Retirer puis recréer, comme
+/// avant, laissait entre les deux un instant où un autre membre de `prophet-system` pouvait
+/// poser son propre socket sous le nom d'un daemon ; dans le répertoire collant des sockets, ce
+/// nom lui serait resté. Pour la même raison, un service arrêté ne retire pas son socket : le
+/// nom reste à son compte, les clients sont refusés au lieu de joindre un autre programme, et
+/// le démarrage suivant le remplace. Si le nom appartient à un autre compte, le renommage est
+/// refusé par le noyau et le service ne démarre pas, plutôt que de servir à côté d'un imposteur.
+///
+/// # Erreurs
+/// Si le répertoire, le socket ou le renommage échouent.
+pub fn publish<L>(
+    path: &Path,
+    bind: impl FnOnce(&Path) -> std::io::Result<L>,
+) -> std::io::Result<L> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
+    let name = path.file_name().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "chemin de socket sans nom",
+        )
+    })?;
+    let temporary = path.with_file_name(format!(
+        ".{}.{}",
+        name.to_string_lossy(),
+        std::process::id()
+    ));
+    // Reste d'un processus mort qui portait le même numéro : il était à nous.
+    let _ = std::fs::remove_file(&temporary);
+    let listener = bind(&temporary)?;
+    let placed = std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o660))
+        .and_then(|()| std::fs::rename(&temporary, path));
+    if let Err(error) = placed {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(if error.kind() == std::io::ErrorKind::PermissionDenied {
+            std::io::Error::new(
+                error.kind(),
+                format!(
+                    "{} appartient à un autre compte : le socket n'est pas remplacé",
+                    path.display()
+                ),
+            )
+        } else {
+            error
+        });
+    }
+    Ok(listener)
 }
 
 async fn handle_connection<H: Handler>(stream: UnixStream, handler: Arc<H>) -> std::io::Result<()> {

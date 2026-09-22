@@ -63,18 +63,9 @@ struct Sortie {
 async fn main() -> anyhow::Result<()> {
     commun::journaliser();
 
+    // Posé d'un coup sur l'ancien, comme les sockets des autres daemons (ADR 0044).
     let socket = commun::socket("egress");
-    if socket.exists() {
-        std::fs::remove_file(&socket)?;
-    }
-    if let Some(parent) = socket.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let ecoute = UnixListener::bind(&socket)?;
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o660))?;
-    }
+    let ecoute = prophet_ipc::publish(&socket, |temporaire| UnixListener::bind(temporaire))?;
 
     let capd = std::env::var("PROPHET_CAPD_SOCKET").map_or_else(
         |_| prophet_ipc::socket_path("capd"),
