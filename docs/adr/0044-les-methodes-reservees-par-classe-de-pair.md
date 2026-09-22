@@ -36,6 +36,10 @@ lancent tout sous un même compte, et l'administration par `root`.
   → tous. La spécification d'une sandbox nomme ses montages, ses chemins inscriptibles et les
   sockets qu'elle expose, et le programme tourne sous l'identité de sandboxd, de la classe des
   services : ouverte à la session humaine, elle rendrait par ce détour ce que capd refuse.
+- `memoryd` : `memory.remember` → services ; chercher, lister, oublier → tous. Un souvenir
+  écrit depuis la session humaine serait relu par l'agent comme le sien.
+- `vault` et `egress` gardent leurs contrôles propres, qui suffisent : `secrets.use` n'est servi
+  qu'au compte du proxy, et chaque requête d'egress passe sous un jeton que capd tranche.
 - `/run/prophet` devient collant (`1770`) : chacun n'y retire ou n'y renomme que ses propres
   sockets. Sans cela, un membre du groupe pouvait supprimer `capd.sock` et poser un faux capd
   à sa place ; `supd` et la surface continuent d'y créer et d'y retirer les leurs.
@@ -65,8 +69,8 @@ l'utilisateur. Un processus de l'humain peut aussi toujours **trancher** une app
 l'humain lui-même par la CLI. Un client officiel lancé par `prophet-pilotd` sous cette identité, avec ses propres outils,
 le pourrait donc s'il exécutait un programme qui appelle `approval.resolve` ; distinguer la
 surface d'un autre programme du même compte demande un chemin de confiance que l'OS n'a pas
-encore, ou le confinement du client que l'ADR 0026 laisse ouvert. Les autres daemons (agentd,
-vault, egress, sandboxd, memoryd) gardent leurs propres contrôles, à passer au même crible.
+encore, ou le confinement du client que l'ADR 0026 laisse ouvert. agentd garde ses contrôles
+propres (créateur constaté pour publier, annuler, examiner).
 Reste aussi une fenêtre étroite au redémarrage d'un daemon, entre le retrait de son ancien socket
 et la création du nouveau, où un autre membre pourrait prendre le nom. L'essai NixOS des services
 vérifie, sous le compte de l'humain, la lecture permise, les refus de `cap.mint`,

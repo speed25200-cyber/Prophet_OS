@@ -26,6 +26,17 @@ struct Memoire {
     pairs: commun::Pairs,
 }
 
+/// À qui chaque méthode s'ouvre (ADR 0044). Écrire un souvenir revient aux services, qui le
+/// tiennent d'une tâche : un processus de la session humaine qui pourrait en écrire glisserait
+/// dans la mémoire d'un agent des consignes qu'il relirait comme les siennes. Chercher, lister
+/// et oublier restent ouverts : l'humain édite et efface la mémoire de ses agents (M11-T4).
+fn acces(methode: &str) -> commun::Acces {
+    match methode {
+        "memory.remember" => commun::Acces::Services,
+        _ => commun::Acces::Tous,
+    }
+}
+
 impl Handler for Memoire {
     async fn call(
         &self,
@@ -34,9 +45,13 @@ impl Handler for Memoire {
         methode: String,
         params: Value,
     ) -> Result<Value, Error> {
-        if methode != "ping" && !self.pairs.autorise(pair) {
+        if methode != "ping" && !self.pairs.permet(pair, acces(&methode)) {
             tracing::warn!(uid = pair.uid, gid = pair.gid, %methode, "pair refusé");
-            return Err(self.pairs.refus());
+            return Err(if self.pairs.autorise(pair) {
+                self.pairs.refus_pour(&methode, acces(&methode))
+            } else {
+                self.pairs.refus()
+            });
         }
 
         match methode.as_str() {
@@ -188,4 +203,23 @@ async fn main() -> anyhow::Result<()> {
         }))
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests_acces {
+    use super::*;
+
+    #[test]
+    fn ecrire_un_souvenir_revient_aux_services_et_l_oublier_a_tous() {
+        assert_eq!(acces("memory.remember"), commun::Acces::Services);
+        for methode in [
+            "memory.search",
+            "memory.list",
+            "memory.forget",
+            "memory.forget_space",
+            "memory.spaces",
+        ] {
+            assert_eq!(acces(methode), commun::Acces::Tous, "{methode}");
+        }
+    }
 }
