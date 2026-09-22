@@ -103,7 +103,7 @@ pub(crate) fn tableau(
 ) {
     let accent = Accent::de(ui.ctx());
     let width = ui.available_width();
-    let radius = if compact { 24.0 } else { 52.0 };
+    let radius = if compact { 17.0 } else { 52.0 };
     let height = radius * 2.0 + 10.0;
     let (row, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
     let painter = ui.painter();
@@ -125,6 +125,24 @@ pub(crate) fn tableau(
     ];
     let slot = width / 3.0;
     for (i, (fraction, value, label)) in gauges.iter().enumerate() {
+        if compact {
+            // Trop petit pour porter son texte, l'anneau le laisse à sa droite, en relevé :
+            // la valeur et son unité se lisent sans chevaucher les graduations.
+            let center = pos2(
+                row.left() + slot * i as f32 + radius + 2.0,
+                row.top() + radius + 4.0,
+            );
+            hud::jauge(painter, center, radius, *fraction, color, &accent, ("", ""));
+            hud::releve(
+                painter,
+                pos2(center.x + radius + 10.0, center.y - 6.0),
+                Align2::LEFT_CENTER,
+                label,
+                value,
+                ENCRE,
+            );
+            continue;
+        }
         let center = pos2(
             row.left() + slot * (i as f32 + 0.5),
             row.top() + radius + 4.0,

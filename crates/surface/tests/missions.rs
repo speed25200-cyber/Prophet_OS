@@ -395,6 +395,16 @@ fn les_widgets_lancent_la_mission_et_permettent_de_lire_son_resultat() {
         );
         std::thread::sleep(Duration::from_millis(50));
     }
+    // Le dernier geste se lit dans l'en-tête de la mission, sans ouvrir le parcours, et il
+    // est offert à l'accessibilité.
+    frame(&mut bureau, &mut source, &context, &target, vec![]);
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("mission-dernier-geste"))
+            .is_some(),
+        "le dernier geste de l'agent n'est pas affiché"
+    );
     for (width, height) in [(1440, 1000), (1920, 1080), (1280, 800), (640, 900)] {
         let target = Cible::nouvelle(&context, width, height);
         for _ in 0..3 {

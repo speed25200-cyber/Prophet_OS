@@ -1,6 +1,6 @@
 //! Le travail et son plan occupent la surface principale ; les compteurs restent secondaires.
 use crate::hud;
-use crate::missions::{Action, Missions};
+use crate::missions::{Action, Missions, Outcome};
 use crate::scene::Courant;
 use crate::supervision::bouton;
 use crate::theme::Accent;
@@ -230,6 +230,46 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
                     open_in_browser(url);
                 }
             });
+        }
+        // Le dernier geste de l'agent, relu dans le journal : ce qu'il fait se voit sans ouvrir
+        // le parcours. La cible est celle que capd a contrôlée ; le contenu n'y est jamais.
+        if !reviewing && let Some(geste) = missions.trail().last() {
+            ui.add_space(4.0);
+            let (marque, couleur, note) = issue(&geste.outcome);
+            let ligne = ui
+                .horizontal_wrapped(|ui| {
+                    small(ui, "Dernier geste :");
+                    ui.label(RichText::new(marque).color(couleur).size(13.0));
+                    ui.label(
+                        RichText::new(&geste.tool)
+                            .size(13.0)
+                            .monospace()
+                            .color(accent.sourd),
+                    );
+                    if let Some(cible) = &geste.target {
+                        ui.label(
+                            RichText::new(limited(&cible_lisible(cible), 80))
+                                .size(12.0)
+                                .color(MUTED),
+                        );
+                    }
+                    if !note.is_empty() {
+                        ui.label(RichText::new(limited(&note, 80)).size(12.0).color(RED));
+                    }
+                })
+                .response;
+            let decrit = format!(
+                "Dernier geste : {} {} — {}",
+                geste.tool,
+                geste.target.as_deref().unwrap_or(""),
+                issue_en_mots(&geste.outcome)
+            );
+            ui.interact(
+                ligne.rect,
+                egui::Id::new("mission-dernier-geste"),
+                egui::Sense::hover(),
+            )
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &decrit));
         }
         if !reviewing {
             ui.add_space(6.0);
@@ -659,7 +699,6 @@ fn open_in_browser(url: &str) {
 
 fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::TrailEntry]) {
     let accent = Accent::de(ui.ctx());
-    use crate::missions::Outcome;
     heading(ui, "Parcours observé", 23.0);
     ui.add_space(14.0);
     for (n, state) in info.task.history.iter().enumerate() {
@@ -680,12 +719,7 @@ fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::Trail
         );
     }
     for entry in trail.iter().take(200) {
-        let (mark, color, note) = match &entry.outcome {
-            Outcome::Pending => ("·", MUTED, String::new()),
-            Outcome::Ok => ("✓", GREEN, String::new()),
-            Outcome::Error(code) => ("✕", RED, code.clone()),
-            Outcome::Denied(reason) => ("⊘", RED, reason.clone()),
-        };
+        let (mark, color, note) = issue(&entry.outcome);
         ui.horizontal_wrapped(|ui| {
             small(
                 ui,
@@ -701,7 +735,11 @@ fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::Trail
                     .color(accent.sourd),
             );
             if let Some(target) = &entry.target {
-                ui.label(RichText::new(limited(target, 120)).size(13.0).color(MUTED));
+                ui.label(
+                    RichText::new(limited(&cible_lisible(target), 120))
+                        .size(13.0)
+                        .color(MUTED),
+                );
                 // Un hôte visité par l'agent s'ouvre dans le navigateur de l'humain, par la
                 // commande que la session lui a donnée ; jamais par une adresse venue du modèle
                 // au-delà de l'hôte contrôlé par capd.
@@ -731,6 +769,40 @@ fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::Trail
         ui,
         "États conservés par le service ; appels relus dans le journal, avec leur cible contrôlée et leur issue.",
     );
+}
+
+/// La marque, la couleur et la note d'une issue d'appel, pour le parcours et le dernier geste.
+fn issue(outcome: &Outcome) -> (&'static str, Color32, String) {
+    match outcome {
+        Outcome::Pending => ("·", MUTED, String::new()),
+        Outcome::Ok => ("✓", GREEN, String::new()),
+        Outcome::Error(code) => ("✕", RED, code.clone()),
+        Outcome::Denied(reason) => ("⊘", RED, reason.clone()),
+    }
+}
+
+/// Une cible lisible : un chemin du dossier de l'humain s'écrit à partir de `~`, comme il
+/// l'écrirait lui-même ; toute autre cible reste telle que capd l'a contrôlée.
+fn cible_lisible(cible: &str) -> String {
+    cible_depuis(cible, &std::env::var("HOME").unwrap_or_default())
+}
+
+fn cible_depuis(cible: &str, home: &str) -> String {
+    let home = home.trim_end_matches('/');
+    match cible.strip_prefix(home) {
+        Some(reste) if !home.is_empty() && reste.starts_with('/') => format!("~{reste}"),
+        _ => cible.to_owned(),
+    }
+}
+
+/// Une issue d'appel en mots, pour l'accessibilité.
+fn issue_en_mots(outcome: &Outcome) -> String {
+    match outcome {
+        Outcome::Pending => "en cours".to_owned(),
+        Outcome::Ok => "réussi".to_owned(),
+        Outcome::Error(code) => format!("en erreur ({code})"),
+        Outcome::Denied(reason) => format!("refusé ({reason})"),
+    }
 }
 
 /// Les sous-missions d'une mission : leurs identifiants sont les siens suivis d'un rang
@@ -781,6 +853,25 @@ pub(crate) fn confiees(ui: &mut egui::Ui, c: &Courant, courants: &[Courant]) {
 mod tests {
     use super::*;
     use crate::scene::Etat;
+
+    #[test]
+    fn une_cible_du_dossier_de_l_humain_se_lit_depuis_le_tilde() {
+        assert_eq!(
+            cible_depuis("/home/pilot/Documents/Prophet/note.txt", "/home/pilot"),
+            "~/Documents/Prophet/note.txt"
+        );
+        assert_eq!(
+            cible_depuis("/home/pilot/Documents/x", "/home/pilot/"),
+            "~/Documents/x"
+        );
+        // Un voisin qui partage le préfixe n'est pas le dossier de l'humain.
+        assert_eq!(
+            cible_depuis("/home/pilote/secret", "/home/pilot"),
+            "/home/pilote/secret"
+        );
+        assert_eq!(cible_depuis("exemple.fr", "/home/pilot"), "exemple.fr");
+        assert_eq!(cible_depuis("/etc/passwd", ""), "/etc/passwd");
+    }
 
     fn courant(id: &str, agent: &str) -> Courant {
         Courant {
