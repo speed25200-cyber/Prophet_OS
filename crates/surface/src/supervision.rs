@@ -1354,12 +1354,113 @@ fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
     });
 }
 
+/// Les poids installés, tels que leurs fichiers les décrivent : l'agent qui confie une étape et
+/// l'humain qui choisit un modèle lisent la même fenêtre de contexte et la même quantification.
+fn poids_installes(ui: &mut egui::Ui, atelier: &Atelier) {
+    let accent = Accent::de(ui.ctx());
+    etiquette(ui, "POIDS INSTALLÉS");
+    ui.add_space(6.0);
+    petit(
+        ui,
+        format!(
+            "Lus dans {} : l'en-tête de chaque fichier, sans charger les poids.",
+            atelier.dossier_des_poids.display()
+        ),
+    );
+    ui.add_space(10.0);
+    if atelier.demonstration {
+        petit(ui, "Catalogue non lu dans une scène d'exemple.");
+        return;
+    }
+    if !atelier.poids_lus {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            petit(ui, "Lecture du catalogue…");
+        });
+        return;
+    }
+    if atelier.poids.is_empty() {
+        ui.label(titre("Aucun poids sur cette machine.", 22.0));
+        petit(
+            ui,
+            "L'installation dépose le modèle par défaut dans ce dossier ; `prophet model ls` le relit.",
+        );
+        return;
+    }
+    for entree in &atelier.poids {
+        match entree {
+            Ok(w) => {
+                let fichier = w
+                    .path
+                    .file_name()
+                    .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                let ligne = ui
+                    .horizontal_wrapped(|ui| {
+                        ui.label(titre(
+                            w.name.clone().unwrap_or_else(|| fichier.clone()),
+                            18.0,
+                        ));
+                        for (valeur, couleur) in [
+                            (w.architecture.clone(), accent.sourd),
+                            (w.size_label.clone(), ENCRE),
+                            (w.quantization.clone(), ENCRE),
+                            (
+                                w.context_length
+                                    .map(|c| format!("{} tokens de contexte", groupes(c))),
+                                ENCRE,
+                            ),
+                            (Some(format!("{:.1} Go", w.gigabytes())), DISCRET),
+                        ]
+                        .into_iter()
+                        .filter_map(|(v, c)| v.map(|v| (v, c)))
+                        {
+                            ui.label(RichText::new(valeur).size(12.0).color(couleur));
+                        }
+                    })
+                    .response;
+                let decrit = format!(
+                    "{} — {} {} {}",
+                    fichier,
+                    w.architecture.as_deref().unwrap_or(""),
+                    w.quantization.as_deref().unwrap_or(""),
+                    w.context_length
+                        .map_or_else(String::new, |c| format!("{c} tokens de contexte"))
+                );
+                ui.interact(
+                    ligne.rect,
+                    egui::Id::new(format!("poids-{fichier}")),
+                    egui::Sense::hover(),
+                )
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &decrit));
+            }
+            Err(raison) => {
+                ui.label(RichText::new(raison).size(12.0).color(ATTENTE));
+            }
+        }
+        ui.add_space(8.0);
+    }
+}
+
+/// Un nombre en groupes de trois chiffres, séparés d'une espace fine : 40 960.
+fn groupes(n: u64) -> String {
+    let chiffres = n.to_string();
+    let mut out = String::new();
+    for (i, c) in chiffres.chars().enumerate() {
+        if i > 0 && (chiffres.len() - i).is_multiple_of(3) {
+            out.push('\u{202f}');
+        }
+        out.push(c);
+    }
+    out
+}
+
 fn modeles(ui: &mut egui::Ui, atelier: &mut Atelier) {
     let accent = Accent::de(ui.ctx());
     etiquette(ui, "MODÈLES");
     ui.label(titre("L'intelligence sur votre machine.", 40.0));
     hud::etiquette(ui, "MOTEUR LOCAL ET CLIENTS OFFICIELS", EFFACE);
     atelier.sonder_les_clients(&ui.ctx().clone());
+    atelier.lire_les_poids(&ui.ctx().clone());
     ui.add_space(26.0);
     egui::ScrollArea::vertical()
         .id_salt("bibliotheque")
@@ -1415,9 +1516,14 @@ fn modeles(ui: &mut egui::Ui, atelier: &mut Atelier) {
                     ui.add_space(8.0);
                     petit(
                         ui,
-                        "Le téléchargement et le lancement des moteurs restent à intégrer.",
+                        "Sur l'image installée, le moteur démarre avec le modèle que l'installation a déposé ; ailleurs, lancez llama-server puis actualisez.",
                     );
                 }
+            });
+            ui.add_space(14.0);
+            plaque(ui, 28, |ui| {
+                ui.set_width(ui.available_width());
+                poids_installes(ui, atelier);
             });
             ui.add_space(18.0);
             for model in &atelier.modeles {
@@ -1452,6 +1558,13 @@ fn modeles(ui: &mut egui::Ui, atelier: &mut Atelier) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn un_grand_nombre_se_lit_par_groupes_de_trois() {
+        assert_eq!(groupes(7), "7");
+        assert_eq!(groupes(40_960), "40\u{202f}960");
+        assert_eq!(groupes(1_048_576), "1\u{202f}048\u{202f}576");
+    }
 
     #[test]
     fn les_filtres_ne_transforment_pas_un_blocage_en_execution() {

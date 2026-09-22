@@ -51,8 +51,12 @@ pub struct ClientCard {
     pub connected: bool,
 }
 
+/// Une entrée du catalogue des poids : lue, ou refusée avec sa raison.
+pub type Poids = Result<providers::weights::Weights, String>;
+
 enum Evenement {
     Modeles(Result<Vec<String>, String>),
+    Poids(Vec<Poids>),
     Clients(Vec<ClientCard>),
     Fragment(u64, String),
     Fin(u64, Result<Completion, String>),
@@ -86,6 +90,15 @@ pub struct Atelier {
     pub clients: Vec<ClientCard>,
     /// Une sonde des clients est partie ou a déjà répondu.
     pub clients_sondes: bool,
+    /// Dossier des poids lu par le catalogue (`PROPHET_MODELS_DIR`, sinon celui de l'image).
+    pub dossier_des_poids: std::path::PathBuf,
+    /// Fichiers de poids que la configuration nomme hors du dossier (`PROPHET_WEIGHTS`).
+    pub fichiers_de_poids: Vec<std::path::PathBuf>,
+    /// Le catalogue des poids, tel que lu ; vide tant que la lecture n'a pas répondu.
+    pub poids: Vec<Poids>,
+    /// Le catalogue a été lu (ou n'a pas à l'être, dans une scène d'exemple).
+    pub poids_lus: bool,
+    lecture_des_poids: bool,
     tx: Sender<Evenement>,
     rx: Receiver<Evenement>,
     cancel: Option<watch::Sender<bool>>,
@@ -111,6 +124,11 @@ impl Atelier {
             endpoint,
             clients: Vec::new(),
             clients_sondes: false,
+            dossier_des_poids: providers::weights::dir(),
+            fichiers_de_poids: providers::weights::configured(),
+            poids: Vec::new(),
+            poids_lus: false,
+            lecture_des_poids: false,
             tx,
             rx,
             cancel: None,
@@ -180,6 +198,29 @@ impl Atelier {
         });
     }
 
+    /// Lit une fois, en arrière-plan, ce que chaque fichier de poids dit de lui-même. Une scène
+    /// de démonstration ne lit rien : elle n'a pas de machine à décrire.
+    pub fn lire_les_poids(&mut self, ctx: &egui::Context) {
+        if self.lecture_des_poids {
+            return;
+        }
+        self.lecture_des_poids = true;
+        if self.demonstration {
+            self.poids_lus = true;
+            return;
+        }
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        let dossier = self.dossier_des_poids.clone();
+        let fichiers = self.fichiers_de_poids.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Evenement::Poids(providers::weights::installed(
+                &dossier, &fichiers,
+            )));
+            ctx.request_repaint();
+        });
+    }
+
     /// Interroge le moteur en arrière-plan, avec un délai court pour une découverte.
     pub fn decouvrir(&mut self, ctx: &egui::Context) {
         if self.decouverte || self.demonstration {
@@ -228,6 +269,10 @@ impl Atelier {
                 }
                 Evenement::Clients(cards) => {
                     self.clients = cards;
+                }
+                Evenement::Poids(poids) => {
+                    self.poids = poids;
+                    self.poids_lus = true;
                 }
                 Evenement::Fragment(id, text) if id == self.numero => {
                     if let Some(tour) = self.tours.last_mut() {

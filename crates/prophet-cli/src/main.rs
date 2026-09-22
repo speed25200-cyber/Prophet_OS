@@ -50,6 +50,11 @@ enum Command {
         #[command(subcommand)]
         action: ProviderAction,
     },
+    /// Poids des modèles locaux installés sur cette machine.
+    Model {
+        #[command(subcommand)]
+        action: ModelAction,
+    },
     /// Mémoire.
     Memory {
         #[command(subcommand)]
@@ -107,6 +112,18 @@ enum Command {
         /// Avec `--say` ou `--reply` : écrire la réponse dans ce fichier WAV au lieu de la jouer.
         #[arg(long)]
         out: Option<std::path::PathBuf>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ModelAction {
+    /// Le catalogue des poids : ce que chaque fichier GGUF dit de lui-même (architecture,
+    /// quantification, fenêtre de contexte), sans charger les poids.
+    Ls {
+        /// Dossier à lire, seul. Sans lui : `PROPHET_MODELS_DIR` (sinon `/var/lib/prophet/models`)
+        /// et les fichiers que `PROPHET_WEIGHTS` nomme.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
     },
 }
 
@@ -399,6 +416,7 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
             freeze(&socket, cli.json)
         }
         Command::Provider { action } => provider(action, cli.json),
+        Command::Model { action } => model(action, cli.json),
         Command::Voice {
             file,
             seconds,
@@ -1845,6 +1863,59 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
             }
         }
     }
+}
+
+fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
+    let ModelAction::Ls { dir } = action;
+    // Un dossier nommé se lit seul ; sinon, le dossier des poids et les fichiers que la
+    // configuration du système nomme, comme le modèle par défaut dans /nix/store (ADR 0033).
+    let (dir, catalog) = match dir {
+        Some(dir) => (dir.clone(), providers::weights::catalog(dir)),
+        None => {
+            let dir = providers::weights::dir();
+            let catalog = providers::weights::installed(&dir, &providers::weights::configured());
+            (dir, catalog)
+        }
+    };
+    if as_json {
+        let (weights, refused): (Vec<_>, Vec<_>) = catalog.into_iter().partition(Result::is_ok);
+        return Ok(format!(
+            "{}\n",
+            serde_json::json!({
+                "dir": dir,
+                "weights": weights.into_iter().flatten().collect::<Vec<_>>(),
+                "refused": refused.into_iter().filter_map(Result::err).collect::<Vec<_>>(),
+            })
+        ));
+    }
+    if catalog.is_empty() {
+        return Ok(format!("Aucun poids GGUF dans {}.\n", dir.display()));
+    }
+    let mut out = format!(
+        "{:<28} {:<10} {:<8} {:<8} {:>9} {:>8}\n",
+        "fichier", "archi.", "taille", "quant.", "contexte", "Go"
+    );
+    let tiret = || "—".to_owned();
+    for entry in catalog {
+        match entry {
+            Ok(w) => {
+                let go = w.gigabytes();
+                out.push_str(&format!(
+                    "{:<28} {:<10} {:<8} {:<8} {:>9} {:>8.1}\n",
+                    w.path
+                        .file_name()
+                        .map_or_else(tiret, |n| n.to_string_lossy().into_owned()),
+                    w.architecture.unwrap_or_else(tiret),
+                    w.size_label.unwrap_or_else(tiret),
+                    w.quantization.unwrap_or_else(tiret),
+                    w.context_length.map_or_else(tiret, |c| c.to_string()),
+                    go
+                ));
+            }
+            Err(raison) => out.push_str(&format!("refusé : {raison}\n")),
+        }
+    }
+    Ok(out)
 }
 
 fn provider(action: &ProviderAction, as_json: bool) -> anyhow::Result<String> {

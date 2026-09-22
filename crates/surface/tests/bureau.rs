@@ -1106,3 +1106,67 @@ fn le_clavier_ouvre_les_pages_et_la_preparation_sans_souris() {
     assert_eq!(bureau.preparation().intent, "Résumer le rapport");
     assert_eq!(bureau.atelier.page, Page::Accueil);
 }
+
+/// Un en-tête GGUF v3 minimal : architecture, quantification Q8_0 et fenêtre de contexte.
+fn gguf(architecture: &str, contexte: u32) -> Vec<u8> {
+    let mut kv = Vec::new();
+    let texte = |kv: &mut Vec<u8>, k: &str, v: &str| {
+        kv.extend((k.len() as u64).to_le_bytes());
+        kv.extend(k.as_bytes());
+        kv.extend(8u32.to_le_bytes());
+        kv.extend((v.len() as u64).to_le_bytes());
+        kv.extend(v.as_bytes());
+    };
+    let nombre = |kv: &mut Vec<u8>, k: &str, v: u32| {
+        kv.extend((k.len() as u64).to_le_bytes());
+        kv.extend(k.as_bytes());
+        kv.extend(4u32.to_le_bytes());
+        kv.extend(v.to_le_bytes());
+    };
+    texte(&mut kv, "general.architecture", architecture);
+    nombre(&mut kv, "general.file_type", 7);
+    nombre(&mut kv, &format!("{architecture}.context_length"), contexte);
+    let mut out = b"GGUF".to_vec();
+    out.extend(3u32.to_le_bytes());
+    out.extend(0u64.to_le_bytes());
+    out.extend(3u64.to_le_bytes());
+    out.extend(kv);
+    out
+}
+
+#[test]
+#[ignore = "needs_gpu"]
+fn les_poids_installes_se_lisent_sur_la_page_modeles() {
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1440, 1000);
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("qwen3-1.7b.gguf"), gguf("qwen3", 40_960)).unwrap();
+    std::fs::write(dir.path().join("abime.gguf"), b"pas un modele").unwrap();
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.figer_transitions();
+    bureau.atelier.dossier_des_poids = dir.path().to_owned();
+    bureau.atelier.fichiers_de_poids.clear();
+    bureau.atelier.page = Page::Modeles;
+    let limite = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !bureau.atelier.poids_lus {
+        frame(&mut bureau, &context, &target, vec![]);
+        assert!(std::time::Instant::now() < limite, "catalogue jamais lu");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    for _ in 0..3 {
+        frame(&mut bureau, &context, &target, vec![]);
+    }
+    capture(&context, &target, "poids");
+    assert_eq!(bureau.atelier.poids.len(), 2);
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("poids-qwen3-1.7b.gguf"))
+            .is_some(),
+        "le poids lu doit être affiché"
+    );
+    assert!(
+        bureau.atelier.poids[0].as_ref().is_err(),
+        "le fichier abîmé est dit refusé"
+    );
+}

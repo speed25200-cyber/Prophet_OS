@@ -22,6 +22,7 @@ pub mod native;
 pub mod official;
 pub mod selection;
 pub mod stream;
+pub mod weights;
 
 use prophet_types::driver::{DriverCapabilities, DriverEvent, StartRequest, StartResponse};
 

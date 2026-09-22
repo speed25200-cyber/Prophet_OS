@@ -18,6 +18,13 @@ Sans service, la liste peut encore signaler les anciens espaces de travail acces
 compte. L'ancien `task undo` agit sur ces espaces de bibliothèque ; il n'est pas raccordé
 à la validation et à l'annulation des missions installées. Leur parcours sûr reste à livrer.
 
+`prophet model ls` rend le catalogue des poids de la machine : le dossier des poids
+(`PROPHET_MODELS_DIR`, sinon `/var/lib/prophet/models`) et les fichiers que `PROPHET_WEIGHTS`
+nomme, comme le modèle par défaut de l'image dans `/nix/store`. Pour chacun, ce que son en-tête
+GGUF dit de lui : architecture, taille annoncée, quantification, fenêtre de contexte et poids
+du fichier, sans charger les poids ; un fichier illisible est dit refusé avec sa raison.
+`--dir` lit un dossier seul, `--json` rend `weights` et `refused`.
+
 Validation : `nix develop --command cargo test -p prophet-cli`. Les tests de processus
 `task_service` reproduisent une consultation avec captures inaccessibles. Les vrais comptes
 et services sont exercés par `nix build .#checks.x86_64-linux.services`.
