@@ -21,7 +21,7 @@
 | `fs.write` | fs.write chemin | non (réversible via sfs) | non | remplacement atomique dans le travail, contenu ≤ 1 Mio |
 | `fs.list` | fs.list chemin et descendants | non | non | fusion travail/origine ; ≤ 2000 résultats |
 | `fs.stat` | fs.read chemin | non | non | |
-| `fs.search` | fs.read racine et descendants | non | non | nom et contenu ; ≤ 200 résultats |
+| `fs.search` | fs.read racine et descendants | non | non | nom et contenu ; ≤ 200 résultats ; par contenu, les cinq premières lignes trouvées de chaque fichier (`matches` : numéro et extrait de 200 caractères au plus, `more_matches`) |
 | `fs.diff_task` | task courante | non | non | |
 | `proc.exec` | proc.exec binaire | selon commande | non | niveau de sandbox forcé à 2 hors liste blanche |
 | `proc.kill` | task courante | non | non | |

@@ -334,6 +334,50 @@ fn les_metadonnees_et_la_recherche_de_la_version_de_travail_fonctionnent() {
 }
 
 #[test]
+fn la_recherche_de_contenu_rend_les_lignes_trouvees() {
+    // Un agent à petite fenêtre lit les lignes qui l'intéressent sans relire le fichier : la
+    // recherche rend leur numéro et un extrait borné autour du motif.
+    let m = monde(&["~/docs/**"]);
+    let longue = format!("{} cible au milieu {}", "x".repeat(500), "y".repeat(500));
+    let mut texte = format!("intro\nune cible ici\nrien\n{longue}\n");
+    for i in 0..10 {
+        texte.push_str(&format!("cible {i}\n"));
+    }
+    std::fs::write(m.home.join("docs/notes.txt"), &texte).unwrap();
+    let data = m
+        .call(
+            "fs.search",
+            json!({"root":"~/docs","content_contains":"cible"}),
+        )
+        .structured
+        .unwrap();
+    let trouve = &data["results"][0];
+    let lignes = trouve["matches"].as_array().unwrap();
+    assert_eq!(lignes.len(), 5, "{trouve}");
+    assert_eq!(lignes[0]["line"], 2);
+    assert_eq!(lignes[0]["text"], "une cible ici");
+    assert_eq!(lignes[1]["line"], 4);
+    let extrait = lignes[1]["text"].as_str().unwrap();
+    assert!(extrait.contains("cible au milieu"), "{extrait}");
+    assert!(
+        extrait.chars().count() <= 200,
+        "{}",
+        extrait.chars().count()
+    );
+    assert!(extrait.starts_with('…') && extrait.ends_with('…'));
+    assert_eq!(trouve["more_matches"], true);
+    // Une recherche par nom seul ne lit pas le contenu et n'invente pas de lignes.
+    let data = m
+        .call(
+            "fs.search",
+            json!({"root":"~/docs","name_contains":"notes"}),
+        )
+        .structured
+        .unwrap();
+    assert!(data["results"][0].get("matches").is_none());
+}
+
+#[test]
 fn liens_physiques_et_fichiers_speciaux_ne_sont_pas_lus() {
     let m = monde(&["~/docs/**"]);
     std::fs::hard_link(m.outside.join("secret.txt"), m.home.join("docs/dur.txt")).unwrap();

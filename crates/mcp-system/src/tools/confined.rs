@@ -574,6 +574,42 @@ fn run(
     }
 }
 
+/// Lignes trouvées rendues par fichier, et longueur d'un extrait en caractères.
+const MAX_MATCHES: usize = 5;
+const EXCERPT_CHARS: usize = 200;
+
+/// Les premières lignes qui contiennent le motif, numérotées depuis 1, chacune réduite à un
+/// extrait centré sur le motif ; vrai s'il y en a d'autres.
+fn matching_lines(text: &str, needle: &str) -> (Vec<Value>, bool) {
+    let mut found = text
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains(needle));
+    let lines = found
+        .by_ref()
+        .take(MAX_MATCHES)
+        .map(|(index, line)| json!({"line": index + 1, "text": excerpt(line.trim(), needle)}))
+        .collect();
+    (lines, found.next().is_some())
+}
+
+fn excerpt(line: &str, needle: &str) -> String {
+    let count = line.chars().count();
+    if count <= EXCERPT_CHARS {
+        return line.to_owned();
+    }
+    let at = line[..line.find(needle).unwrap_or(0)].chars().count();
+    let needle_chars = needle.chars().count();
+    // Deux caractères réservés aux points de suspension, le reste réparti autour du motif.
+    let room = EXCERPT_CHARS - 2;
+    let before = room.saturating_sub(needle_chars) / 2;
+    let start = at.saturating_sub(before).min(count.saturating_sub(room));
+    let body: String = line.chars().skip(start).take(room).collect();
+    let prefix = if start > 0 { "…" } else { "" };
+    let suffix = if start + room < count { "…" } else { "" };
+    format!("{prefix}{body}{suffix}")
+}
+
 fn search(view: &View<'_>, root: &Path, args: &Value) -> Result<Value> {
     let text_arg = |key| -> Result<Option<&str>> {
         args.get(key)
@@ -634,6 +670,7 @@ fn search(view: &View<'_>, root: &Path, args: &Value) -> Result<Value> {
             }) {
                 continue;
             }
+            let mut found = None;
             if let Some(needle) = content {
                 let remaining = MAX_SCAN.saturating_sub(budget.scanned);
                 if remaining == 0 {
@@ -651,8 +688,15 @@ fn search(view: &View<'_>, root: &Path, args: &Value) -> Result<Value> {
                 if !text.contains(needle) {
                     continue;
                 }
+                found = Some(matching_lines(&text, needle));
             }
-            let value = json!({"path":view.logical.join(&child),"size":m.len()});
+            let mut value = json!({"path":view.logical.join(&child),"size":m.len()});
+            if let Some((lines, more)) = found.take() {
+                value["matches"] = json!(lines);
+                if more {
+                    value["more_matches"] = json!(true);
+                }
+            }
             if !budget.accept(&value, results.len(), 200) {
                 stack.clear();
                 break;
