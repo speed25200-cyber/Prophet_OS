@@ -32,9 +32,13 @@ impl Handler for Capd {
         methode: String,
         params: Value,
     ) -> Result<Value, Error> {
-        if methode != "ping" && !self.pairs.autorise(pair) {
+        if methode != "ping" && !self.pairs.permet(pair, acces(&methode)) {
             tracing::warn!(uid = pair.uid, gid = pair.gid, %methode, "pair refusé");
-            return Err(self.pairs.refus());
+            return Err(if self.pairs.autorise(pair) {
+                self.pairs.refus_pour(&methode, acces(&methode))
+            } else {
+                self.pairs.refus()
+            });
         }
 
         let maintenant = OffsetDateTime::now_utc();
@@ -186,6 +190,22 @@ impl Handler for Capd {
 
             autre => Err(commun::methode_inconnue(autre)),
         }
+    }
+}
+
+/// À qui chaque méthode s'ouvre (ADR 0044).
+///
+/// Émettre, déléguer et vérifier des droits, demander une approbation ou en donner le motif, les
+/// expirer : les services, qui agissent pour une tâche. Trancher une approbation : l'humain, par
+/// la surface ou la CLI ; un service qui pourrait trancher pourrait s'approuver lui-même. Lire les
+/// demandes, les règles et la clé publique, révoquer : tout pair admis — révoquer ne fait que
+/// retirer, et l'arrêt d'urgence de l'humain en dépend.
+fn acces(methode: &str) -> commun::Acces {
+    match methode {
+        "cap.mint" | "cap.delegate" | "cap.check" | "approval.request" | "approval.explain"
+        | "approval.expire" => commun::Acces::Services,
+        "approval.resolve" => commun::Acces::Humains,
+        _ => commun::Acces::Tous,
     }
 }
 
@@ -352,5 +372,35 @@ mod service_context_tests {
         assert!(request.context.target.is_empty());
         assert_eq!(request.target, "/home/prophet/docs/note.txt");
         assert_eq!(request.context.bytes, Some(42));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn emettre_revient_aux_services_trancher_a_l_humain_lire_a_tous() {
+        use commun::Acces::{Humains, Services, Tous};
+        for methode in [
+            "cap.mint",
+            "cap.delegate",
+            "cap.check",
+            "approval.request",
+            "approval.explain",
+            "approval.expire",
+        ] {
+            assert_eq!(acces(methode), Services, "{methode}");
+        }
+        assert_eq!(acces("approval.resolve"), Humains);
+        for methode in [
+            "cap.public_key",
+            "cap.revoke",
+            "approval.pending",
+            "approval.rules",
+            "approval.status",
+        ] {
+            assert_eq!(acces(methode), Tous, "{methode}");
+        }
     }
 }

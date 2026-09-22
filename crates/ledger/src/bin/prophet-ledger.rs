@@ -29,6 +29,17 @@ struct Journal {
     pairs: commun::Pairs,
 }
 
+/// À qui chaque méthode s'ouvre (ADR 0044) : écrire et sceller le journal revient aux services,
+/// qui y consignent ce que font les tâches ; le lire et le vérifier, à tout pair admis. Un
+/// processus de la session humaine — un client officiel compris — ne peut donc pas y inscrire
+/// un événement qui n'a pas eu lieu.
+fn acces(methode: &str) -> commun::Acces {
+    match methode {
+        "ledger.append" | "ledger.seal" => commun::Acces::Services,
+        _ => commun::Acces::Tous,
+    }
+}
+
 impl Handler for Journal {
     async fn call(
         &self,
@@ -37,9 +48,13 @@ impl Handler for Journal {
         methode: String,
         params: Value,
     ) -> Result<Value, Error> {
-        if methode != "ping" && !self.pairs.autorise(pair) {
+        if methode != "ping" && !self.pairs.permet(pair, acces(&methode)) {
             tracing::warn!(uid = pair.uid, gid = pair.gid, %methode, "pair refusé");
-            return Err(self.pairs.refus());
+            return Err(if self.pairs.autorise(pair) {
+                self.pairs.refus_pour(&methode, acces(&methode))
+            } else {
+                self.pairs.refus()
+            });
         }
 
         match methode.as_str() {
@@ -206,4 +221,23 @@ async fn main() -> anyhow::Result<()> {
         }))
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests_acces {
+    use super::*;
+
+    #[test]
+    fn ecrire_le_journal_revient_aux_services_et_le_lire_a_tous() {
+        assert_eq!(acces("ledger.append"), commun::Acces::Services);
+        assert_eq!(acces("ledger.seal"), commun::Acces::Services);
+        for methode in [
+            "ledger.query",
+            "ledger.verify",
+            "ledger.replay_summary",
+            "ledger.head",
+        ] {
+            assert_eq!(acces(methode), commun::Acces::Tous, "{methode}");
+        }
+    }
 }

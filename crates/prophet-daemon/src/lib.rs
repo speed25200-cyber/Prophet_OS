@@ -84,6 +84,34 @@ pub struct Pairs {
 /// L'identifiant de l'administrateur.
 const ROOT: u32 = 0;
 
+/// Ce qu'est un pair admis, pour les méthodes qui ne s'ouvrent pas à tous.
+///
+/// Appartenir au groupe système ouvre la porte ; cela ne dit pas qui l'on est. Les sept daemons
+/// ont ce groupe pour groupe principal, que systemd leur donne (`Group=`) et que `SO_PEERCRED`
+/// atteste ; l'humain, sa session et la surface n'en sont que membres déclarés
+/// (`extraGroups`). La différence suffit à séparer ce qui émet des droits ou écrit le journal de
+/// ce qui les lit et tranche ce qui revient à l'humain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Classe {
+    /// Le service lui-même, ou `root` : ils peuvent déjà tout par leurs fichiers.
+    Soi,
+    /// Un daemon de l'OS : son groupe principal est le groupe système.
+    Service,
+    /// Un membre déclaré du groupe système : l'humain, sa session, la surface.
+    Humain,
+}
+
+/// À qui une méthode s'ouvre.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Acces {
+    /// Tout pair admis : lire, demander, révoquer.
+    Tous,
+    /// Les daemons seulement : émettre ou vérifier des droits, écrire le journal.
+    Services,
+    /// L'humain seulement : trancher une décision qui lui revient.
+    Humains,
+}
+
 impl Pairs {
     /// Lit l'identité du service et celle du groupe système.
     ///
@@ -132,16 +160,52 @@ impl Pairs {
     /// `/etc/group`, et seulement pour un pair qui serait sinon refusé.
     #[must_use]
     pub fn autorise(&self, pair: PeerIdentity) -> bool {
+        self.classe(pair).is_some()
+    }
+
+    /// La classe d'un pair admis, ou `None` s'il ne l'est pas.
+    #[must_use]
+    pub fn classe(&self, pair: PeerIdentity) -> Option<Classe> {
         if pair.uid == ROOT || pair.uid == self.uid_propre {
-            return true;
+            return Some(Classe::Soi);
         }
         if self.gid_systeme.is_some_and(|gid| pair.gid == gid) {
-            return true;
+            return Some(Classe::Service);
         }
-        match &self.membres_figes {
+        let declare = match &self.membres_figes {
             Some(membres) => membres.contains(&pair.uid),
             None => membres_du_groupe(GROUPE_SYSTEME).contains(&pair.uid),
-        }
+        };
+        declare.then_some(Classe::Humain)
+    }
+
+    /// Ce pair peut-il appeler une méthode ouverte à `acces` ? Le service lui-même et `root`
+    /// peuvent tout ; un service n'ouvre pas ce qui revient à l'humain, ni l'humain ce qui
+    /// revient aux services.
+    #[must_use]
+    pub fn permet(&self, pair: PeerIdentity, acces: Acces) -> bool {
+        matches!(
+            (self.classe(pair), acces),
+            (Some(Classe::Soi), _)
+                | (Some(_), Acces::Tous)
+                | (Some(Classe::Service), Acces::Services)
+                | (Some(Classe::Humain), Acces::Humains)
+        )
+    }
+
+    /// Le refus d'une méthode réservée, formulé pour un pair admis.
+    #[must_use]
+    pub fn refus_pour(&self, methode: &str, acces: Acces) -> Error {
+        Error::new(
+            ErrorCode::Unauthorized,
+            match acces {
+                Acces::Services => {
+                    format!("« {methode} » est réservée aux services de l'OS")
+                }
+                Acces::Humains => format!("« {methode} » revient à l'humain"),
+                Acces::Tous => format!("« {methode} » n'est pas ouverte à ce pair"),
+            },
+        )
     }
 
     /// Le refus, formulé. Un pair refusé mérite de savoir pourquoi ; il n'apprend rien qu'il ne
@@ -351,6 +415,48 @@ mod tests {
         let regle = Pairs::explicite(Some(900), 42);
         assert!(regle.autorise(pair(1000, 900)), "membre du groupe système");
         assert!(regle.autorise(pair(42, 1)), "le service lui-même");
+    }
+
+    #[test]
+    fn un_daemon_est_un_service_et_un_membre_declare_un_humain() {
+        // Les sept daemons ont le groupe système pour groupe principal (`Group=` de systemd) ;
+        // l'humain et la surface n'en sont que membres déclarés (`extraGroups`).
+        let regle = Pairs::avec_membres(Some(900), 42, vec![1000]);
+        assert_eq!(regle.classe(pair(42, 1)), Some(Classe::Soi));
+        assert_eq!(regle.classe(pair(0, 0)), Some(Classe::Soi));
+        assert_eq!(regle.classe(pair(981, 900)), Some(Classe::Service));
+        assert_eq!(regle.classe(pair(1000, 100)), Some(Classe::Humain));
+        assert_eq!(regle.classe(pair(1001, 100)), None);
+    }
+
+    #[test]
+    fn emettre_revient_aux_services_et_trancher_a_l_humain() {
+        let regle = Pairs::avec_membres(Some(900), 42, vec![1000]);
+        let (soi, service, humain, inconnu) = (
+            pair(42, 1),
+            pair(981, 900),
+            pair(1000, 100),
+            pair(1001, 100),
+        );
+        for p in [soi, service, humain] {
+            assert!(regle.permet(p, Acces::Tous));
+        }
+        assert!(!regle.permet(inconnu, Acces::Tous));
+        assert!(regle.permet(soi, Acces::Services) && regle.permet(service, Acces::Services));
+        assert!(
+            !regle.permet(humain, Acces::Services),
+            "l'humain n'émet pas de droits"
+        );
+        assert!(regle.permet(soi, Acces::Humains) && regle.permet(humain, Acces::Humains));
+        assert!(
+            !regle.permet(service, Acces::Humains),
+            "un service ne tranche pas"
+        );
+        assert!(!regle.permet(inconnu, Acces::Humains));
+        // Le refus nomme la méthode et à qui elle revient.
+        let refus = regle.refus_pour("cap.mint", Acces::Services);
+        assert_eq!(refus.code, ErrorCode::Unauthorized);
+        assert!(refus.message.contains("cap.mint"), "{}", refus.message);
     }
 
     #[test]
