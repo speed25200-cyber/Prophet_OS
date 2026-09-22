@@ -47,61 +47,64 @@ pub enum NoChoice {
     },
 }
 
-/// Choisit un pilote.
+/// Choisit un pilote : la première préférence satisfiable.
 ///
 /// # Errors
 /// Si aucune préférence n'est satisfiable.
 pub fn choose(manifest: &Manifest, availability: &Availability) -> Result<Choice, NoChoice> {
-    let mut tried = Vec::new();
-    for reference in &manifest.model.preferred {
-        tried.push(reference.clone());
-        let Some((kind, rest)) = reference.split_once(':') else {
-            continue;
-        };
-        match kind {
-            "local" => {
-                if availability.local_models.iter().any(|m| m == rest) {
-                    return Ok(Choice {
-                        reference: reference.clone(),
-                        reason: format!("modèle local {rest} disponible"),
-                    });
-                }
-            }
-            "driver" => {
-                if manifest.model.privacy == Privacy::LocalOnly {
-                    continue;
-                }
-                // `client@palier` : le client seul décide de la disponibilité (ADR 0040).
-                let client = rest.split('@').next().unwrap_or(rest);
-                if availability.exhausted_drivers.iter().any(|d| d == client) {
-                    continue;
-                }
-                if availability.logged_in_drivers.iter().any(|d| d == client) {
-                    return Ok(Choice {
-                        reference: reference.clone(),
-                        reason: format!("abonnement {client} connecté et quota disponible"),
-                    });
-                }
-            }
-            "api" => {
-                if manifest.model.privacy == Privacy::LocalOnly {
-                    continue;
-                }
-                let provider = rest.split(':').next().unwrap_or_default();
-                if availability.api_providers.iter().any(|p| p == provider) {
-                    return Ok(Choice {
-                        reference: reference.clone(),
-                        reason: format!("fournisseur d'API {provider} configuré"),
-                    });
-                }
-            }
-            _ => {}
-        }
+    let (candidates, tried) = eligible(manifest, availability);
+    if let Some(first) = candidates.into_iter().next() {
+        return Ok(first);
     }
     if manifest.model.privacy == Privacy::LocalOnly && availability.local_models.is_empty() {
         return Err(NoChoice::LocalRequiredButAbsent);
     }
     Err(NoChoice::NothingAvailable { tried })
+}
+
+/// Toutes les préférences satisfiables, dans l'ordre du manifeste, et ce qui a été essayé.
+///
+/// C'est la liste qu'un routeur peut départager ; [`choose`] en prend simplement la première.
+/// La confidentialité et la disponibilité sont tranchées ici, une seule fois : un routeur ne
+/// voit jamais une référence que le manifeste ou la politique interdit.
+#[must_use]
+pub fn eligible(manifest: &Manifest, availability: &Availability) -> (Vec<Choice>, Vec<String>) {
+    let mut tried = Vec::new();
+    let mut candidates = Vec::new();
+    for reference in &manifest.model.preferred {
+        tried.push(reference.clone());
+        let Some((kind, rest)) = reference.split_once(':') else {
+            continue;
+        };
+        let reason = match kind {
+            "local" if availability.local_models.iter().any(|m| m == rest) => {
+                format!("modèle local {rest} disponible")
+            }
+            "driver" if manifest.model.privacy != Privacy::LocalOnly => {
+                // `client@palier` : le client seul décide de la disponibilité (ADR 0040).
+                let client = rest.split('@').next().unwrap_or(rest);
+                if availability.exhausted_drivers.iter().any(|d| d == client)
+                    || !availability.logged_in_drivers.iter().any(|d| d == client)
+                {
+                    continue;
+                }
+                format!("abonnement {client} connecté et quota disponible")
+            }
+            "api" if manifest.model.privacy != Privacy::LocalOnly => {
+                let provider = rest.split(':').next().unwrap_or_default();
+                if !availability.api_providers.iter().any(|p| p == provider) {
+                    continue;
+                }
+                format!("fournisseur d'API {provider} configuré")
+            }
+            _ => continue,
+        };
+        candidates.push(Choice {
+            reference: reference.clone(),
+            reason,
+        });
+    }
+    (candidates, tried)
 }
 
 /// Que faire quand le quota d'un abonnement s'épuise en cours de tâche.

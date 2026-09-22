@@ -15,6 +15,7 @@
 #![warn(missing_docs)]
 
 pub mod conformance;
+pub mod jev;
 pub mod local;
 pub mod mock;
 pub mod native;
@@ -48,6 +49,10 @@ pub enum DriverError {
     /// Budget épuisé.
     #[error("budget épuisé : {0}")]
     BudgetExceeded(String),
+    /// Un décideur rapide rend la main à un modèle génératif : ce n'est pas une panne, c'est la
+    /// limite qu'il s'est fixée. Une cascade reprend la même histoire avec le modèle suivant.
+    #[error("main rendue au modèle génératif : {0}")]
+    HandOver(String),
 }
 
 /// Contrat commun à tous les pilotes.

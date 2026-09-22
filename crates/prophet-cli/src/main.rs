@@ -55,6 +55,16 @@ enum Command {
         #[command(subcommand)]
         action: MemoryAction,
     },
+    /// Jev, le décideur rapide : routage des demandes et état de sa configuration.
+    Jev {
+        #[command(subcommand)]
+        action: JevAction,
+    },
+    /// Secrets du coffre : des références pour les agents, jamais des valeurs.
+    Secret {
+        #[command(subcommand)]
+        action: SecretAction,
+    },
     /// Gel d'urgence de toutes les tâches.
     Freeze,
     /// Parler à Prophet OS : enregistrer le micro ou lire un fichier audio, transcrire en
@@ -98,6 +108,37 @@ enum Command {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum JevAction {
+    /// Demande à agentd quel modèle servirait une requête de mission, sans la planifier.
+    Route {
+        /// Fichier JSON contenant intent, manifest et availability (le format de `task new`).
+        request: std::path::PathBuf,
+    },
+    /// Dit si le service a un décideur configuré et si son secret est dans le coffre.
+    Status,
+}
+
+#[derive(Debug, Subcommand)]
+enum SecretAction {
+    /// Dépose un secret dans le coffre. La valeur est lue sur l'entrée standard, jamais en argument.
+    Put {
+        /// Nom du secret, tel que les agents le référencent (`prophet-secret:<nom>`).
+        name: String,
+        /// Hôtes auxquels ce secret peut être présenté ; répétable.
+        #[arg(long = "host", required = true)]
+        hosts: Vec<String>,
+        /// En-tête dans lequel il est substitué.
+        #[arg(long, default_value = "Authorization")]
+        header: String,
+        /// Description libre.
+        #[arg(long, default_value = "")]
+        description: String,
+    },
+    /// Liste les secrets du coffre : noms, hôtes, en-têtes. Jamais de valeur.
+    Ls,
 }
 
 #[derive(Debug, Subcommand)]
@@ -396,6 +437,8 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
             }
         }
         Command::Memory { action } => memory(action),
+        Command::Jev { action } => jev(action, cli.json),
+        Command::Secret { action } => secret(action, cli.json),
         Command::Log { action } => log(action),
         Command::Task { action } => task(action, cli.json),
         Command::Cap { action } => cap(action, cli.json),
@@ -1926,6 +1969,174 @@ fn provider(action: &ProviderAction, as_json: bool) -> anyhow::Result<String> {
     }
 }
 
+fn jev(action: &JevAction, as_json: bool) -> anyhow::Result<String> {
+    match action {
+        JevAction::Route { request } => {
+            use std::io::Read as _;
+            let mut bytes = Vec::new();
+            std::fs::File::open(request)?
+                .take(1024 * 1024 + 1)
+                .read_to_end(&mut bytes)?;
+            anyhow::ensure!(
+                bytes.len() <= 1024 * 1024,
+                "requête de mission limitée à 1 Mio"
+            );
+            let demande: serde_json::Value = serde_json::from_slice(&bytes)?;
+            let params = serde_json::json!({
+                "intent": demande["intent"],
+                "manifest": demande["manifest"],
+                "availability": demande.get("availability").cloned().unwrap_or(serde_json::Value::Null),
+            });
+            let result = task_rpc(&socket_agentd(), "task.route", params)?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&result)?));
+            }
+            let route: providers::jev::router::Route = serde_json::from_value(result)?;
+            let mut out = format!(
+                "Modèle : {}\nRaison : {}\nDécideur : {}\n",
+                route.choice.reference,
+                route.choice.reason,
+                match route.decider {
+                    providers::jev::router::Decider::Jev => "Jev",
+                    providers::jev::router::Decider::Static => "sélection statique",
+                }
+            );
+            for (reference, p) in &route.probabilities {
+                out.push_str(&format!("  {reference:<32} p = {p:.2}\n"));
+            }
+            if let Some(difficulty) = route.difficulty {
+                out.push_str(&format!(
+                    "Difficulté : {difficulty:.2} (0 triviale, 1 experte)\n"
+                ));
+            }
+            if let Some(risk) = route.risk {
+                out.push_str(&format!("Risque : {risk:.2}\n"));
+            }
+            if let Some(reason) = &route.fallback_reason {
+                out.push_str(&format!("Sans Jev : {reason}\n"));
+            }
+            Ok(out)
+        }
+        JevAction::Status => {
+            let options = task_rpc(&socket_agentd(), "task.options", serde_json::json!({}))?;
+            let configured = options.get("jev").cloned().filter(|j| !j.is_null());
+            let secret = configured
+                .as_ref()
+                .and_then(|j| j["secret"].as_str())
+                .map(str::to_owned);
+            let dans_le_coffre = match &secret {
+                Some(nom) => {
+                    let refs =
+                        task_rpc(&socket_vault(), "secrets.list_refs", serde_json::json!({})).ok();
+                    refs.and_then(|liste| {
+                        liste.as_array().map(|l| {
+                            l.iter().any(|s| {
+                                s["name"] == nom.as_str()
+                                    && s["domains"].as_array().is_some_and(|d| {
+                                        d.iter().any(|h| h == providers::jev::HOST)
+                                    })
+                            })
+                        })
+                    })
+                }
+                None => None,
+            };
+            if as_json {
+                return Ok(format!(
+                    "{}\n",
+                    serde_json::json!({
+                        "configured": configured.is_some(),
+                        "model": configured.as_ref().and_then(|j| j["model"].as_str()),
+                        "secret": secret,
+                        "host": providers::jev::HOST,
+                        "secret_in_vault": dans_le_coffre,
+                    })
+                ));
+            }
+            let Some(jev) = configured else {
+                return Ok("Jev : non configuré sur ce service (PROPHET_JEV_SECRET absent). Les missions tournent sans décideur rapide.\n".into());
+            };
+            Ok(format!(
+                "Jev : configuré, modèle {}\nSecret : {} ({})\nHôte : {} (sortie par egress, POST traité comme une lecture si l'hôte est déclaré)\n",
+                jev["model"].as_str().unwrap_or("?"),
+                jev["secret"].as_str().unwrap_or("?"),
+                match dans_le_coffre {
+                    Some(true) => "présent dans le coffre pour cet hôte",
+                    Some(false) =>
+                        "ABSENT du coffre ou non destiné à cet hôte : `prophet secret put`",
+                    None => "coffre injoignable",
+                },
+                providers::jev::HOST
+            ))
+        }
+    }
+}
+
+fn secret(action: &SecretAction, as_json: bool) -> anyhow::Result<String> {
+    match action {
+        SecretAction::Put {
+            name,
+            hosts,
+            header,
+            description,
+        } => {
+            use std::io::Read as _;
+            let mut valeur = String::new();
+            std::io::stdin()
+                .take(64 * 1024)
+                .read_to_string(&mut valeur)?;
+            let valeur = valeur.trim_end_matches(['\n', '\r']).to_owned();
+            anyhow::ensure!(
+                !valeur.is_empty(),
+                "aucune valeur lue sur l'entrée standard"
+            );
+            let result = task_rpc(
+                &socket_vault(),
+                "vault.put",
+                serde_json::json!({
+                    "info": {"name": name, "domains": hosts, "header": header, "description": description},
+                    "value": valeur,
+                }),
+            )?;
+            if as_json {
+                Ok(format!("{}\n", serde_json::to_string(&result)?))
+            } else {
+                Ok(format!(
+                    "Secret {name} déposé pour {} ; les agents le référencent par prophet-secret:{name}.\n",
+                    hosts.join(", ")
+                ))
+            }
+        }
+        SecretAction::Ls => {
+            let refs = task_rpc(&socket_vault(), "secrets.list_refs", serde_json::json!({}))?;
+            if as_json {
+                return Ok(format!("{}\n", serde_json::to_string_pretty(&refs)?));
+            }
+            let liste = refs.as_array().cloned().unwrap_or_default();
+            if liste.is_empty() {
+                return Ok("aucun secret dans le coffre\n".into());
+            }
+            let mut out = format!("{:<24} {:<16} {}\n", "nom", "en-tête", "hôtes");
+            for s in liste {
+                out.push_str(&format!(
+                    "{:<24} {:<16} {}\n",
+                    s["name"].as_str().unwrap_or("?"),
+                    s["header"].as_str().unwrap_or("?"),
+                    s["domains"]
+                        .as_array()
+                        .map(|d| d
+                            .iter()
+                            .filter_map(|h| h.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", "))
+                        .unwrap_or_default()
+                ));
+            }
+            Ok(out)
+        }
+    }
+}
+
 fn memory(action: &MemoryAction) -> anyhow::Result<String> {
     use memoryd::{HashEmbedder, Query, Space, Store};
     let chemin = home().join(".prophet/memoire.db");
@@ -2087,6 +2298,14 @@ fn sous_delai_de<T>(
             .await
             .map_err(|_| format!("pas de réponse en {} s", delai.as_secs()))?
     })
+}
+
+/// Où joindre le coffre.
+fn socket_vault() -> std::path::PathBuf {
+    std::env::var("PROPHET_VAULT_SOCKET").map_or_else(
+        |_| prophet_ipc::socket_path("vault"),
+        std::path::PathBuf::from,
+    )
 }
 
 /// Où joindre `agentd`. La variable d'environnement sert aux tests et aux développements ; sur une
@@ -2476,6 +2695,17 @@ mod tests {
             vec!["prophet", "cap", "revoke", "task:01"],
             vec!["prophet", "provider", "ls"],
             vec!["prophet", "provider", "login", "claude-code"],
+            vec!["prophet", "jev", "route", "mission.json"],
+            vec!["prophet", "jev", "status"],
+            vec![
+                "prophet",
+                "secret",
+                "put",
+                "typesafe",
+                "--host",
+                "api.typesafe.ai",
+            ],
+            vec!["prophet", "secret", "ls"],
             vec!["prophet", "memory", "search", "ventes"],
         ] {
             assert!(

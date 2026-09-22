@@ -45,6 +45,12 @@ voit où l'agent navigue et ce qu'il a touché, et peut y aller avec son propre 
 bureau ouvre un navigateur à profil Prophet (Super+N) et X en fenêtre dédiée (Super+X) ; l'image
 qui les contient se construit et démarre en CI, le parcours complet du bureau reste à confirmer.
 
+[Jev](docs/reports/jev-2026-09-17.md), le modèle de décision de TypeSafe AI, peut désormais
+router chaque mission vers le modèle génératif qui lui convient et opérer lui-même une page par
+son arbre sémantique, en quelques centaines de millisecondes par décision, en rendant la main au
+modèle génératif dès qu'il faut écrire. Sa clé reste dans le coffre, ses requêtes passent par le
+proxy de sortie, et il est optionnel : sans lui, tout fonctionne comme avant ([ADR 0042](docs/adr/0042-jev-decideur-rapide.md)).
+
 Le nouvel [atelier de supervision](docs/reports/atelier-2026-09-13.md) présente une galerie de
 missions et une Focale pour examiner le travail, avec recherche Ctrl+K et navigation compacte.
 

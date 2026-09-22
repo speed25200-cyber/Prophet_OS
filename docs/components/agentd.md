@@ -29,6 +29,7 @@
 | `task.tools` | Rend les outils que le jeton de la séance couvre |
 | `task.call` | Exécute un outil de la séance, compté comme une étape (`{id, name, arguments}`) |
 | `task.detach` | Retire le client, scelle les versions et conclut la mission en `done` (`{id, text?}`) |
+| `task.route` | Dit quel modèle Jev choisirait pour une intention, sans planifier ; sélection statique sans Jev |
 
 `task.start`, `task.status`, `task.inspect`, `task.result`, `task.cancel`, `task.apply` et
 `task.undo` prennent `{"id":"…"}`.
@@ -65,11 +66,26 @@ Une référence déjà connue est refusée et se relit par `task.inspect`. Le pl
 par une commande distincte après examen. Le catalogue est une configuration locale de confiance,
 pas une validation des signatures d'éditeurs. Voir l'[ADR 0015](../adr/0015-intention-et-profils-de-mission.md).
 
+`task.route` prend `{intent, manifest, availability?}`. Quand Jev est configuré et que le
+manifeste admet un service distant et la sortie vers `api.typesafe.ai`, le service demande à
+capd un jeton de deux minutes borné à cet hôte, consulte Jev par le proxy et rend la route
+(`decider`, probabilités, difficulté, risque, consommation). Sinon, il rend la sélection
+statique avec la raison. Aucune tâche n'est créée. `task.spawn` fait la même consultation avec
+le jeton de la mission avant de planifier ; la route est conservée dans le plan (`route`) et
+journalisée dans `task.planned`. Voir l'[ADR 0042](../adr/0042-jev-decideur-rapide.md).
+
 ## Exécution
 
 Deux missions au maximum peuvent être actives. Les plans et jetons restent côté service.
 Les outils offerts au modèle sont les accès fichiers, `http.fetch` par egress et, si un
 navigateur est nommé, `web.open`, `web.tree` et `web.act` ; voir l'[ADR 0024](../adr/0024-navigateur-integre-et-applications-web.md).
+Quand `PROPHET_JEV_SECRET` nomme un secret du coffre, qu'un navigateur est configuré, que le
+manifeste n'est pas `local-only` et que le jeton autorise `net.egress` sur `api.typesafe.ai`,
+la mission tourne en cascade : l'opérateur Jev lit l'arbre de la page et décide `web.act`
+lui-même, en quelques centaines de millisecondes ; il rend la main au modèle génératif quand
+il faut écrire ou quand il hésite. `provider.started` porte alors `decider`, et le résultat
+porte `jev` (décisions, actions, mains rendues, tokens). Les tokens de Jev sont imputés au
+budget comme ceux du modèle. `PROPHET_JEV_MODEL` choisit le modèle (`jev-latest` par défaut).
 Le moteur reçoit l'intention et le catalogue d'outils autorisés ; il ne fournit aucune racine
 de fichiers ni aucun niveau d'isolation. Les accès doivent aussi rester dans les scopes du
 plan. La capture SFS limite son parcours à 10 000 objets, 64 niveaux et 512 Mio de contenu.

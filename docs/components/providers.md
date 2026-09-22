@@ -17,6 +17,30 @@ Le paquet officiel ChatGPT Linux téléchargé pour préparer la compatibilité 
 Il n'est pas installé dans l'image. L'attribut `pkgs.chatgpt` du nixpkgs épinglé vise seulement
 macOS ; l'ajouter directement ne fournirait pas l'application Linux.
 
+## Jev, le décideur rapide
+
+[Jev](../specs/jev-decisions.md) (TypeSafe AI) ne génère pas de texte : il répond à des
+questions fermées sur un état structuré, avec une probabilité calibrée, en quelques centaines
+de millisecondes. `providers::jev` porte le protocole, un transport par le proxy de sortie
+(jeton de la tâche, référence de secret `prophet-secret:<nom>`, jamais la clé), un opérateur
+d'interface qui décide `web.act` sur l'arbre SUP et rend la main au modèle génératif quand il
+faut écrire, et un routeur qui départage les modèles admissibles à la planification. Voir
+l'[ADR 0042](../adr/0042-jev-decideur-rapide.md) et le [rapport](../reports/jev-2026-09-17.md).
+
+| Composant | Preuve acquise | Reste à livrer |
+|---|---|---|
+| Protocole et validation | corps documenté, réponses confrontées à la demande, bornes appliquées (tests unitaires) | premier appel réel, sur un hôte où les daemons tournent sous leurs comptes (`tools/lancer-sur-l-hote.sh`, puis `prophet secret put` et `prophet jev route`) |
+| Transport par egress | requête sur socket avec jeton et référence, refus du proxy et codes 401/422/429/529 nommés (faux proxy) | mesure de latence réelle |
+| Opérateur d'interface | page réelle opérée sous Chromium avec capd et ledger réels, sans modèle génératif (`cargo test -p agentd --test jev`) | outils `ui.*`, valeurs au-delà des guillemets |
+| Routeur | choix parmi les admissibles, `local-only` jamais envoyé, repli statique (tests avec proxy simulé) | calibration observée sur de vraies demandes |
+
+Configuration : `prophet.jev.enable = true` sur l'image, ou `PROPHET_JEV_SECRET` pour agentd et
+`PROPHET_EGRESS_QUERY_HOSTS=api.typesafe.ai` pour egress (sur un hôte : `/etc/prophet/agentd.env`
+et `/etc/prophet/egress.env`) ; puis `prophet secret put typesafe --host api.typesafe.ai < clé`
+et `prophet jev status`. `prophet jev route mission.json` montre la route sans planifier ; Jev
+n'est consulté que s'il y a au moins deux candidats admissibles. Le coffre ne révèle la clé
+qu'au compte `egress` : sans lui, la route retombe en le disant, et rien ne part.
+
 ## Diagnostic utilisable
 
 ```sh

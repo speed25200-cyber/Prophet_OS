@@ -18,7 +18,8 @@ use prophet_types::driver::{
 };
 use prophet_types::ledger::{Actor, Draft, EventKind};
 use prophet_types::manifest::Manifest;
-use providers::selection::{Availability, Choice, QuotaPolicy, choose};
+use providers::jev::router::{Decider, Route};
+use providers::selection::{Availability, Choice, QuotaPolicy, choose, eligible};
 use providers::{Driver, DriverError};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -109,6 +110,10 @@ pub struct PlanRequest<'a> {
     pub scopes: &'a [&'a str],
     /// Ce qui est disponible au moment du choix du pilote.
     pub availability: &'a Availability,
+    /// Décision de routage déjà prise, par Jev ou par la sélection statique. Elle n'est suivie
+    /// que si sa référence est admissible pour ce manifeste et cette disponibilité : un routeur
+    /// départage, il n'élargit pas.
+    pub route: Option<&'a Route>,
 }
 
 /// Décisions prises à la planification, avant toute exécution.
@@ -131,6 +136,9 @@ pub struct TaskPlan {
     pub limits: Limits,
     /// Périmètre du système de fichiers.
     pub scopes: Vec<String>,
+    /// Comment le pilote a été choisi, quand un routeur a été consulté.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<Route>,
 }
 
 /// Vue atomique destinée à la supervision, sans jeton ni état interne du broker.
@@ -200,6 +208,24 @@ impl TaskPlan {
             "  Pilote      : {} ({})\n",
             self.choice.reference, self.choice.reason
         ));
+        if let Some(route) = &self.route {
+            out.push_str(&format!(
+                "  Routage     : {}{}{}\n",
+                match route.decider {
+                    Decider::Jev => "Jev",
+                    Decider::Static => "sélection statique",
+                },
+                route
+                    .difficulty
+                    .map(|d| format!(", difficulté {d:.2}"))
+                    .unwrap_or_default(),
+                route
+                    .fallback_reason
+                    .as_deref()
+                    .map(|r| format!(" ({r})"))
+                    .unwrap_or_default()
+            ));
+        }
         out.push_str(&format!("  Isolation   : niveau {}\n", self.sandbox_level));
         out.push_str(&format!("  Périmètre   : {}\n", self.scopes.join(", ")));
         out.push_str("  Capacités   :\n");
@@ -812,6 +838,12 @@ impl Runtime {
         Ok((task.clone(), token.clone(), plan.clone(), self.home.clone()))
     }
 
+    /// Politique de confidentialité du manifeste d'une tâche planifiée.
+    #[must_use]
+    pub fn privacy(&self, id: &str) -> Option<prophet_types::manifest::Privacy> {
+        self.manifests.get(id).map(|m| m.model.privacy)
+    }
+
     /// Publie un état de travailleur et, à la fin, le résultat à conserver.
     pub fn publish_local(&mut self, task: Task, result: Option<serde_json::Value>) {
         if let Some(result) = result {
@@ -875,6 +907,7 @@ impl Runtime {
             requested,
             scopes,
             availability,
+            route,
         } = *request;
         let path = std::path::Path::new(id);
         if !id
@@ -919,8 +952,23 @@ impl Runtime {
             now,
         );
 
-        let choice =
-            choose(manifest, availability).map_err(|e| RuntimeError::NoDriver(format!("{e:?}")))?;
+        let choice = match route {
+            Some(route) => {
+                let (admissibles, _) = eligible(manifest, availability);
+                if !admissibles
+                    .iter()
+                    .any(|c| c.reference == route.choice.reference)
+                {
+                    return Err(RuntimeError::NoDriver(format!(
+                        "route inadmissible : {}",
+                        route.choice.reference
+                    )));
+                }
+                route.choice.clone()
+            }
+            None => choose(manifest, availability)
+                .map_err(|e| RuntimeError::NoDriver(format!("{e:?}")))?,
+        };
 
         // Le niveau de sandbox est le plus contraignant des exigences du manifeste et du jeton.
         // Jamais le plus permissif. Un droit `proc.exec` n'élève pas la mission : chaque
@@ -979,6 +1027,14 @@ impl Runtime {
                 "sandbox_level": sandbox_level,
                 "grants_digest": digest(&grants.join("|")),
                 "budget": {"tokens": limits.tokens, "steps": limits.steps},
+                "route": route.map(|r| json!({
+                    "decider": r.decider,
+                    "confidence": r.confidence,
+                    "difficulty": r.difficulty,
+                    "risk": r.risk,
+                    "input_tokens": r.usage.input_tokens,
+                    "fallback_reason": r.fallback_reason,
+                })),
             }),
             now,
         );
@@ -994,6 +1050,7 @@ impl Runtime {
             grants,
             limits,
             scopes: scopes.iter().map(|s| (*s).to_owned()).collect(),
+            route: route.cloned(),
         };
         self.plans.insert(id.to_owned(), plan.clone());
         self.manifests.insert(id.to_owned(), manifest.clone());

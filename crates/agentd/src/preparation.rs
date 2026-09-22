@@ -177,6 +177,10 @@ pub struct Options {
     /// service n'en configure aucun ou s'il ne répond pas (ADR 0035).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pilot: Option<pilotd::Status>,
+    /// Le décideur rapide du service, s'il est configuré : nom du secret et modèle, jamais
+    /// une valeur. Absent quand le service n'en a pas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jev: Option<crate::local::JevSetup>,
 }
 
 /// Intention explicite : le client ne fournit ni manifeste, ni identité, ni droits.

@@ -216,6 +216,7 @@ fn executer(
                 requested: &grants_demandes(),
                 scopes: &["~/ventes"],
                 availability,
+                route: None,
             },
             now(),
         )
@@ -317,6 +318,7 @@ fn le_choix_du_pilote_est_explicable() {
                 requested: &grants_demandes(),
                 scopes: &["~/ventes"],
                 availability: &disponibilite(false, &["claude-code"]),
+                route: None,
             },
             now(),
         )
@@ -349,6 +351,7 @@ fn sans_aucun_pilote_la_tache_ne_demarre_pas() {
                 requested: &grants_demandes(),
                 scopes: &["~/ventes"],
                 availability: &Availability::default(),
+                route: None,
             },
             now(),
         )
@@ -374,6 +377,7 @@ fn le_jeton_est_borne_par_le_manifeste_quel_que_soit_le_pilote() {
                 requested: &trop_large,
                 scopes: &["~/ventes"],
                 availability: &disponibilite(true, &[]),
+                route: None,
             },
             now(),
         )
@@ -466,6 +470,7 @@ fn l_humain_peut_annuler_une_tache_planifiee() {
                 requested: &grants_demandes(),
                 scopes: &["~/ventes"],
                 availability: &disponibilite(true, &[]),
+                route: None,
             },
             now(),
         )
@@ -494,6 +499,7 @@ fn l_annulation_aboutit_meme_si_le_pilote_ne_repond_pas() {
                 requested: &grants_demandes(),
                 scopes: &["~/ventes"],
                 availability: &disponibilite(true, &[]),
+                route: None,
             },
             now(),
         )
@@ -519,6 +525,7 @@ fn un_client_officiel_reel_sans_session_est_signale_clairement() {
                 requested: &grants_demandes(),
                 scopes: &["~/ventes"],
                 availability: &disponibilite(false, &["claude-code"]),
+                route: None,
             },
             now(),
         )

@@ -13,10 +13,20 @@ au maximum, borne la version à 4 Kio et ne capture aucune sortie d'authentifica
 muet est arrêté et attendu. Les variables d'environnement portant des clés API ne sont pas
 transmises.
 
+`jev` porte le décideur rapide de TypeSafe AI : protocole (`Question`, `Request`, `Response`,
+vérification des réponses), transport par le proxy de sortie (`egress::EgressTransport`, jeton
+de la tâche et référence de secret, jamais la clé), opérateur d'interface (`operator::Operator`,
+un `ModelClient` qui décide `web.act` sur l'arbre SUP et rend la main au modèle génératif par
+`DriverError::HandOver` ; `operator::Cascade` enchaîne les deux) et routeur
+(`router::Router`, qui départage les candidats admissibles de `selection::eligible`). Jev est
+optionnel et ne parle jamais au réseau directement. Voir la
+[spécification](../../docs/specs/jev-decisions.md) et l'[ADR 0042](../../docs/adr/0042-jev-decideur-rapide.md).
+
 Commandes de vérification, depuis `nix develop` :
 
 ```sh
 cargo test -p providers
+cargo test -p providers --lib -- jev            # protocole, transport, opérateur, routeur
 cargo test -p providers --lib needs_official_clients_versions_et_sessions_vierges -- --ignored --nocapture
 ```
 

@@ -1,0 +1,41 @@
+{
+  "id": "horaires-jev",
+  "intent": "Ouvre http://127.0.0.1:8000/reservation, indique la ville « Paris » puis affiche les horaires.",
+  "user": "prophet",
+  "manifest": {
+    "agent": {
+      "id": "org.prophet.horaires-jev",
+      "version": "1.0.0",
+      "name": "Horaires par Jev",
+      "publisher_key": "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    },
+    "model": { "preferred": ["local:qwen3-1.7b"], "privacy": "local-preferred" },
+    "sandbox": { "min_level": 0 },
+    "capabilities": {
+      "max": {
+        "fs.read": ["~/Documents/Prophet/**"],
+        "fs.write": ["~/Documents/Prophet/**"],
+        "net.egress": ["127.0.0.1", "api.typesafe.ai"],
+        "ui.read": ["browser"],
+        "ui.act": ["browser"],
+        "tool.call": ["fs.read", "fs.write", "web.open", "web.tree", "web.act"]
+      }
+    },
+    "budget": { "default": { "tokens": 40000, "wall_time": "120s", "approvals": 3 } }
+  },
+  "requested": [
+    { "res": "fs", "act": "read", "match": "~/Documents/Prophet/**" },
+    { "res": "fs", "act": "write", "match": "~/Documents/Prophet/**" },
+    { "res": "net", "act": "egress", "match": "127.0.0.1" },
+    { "res": "net", "act": "egress", "match": "api.typesafe.ai" },
+    { "res": "ui", "act": "read", "match": "browser" },
+    { "res": "ui", "act": "act", "match": "browser" },
+    { "res": "tool", "act": "call", "match": "fs.read" },
+    { "res": "tool", "act": "call", "match": "fs.write" },
+    { "res": "tool", "act": "call", "match": "web.open" },
+    { "res": "tool", "act": "call", "match": "web.tree" },
+    { "res": "tool", "act": "call", "match": "web.act" }
+  ],
+  "scopes": ["~/Documents/Prophet"],
+  "availability": { "local_models": ["qwen3-1.7b"] }
+}
