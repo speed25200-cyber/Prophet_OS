@@ -90,6 +90,10 @@ let
         assert refus == -32001, f"cap.mint accepté sous le compte de l'humain : {refus}"
         refus = code("/run/prophet/ledger.sock", "ledger.append", {})
         assert refus == -32001, f"ledger.append accepté sous le compte de l'humain : {refus}"
+        # Lancer un programme sous l'identité de sandboxd, qui est un service, lui est refusé.
+        refus = code("/run/prophet/sandboxd.sock", "sandbox.run", {})
+        assert refus == -32001, f"sandbox.run accepté sous le compte de l'humain : {refus}"
+        assert code("/run/prophet/sandboxd.sock", "sandbox.capabilities", {}) is None
         print("droits : lecture permise ; émission et écriture du journal refusées")
         raise SystemExit(0)
 
@@ -155,7 +159,8 @@ pkgs.testers.runNixOSTest {
         # 0770 : le groupe doit pouvoir *écrire*, sinon seul le premier service démarré arrive à
         # créer son socket et les six autres échouent sur un « Permission denied ». C'est
         # exactement ce que ce test a trouvé à sa première exécution.
-        assert repertoire == "770", f"/run/prophet est en {repertoire}, attendu 770"
+        # Et collant : chacun ne retire que ses propres sockets (ADR 0044).
+        assert repertoire == "1770", f"/run/prophet est en {repertoire}, attendu 1770"
         groupe = machine.succeed("stat -c %G /run/prophet").strip()
         assert groupe == "prophet-system", f"/run/prophet appartient à {groupe}"
 
@@ -311,6 +316,10 @@ pkgs.testers.runNixOSTest {
         # Même groupe que les services, autre classe : le groupe principal des daemons est
         # `prophet-system`, celui de l'humain ne l'est pas (ADR 0044).
         print(machine.succeed("su - prophet -c 'prophet-essai-tache droits'"))
+        # Le répertoire est collant : l'humain ne retire pas le socket d'un daemon.
+        machine.fail("su - prophet -c 'mv /run/prophet/capd.sock /run/prophet/capd.ancien'")
+        machine.fail("su - prophet -c 'rm /run/prophet/capd.sock'")
+        machine.succeed("test -S /run/prophet/capd.sock")
 
     with subtest("le navigateur piloté répond sous le durcissement réel d'agentd"):
         # `agentd` sonde son navigateur au démarrage, sous ses propres contraintes systemd, et

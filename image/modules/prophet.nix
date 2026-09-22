@@ -39,7 +39,11 @@ let
         # `0770` le tient aussi bien que `0750`. Ce que chaque membre peut appeler dépend ensuite
         # de sa classe : émettre des droits et écrire le journal ne revient qu'aux services, dont
         # ce groupe est le groupe principal (ADR 0044).
-        RuntimeDirectoryMode = "0770";
+        # Le bit collant (`1770`) : chacun ne retire ou ne renomme que ses propres sockets. Sans
+        # lui, un membre du groupe — l'humain, sa session, un client officiel qu'il lance — pouvait
+        # supprimer `capd.sock` et poser un faux capd à sa place (ADR 0044). `supd` et la surface
+        # continuent d'y créer et d'y retirer les leurs.
+        RuntimeDirectoryMode = "1770";
         # Sans cette ligne, systemd supprime le répertoire quand l'un d'eux s'arrête — et emporte
         # les six autres sockets avec lui. Un `systemctl restart prophet-memoryd` couperait tout
         # le reste, ce qui est une façon remarquable de rendre un système fragile sans qu'aucun

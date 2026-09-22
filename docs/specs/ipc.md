@@ -6,14 +6,14 @@
 
 ## Transport
 
-- Sockets Unix de type flux, chemins `/run/prophet/<daemon>.sock`, mode `0660`, groupe `prophet-system` ; les sockets destinés aux tâches (serveurs MCP) sont montés dans la sandbox de la tâche.
+- Sockets Unix de type flux, chemins `/run/prophet/<daemon>.sock`, mode `0660`, groupe `prophet-system`, dans un répertoire collant en `1770` ; les sockets destinés aux tâches (serveurs MCP) sont montés dans la sandbox de la tâche.
 - Un message = un objet JSON-RPC 2.0 sur une ligne terminée par `\n`. Taille maximale d'un message : 8 Mio (au-delà, `-32600`).
 - Multiplexage par `id`. Les flux sont des notifications répétées (`method` sans `id`) associées à un `run` ou `subscription`.
 
 ## Authentification
 
 1. `SO_PEERCRED` sur chaque connexion : `uid`, `gid`, `pid`. Les méthodes système (`ledger.append`, `vault.put`, `cap.mint`…) exigent l'appartenance au groupe `prophet-system`, ou `uid == 0`.
-   - Un pair admis a une **classe** (ADR 0044) : *soi* (le service lui-même, ou `root`), *service* (son groupe principal est `prophet-system`, ce que systemd donne aux sept daemons), *humain* (membre déclaré seulement : l'humain, sa session, la surface). Certaines méthodes ne s'ouvrent qu'à une classe : dans `capd`, `cap.mint`, `cap.delegate`, `cap.check`, `approval.request`, `approval.explain` et `approval.expire` aux services, `approval.resolve` à l'humain ; dans `ledger`, `ledger.append` et `ledger.seal` aux services. *Soi* passe partout. Un pair admis mais d'une autre classe reçoit `-32001` avec la méthode nommée.
+   - Un pair admis a une **classe** (ADR 0044) : *soi* (le service lui-même, ou `root`), *service* (son groupe principal est `prophet-system`, ce que systemd donne aux sept daemons), *humain* (membre déclaré seulement : l'humain, sa session, la surface). Certaines méthodes ne s'ouvrent qu'à une classe : dans `capd`, `cap.mint`, `cap.delegate`, `cap.check`, `approval.request`, `approval.explain` et `approval.expire` aux services, `approval.resolve` à l'humain ; dans `ledger`, `ledger.append` et `ledger.seal` aux services ; dans `sandboxd`, `sandbox.start` et `sandbox.run` aux services. `/run/prophet` est collant (`1770`) : chacun n'y retire que ses propres sockets. *Soi* passe partout. Un pair admis mais d'une autre classe reçoit `-32001` avec la méthode nommée.
    - `SO_PEERCRED` ne rend que le groupe **principal**. Comparer ce seul `gid` refuse les membres déclarés par `extraGroups`, qui appartiennent pourtant au groupe. L'appartenance est donc aussi cherchée dans `/etc/group`, le fichier même que consulte `initgroups`. Le fichier n'est lu que si le pair serait sinon refusé — jamais sur le chemin fréquent — et il n'est pas mis en cache : un compte créé après le démarrage d'un daemon doit être servi sans attendre son redémarrage, qu'un `nixos-rebuild switch` ne fait pas. Obtenir la réponse du noyau demanderait `SO_PEERGROUPS` et changerait le type traversant les sept daemons.
    - `root` est accepté. Il lit les clés de signature dans `/var/lib/prophet` et peut donc émettre ses jetons sans passer par le socket : le refuser ne protégeait rien et rendait `prophet status` inutilisable pour le propriétaire.
    - `egress` ne parle pas ce protocole : c'est un proxy HTTP (voir `docs/components/egress.md`). Lui envoyer un `ping` JSON-RPC le laisse attendre la fin d'en-têtes qui ne viendront pas.

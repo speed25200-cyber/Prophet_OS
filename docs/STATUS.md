@@ -1490,13 +1490,17 @@ donne le détail.
 - Méthodes réservées par classe de pair (ADR 0044) : le compte de l'humain, membre de
   `prophet-system`, pouvait demander à capd un jeton pour un manifeste de sa main ou écrire au
   journal. `cap.mint` et ses voisins, `ledger.append` et `ledger.seal` reviennent désormais aux
-  services, `approval.resolve` à l'humain ; l'essai NixOS des services le vérifie sous le
-  compte de l'humain (résultat attendu de la CI).
+  services, `approval.resolve` à l'humain. Le même examen a trouvé deux détours : sandboxd
+  lançait pour tout membre un programme sous sa propre identité, montages et sockets au choix
+  de l'appelant (`sandbox.start` et `sandbox.run` reviennent désormais aux services), et
+  `/run/prophet`, en `0770`, laissait tout membre supprimer `capd.sock` pour en poser un faux
+  (il devient collant, `1770`). L'essai NixOS des services vérifie tout cela sous le compte de
+  l'humain.
 - Catalogue des poids (M8-T7) : `providers::weights` lit l'en-tête GGUF de chaque fichier sans
   charger les poids, bornes comprises contre un en-tête hostile ; `prophet model ls` et une
   plaque « Poids installés » de la page Modèles réunissent le dossier des poids et les fichiers
   que `PROPHET_WEIGHTS` nomme, dont le modèle par défaut de l'image dans `/nix/store`.
-- `just check` : **841 réussis, 0 échec, 47 ignorés**, format, clippy, contrôles du dépôt et
+- `just check` : **842 réussis, 0 échec, 47 ignorés**, format, clippy, contrôles du dépôt et
   secrets (repli). Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
 
@@ -1509,7 +1513,7 @@ que fait `prophet task new`) ; le réserver aux profils du catalogue fermerait l
 par laquelle un processus de la session fait planifier une mission sous un manifeste de sa main.
 
 **Pour la session suivante.** Lire la CI de la branche ; trancher avec l'utilisateur le sort de
-`task.spawn` pour le compte de l'humain, puis passer vault, egress, sandboxd et memoryd au crible
+`task.spawn` pour le compte de l'humain, puis passer vault, egress et memoryd au crible
 de l'ADR 0044 ; mesurer la surface sur une carte graphique ; écrire M5-T4 (pool d'instantanés
 Firecracker) sur un hôte KVM, la CI pouvant l'exercer sur son coureur ; faire le premier appel
 réel de Jev avec une clé déposée ; gérer le téléchargement et la suppression des poids que le
@@ -1712,12 +1716,13 @@ Les pilotes de clients officiels sont testés jusqu'à la limite de ce qui est v
 (22 septembre 2026, ADR 0044).** Un pair admis a désormais une classe : soi ou `root`, service
 (groupe principal `prophet-system`, les sept daemons), humain (membre déclaré : l'humain, sa
 session, la surface). Émettre, déléguer ou vérifier un droit, demander une approbation, écrire ou
-sceller le journal reviennent aux services ; trancher une approbation revient à l'humain. Reste
-ouvert : un processus du compte de l'humain — un client officiel lancé par `prophet-pilotd`
+sceller le journal, lancer un programme sous sandboxd reviennent aux services ; trancher une
+approbation revient à l'humain ; `/run/prophet` est collant, pour qu'aucun membre ne retire le
+socket d'un autre. Reste ouvert : un processus du compte de l'humain — un client officiel lancé par `prophet-pilotd`
 compris — peut encore trancher une approbation comme l'humain lui-même, et faire planifier par
 `task.spawn` une mission sous un manifeste de sa main (visible, journalisée, lancée à part) ;
-réserver l'humain aux profils du catalogue est à décider avec l'utilisateur. Les autres daemons
-(vault, egress, sandboxd, memoryd) n'ont pas encore été passés au même crible.
+réserver l'humain aux profils du catalogue est à décider avec l'utilisateur. Vault, egress et
+memoryd n'ont pas encore été passés au même crible.
 
 **Les sept daemons tournent sous systemd**, dans une machine NixOS de test que `just test-vm`
 démarre et que l'intégration continue exerce : chacun sous son utilisateur, avec le durcissement

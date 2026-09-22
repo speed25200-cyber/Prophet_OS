@@ -32,6 +32,13 @@ lancent tout sous un même compte, et l'administration par `root`.
   `approval.pending`, `approval.rules`, `approval.status` → tous. Révoquer reste ouvert :
   cela ne fait que retirer, et l'arrêt d'urgence de l'humain en dépend.
 - `ledger` : `ledger.append`, `ledger.seal` → services ; lire, vérifier, résumer → tous.
+- `sandboxd` : `sandbox.start`, `sandbox.run` → services ; geler, dégeler, arrêter, lire l'état
+  → tous. La spécification d'une sandbox nomme ses montages, ses chemins inscriptibles et les
+  sockets qu'elle expose, et le programme tourne sous l'identité de sandboxd, de la classe des
+  services : ouverte à la session humaine, elle rendrait par ce détour ce que capd refuse.
+- `/run/prophet` devient collant (`1770`) : chacun n'y retire ou n'y renomme que ses propres
+  sockets. Sans cela, un membre du groupe pouvait supprimer `capd.sock` et poser un faux capd
+  à sa place ; `supd` et la surface continuent d'y créer et d'y retirer les leurs.
 
 Un pair admis d'une autre classe reçoit `-32001` avec le nom de la méthode et à qui elle revient ;
 un pair non admis reçoit le refus d'avant.
@@ -60,5 +67,7 @@ le pourrait donc s'il exécutait un programme qui appelle `approval.resolve` ; d
 surface d'un autre programme du même compte demande un chemin de confiance que l'OS n'a pas
 encore, ou le confinement du client que l'ADR 0026 laisse ouvert. Les autres daemons (agentd,
 vault, egress, sandboxd, memoryd) gardent leurs propres contrôles, à passer au même crible.
-L'essai NixOS des services vérifie, sous le compte de l'humain, la lecture permise et les refus
-de `cap.mint` et de `ledger.append`.
+Reste aussi une fenêtre étroite au redémarrage d'un daemon, entre le retrait de son ancien socket
+et la création du nouveau, où un autre membre pourrait prendre le nom. L'essai NixOS des services
+vérifie, sous le compte de l'humain, la lecture permise, les refus de `cap.mint`,
+`ledger.append` et `sandbox.run`, et qu'il ne peut ni retirer ni renommer `capd.sock`.
