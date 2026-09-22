@@ -10,7 +10,10 @@ use serde_json::{Value, json};
 use tokio::sync::watch;
 
 use crate::DriverError;
-use crate::local::{local_endpoint, messages};
+use crate::local::{
+    MAX_ERROR_BYTES, MAX_FIT_ATTEMPTS, Overflow, SAFETY, local_endpoint, messages, read_body,
+    serialized_len,
+};
 use crate::native::Usage;
 
 const MAX_FRAME: usize = 256 * 1024;
@@ -28,6 +31,9 @@ pub struct Completion {
     pub elapsed: Duration,
     /// Temps jusqu'au premier fragment de texte visible.
     pub first_token: Option<Duration>,
+    /// Messages les plus anciens laissés hors de l'envoi parce que la conversation ne tenait
+    /// plus dans la fenêtre de contexte du moteur ; le modèle ne les a pas relus.
+    pub forgotten: usize,
 }
 
 /// Une annulation est distincte d'une panne et d'une réponse réussie.
@@ -155,17 +161,37 @@ impl ChatClient {
         on_delta: &mut impl FnMut(&str),
     ) -> Result<Completion, DriverError> {
         let started = Instant::now();
-        let mut response = self
-            .client
-            .post(self.url("chat/completions")?)
-            .json(&json!({
-                "model":model, "messages":messages(history)?, "stream":true,
-                "stream_options":{"include_usage":true}, "max_tokens":max_tokens,
-            }))
-            .send()
-            .await
-            .map_err(io)?;
-        status(&response)?;
+        let mut messages = messages(history)?;
+        let mut forgotten = 0;
+        let mut attempts = 0;
+        let mut response = loop {
+            attempts += 1;
+            let mut response = self
+                .client
+                .post(self.url("chat/completions")?)
+                .json(&json!({
+                    "model":model, "messages":messages, "stream":true,
+                    "stream_options":{"include_usage":true}, "max_tokens":max_tokens,
+                }))
+                .send()
+                .await
+                .map_err(io)?;
+            if response.status() != reqwest::StatusCode::BAD_REQUEST {
+                status(&response)?;
+                break response;
+            }
+            // Seul le refus de fenêtre est lu, et seulement ses nombres.
+            let overflow = read_body(&mut response, MAX_ERROR_BYTES)
+                .await
+                .ok()
+                .and_then(|bytes| Overflow::parse(&bytes))
+                .ok_or_else(|| DriverError::Io("le moteur local répond HTTP 400".into()))?;
+            let dropped = forget(&mut messages, overflow, max_tokens);
+            if dropped == 0 || attempts >= MAX_FIT_ATTEMPTS {
+                return Err(overflow.error());
+            }
+            forgotten += dropped;
+        };
         let mut decoder = Decoder::default();
         let mut result = Assembly::default();
         let mut transferred = 0usize;
@@ -176,7 +202,12 @@ impl ChatClient {
             }
             for data in decoder.feed(&chunk)? {
                 if data == "[DONE]" {
-                    return result.finish(started.elapsed());
+                    return result
+                        .finish(started.elapsed())
+                        .map(|completion| Completion {
+                            forgotten,
+                            ..completion
+                        });
                 }
                 if let Some(delta) = result.event(&data)? {
                     result.first_token.get_or_insert_with(|| started.elapsed());
@@ -262,8 +293,37 @@ impl Assembly {
                 .ok_or_else(|| bad("consommation du moteur absente"))?,
             elapsed,
             first_token: self.first_token,
+            forgotten: 0,
         })
     }
+}
+
+/// Retire les plus anciens messages d'une conversation refusée pour sa longueur, à la mesure
+/// du refus, et rend leur nombre. La consigne de système en tête reste, la dernière question
+/// aussi, et l'échange repris commence par une question de l'humain.
+fn forget(messages: &mut Vec<Value>, overflow: Overflow, max_tokens: u32) -> usize {
+    let first = usize::from(messages.first().is_some_and(|m| m["role"] == "system"));
+    let excess = match (overflow.n_prompt, overflow.n_ctx) {
+        (Some(prompt), Some(ctx)) if prompt > 0 && ctx > 0 => {
+            let bytes_per_token = (serialized_len(messages) as f64 / prompt as f64).max(0.5);
+            let target = ctx.saturating_sub(u64::from(max_tokens).min(ctx / 4));
+            (prompt.saturating_sub(target) as f64 * bytes_per_token * SAFETY).ceil() as usize
+        }
+        // Un refus sans nombres : la moitié de la conversation.
+        _ => serialized_len(messages) / 2,
+    };
+    let last = messages.len().saturating_sub(1);
+    let mut end = first;
+    let mut removed = 0;
+    while end < last && removed < excess {
+        removed += serialized_len(&messages[end..=end]);
+        end += 1;
+    }
+    while end < last && messages[end]["role"] != "user" {
+        end += 1;
+    }
+    messages.drain(first..end);
+    end - first
 }
 
 #[derive(Default)]

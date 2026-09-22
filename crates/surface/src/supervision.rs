@@ -1170,6 +1170,10 @@ fn conversation(ui: &mut egui::Ui, atelier: &mut Atelier) {
                     if let Some(mesure) = &tour.mesure {
                         ui.add_space(12.0);
                         petit(ui, format!("{} tokens · {:.2} s · premier texte {} ms", mesure.usage.tokens_out, mesure.elapsed.as_secs_f64(), mesure.first_token.unwrap_or_default().as_millis()));
+                        if mesure.forgotten > 0 {
+                            // Le modèle n'a pas relu le début : l'humain doit le savoir avant de s'y référer.
+                            petit(ui, oubli(mesure.forgotten));
+                        }
                     }
                 });
                 ui.add_space(18.0);
@@ -1441,6 +1445,17 @@ fn poids_installes(ui: &mut egui::Ui, atelier: &Atelier) {
     }
 }
 
+/// Ce que la conversation a laissé hors de l'envoi pour tenir dans la fenêtre du modèle.
+fn oubli(messages: usize) -> String {
+    if messages == 1 {
+        "Le premier message ne tient plus dans la fenêtre du modèle : il ne l'a pas relu.".into()
+    } else {
+        format!(
+            "Les {messages} premiers messages ne tiennent plus dans la fenêtre du modèle : il ne les a pas relus."
+        )
+    }
+}
+
 /// Un nombre en groupes de trois chiffres, séparés d'une espace fine : 40 960.
 fn groupes(n: u64) -> String {
     let chiffres = n.to_string();
@@ -1564,6 +1579,12 @@ mod tests {
         assert_eq!(groupes(7), "7");
         assert_eq!(groupes(40_960), "40\u{202f}960");
         assert_eq!(groupes(1_048_576), "1\u{202f}048\u{202f}576");
+    }
+
+    #[test]
+    fn l_oubli_de_la_conversation_se_dit_au_singulier_comme_au_pluriel() {
+        assert!(oubli(1).starts_with("Le premier message"));
+        assert!(oubli(6).starts_with("Les 6 premiers messages"));
     }
 
     #[test]
