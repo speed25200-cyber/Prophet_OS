@@ -1486,7 +1486,12 @@ donne le détail.
   pages témoins visitées par un navigateur servent désormais chaque connexion à part (`064b07b`).
   Le reste de la CI générale de `d6e686f` est vert, dont la mission réelle Qwen3 sous NixOS et,
   pour la première fois depuis des jours, ChatGPT sous NixOS.
-- `just check` : **829 réussis, 0 échec, 46 ignorés**, format, clippy, contrôles du dépôt et
+- Méthodes réservées par classe de pair (ADR 0044) : le compte de l'humain, membre de
+  `prophet-system`, pouvait demander à capd un jeton pour un manifeste de sa main ou écrire au
+  journal. `cap.mint` et ses voisins, `ledger.append` et `ledger.seal` reviennent désormais aux
+  services, `approval.resolve` à l'humain ; l'essai NixOS des services le vérifie sous le
+  compte de l'humain (résultat attendu de la CI).
+- `just check` : **834 réussis, 0 échec, 46 ignorés**, format, clippy, contrôles du dépôt et
   secrets (repli). Parcours de la surface avec `--include-ignored` : 14 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
 
@@ -1692,12 +1697,14 @@ désormais, et `tools/install-isolation.sh` le traite sans rien modifier sans au
 
 Les pilotes de clients officiels sont testés jusqu'à la limite de ce qui est vérifiable sans compte : construction de la ligne de commande, environnement transmis, détection de session, messages d'erreur. L'exécution de bout en bout exige une connexion réelle.
 
-**L'autorisation au niveau du socket est grossière.** Un pair est accepté s'il appartient au
-groupe `prophet-system`, et il a alors accès à *toutes* les méthodes système du daemon. C'est
-suffisant entre daemons, qui se font mutuellement confiance par construction, mais la surface doit
-elle aussi en faire partie pour lire les tâches — et elle obtient du même coup un accès qu'elle
-n'utilise pas. Restreindre demanderait une notion de méthode autorisée par pair que `prophet-ipc`
-n'a pas. À faire avant qu'un programme moins fiable qu'un afficheur ne parle à un daemon.
+**L'autorisation au niveau du socket était grossière ; elle est levée pour capd et le journal
+(22 septembre 2026, ADR 0044).** Un pair admis a désormais une classe : soi ou `root`, service
+(groupe principal `prophet-system`, les sept daemons), humain (membre déclaré : l'humain, sa
+session, la surface). Émettre, déléguer ou vérifier un droit, demander une approbation, écrire ou
+sceller le journal reviennent aux services ; trancher une approbation revient à l'humain. Reste
+ouvert : un processus du compte de l'humain — un client officiel lancé par `prophet-pilotd`
+compris — peut encore trancher une approbation comme l'humain lui-même, et les autres daemons
+(agentd, vault, egress, sandboxd, memoryd) n'ont pas encore été passés au même crible.
 
 **Les sept daemons tournent sous systemd**, dans une machine NixOS de test que `just test-vm`
 démarre et que l'intégration continue exerce : chacun sous son utilisateur, avec le durcissement

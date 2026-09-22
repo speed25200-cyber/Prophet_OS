@@ -33,6 +33,10 @@ un appel malformé pour une politique appliquée.
 
 - Un pair hors du groupe `prophet-system` — membre déclaré dans `/etc/group` compris. `root`, lui,
   est accepté : le refuser ne protégeait rien, puisqu'il lit déjà la clé de signature.
+- Un pair de la session humaine qui voudrait émettre, déléguer ou vérifier un droit, demander ou
+  expirer une approbation : ces méthodes reviennent aux services (groupe principal
+  `prophet-system`). Un service qui voudrait trancher une approbation : cela revient à l'humain.
+  Voir l'[ADR 0044](../adr/0044-les-methodes-reservees-par-classe-de-pair.md).
 - Un jeton signé par une autre clé — motif `bad_signature`.
 - Une portée d'approbation inconnue ; le défaut est la plus étroite, jamais la plus large.
 

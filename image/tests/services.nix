@@ -70,6 +70,29 @@ let
         print(json.dumps(lancee, ensure_ascii=False))
         raise SystemExit(0)
 
+    # Sous le compte de l'humain (ADR 0044) : il lit les demandes d'approbation et le journal,
+    # mais n'émet aucun droit et n'écrit rien au journal ; ce qui le lui refuse est la classe
+    # du pair, pas l'appartenance au groupe, qu'il a.
+    if len(sys.argv) > 1 and sys.argv[1] == "droits":
+        def code(chemin, methode, params):
+            s = socket.socket(socket.AF_UNIX)
+            s.connect(chemin)
+            s.sendall((json.dumps({
+                "jsonrpc": "2.0", "id": 1, "method": methode, "params": params
+            }) + "\n").encode())
+            reponse = json.loads(s.makefile().readline())
+            return reponse.get("error", {}).get("code")
+        assert code("/run/prophet/capd.sock", "approval.pending", {}) is None
+        assert code("/run/prophet/ledger.sock", "ledger.query", {}) is None
+        refus = code("/run/prophet/capd.sock", "cap.mint", {
+            "manifest": manifeste, "grants": [], "task": "task:intrus", "user": "prophet",
+        })
+        assert refus == -32001, f"cap.mint accepté sous le compte de l'humain : {refus}"
+        refus = code("/run/prophet/ledger.sock", "ledger.append", {})
+        assert refus == -32001, f"ledger.append accepté sous le compte de l'humain : {refus}"
+        print("droits : lecture permise ; émission et écriture du journal refusées")
+        raise SystemExit(0)
+
     if len(sys.argv) > 1 and sys.argv[1] == "options":
         print(json.dumps(appeler("/run/prophet/agentd.sock", "task.options", {}), ensure_ascii=False))
         raise SystemExit(0)
@@ -283,6 +306,11 @@ pkgs.testers.runNixOSTest {
         assert "task:essai-vm" in detail and "local:qwen3-8b" in detail, detail
         # Une tâche seulement planifiée n'a aucun diff à présenter : pas de faux diff vide.
         machine.fail("su - prophet -c 'prophet task diff task:essai-vm'")
+
+    with subtest("l'humain lit les droits et le journal sans pouvoir en émettre ni y écrire"):
+        # Même groupe que les services, autre classe : le groupe principal des daemons est
+        # `prophet-system`, celui de l'humain ne l'est pas (ADR 0044).
+        print(machine.succeed("su - prophet -c 'prophet-essai-tache droits'"))
 
     with subtest("le navigateur piloté répond sous le durcissement réel d'agentd"):
         # `agentd` sonde son navigateur au démarrage, sous ses propres contraintes systemd, et

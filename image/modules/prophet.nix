@@ -34,9 +34,11 @@ let
         # course, `capd` et `ledger` ont bouclé jusqu'à la limite de redémarrages.
         #
         # Le droit d'écriture est donné au groupe, pas au monde. Cela n'élargit rien : appartenir à
-        # `prophet-system` donne déjà accès à toutes les méthodes système de tous les daemons, donc
-        # pouvoir poser un fichier à côté de leurs sockets n'ajoute aucun pouvoir. Ce qui compte
-        # est que les autres n'entrent pas, et `0770` le tient aussi bien que `0750`.
+        # `prophet-system` ouvre déjà les sockets de tous les daemons, donc pouvoir poser un
+        # fichier à côté n'ajoute aucun pouvoir. Ce qui compte est que les autres n'entrent pas, et
+        # `0770` le tient aussi bien que `0750`. Ce que chaque membre peut appeler dépend ensuite
+        # de sa classe : émettre des droits et écrire le journal ne revient qu'aux services, dont
+        # ce groupe est le groupe principal (ADR 0044).
         RuntimeDirectoryMode = "0770";
         # Sans cette ligne, systemd supprime le répertoire quand l'un d'eux s'arrête — et emporte
         # les six autres sockets avec lui. Un `systemctl restart prophet-memoryd` couperait tout

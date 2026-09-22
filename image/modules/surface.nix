@@ -39,10 +39,11 @@ in
     # pour ce groupe, et les sockets en 0660. Sans lui, la surface ne joindrait aucun daemon et
     # afficherait un champ vide en permanence — ce qui ressemblerait à une machine au repos.
     #
-    # Ce que cela donne, dit franchement : au niveau du socket, la surface a le même accès qu'un
-    # daemon. Le restreindre demanderait une notion de méthode autorisée par pair que `prophet-ipc`
-    # n'a pas encore ; c'est noté dans `docs/STATUS.md`. Le durcissement ci-dessous limite le reste
-    # — pas de réseau, pas d'écriture ailleurs, pas d'acquisition de privilège.
+    # Membre déclaré et non groupe principal, la surface est un pair de la classe humaine (ADR
+    # 0044) : elle lit les tâches, les demandes et le journal et transmet les décisions, mais
+    # n'émet aucun droit et n'écrit rien au journal. Les autres méthodes des daemons lui restent
+    # ouvertes comme à l'humain. Le durcissement ci-dessous limite le reste — pas de réseau, pas
+    # d'écriture ailleurs, pas d'acquisition de privilège.
     users.users.surface = {
       isSystemUser = true;
       group = "surface";

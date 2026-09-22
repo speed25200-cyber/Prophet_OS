@@ -30,6 +30,9 @@ encore écrite signerait une chaîne qui n'existe pas.
 - Un type d'événement hors du vocabulaire de `docs/specs/ledger-event.md`.
 - Un scellement quand aucun signataire n'est chargé : il le dit plutôt que de rendre « rien » et de
   laisser croire la chaîne scellée.
+- Une écriture ou un scellement demandé depuis la session humaine : `ledger.append` et
+  `ledger.seal` reviennent aux services ; la lecture et la vérification restent ouvertes à tout
+  pair admis. Voir l'[ADR 0044](../adr/0044-les-methodes-reservees-par-classe-de-pair.md).
 
 ## Quand il n'est pas là
 
