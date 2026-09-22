@@ -810,7 +810,7 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 - [x] M8-T4 — Pilote `claude-code` (2026-09-12, 24b8338) — ligne de commande, environnement, détection de session
 - [x] M8-T5 — Pilote `codex` (2026-09-12, 24b8338) — pilote Codex CLI
 - [x] M8-T6 — Pilote `gemini` (2026-09-12, 24b8338) — pilote Gemini CLI
-- [ ] M8-T7 — Moteurs locaux — client HTTP, flux annulable, interface de conversation et essai Qwen3/CPU réalisés ; le 13 septembre, budgets de tokens par modèle, condensation du contexte et deux modèles servis par un llama-server en mode routeur, prouvés en relais réel (ADR 0034) ; le même jour, l'image sert deux modèles en mode routeur (Qwen3-1.7B en réflexion, Qwen3-0.6B en exécution, téléchargés à l'installation), préréglages vérifiés sur le vrai moteur et configuration évaluée ; le 22 septembre, le catalogue des poids se lit dans l'en-tête GGUF de chaque fichier (`prophet model ls`, page Modèles : architecture, quantification, fenêtre de contexte) ; restent le téléchargement et la suppression gérés des poids, les budgets VRAM et la matrice GPU/modèles
+- [ ] M8-T7 — Moteurs locaux — client HTTP, flux annulable, interface de conversation et essai Qwen3/CPU réalisés ; le 13 septembre, budgets de tokens par modèle, condensation du contexte et deux modèles servis par un llama-server en mode routeur, prouvés en relais réel (ADR 0034) ; le même jour, l'image sert deux modèles en mode routeur (Qwen3-1.7B en réflexion, Qwen3-0.6B en exécution, téléchargés à l'installation), préréglages vérifiés sur le vrai moteur et configuration évaluée ; le 22 septembre, le catalogue des poids se lit dans l'en-tête GGUF de chaque fichier (`prophet model ls`, page Modèles : architecture, quantification, fenêtre de contexte), et un historique plus long que la fenêtre du moteur est resserré à sa mesure au lieu de faire échouer la mission ou la conversation ; restent le téléchargement et la suppression gérés des poids, les budgets VRAM et la matrice GPU/modèles
 - [x] M8-T8 — Pilote `prophet-agent` (2026-09-12, 24b8338) — boucle native : points de reprise, fork, rejeu
 - [x] M8-T9 — Sélection de pilote (2026-09-12, 24b8338) — sélection expliquée, confidentialité locale respectée
 - [x] M8-T10 — CLI (2026-09-12, 24b8338) — `prophet provider ls|login`
@@ -1500,7 +1500,19 @@ donne le détail.
   charger les poids, bornes comprises contre un en-tête hostile ; `prophet model ls` et une
   plaque « Poids installés » de la page Modèles réunissent le dossier des poids et les fichiers
   que `PROPHET_WEIGHTS` nomme, dont le modèle par défaut de l'image dans `/nix/store`.
-- `just check` : **842 réussis, 0 échec, 47 ignorés**, format, clippy, contrôles du dépôt et
+- Fenêtre du moteur local (M8-T7, complément de l'ADR 0034) : avec 4 096 tokens de fenêtre,
+  une seule lecture d'un fichier moyen faisait refuser l'historique par llama-server et la
+  mission échouait sur « HTTP 400 ». Le pilote lit ce refus (ses deux nombres seulement),
+  resserre les résultats d'outils à sa mesure et renvoie le tour ; la fenêtre apprise sert
+  ensuite d'emblée (`d90a8bd`). La conversation de l'atelier oublie de même ses premiers
+  échanges et dit combien (`3a1337d`) ; `fs.read` lit par morceaux (`offset`, `next_offset`,
+  sans couper de caractère, `71d9a98`) et `fs.search` rend les lignes trouvées, numéro et
+  extrait (`2513326`) : un agent à petite fenêtre lit ce qui l'intéresse sans relire le
+  fichier. L'essai NixOS du moteur vérifie la forme du refus sur le llama-server épinglé.
+- CI de `6e1a152` et `c6e4979` (restriction de capd et du journal, essai des droits sous le
+  compte de l'humain) : **verte des deux côtés**, dont les sept services sous systemd, la
+  mission réelle Qwen3 sous NixOS, le système installé (UEFI et BIOS) et l'ISO.
+- `just check` : **851 réussis, 0 échec, 47 ignorés**, format, clippy, contrôles du dépôt et
   secrets (repli). Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
 
@@ -1512,7 +1524,9 @@ l'utilisateur : `task.spawn` d'agentd accepte un manifeste brut du compte de l'h
 que fait `prophet task new`) ; le réserver aux profils du catalogue fermerait la dernière voie
 par laquelle un processus de la session fait planifier une mission sous un manifeste de sa main.
 
-**Pour la session suivante.** Lire la CI de la branche ; trancher avec l'utilisateur le sort de
+**Pour la session suivante.** Lire la CI de la branche (la restriction de sandboxd et de
+memoryd, le `/run/prophet` collant, le refus de fenêtre du moteur épinglé, poussés après le
+verdict de `c6e4979`) ; trancher avec l'utilisateur le sort de
 `task.spawn` pour le compte de l'humain ; mesurer la surface sur une carte graphique ; écrire M5-T4 (pool d'instantanés
 Firecracker) sur un hôte KVM, la CI pouvant l'exercer sur son coureur ; faire le premier appel
 réel de Jev avec une clé déposée ; gérer le téléchargement et la suppression des poids que le
