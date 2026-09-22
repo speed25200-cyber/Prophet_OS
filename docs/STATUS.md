@@ -1480,7 +1480,8 @@ donne le détail.
   vrais services et un modèle contrôlé qui garde chaque requête.
 - L'en-tête de l'inspecteur dit le dernier geste de l'agent, relu dans le journal, et le
   donne à l'accessibilité ; les instruments compacts ne chevauchent plus leurs graduations
-  (`c8550d4`).
+  (`c8550d4`) ; les cartes des clients officiels prennent le vocabulaire des boutons du tableau
+  de bord et leur nom accessible (`f404c88`).
 - La CI de `d6e686f` a vu `mcp-system::web` expirer sur `Page.navigate` : son serveur témoin
   servait les connexions en série et attendait une connexion spéculative de Chromium. Les trois
   pages témoins visitées par un navigateur servent désormais chaque connexion à part (`064b07b`).
@@ -1502,11 +1503,17 @@ donne le détail.
 **Bloqué.** Rien n'est vérifiable ici sous Nix, en VM ou sur matériel : pas de KVM (M5-T4
 reste à écrire sur un coureur qui l'a), pas de carte graphique (fluidité et consommation
 réelles à mesurer avec `prophet-surface --mesure` et `--repos`). Le premier appel réel de Jev
-attend une clé. La CI de `d6e686f` tournait au moment d'écrire ces lignes.
+attend une clé. Aucun compte Claude, ChatGPT ou Codex n'est connecté. Une décision revient à
+l'utilisateur : `task.spawn` d'agentd accepte un manifeste brut du compte de l'humain (c'est ce
+que fait `prophet task new`) ; le réserver aux profils du catalogue fermerait la dernière voie
+par laquelle un processus de la session fait planifier une mission sous un manifeste de sa main.
 
-**Pour la session suivante.** Lire la CI de la branche ; mesurer la surface sur une carte
-graphique ; écrire M5-T4 (pool d'instantanés Firecracker) sur un hôte KVM, la CI pouvant
-l'exercer sur son coureur ; faire le premier appel réel de Jev avec une clé déposée.
+**Pour la session suivante.** Lire la CI de la branche ; trancher avec l'utilisateur le sort de
+`task.spawn` pour le compte de l'humain, puis passer vault, egress, sandboxd et memoryd au crible
+de l'ADR 0044 ; mesurer la surface sur une carte graphique ; écrire M5-T4 (pool d'instantanés
+Firecracker) sur un hôte KVM, la CI pouvant l'exercer sur son coureur ; faire le premier appel
+réel de Jev avec une clé déposée ; gérer le téléchargement et la suppression des poids que le
+catalogue lit désormais.
 
 ### 15 septembre 2026, nuit et matin : l'ISO installée dans une machine virtuelle, deux fautes
 
