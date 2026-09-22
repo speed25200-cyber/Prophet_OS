@@ -18,7 +18,7 @@
         "net.egress": ["127.0.0.1", "api.typesafe.ai"],
         "ui.read": ["browser"],
         "ui.act": ["browser"],
-        "tool.call": ["fs.read", "fs.write", "web.open", "web.tree", "web.act"]
+        "tool.call": ["task.status", "task.diff", "fs.read", "fs.write", "web.open", "web.tree", "web.act"]
       }
     },
     "budget": { "default": { "tokens": 40000, "wall_time": "120s", "approvals": 3 } }
@@ -30,6 +30,8 @@
     { "res": "net", "act": "egress", "match": "api.typesafe.ai" },
     { "res": "ui", "act": "read", "match": "browser" },
     { "res": "ui", "act": "act", "match": "browser" },
+    { "res": "tool", "act": "call", "match": "task.status" },
+    { "res": "tool", "act": "call", "match": "task.diff" },
     { "res": "tool", "act": "call", "match": "fs.read" },
     { "res": "tool", "act": "call", "match": "fs.write" },
     { "res": "tool", "act": "call", "match": "web.open" },

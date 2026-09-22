@@ -374,6 +374,12 @@ fn le_catalogue_refuse_les_profils_hors_perimetre_et_accepte_une_ecriture_plus_e
     profile["manifest"]["capabilities"]["max"]["fs.write"] = json!(["~/Documents/Prophet/out/**"]);
     std::fs::write(&path, json!([profile]).to_string()).unwrap();
     assert!(agentd::preparation::load(&path).is_ok());
+    // L'agent peut lire l'état et les changements de sa propre mission, rien au-delà.
+    let mut introspection = profile.clone();
+    introspection["manifest"]["capabilities"]["max"]["tool.call"] =
+        json!(["fs.read", "fs.write", "task.status", "task.diff"]);
+    std::fs::write(&path, json!([introspection]).to_string()).unwrap();
+    assert!(agentd::preparation::load(&path).is_ok());
     // Le web relayé par egress est admis : hôtes, navigateur piloté et outils réseau nommés.
     let mut web = profile.clone();
     web["manifest"]["capabilities"]["max"]["net.egress"] = json!(["*.exemple.fr", "*"]);

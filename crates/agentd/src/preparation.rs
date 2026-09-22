@@ -445,6 +445,10 @@ impl Profile {
                         grant.pattern.as_str(),
                         "fs.read" | "fs.write" | "fs.list" | "fs.search" | "fs.stat" | "doc.read"
                     ) => {}
+                // L'introspection ne lit que la mission elle-même : son état, son budget et
+                // ses propres changements.
+                (Res::Tool, Act::Call)
+                    if matches!(grant.pattern.as_str(), "task.status" | "task.diff") => {}
                 (Res::Tool, Act::Call) if hosts && WEB_TOOLS.contains(&grant.pattern.as_str()) => {}
                 (Res::Tool, Act::Call) if apps && UI_TOOLS.contains(&grant.pattern.as_str()) => {}
                 // Une sous-mission se confie à un contexte nommé du catalogue, jamais à « tout ».

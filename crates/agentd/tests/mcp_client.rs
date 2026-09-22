@@ -236,8 +236,13 @@ async fn un_client_mcp_travaille_dans_la_mission_preparee_et_le_createur_publie(
         .map(|t| t["name"].as_str().unwrap())
         .collect();
     // Seuls les outils que le jeton couvre sont proposés : le profil d'exemple n'accorde que
-    // fs.read et fs.write ; ni liste, ni réseau, ni navigateur n'apparaissent.
-    assert_eq!(names, ["fs.read", "fs.write"], "{names:?}");
+    // fs.read, fs.write et l'introspection de la mission ; ni liste, ni réseau, ni navigateur
+    // n'apparaissent.
+    assert_eq!(
+        names,
+        ["fs.read", "fs.write", "task.diff", "task.status"],
+        "{names:?}"
+    );
     let written = mcp
         .tool(
             "fs.write",

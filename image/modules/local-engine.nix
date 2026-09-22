@@ -54,7 +54,7 @@ let
         capabilities.max = {
           "fs.read" = [ "~/Documents/Prophet/**" ];
           "fs.write" = [ "~/Documents/Prophet/**" ];
-          "tool.call" = [ "fs.read" "doc.read" "fs.write" ];
+          "tool.call" = [ "task.status" "task.diff" "fs.read" "doc.read" "fs.write" ];
         };
         budget.default = { tokens = 20000; wall_time = "90s"; approvals = 3; };
       };
@@ -84,7 +84,7 @@ let
           # Le contexte web peut confier la rédaction au contexte documents : deux agents, deux
           # modèles au besoin, sous un jeton délégué par capd (ADR 0029).
           "task.spawn" = [ "documents" ];
-          "tool.call" = [ "fs.read" "doc.read" "fs.write" "http.fetch" "task.delegate" ]
+          "tool.call" = [ "task.status" "task.diff" "fs.read" "doc.read" "fs.write" "http.fetch" "task.delegate" ]
             ++ lib.optionals navigateur [ "web.open" "web.tree" "web.act" ];
         } // lib.optionalAttrs navigateur {
           "ui.read" = [ "browser" ];
@@ -116,7 +116,7 @@ let
           # (« soffice » sur le bus), GIMP, Inkscape, FreeCAD, le lecteur PDF ; jamais l'écran.
           "ui.read" = [ "mousepad" "soffice" "gimp" "inkscape" "freecad" "evince" "kdenlive" "darktable" ];
           "ui.act" = [ "mousepad" "soffice" "gimp" "inkscape" "freecad" "evince" "kdenlive" "darktable" ];
-          "tool.call" = [ "fs.read" "doc.read" "fs.write" "ui.apps" "ui.tree" "ui.act" ];
+          "tool.call" = [ "task.status" "task.diff" "fs.read" "doc.read" "fs.write" "ui.apps" "ui.tree" "ui.act" ];
         };
         budget.default = { tokens = 30000; wall_time = "180s"; approvals = 3; };
       };
@@ -143,7 +143,7 @@ let
           "fs.read" = [ "~/Documents/Prophet/**" ];
           "fs.write" = [ "~/Documents/Prophet/outils/**" ];
           "proc.exec" = [ "python3" "sh" ];
-          "tool.call" = [ "fs.read" "doc.read" "fs.write" "proc.exec" "proc.kill" ];
+          "tool.call" = [ "task.status" "task.diff" "fs.read" "doc.read" "fs.write" "proc.exec" "proc.kill" ];
         };
         budget.default = { tokens = 40000; wall_time = "300s"; approvals = 3; };
       };
@@ -172,7 +172,7 @@ let
           "fs.read" = [ "~/Documents/Prophet/**" ];
           "fs.write" = [ "~/Documents/Prophet/**" ];
           "task.spawn" = [ "atelier" "documents" ];
-          "tool.call" = [ "fs.read" "doc.read" "fs.write" "task.delegate" ];
+          "tool.call" = [ "task.status" "task.diff" "fs.read" "doc.read" "fs.write" "task.delegate" ];
         };
         budget.default = { tokens = 60000; wall_time = "900s"; approvals = 3; };
       };

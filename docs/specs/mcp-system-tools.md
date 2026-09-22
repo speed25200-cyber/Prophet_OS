@@ -102,6 +102,17 @@ styles ; archives zip et tar listées ; texte brut sinon, avec `json`, `csv`, `m
 attendu indéfiniment ; les octets passent par un fichier temporaire privé, effacé après. Aucun
 réseau, aucun programme choisi par l'agent. Voir l'[ADR 0028](../adr/0028-lecture-des-formats-par-un-outil-natif.md).
 
+## Introspection actuellement implémentée
+
+Dans une mission d'agentd, comme dans la séance d'outils d'un client de l'humain,
+`task.status {}` rend la tâche, l'agent, l'étape, le niveau d'isolation, le dossier de travail,
+les capacités accordées et le budget : `limits`, `spent` et `remaining` en étapes, tokens et
+secondes. `task.diff {}` rend les fichiers ajoutés, modifiés et supprimés dans le travail de la
+tâche, et leur rendu, sans rien appliquer. Tous deux exigent `tool.call` sur leur nom, ne lisent
+que la mission elle-même et ne changent rien : un agent qui sait ce qu'il lui reste et ce qu'il
+a déjà fait choisit ses étapes au lieu de heurter le plafond. Les profils de l'image et des
+exemples les accordent.
+
 ## Commandes actuellement implémentées
 
 `proc.exec {program, args?, level?, timeout_s?}` exige `proc.exec` sur le programme tel que

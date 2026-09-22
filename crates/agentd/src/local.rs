@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use capd::CheckRequest;
 use mcp_system::native::RegistryExecutor;
-use mcp_system::protocol::CallResult;
+use mcp_system::protocol::{CallResult, ToolSpec};
 use mcp_system::registry::{Authority, Journal, Registry, ToolContext};
 use mcp_system::services::Services;
 use prophet_types::cap::{Act, Decision, DenyReason, Res, Token};
@@ -372,6 +372,56 @@ impl ModelClient for Metered {
     }
 }
 
+/// `task.status` pour une mission : ce que `mcp-system` rend (tâche, étape, isolation, droits),
+/// et le budget — plafonds, consommé, restant. Un agent qui sait ce qu'il lui reste choisit ses
+/// étapes au lieu de heurter le plafond ; il ne peut rien y changer.
+struct Etat {
+    control: Arc<Control>,
+}
+impl mcp_system::registry::Tool for Etat {
+    fn spec(&self) -> ToolSpec {
+        let mut spec = mcp_system::tools::TaskStatus.spec();
+        spec.description = "Donne l'état de la mission : identifiant, étape, niveau d'isolation, \
+            capacités accordées et budget (plafonds, consommé et restant en étapes, tokens et \
+            secondes)."
+            .into();
+        spec
+    }
+
+    fn target(&self, _args: &Value, _context: &ToolContext) -> Option<String> {
+        None
+    }
+
+    fn call(&self, args: &Value, context: &ToolContext) -> CallResult {
+        let mut etat = mcp_system::tools::TaskStatus
+            .call(args, context)
+            .structured
+            .unwrap_or_else(|| json!({}));
+        let task = self.control.current();
+        let limits = task.budget.limits;
+        let spent = task.budget.spent;
+        let elapsed = self.control.started.elapsed().as_secs();
+        etat["budget"] = json!({
+            "limits": {
+                "steps": limits.steps,
+                "tokens": limits.tokens,
+                "wall_time_s": limits.wall_time_s,
+            },
+            "spent": {
+                "steps": spent.steps,
+                "tokens": spent.tokens,
+                "wall_time_s": elapsed,
+            },
+            "remaining": {
+                "steps": limits.steps.saturating_sub(spent.steps),
+                "tokens": limits.tokens.saturating_sub(spent.tokens),
+                "wall_time_s": limits.wall_time_s.saturating_sub(elapsed),
+            },
+        });
+        CallResult::structured(etat)
+    }
+}
+
 impl Mission {
     /// Exécute et publie un résultat. À appeler sur un thread dédié, hors de Tokio.
     pub fn run(self, publish: Publish) {
@@ -535,6 +585,12 @@ impl Mission {
     /// Les outils d'une mission, tous sous le contrôle et le journal de `control`.
     fn registry(&self, control: &Arc<Control>) -> Registry {
         let mut registry = Registry::with_authority(control.clone(), control.clone());
+        // L'agent lit où il en est : ses droits, son budget restant, ses propres changements.
+        // Offerts seulement si le profil accorde `tool.call` sur leur nom, comme les autres.
+        registry.register(Arc::new(Etat {
+            control: control.clone(),
+        }));
+        registry.register(Arc::new(mcp_system::tools::TaskDiff));
         registry.register(Arc::new(mcp_system::tools::Read));
         registry.register(Arc::new(mcp_system::tools::Write));
         registry.register(Arc::new(mcp_system::tools::List));

@@ -1213,3 +1213,153 @@ async fn sans_egress_le_navigateur_pilote_n_a_aucune_route() {
         "sans proxy de sortie, le navigateur ne doit trouver aucune route directe"
     );
 }
+
+/// Un modèle qui joue une suite de réponses, une par tour, et garde le corps de chaque
+/// requête reçue : ce que l'agent a vu à chaque tour, résultats d'outils compris.
+async fn modele_scripte(
+    reponses: Vec<Value>,
+) -> (String, std::sync::Arc<std::sync::Mutex<Vec<Value>>>) {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
+    let corps = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recus = corps.clone();
+    tokio::spawn(async move {
+        for reponse in reponses {
+            let Ok((stream, _)) = listener.accept().await else {
+                return;
+            };
+            let mut stream = BufReader::new(stream);
+            let mut size = 0;
+            loop {
+                let mut line = String::new();
+                if stream.read_line(&mut line).await.unwrap_or(0) == 0 {
+                    return;
+                }
+                if line == "\r\n" {
+                    break;
+                }
+                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    size = value.trim().parse::<usize>().unwrap();
+                }
+            }
+            let mut body = vec![0; size];
+            stream.read_exact(&mut body).await.unwrap();
+            recus
+                .lock()
+                .unwrap()
+                .push(serde_json::from_slice(&body).unwrap_or(Value::Null));
+            let body = reponse.to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.get_mut().write_all(response.as_bytes()).await;
+        }
+    });
+    (endpoint, corps)
+}
+
+fn appel_d_outil(n: u32, outil: &str, arguments: Value) -> Value {
+    json!({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"type":"function","id":format!("call_{n}"),"function":{"name":outil,"arguments":arguments.to_string()}}]}}],"usage":{"prompt_tokens":40,"completion_tokens":10}})
+}
+
+/// Le dernier résultat d'outil que le modèle a reçu dans une requête, relu en JSON : le
+/// contenu de l'enveloppe `{"ok": true, "result": …}` que la boucle native lui transmet.
+fn dernier_resultat(corps: &Value) -> Value {
+    let message = corps["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|m| m["role"] == "tool")
+        .unwrap_or_else(|| panic!("aucun résultat d'outil : {corps}"));
+    let texte = message["content"].as_str().unwrap();
+    let enveloppe: Value =
+        serde_json::from_str(texte).unwrap_or_else(|_| panic!("résultat illisible : {texte}"));
+    assert_eq!(enveloppe["ok"], true, "{enveloppe}");
+    enveloppe["result"].clone()
+}
+
+#[tokio::test]
+async fn l_agent_lit_son_budget_restant_et_ses_propres_changements() {
+    let (endpoint, corps) = modele_scripte(vec![
+        appel_d_outil(1, "fs.write", json!({"path":"~/docs/note.txt","content":"preuve"})),
+        appel_d_outil(2, "task.status", json!({})),
+        appel_d_outil(3, "task.diff", json!({})),
+        json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"Terminé."}}],"usage":{"prompt_tokens":60,"completion_tokens":3}}),
+    ])
+    .await;
+    let chain = Chain::new(&endpoint).await;
+    chain.agents.call("task.spawn",json!({
+        "id":"local-test", "intent":"Écris une note, puis fais le point sur ce qu'il te reste", "user":"prophet",
+        "manifest": {
+            "agent":{"id":"org.prophet.local-test","version":"1.0.0","name":"Test local","publisher_key":"ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+            "model":{"preferred":["local:m"]},
+            "sandbox":{"min_level":0},
+            "capabilities":{"max":{"fs.read":["~/docs/**"],"fs.write":["~/docs/**"],"tool.call":["fs.read","fs.write","task.status","task.diff"]}},
+            "budget":{"default":{"tokens":20000,"wall_time":"90s","approvals":3}}
+        },
+        "requested":[{"res":"fs","act":"read","match":"~/docs/**"},{"res":"fs","act":"write","match":"~/docs/**"},{"res":"tool","act":"call","match":"fs.read"},{"res":"tool","act":"call","match":"fs.write"},{"res":"tool","act":"call","match":"task.status"},{"res":"tool","act":"call","match":"task.diff"}],
+        "scopes":["~/docs"],"availability":{"local_models":["m"]}
+    })).await.unwrap();
+    chain
+        .agents
+        .call("task.start", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    let status = chain.wait_terminal().await;
+    assert_eq!(status["state"], "done", "{status}");
+    let corps = corps.lock().unwrap().clone();
+    assert_eq!(corps.len(), 4, "quatre tours de modèle");
+
+    // Les outils d'introspection sont offerts au modèle parce que le profil les accorde.
+    let offerts: Vec<&str> = corps[0]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["function"]["name"].as_str().unwrap())
+        .collect();
+    assert!(
+        offerts.contains(&"task.status") && offerts.contains(&"task.diff"),
+        "{offerts:?}"
+    );
+
+    // `task.status` dit ce qui reste : plafonds, consommé et restant, cohérents entre eux.
+    let etat = dernier_resultat(&corps[2]);
+    assert_eq!(etat["task"], "local-test", "{etat}");
+    let budget = &etat["budget"];
+    for champ in ["steps", "tokens"] {
+        let plafond = budget["limits"][champ].as_u64().unwrap();
+        let consomme = budget["spent"][champ].as_u64().unwrap();
+        assert!(consomme > 0, "{champ} consommé : {etat}");
+        assert_eq!(
+            budget["remaining"][champ].as_u64().unwrap(),
+            plafond - consomme,
+            "{etat}"
+        );
+    }
+    assert!(
+        budget["remaining"]["wall_time_s"].as_u64().unwrap()
+            <= budget["limits"]["wall_time_s"].as_u64().unwrap()
+    );
+    assert!(
+        etat["grants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|g| g["match"] == "task.diff")
+    );
+
+    // `task.diff` rend le travail de la mission, pas le home : la note est ajoutée.
+    let diff = dernier_resultat(&corps[3]);
+    assert_eq!(diff["added"], 1, "{diff}");
+    assert!(
+        diff["rendering"]
+            .as_str()
+            .unwrap()
+            .contains("docs/note.txt"),
+        "{diff}"
+    );
+    assert!(!chain.dir.path().join("home/docs/note.txt").exists());
+}

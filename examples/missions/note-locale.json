@@ -15,7 +15,7 @@
       "max": {
         "fs.read": ["~/Documents/Prophet/**"],
         "fs.write": ["~/Documents/Prophet/**"],
-        "tool.call": ["fs.read", "fs.write"]
+        "tool.call": ["task.status", "task.diff", "fs.read", "fs.write"]
       }
     },
     "budget": { "default": { "tokens": 20000, "wall_time": "90s", "approvals": 3 } }
@@ -23,6 +23,8 @@
   "requested": [
     { "res": "fs", "act": "read", "match": "~/Documents/Prophet/**" },
     { "res": "fs", "act": "write", "match": "~/Documents/Prophet/**" },
+    { "res": "tool", "act": "call", "match": "task.status" },
+    { "res": "tool", "act": "call", "match": "task.diff" },
     { "res": "tool", "act": "call", "match": "fs.read" },
     { "res": "tool", "act": "call", "match": "fs.write" }
   ],

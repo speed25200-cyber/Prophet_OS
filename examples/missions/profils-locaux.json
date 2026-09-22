@@ -39,6 +39,8 @@
             "~/Documents/Prophet/**"
           ],
           "tool.call": [
+            "task.status",
+            "task.diff",
             "fs.read",
             "doc.read",
             "fs.list",
@@ -106,6 +108,8 @@
             "browser"
           ],
           "tool.call": [
+            "task.status",
+            "task.diff",
             "fs.read",
             "doc.read",
             "fs.list",
@@ -183,6 +187,8 @@
             "evince"
           ],
           "tool.call": [
+            "task.status",
+            "task.diff",
             "fs.read",
             "doc.read",
             "fs.list",
