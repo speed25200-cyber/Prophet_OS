@@ -135,10 +135,34 @@ impl Manager {
 
     /// Garde `taille` microVM prêtes pour le niveau 2, restaurées d'un instantané et
     /// régénérées en arrière-plan (ADR 0045). Sans niveau 2, ou pour une taille nulle, rien ne
-    /// change : chaque exécution démarre sa machine à froid. L'instantané et les dossiers des
-    /// machines vont sous `PROPHET_MICROVM_RESERVE`, sinon le répertoire temporaire.
+    /// change : chaque exécution démarre sa machine à froid. Sous `PROPHET_MICROVM_RESERVE`, la
+    /// réserve garde son instantané d'un démarrage à l'autre ; sans elle, tout va dans un
+    /// dossier temporaire propre à ce processus, retiré avec la réserve.
     #[must_use]
-    pub fn avec_reserve(mut self, taille: usize) -> Self {
+    pub fn avec_reserve(self, taille: usize) -> Self {
+        match std::env::var_os("PROPHET_MICROVM_RESERVE") {
+            Some(racine) => self.avec_reserve_dans(taille, racine.into(), true),
+            None => {
+                let racine = std::env::temp_dir().join(format!(
+                    "prophet-reserve-{}-{}",
+                    std::process::id(),
+                    NEXT_SANDBOX.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                ));
+                self.avec_reserve_dans(taille, racine, false)
+            }
+        }
+    }
+
+    /// Comme [`Manager::avec_reserve`], sous `racine`. `persistante`, l'instantané y reste
+    /// après la réserve et se reprend au démarrage suivant si le moniteur, le noyau et la racine
+    /// d'invité n'ont pas changé ; sinon `racine` est retirée avec la réserve.
+    #[must_use]
+    pub fn avec_reserve_dans(
+        mut self,
+        taille: usize,
+        racine: std::path::PathBuf,
+        persistante: bool,
+    ) -> Self {
         if taille == 0 || !self.caps.supports(2) {
             return self;
         }
@@ -148,18 +172,12 @@ impl Manager {
         ) else {
             return self;
         };
-        let racine = std::env::var_os("PROPHET_MICROVM_RESERVE")
-            .map_or_else(std::env::temp_dir, std::path::PathBuf::from)
-            .join(format!(
-                "prophet-reserve-{}-{}",
-                std::process::id(),
-                NEXT_SANDBOX.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            ));
         self.reserve = Some(Arc::new(crate::reserve::Reserve::demarrer(
             &firecracker,
             &images,
             taille,
             racine,
+            persistante,
         )));
         self
     }

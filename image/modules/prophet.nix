@@ -224,6 +224,10 @@ in
         extra.environment = {
           PROPHET_MICROVM_KERNEL = "${inviteMicrovm}/vmlinux";
           PROPHET_MICROVM_ROOTFS = "${inviteMicrovm}/rootfs.squashfs";
+          # La réserve de microVM garde ici l'instantané de son invité en attente (ADR 0045) :
+          # le démarrage suivant le reprend tant que le moniteur, le noyau et la racine
+          # d'invité sont les mêmes, au lieu de démarrer un invité et de réécrire sa mémoire.
+          PROPHET_MICROVM_RESERVE = "/var/lib/prophet/sandboxd/reserve";
         };
         extra.serviceConfig = {
           # Projeter les identifiants d'un enfant exige CAP_SETUID dans l'espace parent

@@ -2600,11 +2600,16 @@ fn status_reserve(capacites: Option<&serde_json::Value>) -> String {
         _ => {
             let signe = if pretes >= cible { "✓" } else { "·" };
             out.push_str(&format!(
-                "    {signe} {pretes} prête{} sur {cible} — le niveau 2 part sans démarrer de noyau{}\n",
+                "    {signe} {pretes} prête{} sur {cible} — le niveau 2 part sans démarrer de noyau{}{}\n",
                 if pretes > 1 { "s" } else { "" },
                 reserve["restauration_ms"]
                     .as_u64()
-                    .map_or_else(String::new, |ms| format!(" ; restauration en {ms} ms"))
+                    .map_or_else(String::new, |ms| format!(" ; restauration en {ms} ms")),
+                if reserve["instantane_repris"].as_bool() == Some(true) {
+                    " ; instantané repris du démarrage précédent"
+                } else {
+                    ""
+                }
             ));
         }
     }
@@ -2911,6 +2916,13 @@ mod tests {
         let dit = status_reserve(Some(&vide));
         assert!(
             dit.contains("✗ vide") && dit.contains("instantané refusé"),
+            "{dit}"
+        );
+        assert!(!dit.contains("repris"), "{dit}");
+        let reprise = serde_json::json!({"reserve": {"cible": 2, "pretes": 1, "restauration_ms": 6, "erreur": null, "instantane_repris": true}});
+        let dit = status_reserve(Some(&reprise));
+        assert!(
+            dit.contains("· 1 prête sur 2") && dit.contains("instantané repris"),
             "{dit}"
         );
         assert!(status_reserve(Some(&serde_json::json!({"reserve": null}))).contains("— aucune"));

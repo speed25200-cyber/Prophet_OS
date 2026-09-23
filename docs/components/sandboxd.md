@@ -33,8 +33,17 @@ d'elles : le disque de la tâche remplace le disque d'attente, la machine repren
 son chemin de travail sur le disque et exécute sous les mêmes marques qu'à froid. Une machine
 ne sert qu'une fois, la réserve en restaure une autre ; vide, ou refusée, l'exécution démarre à
 froid, toujours en microVM. `sandbox.capabilities` rend `reserve` : cible, machines prêtes,
-dernière durée de restauration, erreur. L'instantané (1 Gio de mémoire) va sous
-`PROPHET_MICROVM_RESERVE`, sinon le répertoire temporaire du service.
+dernière durée de restauration, erreur, et si l'instantané vient du démarrage précédent
+(`instantane_repris`, que `prophet status` dit aussi).
+
+L'instantané (1 Gio de mémoire) va sous `PROPHET_MICROVM_RESERVE` — sur la machine installée,
+`/var/lib/prophet/sandboxd/reserve`, persistant — et y reste quand sandboxd s'arrête, avec
+l'empreinte de ce dont il dépend : chemin, taille et date du moniteur, du noyau et de la racine
+d'invité, configuration de la machine, noyau et processeur de l'hôte. Au démarrage suivant,
+une empreinte identique fait reprendre l'instantané tel quel — ni invité à démarrer, ni mémoire
+à réécrire ; une empreinte différente, ou une restauration refusée, le fait refaire. Sans
+`PROPHET_MICROVM_RESERVE`, tout va dans un dossier temporaire propre au processus, retiré à
+l'arrêt.
 
 ## Méthodes
 

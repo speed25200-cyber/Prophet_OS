@@ -60,6 +60,8 @@ struct Etat {
     erreur: Option<String>,
     /// Dernière durée de restauration d'une machine, pour le dire.
     restauration: Option<Duration>,
+    /// L'instantané a été repris d'un démarrage précédent.
+    repris: bool,
 }
 
 #[derive(Debug, Default)]
@@ -79,6 +81,8 @@ pub struct Statut {
     pub restauration_ms: Option<u64>,
     /// Pourquoi la réserve ne se remplit pas, le cas échéant.
     pub erreur: Option<String>,
+    /// L'instantané vient d'un démarrage précédent, repris tel quel.
+    pub instantane_repris: bool,
 }
 
 /// La réserve et son fil de remplissage.
@@ -86,6 +90,8 @@ pub struct Reserve {
     partage: Arc<Partage>,
     cible: usize,
     racine: PathBuf,
+    /// L'instantané survit à la réserve, pour être repris au démarrage suivant.
+    persistante: bool,
     fil: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -99,13 +105,16 @@ impl std::fmt::Debug for Reserve {
 
 impl Reserve {
     /// Démarre la réserve : en arrière-plan, un invité sans tâche, son instantané, puis
-    /// `cible` machines restaurées.
+    /// `cible` machines restaurées. Persistante, elle garde son instantané sous `racine` et le
+    /// reprend au démarrage suivant si le moniteur, le noyau et la racine d'invité n'ont pas
+    /// changé : ni invité à démarrer, ni mémoire à réécrire.
     #[must_use]
     pub fn demarrer(
         firecracker: &str,
         images: &MicrovmImages,
         cible: usize,
         racine: PathBuf,
+        persistante: bool,
     ) -> Self {
         let partage = Arc::new(Partage::default());
         let fil = {
@@ -115,13 +124,16 @@ impl Reserve {
             let racine = racine.clone();
             std::thread::Builder::new()
                 .name("reserve-microvm".into())
-                .spawn(move || remplir(&partage, &firecracker, &images, cible, &racine))
+                .spawn(move || {
+                    remplir(&partage, &firecracker, &images, cible, &racine, persistante);
+                })
                 .ok()
         };
         Self {
             partage,
             cible,
             racine,
+            persistante,
             fil,
         }
     }
@@ -165,7 +177,8 @@ impl Reserve {
                 .as_ref()
                 .and_then(|e| e.restauration)
                 .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
-            erreur: etat.and_then(|e| e.erreur.clone()),
+            erreur: etat.as_ref().and_then(|e| e.erreur.clone()),
+            instantane_repris: etat.is_some_and(|e| e.repris),
         }
     }
 }
@@ -184,7 +197,11 @@ impl Drop for Reserve {
                 membre.abandonner();
             }
         }
-        let _ = std::fs::remove_dir_all(&self.racine);
+        if self.persistante {
+            retirer_les_machines(&self.racine);
+        } else {
+            let _ = std::fs::remove_dir_all(&self.racine);
+        }
     }
 }
 
@@ -194,17 +211,113 @@ struct Instantane {
     memoire: PathBuf,
 }
 
+impl Instantane {
+    fn dans(dossier: &Path) -> Self {
+        Self {
+            etat: dossier.join("etat.snap"),
+            memoire: dossier.join("memoire.snap"),
+        }
+    }
+
+    /// L'instantané d'un démarrage précédent se reprend s'il est complet et fait pour le même
+    /// moniteur, le même noyau et la même racine d'invité.
+    fn reprenable(&self, dossier: &Path, empreinte: &str) -> bool {
+        self.etat.is_file()
+            && self.memoire.is_file()
+            && dossier.join("attente.img").is_file()
+            && std::fs::read_to_string(dossier.join("empreinte")).is_ok_and(|e| e == empreinte)
+    }
+}
+
+/// Ce dont dépend un instantané : le moniteur qui l'a pris, le noyau et la racine d'invité, la
+/// configuration de la machine, et l'hôte qui le restaure — son noyau et son processeur, qu'un
+/// instantané ne traverse pas à coup sûr. Un seul change, l'instantané est refait.
+fn empreinte(firecracker: &str, images: &MicrovmImages) -> String {
+    let fichier = |chemin: &str| {
+        let meta = std::fs::metadata(chemin).ok();
+        let date = meta
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|d| d.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_secs());
+        format!("{chemin} {} {date}", meta.map_or(0, |m| m.len()))
+    };
+    let moniteur = crate::caps::which(firecracker).unwrap_or_else(|| firecracker.to_owned());
+    let noyau = std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
+    let processeur = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+    let ligne = |cle: &str| {
+        processeur
+            .lines()
+            .find(|l| l.split(':').next().is_some_and(|c| c.trim() == cle))
+            .unwrap_or_default()
+            .to_owned()
+    };
+    format!(
+        "réserve 1\n{}\n{}\n{}\n{}\nhôte {}\n{}\n{}\n",
+        fichier(&moniteur),
+        fichier(&images.kernel),
+        fichier(&images.rootfs),
+        configuration(images, Path::new("attente.img")),
+        noyau.trim(),
+        ligne("model name"),
+        ligne("flags"),
+    )
+}
+
+/// Retire les dossiers des machines (`m…`) sous la racine de la réserve, en gardant l'instantané.
+fn retirer_les_machines(racine: &Path) {
+    let Ok(entrees) = std::fs::read_dir(racine) else {
+        return;
+    };
+    for entree in entrees.flatten() {
+        let nom = entree.file_name();
+        if nom.to_string_lossy().starts_with('m') && entree.path().is_dir() {
+            let _ = std::fs::remove_dir_all(entree.path());
+        }
+    }
+}
+
 fn remplir(
     partage: &Partage,
     firecracker: &str,
     images: &MicrovmImages,
     cible: usize,
     racine: &Path,
+    persistante: bool,
 ) {
     let mut numero = 0u64;
+    let dossier = racine.join("instantane");
+    let empreinte = empreinte(firecracker, images);
     let depart = std::fs::create_dir_all(racine)
         .map_err(|e| format!("dossier de la réserve {} : {e}", racine.display()))
-        .and_then(|()| amorcer(firecracker, images, racine));
+        .and_then(|()| {
+            // Les machines d'un démarrage précédent sont mortes avec lui.
+            retirer_les_machines(racine);
+            let instantane = Instantane::dans(&dossier);
+            if persistante && instantane.reprenable(&dossier, &empreinte) {
+                numero += 1;
+                match restaurer(firecracker, &instantane, &racine.join(format!("m{numero}"))) {
+                    Ok(membre) => {
+                        if let Ok(mut etat) = partage.etat.lock() {
+                            etat.repris = true;
+                        }
+                        return Ok((membre, instantane));
+                    }
+                    Err(raison) => {
+                        tracing::warn!(raison = %raison, "instantané de la réserve non repris ; il est refait");
+                        let _ = std::fs::remove_dir_all(&dossier);
+                    }
+                }
+            }
+            // L'empreinte n'est écrite qu'une fois l'instantané complet : un amorçage
+            // interrompu ne laisse rien qui se reprenne.
+            let _ = std::fs::remove_file(dossier.join("empreinte"));
+            let fait = amorcer(firecracker, images, racine, &dossier)?;
+            if persistante {
+                let _ = std::fs::write(dossier.join("empreinte"), &empreinte);
+            }
+            Ok(fait)
+        });
     let instantane = match depart {
         Ok((modele, instantane)) => {
             if let Ok(mut etat) = partage.etat.lock() {
@@ -322,8 +435,10 @@ fn amorcer(
     firecracker: &str,
     images: &MicrovmImages,
     racine: &Path,
+    dossier_instantane: &Path,
 ) -> Result<(Membre, Instantane), String> {
-    let attente = racine.join("attente.img");
+    std::fs::create_dir_all(dossier_instantane).map_err(|e| e.to_string())?;
+    let attente = dossier_instantane.join("attente.img");
     std::fs::File::create(&attente)
         .and_then(|f| f.set_len(ATTENTE_OCTETS))
         .map_err(|e| format!("disque d'attente : {e}"))?;
@@ -350,10 +465,7 @@ fn amorcer(
             return Err(format!("{raison} {}", erreur.trim()));
         }
     }
-    let instantane = Instantane {
-        etat: racine.join("etat.snap"),
-        memoire: racine.join("memoire.snap"),
-    };
+    let instantane = Instantane::dans(dossier_instantane);
     let fait = api_appel(
         &api,
         "PATCH",
@@ -668,6 +780,47 @@ mod tests {
             "/reserve/attente.img"
         );
         assert_eq!(configuration["machine-config"]["mem_size_mib"], 1024);
+    }
+
+    #[test]
+    fn un_instantane_ne_se_reprend_que_complet_et_de_meme_empreinte() {
+        let racine = tempfile::tempdir().unwrap();
+        let noyau = racine.path().join("vmlinux");
+        let rootfs = racine.path().join("rootfs.squashfs");
+        std::fs::write(&noyau, "noyau").unwrap();
+        std::fs::write(&rootfs, "racine").unwrap();
+        let images = MicrovmImages {
+            kernel: noyau.display().to_string(),
+            rootfs: rootfs.display().to_string(),
+        };
+        let avant = empreinte("/bin/sh", &images);
+        assert_eq!(avant, empreinte("/bin/sh", &images), "stable");
+        let dossier = racine.path().join("instantane");
+        std::fs::create_dir_all(&dossier).unwrap();
+        let instantane = Instantane::dans(&dossier);
+        for fichier in ["etat.snap", "memoire.snap"] {
+            std::fs::write(dossier.join(fichier), "x").unwrap();
+        }
+        std::fs::write(dossier.join("empreinte"), &avant).unwrap();
+        assert!(
+            !instantane.reprenable(&dossier, &avant),
+            "sans disque d'attente, rien à reprendre"
+        );
+        std::fs::write(dossier.join("attente.img"), "").unwrap();
+        assert!(instantane.reprenable(&dossier, &avant));
+        // Un autre moniteur, ou une racine d'invité reconstruite : l'instantané est refait.
+        assert!(!instantane.reprenable(&dossier, &empreinte("/bin/true", &images)));
+        std::fs::write(&rootfs, "une racine plus longue").unwrap();
+        let apres = empreinte("/bin/sh", &images);
+        assert_ne!(avant, apres);
+        assert!(!instantane.reprenable(&dossier, &apres));
+        // Les machines d'un démarrage précédent partent, l'instantané reste.
+        std::fs::create_dir_all(racine.path().join("m3")).unwrap();
+        std::fs::create_dir_all(racine.path().join("m12")).unwrap();
+        retirer_les_machines(racine.path());
+        assert!(!racine.path().join("m3").exists());
+        assert!(!racine.path().join("m12").exists());
+        assert!(dossier.join("etat.snap").is_file());
     }
 
     #[test]

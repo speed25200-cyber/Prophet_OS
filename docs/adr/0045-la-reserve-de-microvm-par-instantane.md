@@ -57,9 +57,9 @@ aléatoire du noyau au réveil, sauf si l'hyperviseur signale le clonage (VMGenI
 noyau d'invité le prend en compte. Sur le coureur de la CI (`4aaeb50`), cinq clones tirent cinq
 suites de 16 octets distinctes de `/dev/urandom` : la propriété observable tient ; le mécanisme
 qui la donne n'est pas établi par l'essai, qui la vérifie à chaque passage. L'invité en attente ne détient rien de la tâche ni aucun secret.
-L'instantané écrit la mémoire de l'invité (1 Gio) une fois par démarrage de sandboxd, sous
-`PROPHET_MICROVM_RESERVE` ou le répertoire temporaire du service ; chaque machine restaurée ne
-garde en propre que les pages qu'elle modifie. Le mode réserve suppose que Firecracker accepte
+L'instantané écrit la mémoire de l'invité (1 Gio) sous `PROPHET_MICROVM_RESERVE` ou le
+répertoire temporaire du service ; chaque machine restaurée ne garde en propre que les pages
+qu'elle modifie. Le mode réserve suppose que Firecracker accepte
 de remplacer un disque sur une machine restaurée ; l'ordre inverse (reprendre, puis remplacer)
 est essayé si le moniteur refuse l'ordre direct. La mesure du critère (médiane de cinq prises,
 réserve chaude) est l'essai `la_reserve_rend_une_microvm_de_niveau_deux_en_moins_de_150_ms`,
@@ -69,3 +69,28 @@ deux ordres a servi —, et une prise coûte 8,9 ms, dont l'essentiel pour const
 de la tâche (6,5 ms mesurées sur l'hôte de développement). Un autre passage (`4aaeb50`) : réserve
 pleine en 5,0 s après le démarrage (amorçage du modèle et instantané de 1 Gio), restauration
 d'une machine en 6 ms, prise médiane de 10,9 ms (de 8,8 à 12,1 ms).
+
+## Complément du 23 septembre 2026 : l'instantané survit au redémarrage
+
+Refaire l'instantané à chaque démarrage de sandboxd coûte un démarrage d'invité et l'écriture
+d'un gigaoctet, pour un résultat identique tant que rien n'a changé. Sous
+`PROPHET_MICROVM_RESERVE` (sur la machine installée, `/var/lib/prophet/sandboxd/reserve`, dans
+le répertoire d'état du service, `0700`), la réserve est **persistante** : elle garde son
+instantané à l'arrêt, avec son empreinte, écrite en dernier — un amorçage interrompu ne laisse
+rien qui se reprenne. L'empreinte dit ce dont l'instantané dépend : chemin, taille et date du
+moniteur, du noyau et de la racine d'invité, la configuration de la machine, le noyau et le
+processeur de l'hôte (un instantané ne traverse pas à coup sûr un changement de l'un ou de
+l'autre). Au démarrage, une empreinte identique fait restaurer la première machine directement
+depuis l'instantané gardé ; une empreinte différente, ou une restauration refusée, le fait
+refaire, comme avant. Les dossiers des machines d'un démarrage précédent sont retirés, pas
+l'instantané. Sans `PROPHET_MICROVM_RESERVE`, rien ne change : tout est temporaire et retiré à
+l'arrêt.
+
+Ce que cela ne change pas : l'invité en attente ne détient toujours ni tâche ni secret, et
+l'instantané n'est lisible et modifiable que par le service ; qui peut le réécrire peut déjà
+remplacer le moniteur du service. L'empreinte n'authentifie pas le contenu, elle évite de
+reprendre un instantané périmé. Le critère est l'essai
+`la_reserve_reprend_son_instantane_au_redemarrage` (`needs_kvm`) : après un premier
+démarrage, l'instantané et son empreinte restent, sans machine ; le second démarrage le reprend
+et remplit la réserve en moins d'une seconde, et la machine reprise exécute ; une empreinte
+altérée le fait refaire, et la machine refaite exécute aussi.

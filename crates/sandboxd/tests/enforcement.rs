@@ -694,6 +694,145 @@ fn la_reserve_rend_une_microvm_de_niveau_deux_en_moins_de_150_ms() {
     );
 }
 
+/// Une exécution de niveau 2 par la réserve : le programme dit `bonjour <mot>` et sort sur 3 ;
+/// rend la console, et si la machine venait de la réserve.
+fn executer_par_la_reserve(manager: &Manager, mot: &str) -> (String, bool) {
+    let travail = tempfile::tempdir().unwrap();
+    let spec = SandboxSpec::new(2, "/usr/bin/python3", travail.path().display().to_string())
+        .args([
+            "-c",
+            &format!("import sys\nprint('bonjour {mot}')\nsys.exit(3)"),
+        ])
+        .env("PATH", "/usr/bin:/bin");
+    let mut handle = manager.run("task:reprise", &spec).unwrap();
+    let vm = handle.microvm.clone().expect("un disque de travail");
+    let sortie = handle_child(&mut handle)
+        .and_then(|child| child.stdout.take())
+        .expect("console du moniteur");
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut sortie = sortie;
+        let mut console = String::new();
+        let _ = sortie.read_to_string(&mut console);
+        let _ = tx.send(console);
+    });
+    let Ok(console) = rx.recv_timeout(std::time::Duration::from_secs(60)) else {
+        let _ = manager.kill(&mut handle);
+        panic!("{mot} : l'invité n'a pas fini en 60 s");
+    };
+    let _ = handle.wait();
+    let _ = std::fs::remove_dir_all(&vm.base);
+    (console, vm.depuis_la_reserve)
+}
+
+/// ADR 0045 : une réserve persistante garde son instantané quand elle s'arrête, et le démarrage
+/// suivant le reprend — la réserve est pleine en moins d'une seconde, sans invité à démarrer ni
+/// mémoire à réécrire, et la machine reprise exécute comme les autres. Une empreinte qui ne
+/// correspond plus (autre moniteur, autre noyau, autre racine) fait refaire l'instantané.
+#[test]
+#[ignore = "needs_kvm"]
+fn la_reserve_reprend_son_instantane_au_redemarrage() {
+    let caps = Capabilities::probe();
+    assert!(
+        caps.supports(2),
+        "niveau 2 inatteignable : il manque {}",
+        caps.missing_for(2).join(", ")
+    );
+    let racine = tempfile::tempdir().unwrap();
+    let demarrer = || {
+        Manager::new(helper().display().to_string()).avec_reserve_dans(
+            1,
+            racine.path().join("reserve"),
+            true,
+        )
+    };
+    let instantane = racine.path().join("reserve").join("instantane");
+
+    // Premier démarrage : l'instantané est pris, et il reste quand la réserve s'arrête.
+    {
+        let manager = demarrer();
+        let reserve = manager.reserve().expect("une réserve au niveau 2");
+        assert!(
+            reserve.attendre_pleine(std::time::Duration::from_secs(60)),
+            "{:?}",
+            reserve.statut()
+        );
+        assert!(
+            !reserve.statut().instantane_repris,
+            "{:?}",
+            reserve.statut()
+        );
+    }
+    for fichier in ["etat.snap", "memoire.snap", "attente.img", "empreinte"] {
+        assert!(
+            instantane.join(fichier).is_file(),
+            "{fichier} n'a pas survécu à la réserve"
+        );
+    }
+    let machines: Vec<_> = std::fs::read_dir(racine.path().join("reserve"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|nom| nom != "instantane")
+        .collect();
+    assert!(machines.is_empty(), "machines laissées : {machines:?}");
+
+    // Second démarrage : l'instantané est repris, la réserve est pleine aussitôt.
+    {
+        let debut = std::time::Instant::now();
+        let manager = demarrer();
+        let reserve = manager.reserve().expect("une réserve au niveau 2");
+        assert!(
+            reserve.attendre_pleine(std::time::Duration::from_secs(60)),
+            "{:?}",
+            reserve.statut()
+        );
+        let pleine = debut.elapsed();
+        eprintln!(
+            "mesure : réserve reprise pleine en {pleine:?} ({:?})",
+            reserve.statut()
+        );
+        assert!(reserve.statut().instantane_repris, "{:?}", reserve.statut());
+        assert!(
+            pleine < std::time::Duration::from_secs(1),
+            "reprendre l'instantané a pris {pleine:?}"
+        );
+        let (console, depuis_la_reserve) = executer_par_la_reserve(&manager, "reprise");
+        assert!(depuis_la_reserve, "la réserve reprise n'a pas servi");
+        let lu = sandboxd::invite::lire_console(&console);
+        assert!(lu.fin_vue, "{console}");
+        assert_eq!(lu.code, Some(3), "{console}");
+        assert!(lu.sortie.contains("bonjour reprise"), "{:?}", lu.sortie);
+    }
+
+    // Une empreinte qui ne correspond plus : l'instantané est refait, et il sert.
+    std::fs::write(instantane.join("empreinte"), "un autre moniteur\n").unwrap();
+    let manager = demarrer();
+    let reserve = manager.reserve().expect("une réserve au niveau 2");
+    assert!(
+        reserve.attendre_pleine(std::time::Duration::from_secs(60)),
+        "{:?}",
+        reserve.statut()
+    );
+    assert!(
+        !reserve.statut().instantane_repris,
+        "{:?}",
+        reserve.statut()
+    );
+    assert_ne!(
+        std::fs::read_to_string(instantane.join("empreinte")).unwrap(),
+        "un autre moniteur\n"
+    );
+    let (console, depuis_la_reserve) = executer_par_la_reserve(&manager, "refaite");
+    assert!(depuis_la_reserve, "{console}");
+    assert!(
+        sandboxd::invite::lire_console(&console)
+            .sortie
+            .contains("bonjour refaite"),
+        "{console}"
+    );
+}
+
 /// FRONTIER, isolation : deux microVM de niveau 2 tournent en même temps, chacune sur son
 /// disque, et aucune n'a de réseau — pas d'interface hors de la boucle locale, et une connexion
 /// vers l'extérieur échoue.
