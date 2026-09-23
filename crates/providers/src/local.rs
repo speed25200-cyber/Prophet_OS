@@ -383,9 +383,13 @@ pub struct Condensation {
 }
 
 impl Default for Condensation {
+    /// Un seul résultat récent intact : le moteur ne garde en cache que le préfixe identique à
+    /// l'envoi précédent, et condenser un résultat déjà envoyé le fait réévaluer avec tout ce
+    /// qui le suit. En garder deux faisait réévaluer, à chaque tour, un résultat entier de plus
+    /// (ADR 0034, complément du 23 septembre).
     fn default() -> Self {
         Self {
-            keep_last: 2,
+            keep_last: 1,
             max_bytes: 1024,
         }
     }

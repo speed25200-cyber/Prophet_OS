@@ -531,3 +531,52 @@ fn une_longue_mission_garde_la_place_du_dernier_resultat() {
     assert!(fit(&mut deja, 4096));
     assert_eq!(deja, resserre);
 }
+
+/// Octets de ce qui part au moteur au-delà du plus long préfixe commun avec l'envoi précédent :
+/// ce que llama-server doit réévaluer, son cache ne gardant que le préfixe identique.
+fn a_reevaluer(avant: &[Value], apres: &[Value]) -> usize {
+    let commun = avant.iter().zip(apres).take_while(|(a, b)| a == b).count();
+    apres[commun..].iter().map(|m| m.to_string().len()).sum()
+}
+
+#[test]
+fn garder_un_seul_resultat_intact_menage_le_cache_du_moteur() {
+    use providers::local::{AsyncLocalModel, Condensation};
+    // Une mission de huit tours qui lit à chaque tour un fichier de 3 ko : ce que le moteur
+    // réévalue d'un tour au suivant, selon le nombre de résultats récents gardés intacts.
+    let mesurer = |keep_last: usize| {
+        let model = AsyncLocalModel::new(
+            "http://127.0.0.1:9/v1",
+            "m",
+            Vec::new(),
+            Duration::from_secs(1),
+            16,
+        )
+        .unwrap()
+        .with_condensation(Condensation {
+            keep_last,
+            max_bytes: 1024,
+        });
+        let mut history = vec![json!({"role":"user","content":"Objectif"})];
+        let mut precedent: Vec<Value> = Vec::new();
+        let mut total = 0;
+        for tour in 0..8 {
+            history.push(json!({"role":"assistant","tool_call":{"tool":"fs.read","arguments":{"path":format!("f{tour}")}}}));
+            history.push(json!({"role":"tool","ok":true,"result":{"content":format!("{tour}").repeat(3000)}}));
+            let envoye = model.outgoing(&history).unwrap();
+            if !precedent.is_empty() {
+                total += a_reevaluer(&precedent, &envoye);
+            }
+            precedent = envoye;
+        }
+        total
+    };
+    let un = mesurer(1);
+    let deux = mesurer(2);
+    eprintln!(
+        "à réévaluer sur sept tours : {un} octets en gardant un résultat, {deux} en gardant deux"
+    );
+    assert!(un * 10 < deux * 6, "un : {un}, deux : {deux}");
+    // Et le réglage par défaut est celui qui ménage le cache.
+    assert_eq!(Condensation::default().keep_last, 1);
+}

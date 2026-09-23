@@ -92,6 +92,17 @@ qui ne dit la fenêtre d'un modèle qu'une fois chargé) ; compter les tokens no
 le tokeniseur de chaque modèle) ; retirer des messages entiers (le modèle perdrait la trace de
 ses propres appels, et le rejeu sa correspondance avec l'historique).
 
+## Complément du 23 septembre 2026 : le cache du moteur
+
+llama-server garde en cache le plus long préfixe commun avec la requête précédente et
+réévalue le reste — environ 24 ms par token sur le processeur de la CI. Condenser un résultat
+déjà envoyé change un message du milieu : tout ce qui le suit est réévalué. En gardant intacts
+les deux derniers résultats, chaque tour réévaluait donc, en plus du nouveau, un résultat
+entier. La condensation par défaut n'en garde plus qu'un : sur une mission simulée de huit
+tours lisant chacun 3 ko, 26 ko sont à réévaluer au lieu de 45 ko (sans aucune condensation,
+22 ko, au prix d'un historique qui grossit sans fin). Le modèle lit le résultat de son dernier
+appel en entier et les précédents en résumé ; il peut relancer l'outil.
+
 ## Conséquences
 
 - Un profil peut dire « qwen3-1.7b réfléchit, qwen3-0.6b exécute » ; le catalogue d'exemple le

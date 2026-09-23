@@ -104,7 +104,8 @@ terminée impute son compte à son parent, modèle par modèle. C'est la mesure 
 `prophet task show` dit la part des tokens prise en charge hors du modèle de la mission. Les
 tours d'un client MCP sont comptés sous `client:<nom>`, sans tokens, le client ne rendant pas
 ses compteurs au service. Avant chaque envoi au moteur, les résultats d'outils plus anciens que
-les deux derniers et plus longs que 1 024 octets sont condensés (taille, empreinte, début) ;
+le dernier et plus longs que 1 024 octets sont condensés (taille, empreinte, début), ce qui
+ménage le cache de préfixe du moteur (ADR 0034, complément du 23 septembre) ;
 l'historique conservé par la boucle ne change pas. Si le moteur refuse l'historique parce qu'il
 dépasse sa fenêtre de contexte, le pilote resserre les résultats d'outils à la mesure du refus
 (le dernier garde son début et un avis) et renvoie le tour, trois envois au plus ; la fenêtre
