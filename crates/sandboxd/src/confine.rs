@@ -96,6 +96,37 @@ pub fn enter_namespaces(handshake: Option<&Handshake>) -> Result<Vec<&'static st
     Ok(vec!["user", "mount", "net", "ipc", "uts"])
 }
 
+/// Entre dans les espaces de noms d'un client officiel lancé en mission (ADR 0056) : utilisateur,
+/// montage, processus, IPC et nom d'hôte — **sans espace réseau** : le client joint son éditeur
+/// par le réseau de l'hôte, tant qu'aucun relais ne le fait passer par egress. L'identité reste
+/// celle de l'humain (même uid, même gid, sans groupe supplémentaire) : ce que le client écrit
+/// dans son profil privé lui appartient dehors comme dedans, et aucun droit de plus ne s'y ajoute.
+///
+/// L'appelant doit être seul (aucun autre fil). L'espace de processus ne vaut que pour ses
+/// enfants : le premier `fork` qui suit y devient le processus 1, et c'est lui qui doit monter
+/// la racine minimale, pour que son `/proc` ne montre que la cage.
+///
+/// # Erreurs
+/// Si le noyau refuse un espace de noms ou l'écriture des cartes d'identité.
+pub fn entrer_pour_un_client() -> Result<Vec<&'static str>, ConfineError> {
+    let uid = nix::unistd::getuid();
+    let gid = nix::unistd::getgid();
+    let flags = CloneFlags::CLONE_NEWUSER
+        | CloneFlags::CLONE_NEWNS
+        | CloneFlags::CLONE_NEWPID
+        | CloneFlags::CLONE_NEWIPC
+        | CloneFlags::CLONE_NEWUTS;
+    unshare(flags).map_err(nomme("unshare(CLONE_NEWUSER|NEWNS|NEWPID|NEWIPC|NEWUTS)"))?;
+    // Sans « deny », un processus non privilégié ne peut pas écrire sa carte de groupes.
+    std::fs::write("/proc/self/setgroups", "deny")
+        .map_err(|e| ConfineError::Step("écriture de /proc/self/setgroups", e))?;
+    std::fs::write("/proc/self/uid_map", format!("{uid} {uid} 1\n"))
+        .map_err(|e| ConfineError::Step("écriture de /proc/self/uid_map", e))?;
+    std::fs::write("/proc/self/gid_map", format!("{gid} {gid} 1\n"))
+        .map_err(|e| ConfineError::Step("écriture de /proc/self/gid_map", e))?;
+    Ok(vec!["user", "mount", "pid", "ipc", "uts"])
+}
+
 /// Poignée de main entre le gestionnaire et l'amorçage, par deux tubes nommés.
 ///
 /// Deux tubes plutôt qu'un seul : chacun porte un sens, ce qui rend l'ordre des étapes explicite
