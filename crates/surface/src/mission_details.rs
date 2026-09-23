@@ -755,63 +755,285 @@ fn open_in_browser(url: &str) {
         .spawn();
 }
 
+/// Largeur de la gouttière d'une frise : le numéro d'étape, puis le rail et son nœud.
+const GOUTTIERE: f32 = 58.0;
+/// Abscisse du rail dans la gouttière.
+const RAIL: f32 = 44.0;
+
+/// Ce qu'une ligne de la frise est : un appel de l'agent, ou un geste du service autour de lui.
+enum Nature {
+    Appel,
+    Refus,
+    Rappel,
+    Publication,
+}
+
+fn nature(entry: &crate::missions::TrailEntry) -> Nature {
+    match entry.tool.as_str() {
+        "refus" => Nature::Refus,
+        "rappel" => Nature::Rappel,
+        "publication" | "annulation" => Nature::Publication,
+        _ => Nature::Appel,
+    }
+}
+
+/// Le parcours d'une mission, en deux frises : les états que le service a tenus, puis ce que
+/// l'agent a touché — chaque appel avec sa cible contrôlée et son issue, les refus de capd et
+/// les rappels du service à leur place. Rien de ce que l'agent a lu ou écrit n'y figure.
 fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::TrailEntry]) {
     let accent = Accent::de(ui.ctx());
-    heading(ui, "Parcours observé", 23.0);
+    ui.horizontal_wrapped(|ui| {
+        heading(ui, "Parcours observé", 23.0);
+        ui.add_space(12.0);
+        let appels = trail
+            .iter()
+            .filter(|e| matches!(nature(e), Nature::Appel))
+            .count();
+        let refus = trail
+            .iter()
+            .filter(|e| {
+                matches!(nature(e), Nature::Refus)
+                    || matches!(&e.outcome, Outcome::Denied(_))
+                    || matches!(&e.outcome, Outcome::Error(code) if code == "PolicyDenied")
+            })
+            .count();
+        let rappels = trail
+            .iter()
+            .filter(|e| matches!(nature(e), Nature::Rappel))
+            .count();
+        pastille(
+            ui,
+            &format!("{appels} appel{}", pluriel(appels)),
+            accent.sourd,
+        );
+        if refus > 0 {
+            pastille(ui, &format!("{refus} refus"), RED);
+        }
+        if rappels > 0 {
+            pastille(
+                ui,
+                &format!("{rappels} rappel{}", pluriel(rappels)),
+                ATTENTE_DOUCE,
+            );
+        }
+    });
     ui.add_space(14.0);
-    for (n, state) in info.task.history.iter().enumerate() {
-        let (label, color) = status(*state, &accent);
-        ui.horizontal(|ui| {
-            small(ui, format!("{:02}", n + 1));
-            ui.label(RichText::new(label).color(color));
+    let large = ui.available_width() >= 880.0;
+    if large {
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(250.0);
+                etats(ui, info, &accent);
+            });
+            ui.add_space(28.0);
+            ui.vertical(|ui| touches(ui, trail, &accent));
         });
-        ui.add_space(6.0);
+    } else {
+        etats(ui, info, &accent);
+        ui.add_space(16.0);
+        touches(ui, trail, &accent);
     }
-    ui.add_space(16.0);
-    heading(ui, "Ce que l'agent a touché", 16.0);
+    ui.add_space(12.0);
+    small(
+        ui,
+        "États conservés par le service ; appels relus dans le journal, avec leur cible contrôlée et leur issue.",
+    );
+}
+
+fn pluriel(n: usize) -> &'static str {
+    if n > 1 { "s" } else { "" }
+}
+
+/// L'orange adouci d'un rappel : le service intervient, rien n'est en faute.
+const ATTENTE_DOUCE: Color32 = Color32::from_rgb(242, 176, 92);
+
+/// Une pastille de compte, sobre : un fil et un voile de la couleur.
+fn pastille(ui: &mut egui::Ui, text: &str, color: Color32) {
+    Frame::new()
+        .fill(hud::voile(color, 22))
+        .stroke(Stroke::new(1.0, hud::voile(color, 110)))
+        .corner_radius(10)
+        .inner_margin(egui::Margin::symmetric(9, 3))
+        .show(ui, |ui| {
+            ui.label(RichText::new(text).size(11.5).color(color));
+        });
+}
+
+/// Le rail et le nœud d'une ligne de frise, peints dans la gouttière réservée à sa gauche.
+fn noeud(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    first: bool,
+    last: bool,
+    fill: Option<Color32>,
+    stroke: Color32,
+    losange: bool,
+) {
+    let painter = ui.painter();
+    let x = rect.left() + RAIL;
+    let y = rect.center().y;
+    let rail = Stroke::new(1.0, LINE);
+    if !first {
+        painter.line_segment(
+            [egui::pos2(x, rect.top() - 4.0), egui::pos2(x, y - 7.0)],
+            rail,
+        );
+    }
+    if !last {
+        painter.line_segment(
+            [egui::pos2(x, y + 7.0), egui::pos2(x, rect.bottom() + 4.0)],
+            rail,
+        );
+    }
+    if losange {
+        let r = 5.5;
+        let points = vec![
+            egui::pos2(x, y - r),
+            egui::pos2(x + r, y),
+            egui::pos2(x, y + r),
+            egui::pos2(x - r, y),
+        ];
+        painter.add(egui::Shape::convex_polygon(
+            points,
+            fill.unwrap_or(Color32::TRANSPARENT),
+            Stroke::new(1.2, stroke),
+        ));
+    } else {
+        if let Some(fill) = fill {
+            painter.circle_filled(egui::pos2(x, y), 9.0, hud::voile(fill, 28));
+            painter.circle_filled(egui::pos2(x, y), 4.5, fill);
+        }
+        painter.circle_stroke(egui::pos2(x, y), 4.5, Stroke::new(1.2, stroke));
+    }
+}
+
+/// Les états que le service a tenus, du premier au dernier ; le dernier luit.
+fn etats(ui: &mut egui::Ui, info: &Inspection, accent: &Accent) {
+    label(ui, "États de la mission");
+    ui.add_space(8.0);
+    let count = info.task.history.len();
+    for (n, state) in info.task.history.iter().enumerate() {
+        let (text, color) = status(*state, accent);
+        let last = n + 1 == count;
+        let row = ui
+            .horizontal(|ui| {
+                ui.set_min_height(30.0);
+                ui.add_space(GOUTTIERE);
+                ui.label(
+                    RichText::new(text)
+                        .size(if last { 15.0 } else { 13.5 })
+                        .color(if last { color } else { hud::voile(color, 200) }),
+                );
+            })
+            .response;
+        ui.painter().text(
+            egui::pos2(row.rect.left(), row.rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            format!("{:02}", n + 1),
+            egui::FontId::monospace(11.0),
+            MUTED,
+        );
+        noeud(
+            ui,
+            row.rect,
+            n == 0,
+            last,
+            last.then_some(color),
+            color,
+            false,
+        );
+    }
+}
+
+/// Ce que l'agent a touché : chaque appel, chaque refus, chaque rappel, dans l'ordre du journal.
+fn touches(ui: &mut egui::Ui, trail: &[crate::missions::TrailEntry], accent: &Accent) {
+    label(ui, "Ce que l'agent a touché");
     ui.add_space(8.0);
     if trail.is_empty() {
         small(
             ui,
             "Aucun appel d'outil journalisé pour cette mission. Le journal ne contient jamais le contenu lu ou écrit.",
         );
+        return;
     }
-    for entry in trail.iter().take(200) {
+    let shown = trail.len().min(200);
+    for (index, entry) in trail.iter().take(200).enumerate() {
         let (mark, color, note) = issue(&entry.outcome);
-        ui.horizontal_wrapped(|ui| {
-            small(
-                ui,
-                entry
-                    .step
-                    .map_or_else(|| "  ".to_owned(), |s| format!("{s:02}")),
-            );
-            ui.label(RichText::new(mark).color(color).size(13.0));
-            ui.label(
-                RichText::new(&entry.tool)
-                    .size(13.0)
-                    .monospace()
-                    .color(accent.sourd),
-            );
-            if let Some(target) = &entry.target {
+        let kind = nature(entry);
+        let (outil, couleur_outil) = match kind {
+            Nature::Refus => ("refusé par capd".to_owned(), RED),
+            Nature::Rappel => ("livrable rappelé".to_owned(), ATTENTE_DOUCE),
+            Nature::Publication => (entry.tool.clone(), GREEN),
+            Nature::Appel => (entry.tool.clone(), accent.sourd),
+        };
+        let row = ui
+            .horizontal_wrapped(|ui| {
+                ui.set_min_height(30.0);
+                ui.add_space(GOUTTIERE);
                 ui.label(
-                    RichText::new(limited(&cible_lisible(target), 120))
+                    RichText::new(&outil)
                         .size(13.0)
-                        .color(MUTED),
+                        .monospace()
+                        .color(couleur_outil),
                 );
-                // Un hôte visité par l'agent s'ouvre dans le navigateur de l'humain, par la
-                // commande que la session lui a donnée ; jamais par une adresse venue du modèle
-                // au-delà de l'hôte contrôlé par capd.
-                if matches!(entry.tool.as_str(), "web.open" | "http.fetch")
-                    && std::env::var_os("BROWSER").is_some()
-                    && bouton(ui, &format!("trail-open-{}", entry.seq), "Ouvrir", false).clicked()
-                {
-                    open_in_browser(&format!("https://{target}/"));
+                if let Some(target) = &entry.target {
+                    ui.label(
+                        RichText::new(limited(&cible_lisible(target), 120))
+                            .size(13.0)
+                            .color(INK),
+                    );
+                    // Un hôte visité par l'agent s'ouvre dans le navigateur de l'humain, par la
+                    // commande que la session lui a donnée ; jamais par une adresse venue du
+                    // modèle au-delà de l'hôte contrôlé par capd.
+                    if matches!(entry.tool.as_str(), "web.open" | "http.fetch")
+                        && std::env::var_os("BROWSER").is_some()
+                        && bouton(ui, &format!("trail-open-{}", entry.seq), "Ouvrir", false)
+                            .clicked()
+                    {
+                        open_in_browser(&format!("https://{target}/"));
+                    }
                 }
-            }
-            if !note.is_empty() {
-                ui.label(RichText::new(note).size(12.0).color(RED));
-            }
-        });
+                if matches!(kind, Nature::Appel) {
+                    ui.label(RichText::new(mark).color(color).size(13.0));
+                }
+                if !note.is_empty() {
+                    ui.label(RichText::new(limited(&note, 80)).size(12.0).color(RED));
+                }
+            })
+            .response;
+        if let Some(step) = entry.step {
+            ui.painter().text(
+                egui::pos2(row.rect.left(), row.rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                format!("{step:02}"),
+                egui::FontId::monospace(11.0),
+                MUTED,
+            );
+        }
+        let (fill, stroke, losange) = match (&kind, &entry.outcome) {
+            (Nature::Rappel, _) => (Some(ATTENTE_DOUCE), ATTENTE_DOUCE, true),
+            (Nature::Refus, _) | (_, Outcome::Denied(_)) => (Some(RED), RED, true),
+            (_, Outcome::Error(_)) => (None, RED, false),
+            (_, Outcome::Pending) => (None, MUTED, false),
+            (Nature::Publication, _) => (Some(GREEN), GREEN, false),
+            (Nature::Appel, Outcome::Ok) => (Some(accent.vif), accent.vif, false),
+        };
+        noeud(
+            ui,
+            row.rect,
+            index == 0,
+            index + 1 == shown,
+            fill,
+            stroke,
+            losange,
+        );
+        let decrit = format!(
+            "{} {} — {}",
+            outil,
+            entry.target.as_deref().unwrap_or(""),
+            issue_en_mots(&entry.outcome)
+        );
+        row.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &decrit));
     }
     if trail.len() > 200 {
         small(
@@ -822,11 +1044,6 @@ fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::Trail
             ),
         );
     }
-    ui.add_space(12.0);
-    small(
-        ui,
-        "États conservés par le service ; appels relus dans le journal, avec leur cible contrôlée et leur issue.",
-    );
 }
 
 /// La marque, la couleur et la note d'une issue d'appel, pour le parcours et le dernier geste.
@@ -834,8 +1051,9 @@ fn issue(outcome: &Outcome) -> (&'static str, Color32, String) {
     match outcome {
         Outcome::Pending => ("·", MUTED, String::new()),
         Outcome::Ok => ("✓", GREEN, String::new()),
-        Outcome::Error(code) => ("✕", RED, code.clone()),
-        Outcome::Denied(reason) => ("⊘", RED, reason.clone()),
+        // « × » est dans toutes les polices embarquées ; « ✕ » et « ⊘ » n'y sont pas.
+        Outcome::Error(code) => ("×", RED, code.clone()),
+        Outcome::Denied(reason) => ("×", RED, format!("refusé : {}", motif_lisible(reason))),
     }
 }
 
@@ -864,13 +1082,29 @@ fn cible_depuis(cible: &str, home: &str) -> String {
     }
 }
 
+/// Le motif d'un refus de capd, en mots : l'humain lit « hors de la portée », pas un nom de
+/// variante. Un motif inconnu reste tel quel.
+fn motif_lisible(reason: &str) -> String {
+    match reason {
+        "PolicyDenied" => "hors de la portée de la mission".into(),
+        "NoGrant" => "aucun droit ne le permet".into(),
+        "Expired" => "jeton expiré".into(),
+        "RevokedParent" => "droits retirés".into(),
+        "BadSignature" => "jeton invalide".into(),
+        "ConstraintViolated" => "contrainte du droit non respectée".into(),
+        "ApprovalRequired" => "décision humaine attendue".into(),
+        "UnknownVersion" => "jeton d'une version inconnue".into(),
+        autre => autre.into(),
+    }
+}
+
 /// Une issue d'appel en mots, pour l'accessibilité.
 fn issue_en_mots(outcome: &Outcome) -> String {
     match outcome {
         Outcome::Pending => "en cours".to_owned(),
         Outcome::Ok => "réussi".to_owned(),
         Outcome::Error(code) => format!("en erreur ({code})"),
-        Outcome::Denied(reason) => format!("refusé ({reason})"),
+        Outcome::Denied(reason) => format!("refusé ({})", motif_lisible(reason)),
     }
 }
 

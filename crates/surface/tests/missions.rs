@@ -964,3 +964,162 @@ fn les_widgets_comparent_les_versions_et_refusent_un_travail_altere() {
         before
     );
 }
+
+/// Un moteur scripté sans porte : il rend ses réponses dans l'ordre, une par requête de
+/// complétion, et le catalogue de modèles à qui le demande.
+fn moteur_scripte(reponses: Vec<Value>) -> (String, std::thread::JoinHandle<()>) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
+    let worker = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut reponses = reponses.into_iter();
+        loop {
+            let stream = loop {
+                if let Ok((stream, _)) = listener.accept() {
+                    break stream;
+                }
+                if Instant::now() > deadline {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut stream = std::io::BufReader::new(stream);
+            let mut first = String::new();
+            if stream.read_line(&mut first).unwrap_or(0) == 0 {
+                continue;
+            }
+            let mut size = 0;
+            loop {
+                let mut line = String::new();
+                if stream.read_line(&mut line).unwrap_or(0) == 0 {
+                    break;
+                }
+                if line == "\r\n" {
+                    break;
+                }
+                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    size = value.trim().parse::<usize>().unwrap();
+                }
+            }
+            let completion = !first.starts_with("GET /v1/models ");
+            let body = if completion {
+                let mut request = vec![0; size];
+                let _ = stream.read_exact(&mut request);
+                let Some(reponse) = reponses.next() else {
+                    return;
+                };
+                reponse.to_string()
+            } else {
+                json!({"data":[{"id":"modele-controle"}]}).to_string()
+            };
+            let _ = write!(
+                stream.get_mut(),
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            if completion && reponses.len() == 0 {
+                return;
+            }
+        }
+    });
+    (endpoint, worker)
+}
+
+fn appel(n: u32, outil: &str, arguments: Value) -> Value {
+    json!({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"type":"function","id":format!("appel-{n}"),"function":{"name":outil,"arguments":arguments.to_string()}}]}}],"usage":{"prompt_tokens":40,"completion_tokens":12}})
+}
+
+fn conclusion(texte: &str) -> Value {
+    json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":texte}}],"usage":{"prompt_tokens":60,"completion_tokens":8}})
+}
+
+/// Le parcours d'une mission qui se trompe puis se corrige : une recherche, une écriture hors
+/// de la portée que capd refuse et que le modèle reçoit (ADR 0050), une conclusion sans le
+/// fichier demandé que le service rappelle (ADR 0049), puis l'écriture juste. La frise dit
+/// chacun de ces gestes à sa place.
+#[test]
+#[ignore = "needs_gpu: services réels et modèle HTTP scripté"]
+fn le_parcours_montre_le_refus_rendu_au_modele_et_le_rappel_du_livrable() {
+    let (endpoint, worker) = moteur_scripte(vec![
+        appel(1, "fs.search", json!({"root":"~/docs"})),
+        appel(
+            2,
+            "fs.write",
+            json!({"path":"~/ailleurs/note.txt","content":"hors de la portée"}),
+        ),
+        conclusion("C'est fait."),
+        appel(
+            3,
+            "fs.write",
+            json!({"path":"~/docs/note.txt","content":"L'humain définit, supervise et examine."}),
+        ),
+        conclusion(TEXT),
+    ]);
+    let chain = Chain::with_model(&endpoint, "modele-controle");
+    chain.call("task.spawn", json!({"id":ID,"intent":"Écris une note sur la supervision humaine dans ~/docs/note.txt","user":"prophet",
+        "manifest":{"agent":{"id":"org.prophet.surface-test","version":"1.0.0","name":"Essai de supervision","publisher_key":"ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},"model":{"preferred":["local:modele-controle"]},"sandbox":{"min_level":0},"capabilities":{"max":{"fs.read":["~/docs/**"],"fs.write":["~/docs/**"],"tool.call":["fs.write","fs.search"]}},"budget":{"default":{"tokens":4000,"wall_time":"60s","approvals":3}}},
+        "requested":[{"res":"fs","act":"read","match":"~/docs/**"},{"res":"fs","act":"write","match":"~/docs/**"},{"res":"tool","act":"call","match":"fs.write"},{"res":"tool","act":"call","match":"fs.search"}],"scopes":["~/docs"],"availability":{"local_models":["modele-controle"]}}));
+    let context = Contexte::hors_ecran().unwrap();
+    let mut source = Reel::demarrer(chain.sockets.clone());
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.brancher_missions(chain.sockets.agentd.clone());
+    bureau.brancher_journal(chain.dir.path().join("ledger.sock"));
+    bureau.figer_transitions();
+    let target = Cible::nouvelle(&context, 1440, 1000);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        if bureau.missions().snapshot().is_some() {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    chain.call("task.start", json!({"id":ID}));
+    chain.wait(bureau.missions(), State::Done);
+    worker.join().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        let trail = bureau.missions().trail();
+        let refuse = trail.iter().any(|e| {
+            e.tool == "fs.write" && matches!(e.outcome, surface::missions::Outcome::Denied(_))
+        });
+        let rappele = trail
+            .iter()
+            .any(|e| e.tool == "rappel" && e.target.as_deref() == Some("~/docs/note.txt"));
+        let ecrit = trail
+            .iter()
+            .any(|e| e.tool == "fs.write" && e.outcome == surface::missions::Outcome::Ok);
+        if refuse && rappele && ecrit {
+            break;
+        }
+        assert!(Instant::now() < deadline, "parcours incomplet : {trail:?}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    for (width, height) in [(1440, 1000), (1920, 1080), (640, 900)] {
+        let target = Cible::nouvelle(&context, width, height);
+        for _ in 0..3 {
+            frame(&mut bureau, &mut source, &context, &target, vec![]);
+        }
+        if width == 640 {
+            let events = click(&bureau, &target, &format!("mission-{ID}"));
+            frame(&mut bureau, &mut source, &context, &target, events);
+            for _ in 0..3 {
+                frame(&mut bureau, &mut source, &context, &target, vec![]);
+            }
+        }
+        let events = click(&bureau, &target, "mission-history-tab");
+        frame(&mut bureau, &mut source, &context, &target, events);
+        for _ in 0..3 {
+            frame(&mut bureau, &mut source, &context, &target, vec![]);
+        }
+        capture(&context, &target, "parcours-corrige");
+        let events = click(&bureau, &target, "mission-result-tab");
+        frame(&mut bureau, &mut source, &context, &target, events);
+    }
+}

@@ -92,18 +92,31 @@ pub fn trail_from(events: &[Value]) -> Vec<TrailEntry> {
                     };
                 }
             }
-            Some("policy.deny") => trail.push(TrailEntry {
-                seq,
-                step,
-                tool: "refus".into(),
-                target: payload["path"]
-                    .as_str()
-                    .or_else(|| payload["target"].as_str())
-                    .map(str::to_owned),
-                outcome: Outcome::Denied(
-                    payload["reason"].as_str().unwrap_or("politique").to_owned(),
-                ),
-            }),
+            Some("policy.deny") => {
+                let reason = payload["reason"].as_str().unwrap_or("politique").to_owned();
+                // Le refus d'un appel à la même étape est l'issue de cet appel, pas un geste de
+                // plus : il s'y attache, avec le motif de capd, qu'il arrive avant ou après le
+                // résultat d'outil.
+                if let Some(entry) = trail.last_mut().filter(|e| {
+                    step.is_some()
+                        && e.step == step
+                        && !matches!(e.tool.as_str(), "refus" | "rappel")
+                        && matches!(&e.outcome, Outcome::Pending | Outcome::Error(_))
+                }) {
+                    entry.outcome = Outcome::Denied(reason);
+                } else {
+                    trail.push(TrailEntry {
+                        seq,
+                        step,
+                        tool: "refus".into(),
+                        target: payload["path"]
+                            .as_str()
+                            .or_else(|| payload["target"].as_str())
+                            .map(str::to_owned),
+                        outcome: Outcome::Denied(reason),
+                    });
+                }
+            }
             Some("fs.commit") => trail.push(TrailEntry {
                 seq,
                 step,
@@ -847,9 +860,20 @@ mod tests {
             json!({"seq":5,"kind":"policy.deny","payload":{"stage":"publish","path":"docs/note.txt","reason":"RevokedParent"}}),
             json!({"seq":6,"kind":"fs.commit","payload":{"added":1}}),
             json!({"seq":7,"step":3,"kind":"task.reminded","payload":{"missing":["~/docs/out/total.txt"],"nth":1}}),
+            // Un refus de capd à l'étape d'un appel devient l'issue de cet appel, qu'il arrive
+            // avant ou après le résultat d'outil.
+            json!({"seq":8,"step":4,"kind":"tool.call","payload":{"tool":"fs.write","target":"ailleurs/x.txt"}}),
+            json!({"seq":9,"step":4,"kind":"policy.deny","payload":{"reason":"NoGrant"}}),
+            json!({"seq":10,"step":4,"kind":"tool.result","payload":{"tool":"fs.write","ok":false,"error_code":"PolicyDenied"}}),
+            json!({"seq":11,"step":5,"kind":"tool.call","payload":{"tool":"fs.write","target":"ailleurs/y.txt"}}),
+            json!({"seq":12,"step":5,"kind":"tool.result","payload":{"tool":"fs.write","ok":false,"error_code":"PolicyDenied"}}),
+            json!({"seq":13,"step":5,"kind":"policy.deny","payload":{"reason":"NoGrant"}}),
         ];
         let trail = trail_from(&events);
-        assert_eq!(trail.len(), 5);
+        assert_eq!(trail.len(), 7);
+        assert_eq!(trail[5].tool, "fs.write");
+        assert_eq!(trail[5].outcome, Outcome::Denied("NoGrant".into()));
+        assert_eq!(trail[6].outcome, Outcome::Denied("NoGrant".into()));
         assert_eq!(trail[4].tool, "rappel");
         assert_eq!(trail[4].target.as_deref(), Some("~/docs/out/total.txt"));
         assert_eq!(trail[0].tool, "web.open");
