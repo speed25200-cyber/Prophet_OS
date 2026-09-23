@@ -7,6 +7,17 @@ const CLI: &str = env!("CARGO_BIN_EXE_prophet");
 
 /// Un en-tête GGUF v3 minimal : architecture, taille, quantification, contexte.
 fn gguf(architecture: &str, taille: &str, file_type: u32, contexte: u32) -> Vec<u8> {
+    gguf_avec(architecture, taille, file_type, contexte, &[])
+}
+
+/// Le même, avec des nombres de plus sous l'architecture (`block_count`, têtes…).
+fn gguf_avec(
+    architecture: &str,
+    taille: &str,
+    file_type: u32,
+    contexte: u32,
+    en_plus: &[(&str, u32)],
+) -> Vec<u8> {
     let mut kv = Vec::new();
     let mut n = 0u64;
     let mut texte = |kv: &mut Vec<u8>, k: &str, v: &str| {
@@ -19,10 +30,16 @@ fn gguf(architecture: &str, taille: &str, file_type: u32, contexte: u32) -> Vec<
     };
     texte(&mut kv, "general.architecture", architecture);
     texte(&mut kv, "general.size_label", taille);
-    for (k, v) in [
+    let mut nombres = vec![
         ("general.file_type".to_owned(), file_type),
         (format!("{architecture}.context_length"), contexte),
-    ] {
+    ];
+    nombres.extend(
+        en_plus
+            .iter()
+            .map(|(k, v)| (format!("{architecture}.{k}"), *v)),
+    );
+    for (k, v) in nombres {
         kv.extend((k.len() as u64).to_le_bytes());
         kv.extend(k.as_bytes());
         kv.extend(4u32.to_le_bytes());
@@ -284,4 +301,131 @@ fn servir_un_poids_telecharge_le_fait_charger_par_le_routeur() {
     assert!(!sortie.status.success());
     let erreur = String::from_utf8_lossy(&sortie.stderr);
     assert!(erreur.contains("prophet model pull absent"), "{erreur}");
+}
+
+/// Des têtes qui demandent des téraoctets de cache KV : aucune machine ne les tient.
+const DEMESURE: &[(&str, u32)] = &[
+    ("block_count", 100_000),
+    ("attention.head_count", 64),
+    ("attention.key_length", 128),
+    ("attention.value_length", 128),
+];
+
+#[test]
+fn le_catalogue_dit_la_memoire_que_chaque_poids_demande() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("petit.gguf"),
+        gguf_avec(
+            "qwen3",
+            "0.6B",
+            7,
+            40_960,
+            &[
+                ("block_count", 28),
+                ("attention.head_count", 16),
+                ("attention.head_count_kv", 8),
+                ("attention.key_length", 128),
+                ("attention.value_length", 128),
+            ],
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("demesure.gguf"),
+        gguf_avec("llama", "1T", 15, 4096, DEMESURE),
+    )
+    .unwrap();
+    let chemin = dir.path().to_str().unwrap();
+    let sortie = std::process::Command::new(CLI)
+        .args(["--json", "model", "ls", "--dir", chemin])
+        .env("PROPHET_LOCAL_CONTEXT", "2048")
+        .output()
+        .unwrap();
+    assert!(sortie.status.success(), "{sortie:?}");
+    let json: Value = serde_json::from_slice(&sortie.stdout).unwrap();
+    assert_eq!(json["context"], 2048);
+    let poids = json["weights"].as_array().unwrap();
+    let memoire = &poids
+        .iter()
+        .find(|p| p["path"].as_str().unwrap().ends_with("petit.gguf"))
+        .unwrap()["memory"];
+    // 28 couches × 8 têtes KV × (128 + 128) × 2 octets, pour 2 048 tokens.
+    assert_eq!(memoire["kv_cache"], 28 * 8 * 256 * 2 * 2048, "{json}");
+    assert_eq!(memoire["context"], 2048);
+    assert!(memoire["total"].as_u64().unwrap() > memoire["kv_cache"].as_u64().unwrap());
+    if json["system_memory"].is_object() {
+        let demesure = poids
+            .iter()
+            .find(|p| p["path"].as_str().unwrap().ends_with("demesure.gguf"))
+            .unwrap();
+        assert_eq!(demesure["memory"]["fit"], "too_large", "{json}");
+    }
+
+    let clair = std::process::Command::new(CLI)
+        .args(["model", "ls", "--dir", chemin])
+        .output()
+        .unwrap();
+    let clair = String::from_utf8(clair.stdout).unwrap();
+    assert!(clair.contains("mémoire"), "{clair}");
+    assert!(clair.contains("fenêtre de 4096 tokens"), "{clair}");
+    assert!(
+        clair.contains("✗ ne tient pas en mémoire ici : demesure.gguf"),
+        "{clair}"
+    );
+}
+
+#[test]
+fn un_poids_qui_ne_tient_pas_en_memoire_n_est_pas_charge_sans_force() {
+    let poids = tempfile::tempdir().unwrap();
+    let chemin = poids.path().join("Qwen3-4B-Q4_K_M.gguf");
+    std::fs::write(&chemin, gguf_avec("qwen3", "4B", 15, 40_960, DEMESURE)).unwrap();
+    let (_agentd, socket) = agentd_au_catalogue(serde_json::json!({"entries": [
+        {"id": "qwen3-4b-q4", "name": "Qwen3 4B", "installed": true, "path": chemin}
+    ]}));
+    let (moteur, recues) = routeur(chemin.clone());
+    let sortie = std::process::Command::new(CLI)
+        .args(["model", "serve", "qwen3-4b-q4", "--endpoint", &moteur])
+        .env("PROPHET_AGENTD_SOCKET", &socket)
+        .output()
+        .unwrap();
+    assert!(!sortie.status.success(), "{sortie:?}");
+    let erreur = String::from_utf8_lossy(&sortie.stderr);
+    assert!(
+        erreur.contains("ne tiendrait pas") && erreur.contains("--force"),
+        "{erreur}"
+    );
+    assert!(
+        !recues
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.starts_with("POST /models/load ")),
+        "rien n'est demandé au moteur"
+    );
+    // En connaissance de cause, on charge quand même.
+    let sortie = std::process::Command::new(CLI)
+        .args([
+            "--json",
+            "model",
+            "serve",
+            "qwen3-4b-q4",
+            "--endpoint",
+            &moteur,
+            "--force",
+        ])
+        .env("PROPHET_AGENTD_SOCKET", &socket)
+        .output()
+        .unwrap();
+    assert!(sortie.status.success(), "{sortie:?}");
+    let servi: Value = serde_json::from_slice(&sortie.stdout).unwrap();
+    assert_eq!(servi["memory"]["fit"], "too_large", "{servi}");
+    assert!(
+        recues
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.starts_with("POST /models/load ")),
+        "chargé avec --force"
+    );
 }

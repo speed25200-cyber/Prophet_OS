@@ -150,6 +150,9 @@ enum ModelAction {
         /// `http://127.0.0.1:8080/v1`.
         #[arg(long)]
         endpoint: Option<String>,
+        /// Charger même si l'estimation dit que le poids ne tient pas en mémoire.
+        #[arg(long)]
+        force: bool,
     },
     /// Arrête un téléchargement en cours ; le début reçu reste, pour reprendre.
     Cancel {
@@ -1381,7 +1384,7 @@ fn moteur_local(endpoint: Option<&String>) -> String {
 /// Délai laissé au moteur pour charger un poids.
 const CHARGEMENT_MAX: std::time::Duration = std::time::Duration::from_secs(300);
 
-fn model_serve(id: &str, endpoint: &str, as_json: bool) -> anyhow::Result<String> {
+fn model_serve(id: &str, endpoint: &str, force: bool, as_json: bool) -> anyhow::Result<String> {
     let catalogue = task_rpc(&socket_agentd(), "model.catalog", serde_json::json!({}))?;
     let entree = catalogue["entries"]
         .as_array()
@@ -1408,6 +1411,20 @@ fn model_serve(id: &str, endpoint: &str, as_json: bool) -> anyhow::Result<String
             chemin.display()
         );
     };
+    // Avant de charger : un poids qui ne tient pas fait paginer toute la machine.
+    let memoire = providers::weights::read(&chemin).ok().and_then(|w| {
+        providers::memory::assess(
+            &w,
+            providers::memory::context(),
+            providers::memory::system().as_ref(),
+        )
+    });
+    let deja_charge = modele.status.as_deref() == Some("loaded");
+    if let Some(m) = memoire.filter(|_| !deja_charge && !force)
+        && m.fit == Some(providers::memory::Fit::TooLarge)
+    {
+        anyhow::bail!("{}", refus_memoire(id, &m));
+    }
     let limite = std::time::Instant::now() + CHARGEMENT_MAX;
     let mut demande = false;
     let etat = loop {
@@ -1439,13 +1456,43 @@ fn model_serve(id: &str, endpoint: &str, as_json: bool) -> anyhow::Result<String
     if as_json {
         return Ok(format!(
             "{}\n",
-            serde_json::json!({"id": id, "model": modele.id, "path": chemin, "status": etat})
+            serde_json::json!({"id": id, "model": modele.id, "path": chemin, "status": etat, "memory": memoire})
         ));
     }
-    Ok(format!(
+    let mut out = format!(
         "✓ {id} servi par le moteur sous le nom « {} » : prophet provider chat --model {} \"Bonjour\"\n",
         modele.id, modele.id
-    ))
+    );
+    if let Some(m) = memoire {
+        out.push_str(&format!(
+            "  mémoire estimée : {} pour une fenêtre de {} tokens{}\n",
+            providers::memory::gigabytes(m.need.total),
+            m.need.context,
+            m.fit
+                .map_or_else(String::new, |f| format!(" — {}", f.describe()))
+        ));
+    }
+    Ok(out)
+}
+
+/// Pourquoi un poids n'est pas chargé : ce qu'il demande, poste par poste, et ce que la machine a.
+fn refus_memoire(id: &str, m: &providers::memory::Assessment) -> String {
+    let machine = providers::memory::system().map_or_else(String::new, |s| {
+        format!(
+            " ; cette machine a {} de mémoire, dont {} disponibles, et le système en garde {}",
+            providers::memory::gigabytes(s.total),
+            providers::memory::gigabytes(s.available),
+            providers::memory::gigabytes(providers::memory::SYSTEM_RESERVE)
+        )
+    });
+    format!(
+        "{id} demande environ {} pour une fenêtre de {} tokens (poids {}, cache KV {}, calcul {}){machine} : il ne tiendrait pas sans paginer toute la machine. Choisissez un poids plus petit (prophet model catalog), ou chargez-le quand même avec --force",
+        providers::memory::gigabytes(m.need.total),
+        m.need.context,
+        providers::memory::gigabytes(m.need.weights),
+        providers::memory::gigabytes(m.need.kv_cache),
+        providers::memory::gigabytes(m.need.compute),
+    )
 }
 
 /// Octets en mégaoctets ou gigaoctets, pour l'humain.
@@ -2176,8 +2223,12 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
         ModelAction::Ls { dir, endpoint } => (dir, endpoint),
         ModelAction::Catalog => return model_catalog(as_json),
         ModelAction::Pull { id, detach } => return model_pull(id, *detach, as_json),
-        ModelAction::Serve { id, endpoint } => {
-            return model_serve(id, &moteur_local(endpoint.as_ref()), as_json);
+        ModelAction::Serve {
+            id,
+            endpoint,
+            force,
+        } => {
+            return model_serve(id, &moteur_local(endpoint.as_ref()), *force, as_json);
         }
         ModelAction::Cancel { id } => {
             let reponse = task_rpc(
@@ -2236,13 +2287,28 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
             (dir, catalog)
         }
     };
+    let contexte = providers::memory::context();
+    let machine = providers::memory::system();
+    let memoire =
+        |w: &providers::weights::Weights| providers::memory::assess(w, contexte, machine.as_ref());
     if as_json {
         let (weights, refused): (Vec<_>, Vec<_>) = catalog.into_iter().partition(Result::is_ok);
+        let weights: Vec<serde_json::Value> = weights
+            .into_iter()
+            .flatten()
+            .map(|w| {
+                let mut v = serde_json::to_value(&w).unwrap_or_default();
+                v["memory"] = serde_json::to_value(memoire(&w)).unwrap_or_default();
+                v
+            })
+            .collect();
         return Ok(format!(
             "{}\n",
             serde_json::json!({
                 "dir": dir,
-                "weights": weights.into_iter().flatten().collect::<Vec<_>>(),
+                "context": contexte,
+                "system_memory": machine,
+                "weights": weights,
                 "refused": refused.into_iter().filter_map(Result::err).collect::<Vec<_>>(),
                 "endpoint": endpoint,
                 "served": served.as_ref().ok(),
@@ -2254,14 +2320,31 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
         return Ok(format!("Aucun poids GGUF dans {}.\n", dir.display()));
     }
     let mut out = format!(
-        "{:<28} {:<10} {:<8} {:<8} {:>9} {:>8}\n",
-        "fichier", "archi.", "taille", "quant.", "contexte", "Go"
+        "{:<28} {:<10} {:<8} {:<8} {:>9} {:>8} {:>9}\n",
+        "fichier", "archi.", "taille", "quant.", "contexte", "Go", "mémoire"
     );
     let tiret = || "—".to_owned();
+    let mut trop_grands = Vec::new();
     for entry in catalog {
         match entry {
             Ok(w) => {
                 let go = w.gigabytes();
+                let estime = memoire(&w);
+                let colonne = estime.map_or_else(tiret, |m| {
+                    let signe = match m.fit {
+                        Some(providers::memory::Fit::TooLarge) => " ✗",
+                        Some(providers::memory::Fit::Tight) => " !",
+                        _ => "",
+                    };
+                    format!("{:.1}{signe}", m.need.total as f64 / 1e9)
+                });
+                if estime.is_some_and(|m| m.fit == Some(providers::memory::Fit::TooLarge)) {
+                    trop_grands.push(
+                        w.path
+                            .file_name()
+                            .map_or_else(tiret, |n| n.to_string_lossy().into_owned()),
+                    );
+                }
                 let marque = if is_served(&w.path) {
                     match served.as_ref().ok().and_then(|s| s.n_ctx) {
                         Some(n_ctx) => format!("  ← servi, fenêtre {n_ctx}"),
@@ -2271,7 +2354,7 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
                     String::new()
                 };
                 out.push_str(&format!(
-                    "{:<28} {:<10} {:<8} {:<8} {:>9} {:>8.1}{marque}\n",
+                    "{:<28} {:<10} {:<8} {:<8} {:>9} {:>8.1} {:>9}{marque}\n",
                     w.path
                         .file_name()
                         .map_or_else(tiret, |n| n.to_string_lossy().into_owned()),
@@ -2279,7 +2362,8 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
                     w.size_label.unwrap_or_else(tiret),
                     w.quantization.unwrap_or_else(tiret),
                     w.context_length.map_or_else(tiret, |c| c.to_string()),
-                    go
+                    go,
+                    colonne
                 ));
             }
             Err(raison) => out.push_str(&format!("refusé : {raison}\n")),
@@ -2298,6 +2382,21 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
         }
         Ok(_) => {}
         Err(error) => out.push_str(&format!("{error} : rien n'est servi.\n")),
+    }
+    out.push_str(&format!(
+        "Mémoire estimée (Go) pour une fenêtre de {contexte} tokens : poids, cache KV et calcul{}.\n",
+        machine.map_or_else(String::new, |m| format!(
+            " ; cette machine a {}, dont {} disponibles",
+            providers::memory::gigabytes(m.total),
+            providers::memory::gigabytes(m.available)
+        ))
+    ));
+    if !trop_grands.is_empty() {
+        out.push_str(&format!(
+            "✗ ne tient pas en mémoire ici : {} (le système garde {} pour lui)\n",
+            trop_grands.join(", "),
+            providers::memory::gigabytes(providers::memory::SYSTEM_RESERVE)
+        ));
     }
     Ok(out)
 }
@@ -3292,6 +3391,8 @@ mod tests {
                 context_length: Some(40_960),
                 layers: Some(28),
                 tensors: 310,
+                kv_bytes_per_token: Some(114_688),
+                vocabulary: Some(151_936),
             }),
             Err("casse.gguf : signature absente".into()),
         ];

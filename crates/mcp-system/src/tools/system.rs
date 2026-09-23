@@ -722,11 +722,16 @@ impl Tool for ListModels {
                 })
             })
             .collect();
+        let machine = providers::memory::system();
         CallResult::structured(json!({
             "drivers": pilotes,
+            "local_context": providers::memory::context(),
+            "system_memory": machine,
             "local_weights": poids_locaux(
                 &providers::weights::dir(),
                 &providers::weights::configured(),
+                providers::memory::context(),
+                machine.as_ref(),
             ),
         }))
     }
@@ -734,7 +739,16 @@ impl Tool for ListModels {
 
 /// Les poids locaux, tels que leurs en-têtes les décrivent : ce qu'un agent peut attendre d'un
 /// modèle local avant de lui confier une étape. Un fichier illisible est omis, pas inventé.
-fn poids_locaux(dir: &std::path::Path, files: &[std::path::PathBuf]) -> Vec<Value> {
+///
+/// `memory` dit ce que le moteur réservera pour le servir à la fenêtre `context` (poids, cache
+/// KV, calcul) et, si la mémoire de la machine est connue, où cela tombe (`fits`, `tight`,
+/// `too_large`) : un agent choisit un modèle qui tient avant de le demander.
+fn poids_locaux(
+    dir: &std::path::Path,
+    files: &[std::path::PathBuf],
+    context: u64,
+    machine: Option<&providers::memory::System>,
+) -> Vec<Value> {
     providers::weights::installed(dir, files)
         .into_iter()
         .flatten()
@@ -747,6 +761,7 @@ fn poids_locaux(dir: &std::path::Path, files: &[std::path::PathBuf]) -> Vec<Valu
                 "quantization": w.quantization,
                 "context_length": w.context_length,
                 "gigabytes": w.gigabytes(),
+                "memory": providers::memory::assess(&w, context, machine),
             })
         })
         .collect()
@@ -758,29 +773,62 @@ mod tests {
 
     #[test]
     fn les_poids_locaux_se_disent_par_leur_en_tete() {
+        // Un en-tête GGUF v3 : architecture, puis des nombres sous elle.
+        let gguf = |nombres: &[(&str, u32)]| {
+            let mut out = b"GGUF".to_vec();
+            out.extend(3u32.to_le_bytes());
+            out.extend(0u64.to_le_bytes());
+            out.extend((nombres.len() as u64 + 1).to_le_bytes());
+            let cle = "general.architecture";
+            out.extend((cle.len() as u64).to_le_bytes());
+            out.extend(cle.as_bytes());
+            out.extend(8u32.to_le_bytes());
+            out.extend(5u64.to_le_bytes());
+            out.extend(b"qwen3");
+            for (k, v) in nombres {
+                let cle = format!("qwen3.{k}");
+                out.extend((cle.len() as u64).to_le_bytes());
+                out.extend(cle.as_bytes());
+                out.extend(4u32.to_le_bytes());
+                out.extend(v.to_le_bytes());
+            }
+            out
+        };
         let dir = tempfile::tempdir().unwrap();
-        let mut gguf = b"GGUF".to_vec();
-        gguf.extend(3u32.to_le_bytes());
-        gguf.extend(0u64.to_le_bytes());
-        gguf.extend(2u64.to_le_bytes());
-        let cle = "general.architecture";
-        gguf.extend((cle.len() as u64).to_le_bytes());
-        gguf.extend(cle.as_bytes());
-        gguf.extend(8u32.to_le_bytes());
-        gguf.extend(5u64.to_le_bytes());
-        gguf.extend(b"qwen3");
-        let cle = "qwen3.context_length";
-        gguf.extend((cle.len() as u64).to_le_bytes());
-        gguf.extend(cle.as_bytes());
-        gguf.extend(4u32.to_le_bytes());
-        gguf.extend(40_960u32.to_le_bytes());
-        std::fs::write(dir.path().join("qwen3.gguf"), &gguf).unwrap();
+        std::fs::write(
+            dir.path().join("a-qwen3.gguf"),
+            gguf(&[("context_length", 40_960)]),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("b-qwen3.gguf"),
+            gguf(&[
+                ("context_length", 40_960),
+                ("block_count", 28),
+                ("attention.head_count", 16),
+                ("attention.head_count_kv", 8),
+                ("attention.key_length", 128),
+                ("attention.value_length", 128),
+            ]),
+        )
+        .unwrap();
         std::fs::write(dir.path().join("casse.gguf"), b"pas un poids").unwrap();
-        let poids = poids_locaux(dir.path(), &[]);
-        assert_eq!(poids.len(), 1, "{poids:?}");
-        assert_eq!(poids[0]["file"], "qwen3.gguf");
+        let machine = providers::memory::System {
+            total: 16 << 30,
+            available: 8 << 30,
+        };
+        let poids = poids_locaux(dir.path(), &[], 4096, Some(&machine));
+        assert_eq!(poids.len(), 2, "{poids:?}");
+        assert_eq!(poids[0]["file"], "a-qwen3.gguf");
         assert_eq!(poids[0]["architecture"], "qwen3");
         assert_eq!(poids[0]["context_length"], 40_960);
+        // Sans couches ni têtes, le cache KV ne se calcule pas : la mémoire n'est pas inventée.
+        assert!(poids[0]["memory"].is_null(), "{poids:?}");
+        // Avec : ce que le moteur réservera à la fenêtre du système, et où cela tombe.
+        let memoire = &poids[1]["memory"];
+        assert_eq!(memoire["context"], 4096);
+        assert_eq!(memoire["kv_cache"], 28 * 8 * 256 * 2 * 4096);
+        assert_eq!(memoire["fit"], "fits");
     }
 
     #[test]
