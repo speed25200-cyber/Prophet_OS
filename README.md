@@ -65,8 +65,12 @@ fenêtre du modèle local est resserré à sa mesure au lieu de faire échouer l
 ménageant le cache du moteur ; le catalogue des poids dit l'architecture, la quantification et
 la fenêtre de chaque modèle, et celle que le moteur sert vraiment (`prophet model ls`) ; un
 poids du catalogue du système se télécharge par le proxy de sortie, vérifié avant d'être posé,
-et reprend où il s'était arrêté (`prophet model pull`) ; une mission échouée se relance par son
-contexte (« Relancer », `prophet task retry`).
+et reprend où il s'était arrêté (`prophet model pull`) ; chaque poids dit, avant d'être
+téléchargé ou chargé, la mémoire qu'il demandera à la fenêtre du moteur et ce que son gabarit
+sait faire (outils, réflexion) — un agent reçoit le poids recommandé (`model.list`), et un
+modèle qui ferait paginer la machine n'est ni servi ni confié à une mission ; le moteur charge
+ses poids sans projection, ce qui a fait baisser sa mémoire résidente d'un tiers (ADR 0047) ;
+une mission échouée se relance par son contexte (« Relancer », `prophet task retry`).
 
 Le code d'un agent tourne dans une microVM Firecracker **rendue en une dizaine de
 millisecondes** : sandboxd en tient deux prêtes, restaurées d'un instantané, et chaque exécution
@@ -94,9 +98,10 @@ Captures, essais Wayland et limites : [rapport de l'espace natif](docs/reports/e
 prophet status          # ce que la machine sait faire, et ce qu'elle ne sait pas
 prophet provider ls     # pilotes disponibles et sessions d'abonnement
 prophet provider models # modèles du moteur local (port 8080 par défaut)
-prophet model ls        # poids installés, et la fenêtre que le moteur sert
+prophet model ls        # poids installés, mémoire demandée, outils, et la fenêtre servie
 prophet model catalog   # poids que le système sait télécharger, avec leur empreinte
 prophet model pull qwen3-0.6b-q8   # par egress, vérifié (SHA-256, GGUF) avant d'être posé
+prophet model serve qwen3-0.6b-q8  # le fait charger, s'il tient en mémoire
 prophet provider chat --model qwen3-0.6b "Bonjour /no_think"
 prophet task ls         # missions connues du service, y compris terminées
 prophet task show <id>  # plan, état et résultat conservés par agentd
