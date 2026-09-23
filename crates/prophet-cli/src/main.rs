@@ -452,6 +452,15 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
             out.push_str(&status_reserve(
                 capacites_du_bac(&socket_sandboxd()).as_ref(),
             ));
+            out.push_str(&status_modeles(
+                &providers::weights::installed(
+                    &providers::weights::dir(),
+                    &providers::weights::configured(),
+                ),
+                task_rpc(&socket_agentd(), "model.catalog", serde_json::json!({}))
+                    .ok()
+                    .as_ref(),
+            ));
             out.push_str(&status_parole_et_pilotes(options.as_ref()));
             out.push_str(&status_machine(&chemin_de_l_inventaire()));
             Ok(out)
@@ -2849,6 +2858,78 @@ fn capacites_du_bac(socket: &std::path::Path) -> Option<serde_json::Value> {
 }
 
 /// Les lignes de `prophet status` sur la réserve de microVM du niveau 2 (ADR 0045).
+/// Les lignes de `prophet status` sur les modèles locaux : les poids que la machine a, et ce
+/// que le catalogue du système sait encore télécharger (ADR 0046). Rien n'est inventé : agentd
+/// muet, le catalogue est dit inconnu.
+fn status_modeles(
+    poids: &[Result<providers::weights::Weights, String>],
+    catalogue: Option<&serde_json::Value>,
+) -> String {
+    let mut out = String::from("\n  Modèles locaux\n");
+    let lus: Vec<&providers::weights::Weights> = poids.iter().flatten().collect();
+    if lus.is_empty() {
+        out.push_str("    ✗ aucun poids sur cette machine\n");
+    } else {
+        let noms: Vec<String> = lus
+            .iter()
+            .map(|w| {
+                let nom = w.name.clone().unwrap_or_else(|| {
+                    w.path
+                        .file_name()
+                        .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+                });
+                match &w.quantization {
+                    Some(q) => format!("{nom} ({q})"),
+                    None => nom,
+                }
+            })
+            .collect();
+        out.push_str(&format!(
+            "    ✓ {} poids : {}\n",
+            lus.len(),
+            noms.join(", ")
+        ));
+    }
+    let refuses = poids.iter().filter(|p| p.is_err()).count();
+    if refuses > 0 {
+        out.push_str(&format!(
+            "    · {refuses} fichier(s) illisible(s) : prophet model ls dit lesquels\n"
+        ));
+    }
+    match catalogue.and_then(|c| c["entries"].as_array()) {
+        None => out.push_str("    ? catalogue du système inconnu : agentd ne répond pas\n"),
+        Some(entrees) => {
+            let en_cours = entrees
+                .iter()
+                .filter(|e| e["pull"]["state"] == "running")
+                .count();
+            let disponibles: Vec<&str> = entrees
+                .iter()
+                .filter(|e| {
+                    e["installed"] != true
+                        && !e["provided"].is_string()
+                        && e["pull"]["state"] != "running"
+                })
+                .filter_map(|e| e["id"].as_str())
+                .collect();
+            if en_cours > 0 {
+                out.push_str(&format!(
+                    "    ↓ {en_cours} téléchargement(s) en cours : prophet model catalog\n"
+                ));
+            }
+            if disponibles.is_empty() {
+                out.push_str("    ✓ catalogue du système : tout est sur la machine\n");
+            } else {
+                out.push_str(&format!(
+                    "    · à télécharger : {} (prophet model pull <id>)\n",
+                    disponibles.join(", ")
+                ));
+            }
+        }
+    }
+    out
+}
+
 fn status_reserve(capacites: Option<&serde_json::Value>) -> String {
     let mut out = String::from("\n  Réserve de microVM\n");
     let Some(capacites) = capacites else {
@@ -3195,6 +3276,44 @@ mod tests {
         assert!(dit.contains("Le modèle de réflexion."), "{dit}");
         assert!(dit.contains("✓ fourni par le système"), "{dit}");
         assert_eq!(octets(1_834_000_000), "1.83 Go");
+    }
+
+    #[test]
+    fn les_modeles_locaux_se_disent_dans_prophet_status() {
+        let poids = vec![
+            Ok(providers::weights::Weights {
+                path: "/nix/store/x-Qwen3-1.7B-Q8_0.gguf".into(),
+                bytes: 1_834_000_000,
+                version: 3,
+                architecture: Some("qwen3".into()),
+                name: Some("Qwen3 1.7B".into()),
+                size_label: Some("1.7B".into()),
+                quantization: Some("Q8_0".into()),
+                context_length: Some(40_960),
+                layers: Some(28),
+                tensors: 310,
+            }),
+            Err("casse.gguf : signature absente".into()),
+        ];
+        let catalogue = serde_json::json!({"entries": [
+            {"id": "qwen3-1.7b-q8", "installed": false, "provided": "/nix/store/x-Qwen3-1.7B-Q8_0.gguf"},
+            {"id": "qwen3-0.6b-q8", "installed": false, "pull": {"state": "running"}},
+            {"id": "autre", "installed": false}
+        ]});
+        let dit = status_modeles(&poids, Some(&catalogue));
+        assert!(dit.contains("✓ 1 poids : Qwen3 1.7B (Q8_0)"), "{dit}");
+        assert!(dit.contains("1 fichier(s) illisible(s)"), "{dit}");
+        assert!(dit.contains("↓ 1 téléchargement(s) en cours"), "{dit}");
+        assert!(dit.contains("à télécharger : autre"), "{dit}");
+        assert!(
+            !dit.contains("qwen3-1.7b-q8 ("),
+            "un poids fourni n'est pas à télécharger : {dit}"
+        );
+        let muet = status_modeles(&[], None);
+        assert!(
+            muet.contains("aucun poids") && muet.contains("agentd ne répond pas"),
+            "{muet}"
+        );
     }
 
     #[test]
