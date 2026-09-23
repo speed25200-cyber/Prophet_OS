@@ -141,6 +141,8 @@ impl CommandeDePoids {
 
 /// Entre deux relectures du catalogue pendant un téléchargement.
 const RELECTURE_DU_CATALOGUE: Duration = Duration::from_millis(500);
+/// Entre deux relectures du catalogue au repos, à l'image suivante.
+const RELECTURE_AU_REPOS: Duration = Duration::from_secs(5);
 
 enum Evenement {
     Modeles(Result<Vec<String>, String>),
@@ -351,17 +353,22 @@ impl Atelier {
     }
 
     /// Lit le catalogue du système auprès d'agentd, en arrière-plan : une fois, puis toutes les
-    /// demi-secondes tant qu'un téléchargement court. Une scène de démonstration reçoit un
-    /// catalogue d'exemple : un poids posé, un autre en cours.
+    /// demi-secondes tant qu'un téléchargement court — la page se redessine pour le suivre —, et
+    /// au repos toutes les cinq secondes au plus, à l'image suivante, sans en demander : un
+    /// téléchargement lancé d'ailleurs (`prophet model pull`) finit par s'y voir. Une scène de
+    /// démonstration reçoit un catalogue d'exemple : un poids posé, un autre en cours.
     pub fn lire_le_catalogue(&mut self, ctx: &egui::Context) {
         let en_cours =
             matches!(&self.catalogue, Some(Ok(e)) if e.iter().any(EntreeCatalogue::en_cours));
         if en_cours {
             ctx.request_repaint_after(RELECTURE_DU_CATALOGUE);
         }
-        let due = self
-            .catalogue_lu_a
-            .is_none_or(|lu| en_cours && lu.elapsed() >= RELECTURE_DU_CATALOGUE);
+        let delai = if en_cours {
+            RELECTURE_DU_CATALOGUE
+        } else {
+            RELECTURE_AU_REPOS
+        };
+        let due = self.catalogue_lu_a.is_none_or(|lu| lu.elapsed() >= delai);
         if self.lecture_du_catalogue || !due {
             return;
         }
