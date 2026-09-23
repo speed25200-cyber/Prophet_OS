@@ -398,7 +398,7 @@ fn niveau_deux_demarre_une_microvm() {
     let debut = std::time::Instant::now();
     let mut handle = manager.run("task:test", &spec).unwrap();
     let ecoule = debut.elapsed();
-    eprintln!("démarrage de microVM : {ecoule:?}");
+    eprintln!("mesure : microVM démarrée à froid en {ecoule:?}");
     assert_eq!(handle.level, 2);
     // Objectif du plan : moins de 2 s à froid, moins de 100 ms depuis un instantané.
     assert!(
@@ -504,7 +504,7 @@ fn la_reserve_rend_une_microvm_de_niveau_deux_en_moins_de_150_ms() {
         reserve.statut()
     );
     eprintln!(
-        "réserve pleine en {:?} : {:?}",
+        "mesure : réserve pleine en {:?} ({:?})",
         debut.elapsed(),
         reserve.statut()
     );
@@ -575,7 +575,7 @@ fn la_reserve_rend_une_microvm_de_niveau_deux_en_moins_de_150_ms() {
     }
     durees.sort();
     let mediane = durees[durees.len() / 2];
-    eprintln!("microVM depuis la réserve : médiane {mediane:?}, toutes {durees:?}");
+    eprintln!("mesure : microVM rendue par la réserve en {mediane:?} (médiane de {durees:?})");
     assert!(
         mediane < std::time::Duration::from_millis(150),
         "médiane {mediane:?} au-delà de 150 ms : {durees:?} ; réserve {:?}",

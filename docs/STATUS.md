@@ -775,7 +775,7 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 - [x] M5-T1 — Niveau 0 (bwrap + Landlock + seccomp) (2026-09-12, 24b8338) — 8 tests d'évasion réels, démarrage en 2,6 ms
 - [x] M5-T2 — Niveau 1 (gVisor) (2026-09-12, 3c0b7cd) — vérifié sur matériel réel en intégration continue : exécution effective sous gVisor et absence d'interface réseau, tests `needs_gvisor` verts
 - [x] M5-T3 — Niveau 2 (Firecracker) (2026-09-12, faca93c) — vérifié sur matériel réel en intégration continue : microVM démarrée avec noyau et racine d'invité, et refus explicite plutôt que repli quand le niveau est inatteignable
-- [ ] M5-T4 — Pool de snapshots — plus bloqué : le niveau 2 démarre sur le coureur d'intégration ; reste à écrire, avec l'objectif de 100 ms depuis instantané à mesurer
+- [x] M5-T4 — Pool de snapshots (2026-09-23, 1e3ff79) — vérifié sur matériel réel en intégration continue (`3314b74`) : réserve de deux microVM restaurées de l'instantané d'un invité en attente, disque de la tâche confié à la reprise ; médiane de cinq prises sous 150 ms, machine neuve à chaque prise, programme exécuté et fichiers rapatriés comme à froid, réserve régénérée (ADR 0045) ; un seul profil, l'invité du dépôt (`node` et `browser` n'ont pas d'invité)
 - [x] M5-T5 — Cycle de vie et quotas (2026-09-12, 24b8338) — gel global de 8 sandboxes en 124 µs
 - [x] M5-T6 — Sélection automatique (2026-09-12, 24b8338) — sélection de niveau, microVM imposée pour tout code
 - [x] M5-T7 — CLI (2026-09-12, 24b8338) — sonde de capacités et rapport
@@ -1511,6 +1511,12 @@ donne le détail.
   sans couper de caractère, `71d9a98`) et `fs.search` rend les lignes trouvées, numéro et
   extrait (`2513326`) : un agent à petite fenêtre lit ce qui l'intéresse sans relire le
   fichier. L'essai NixOS du moteur vérifie la forme du refus sur le llama-server épinglé.
+- M5-T4, la réserve de microVM (ADR 0045, `1e3ff79`, `6a7ef34`) : l'invité gagne un mode
+  réserve où il attend le disque de sa tâche ; sandboxd en fait un instantané et garde deux
+  machines restaurées en pause, qui reçoivent le disque de la tâche à la reprise. Sur le
+  coureur KVM de la CI, l'essai du critère est vert du premier coup : médiane de cinq prises
+  sous 150 ms, machine neuve à chaque fois, réserve régénérée. Le script d'isolation fait
+  désormais remonter les lignes « mesure : » des essais réussis.
 - Erreurs et reprise (FRONTIER) : une mission échouée ou arrêtée se relance depuis
   l'inspecteur (« Relancer », `93db17c`) ou par `prophet task retry` (`6bc1b56`) : la
   préparation repasse par le même contexte du catalogue, que le plan retient désormais
@@ -1542,7 +1548,7 @@ par laquelle un processus de la session fait planifier une mission sous un manif
 
 **Pour la session suivante.** Lire la CI de la branche (le socket posé par renommage et
 l'essai de capd arrêté, la relance des missions, la fenêtre servie, poussés après le verdict
-de `299c68d`) ; trancher avec l'utilisateur le sort de
+de `299c68d`, et les chiffres de la réserve de microVM) ; trancher avec l'utilisateur le sort de
 `task.spawn` pour le compte de l'humain ; mesurer la surface sur une carte graphique ; écrire M5-T4 (pool d'instantanés
 Firecracker) sur un hôte KVM, la CI pouvant l'exercer sur son coureur ; faire le premier appel
 réel de Jev avec une clé déposée ; gérer le téléchargement et la suppression des poids que le

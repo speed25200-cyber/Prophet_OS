@@ -143,15 +143,24 @@ NON_VERIFIES=()
 
 lancer() {
   local titre="$1"; shift
+  local sortie
+  sortie=$(mktemp)
   echo "→ $titre"
   echo "## $titre" >> "$RAPPORT"
   echo '```' >> "$RAPPORT"
-  if "$@" >> "$RAPPORT" 2>&1; then
+  if "$@" > "$sortie" 2>&1; then
+    cat "$sortie" >> "$RAPPORT"
     ok "$titre"
+    # Ce qu'un essai réussi mesure (« mesure : … ») atteint le journal : sans cela, la preuve
+    # d'un objectif chiffré ne se lirait que dans un rapport qu'on n'ouvre pas.
+    grep -h '^mesure : ' "$sortie" | sed 's/^/    /' || true
+    rm -f "$sortie"
     echo '```' >> "$RAPPORT"
     echo >> "$RAPPORT"
     return 0
   fi
+  cat "$sortie" >> "$RAPPORT"
+  rm -f "$sortie"
   ko "$titre"
   echo '```' >> "$RAPPORT"
   echo >> "$RAPPORT"
@@ -272,7 +281,7 @@ etape_niveaux() {
     [ -z "$nom" ] && continue
     if raison=$(materiel_pour "$marqueur"); then
       lancer "$nom ($marqueur)" \
-        cargo test -p "$crate" $JOBS -- --ignored --test-threads=1 "$nom" \
+        cargo test -p "$crate" $JOBS -- --ignored --test-threads=1 --nocapture "$nom" \
         || ECHECS=$((ECHECS + 1))
     else
       hors "$nom ($marqueur) — non vérifiable : $raison"
