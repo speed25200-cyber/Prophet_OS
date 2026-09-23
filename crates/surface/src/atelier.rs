@@ -54,9 +54,18 @@ pub struct ClientCard {
 /// Une entrée du catalogue des poids : lue, ou refusée avec sa raison.
 pub type Poids = Result<providers::weights::Weights, String>;
 
+/// Le poids que le moteur dit servir, repéré dans le catalogue, et la fenêtre qu'il accorde.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Servi {
+    /// Rang de l'entrée du catalogue que le moteur a chargée, s'il y en a une.
+    pub rang: Option<usize>,
+    /// Fenêtre de contexte par requête, en tokens.
+    pub fenetre: Option<u64>,
+}
+
 enum Evenement {
     Modeles(Result<Vec<String>, String>),
-    Poids(Vec<Poids>),
+    Poids(Vec<Poids>, Option<Servi>),
     Clients(Vec<ClientCard>),
     Fragment(u64, String),
     Fin(u64, Result<Completion, String>),
@@ -98,6 +107,8 @@ pub struct Atelier {
     pub poids: Vec<Poids>,
     /// Le catalogue a été lu (ou n'a pas à l'être, dans une scène d'exemple).
     pub poids_lus: bool,
+    /// Ce que le moteur sert, s'il a répondu à la lecture du catalogue.
+    pub servi: Option<Servi>,
     lecture_des_poids: bool,
     tx: Sender<Evenement>,
     rx: Receiver<Evenement>,
@@ -128,6 +139,7 @@ impl Atelier {
             fichiers_de_poids: providers::weights::configured(),
             poids: Vec::new(),
             poids_lus: false,
+            servi: None,
             lecture_des_poids: false,
             tx,
             rx,
@@ -213,10 +225,30 @@ impl Atelier {
         let ctx = ctx.clone();
         let dossier = self.dossier_des_poids.clone();
         let fichiers = self.fichiers_de_poids.clone();
+        let endpoint = self.endpoint.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(Evenement::Poids(providers::weights::installed(
-                &dossier, &fichiers,
-            )));
+            let poids = providers::weights::installed(&dossier, &fichiers);
+            // Le moteur dit quel fichier il a chargé et sa fenêtre par requête ; muet, la page
+            // montre le catalogue seul.
+            let servi =
+                providers::local::LocalModel::new(&endpoint, "catalogue", Duration::from_secs(2))
+                    .and_then(|engine| engine.served())
+                    .ok()
+                    .map(|servi| {
+                        let charge = servi.path.and_then(|p| std::fs::canonicalize(p).ok());
+                        Servi {
+                            rang: charge.and_then(|charge| {
+                                poids.iter().position(|w| {
+                                    w.as_ref().is_ok_and(|w| {
+                                        std::fs::canonicalize(&w.path).ok().as_ref()
+                                            == Some(&charge)
+                                    })
+                                })
+                            }),
+                            fenetre: servi.n_ctx,
+                        }
+                    });
+            let _ = tx.send(Evenement::Poids(poids, servi));
             ctx.request_repaint();
         });
     }
@@ -270,8 +302,9 @@ impl Atelier {
                 Evenement::Clients(cards) => {
                     self.clients = cards;
                 }
-                Evenement::Poids(poids) => {
+                Evenement::Poids(poids, servi) => {
                     self.poids = poids;
+                    self.servi = servi;
                     self.poids_lus = true;
                 }
                 Evenement::Fragment(id, text) if id == self.numero => {

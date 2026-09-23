@@ -1170,3 +1170,80 @@ fn les_poids_installes_se_lisent_sur_la_page_modeles() {
         "le fichier abîmé est dit refusé"
     );
 }
+
+/// Un moteur simulé : `/props` comme llama-server, un 404 pour le reste, le temps de l'essai.
+fn moteur_qui_sert(props: serde_json::Value) -> String {
+    use std::io::{BufRead as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { return };
+            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+            let mut lecture = std::io::BufReader::new(stream);
+            let mut premiere = String::new();
+            if lecture.read_line(&mut premiere).is_err() {
+                continue;
+            }
+            loop {
+                let mut ligne = String::new();
+                if lecture.read_line(&mut ligne).unwrap_or(0) == 0 || ligne == "\r\n" {
+                    break;
+                }
+            }
+            let (etat, corps) = if premiere.starts_with("GET /props ") {
+                ("200 OK", props.to_string())
+            } else {
+                ("404 Not Found", "{}".to_owned())
+            };
+            let _ = write!(
+                lecture.get_mut(),
+                "HTTP/1.1 {etat}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corps}",
+                corps.len()
+            );
+        }
+    });
+    endpoint
+}
+
+#[test]
+#[ignore = "needs_gpu: rendu wgpu hors écran"]
+fn la_page_modeles_marque_le_poids_servi_et_sa_fenetre() {
+    // Le fichier annonce 40 960 tokens ; le moteur en accorde 4 096 par requête. La page dit
+    // les deux, et marque le fichier réellement chargé.
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1440, 1000);
+    let dir = tempfile::tempdir().unwrap();
+    let servi = dir.path().join("qwen3-1.7b.gguf");
+    std::fs::write(&servi, gguf("qwen3", 40_960)).unwrap();
+    std::fs::write(dir.path().join("gemma.gguf"), gguf("gemma3", 131_072)).unwrap();
+    let endpoint = moteur_qui_sert(serde_json::json!({"model_path": servi,
+        "default_generation_settings": {"n_ctx": 4096}}));
+    let mut bureau = Bureau::nouveau(&context, endpoint, false);
+    bureau.figer_transitions();
+    bureau.atelier.dossier_des_poids = dir.path().to_owned();
+    bureau.atelier.fichiers_de_poids.clear();
+    bureau.atelier.page = Page::Modeles;
+    let limite = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !bureau.atelier.poids_lus {
+        frame(&mut bureau, &context, &target, vec![]);
+        assert!(std::time::Instant::now() < limite, "catalogue jamais lu");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    for _ in 0..3 {
+        frame(&mut bureau, &context, &target, vec![]);
+    }
+    capture(&context, &target, "poids-servi");
+    let marque = bureau
+        .ctx
+        .read_response(egui::Id::new("poids-servi-qwen3-1.7b.gguf"))
+        .expect("le poids servi est marqué");
+    assert!(marque.rect.width() > 40.0);
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("poids-servi-gemma.gguf"))
+            .is_none(),
+        "seul le poids chargé est marqué"
+    );
+}

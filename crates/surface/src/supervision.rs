@@ -1413,7 +1413,8 @@ fn poids_installes(ui: &mut egui::Ui, atelier: &Atelier) {
         );
         return;
     }
-    for entree in &atelier.poids {
+    for (rang, entree) in atelier.poids.iter().enumerate() {
+        let servi = atelier.servi.as_ref().filter(|s| s.rang == Some(rang));
         match entree {
             Ok(w) => {
                 let fichier = w
@@ -1442,15 +1443,34 @@ fn poids_installes(ui: &mut egui::Ui, atelier: &Atelier) {
                         {
                             ui.label(RichText::new(valeur).size(12.0).color(couleur));
                         }
+                        // Le fichier que le moteur a chargé, et la fenêtre qu'il accorde
+                        // vraiment : souvent dix fois moins que ce que le fichier annonce.
+                        if let Some(servi) = servi {
+                            let texte = servi.fenetre.map_or_else(
+                                || "SERVI".to_owned(),
+                                |n| format!("SERVI · FENÊTRE {}", groupes(n)),
+                            );
+                            let marque = ui
+                                .label(RichText::new(texte).size(11.0).strong().color(accent.vif));
+                            ui.interact(
+                                marque.rect,
+                                egui::Id::new(format!("poids-servi-{fichier}")),
+                                egui::Sense::hover(),
+                            );
+                        }
                     })
                     .response;
                 let decrit = format!(
-                    "{} — {} {} {}",
+                    "{} — {} {} {}{}",
                     fichier,
                     w.architecture.as_deref().unwrap_or(""),
                     w.quantization.as_deref().unwrap_or(""),
                     w.context_length
-                        .map_or_else(String::new, |c| format!("{c} tokens de contexte"))
+                        .map_or_else(String::new, |c| format!("{c} tokens de contexte")),
+                    servi.map_or_else(String::new, |s| s.fenetre.map_or_else(
+                        || " — servi par le moteur".to_owned(),
+                        |n| format!(" — servi par le moteur, fenêtre de {n} tokens par requête")
+                    ))
                 );
                 ui.interact(
                     ligne.rect,
