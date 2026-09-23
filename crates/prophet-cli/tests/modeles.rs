@@ -170,3 +170,116 @@ fn le_catalogue_dit_quel_poids_le_moteur_sert_et_avec_quelle_fenetre() {
         "{seul}"
     );
 }
+
+/// Un faux agentd qui rend ce catalogue à chaque `model.catalog`.
+fn agentd_au_catalogue(catalogue: Value) -> (tempfile::TempDir, std::path::PathBuf) {
+    use std::io::{BufRead as _, Write as _};
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("agentd.sock");
+    let ecoute = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    std::thread::spawn(move || {
+        for flux in ecoute.incoming() {
+            let Ok(flux) = flux else { return };
+            let mut lecteur = std::io::BufReader::new(flux);
+            let mut ligne = String::new();
+            if lecteur.read_line(&mut ligne).unwrap_or(0) == 0 {
+                continue;
+            }
+            let requete: Value = serde_json::from_str(&ligne).unwrap();
+            assert_eq!(requete["method"], "model.catalog", "{requete}");
+            let reponse =
+                serde_json::json!({"jsonrpc": "2.0", "id": requete["id"], "result": catalogue});
+            let _ = writeln!(lecteur.get_mut(), "{reponse}");
+        }
+    });
+    (dir, socket)
+}
+
+/// Un faux routeur de llama-server : le modèle est déchargé jusqu'à ce qu'on demande de le
+/// charger. Rend l'adresse et les requêtes reçues.
+fn routeur(chemin: std::path::PathBuf) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    use std::io::{BufRead as _, Read as _, Write as _};
+    let ecoute = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let adresse = format!("http://{}/v1", ecoute.local_addr().unwrap());
+    let recues = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let notees = recues.clone();
+    std::thread::spawn(move || {
+        let mut charge = false;
+        for flux in ecoute.incoming() {
+            let Ok(flux) = flux else { return };
+            let mut lecteur = std::io::BufReader::new(flux);
+            let mut premiere = String::new();
+            let _ = lecteur.read_line(&mut premiere);
+            let mut longueur = 0;
+            loop {
+                let mut ligne = String::new();
+                if lecteur.read_line(&mut ligne).unwrap_or(0) == 0 || ligne == "\r\n" {
+                    break;
+                }
+                if let Some(v) = ligne.to_ascii_lowercase().strip_prefix("content-length:") {
+                    longueur = v.trim().parse().unwrap();
+                }
+            }
+            let mut corps = vec![0; longueur];
+            let _ = lecteur.read_exact(&mut corps);
+            notees.lock().unwrap().push(format!(
+                "{} {}",
+                premiere.trim(),
+                String::from_utf8_lossy(&corps)
+            ));
+            let reponse = if premiere.starts_with("POST /models/load ") {
+                charge = true;
+                serde_json::json!({"success": true})
+            } else {
+                serde_json::json!({"data": [
+                    {"id": "qwen3-1.7b", "status": {"value": "loaded"}},
+                    {"id": "Qwen3-4B-Q4_K_M", "path": chemin,
+                     "status": {"value": if charge { "loaded" } else { "unloaded" }}}
+                ]})
+            }
+            .to_string();
+            let _ = write!(
+                lecteur.get_mut(),
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reponse}",
+                reponse.len()
+            );
+        }
+    });
+    (adresse, recues)
+}
+
+#[test]
+fn servir_un_poids_telecharge_le_fait_charger_par_le_routeur() {
+    let poids = tempfile::tempdir().unwrap();
+    let chemin = poids.path().join("Qwen3-4B-Q4_K_M.gguf");
+    std::fs::write(&chemin, gguf("qwen3", "4B", 15, 40_960)).unwrap();
+    let (_agentd, socket) = agentd_au_catalogue(serde_json::json!({"entries": [
+        {"id": "qwen3-4b-q4", "name": "Qwen3 4B", "installed": true, "path": chemin},
+        {"id": "absent", "name": "Absent", "installed": false}
+    ]}));
+    let (moteur, recues) = routeur(chemin.clone());
+    let sortie = std::process::Command::new(CLI)
+        .args(["model", "serve", "qwen3-4b-q4", "--endpoint", &moteur])
+        .env("PROPHET_AGENTD_SOCKET", &socket)
+        .output()
+        .unwrap();
+    assert!(sortie.status.success(), "{sortie:?}");
+    let dit = String::from_utf8(sortie.stdout).unwrap();
+    assert!(dit.contains("« Qwen3-4B-Q4_K_M »"), "{dit}");
+    let recues = recues.lock().unwrap().clone();
+    assert!(
+        recues
+            .iter()
+            .any(|r| r.starts_with("POST /models/load ") && r.contains("\"Qwen3-4B-Q4_K_M\"")),
+        "{recues:?}"
+    );
+    // Un poids qui n'est pas sur la machine : on dit comment l'avoir.
+    let sortie = std::process::Command::new(CLI)
+        .args(["model", "serve", "absent", "--endpoint", &moteur])
+        .env("PROPHET_AGENTD_SOCKET", &socket)
+        .output()
+        .unwrap();
+    assert!(!sortie.status.success());
+    let erreur = String::from_utf8_lossy(&sortie.stderr);
+    assert!(erreur.contains("prophet model pull absent"), "{erreur}");
+}

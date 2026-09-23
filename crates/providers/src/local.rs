@@ -150,11 +150,89 @@ impl LocalModel {
         })
     }
 
+    /// Les modèles que le routeur de llama-server connaît, chargés ou non (`GET /models`).
+    /// Un moteur qui sert un seul modèle en rend un, sans état : il n'a rien à charger.
+    ///
+    /// # Errors
+    /// Serveur indisponible ou réponse non conforme.
+    pub fn router_models(&self) -> Result<Vec<RouterModel>, DriverError> {
+        let response = self
+            .client
+            .get(self.url("/models")?)
+            .send()
+            .map_err(request)?;
+        let body = read_response(response)?;
+        let data = body["data"]
+            .as_array()
+            .ok_or_else(|| invalid("liste de modèles absente"))?;
+        Ok(data
+            .iter()
+            .filter_map(|m| {
+                Some(RouterModel {
+                    id: m["id"].as_str()?.to_owned(),
+                    path: m["path"].as_str().map(std::path::PathBuf::from),
+                    // `status` est un objet (`{"value": "loaded"}`) ; certaines versions le
+                    // rendent en simple chaîne.
+                    status: m["status"]["value"]
+                        .as_str()
+                        .or_else(|| m["status"].as_str())
+                        .map(str::to_owned),
+                })
+            })
+            .collect())
+    }
+
+    /// Demande au routeur de charger un modèle (`POST /models/load`) ; il revient aussitôt, le
+    /// chargement se suit par [`LocalModel::router_models`].
+    ///
+    /// # Errors
+    /// Serveur indisponible, sans routeur, ou qui refuse ce modèle.
+    pub fn load_model(&self, id: &str) -> Result<(), DriverError> {
+        let response = self
+            .client
+            .post(self.url("/models/load")?)
+            .json(&json!({"model": id}))
+            .send()
+            .map_err(request)?;
+        read_response(response).map(|_| ())
+    }
+
     fn url(&self, path: &str) -> Result<Url, DriverError> {
         self.endpoint
             .join(path)
             .map_err(|_| invalid("chemin d'API invalide"))
     }
+}
+
+/// Un modèle que le routeur de llama-server connaît.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RouterModel {
+    /// Le nom sous lequel le routeur le sert.
+    pub id: String,
+    /// Le fichier de poids, quand le routeur le dit.
+    pub path: Option<std::path::PathBuf>,
+    /// `loaded`, `loading`, `unloaded`, `failed`…, quand le routeur le dit.
+    pub status: Option<String>,
+}
+
+/// Le modèle du routeur qui sert ce fichier de poids : celui dont le chemin est ce fichier, sinon
+/// celui dont le nom est le nom du fichier, avec ou sans `.gguf`.
+#[must_use]
+pub fn router_model_for<'a>(
+    models: &'a [RouterModel],
+    file: &std::path::Path,
+) -> Option<&'a RouterModel> {
+    let reel = std::fs::canonicalize(file).ok();
+    let nom = file.file_name()?.to_string_lossy().into_owned();
+    let sans = nom.strip_suffix(".gguf").unwrap_or(&nom).to_owned();
+    models
+        .iter()
+        .find(|m| {
+            m.path.as_ref().is_some_and(|p| {
+                p == file || (reel.is_some() && std::fs::canonicalize(p).ok() == reel)
+            })
+        })
+        .or_else(|| models.iter().find(|m| m.id == nom || m.id == sans))
 }
 
 /// Le poids qu'un moteur sert et la fenêtre qu'il accorde à chaque requête.

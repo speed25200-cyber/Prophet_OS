@@ -580,3 +580,41 @@ fn garder_un_seul_resultat_intact_menage_le_cache_du_moteur() {
     // Et le réglage par défaut est celui qui ménage le cache.
     assert_eq!(Condensation::default().keep_last, 1);
 }
+
+#[test]
+fn le_routeur_dit_ses_modeles_et_charge_celui_qu_on_lui_nomme() {
+    let dir = tempfile::tempdir().unwrap();
+    let tire = dir.path().join("Qwen3-4B-Q4_K_M.gguf");
+    std::fs::write(&tire, b"GGUF").unwrap();
+    let (endpoint, thread) = server(vec![
+        (
+            200,
+            json!({"data": [
+                {"id": "qwen3-1.7b", "status": {"value": "loaded"}},
+                {"id": "Qwen3-4B-Q4_K_M", "path": tire, "status": {"value": "unloaded"}}
+            ]}),
+        ),
+        (200, json!({"success": true})),
+    ]);
+    let moteur = LocalModel::new(&endpoint, "catalogue", Duration::from_secs(5)).unwrap();
+    let modeles = moteur.router_models().unwrap();
+    assert_eq!(modeles.len(), 2);
+    assert_eq!(modeles[0].status.as_deref(), Some("loaded"));
+    let trouve = providers::local::router_model_for(&modeles, &tire).unwrap();
+    assert_eq!(trouve.id, "Qwen3-4B-Q4_K_M");
+    // Sans chemin rendu, le nom du fichier suffit.
+    let sans_chemin = [providers::local::RouterModel {
+        id: "Qwen3-4B-Q4_K_M".into(),
+        path: None,
+        status: Some("unloaded".into()),
+    }];
+    assert!(providers::local::router_model_for(&sans_chemin, &tire).is_some());
+    assert!(
+        providers::local::router_model_for(&sans_chemin, &dir.path().join("autre.gguf")).is_none()
+    );
+    moteur.load_model(&trouve.id).unwrap();
+    let requetes = thread.join().unwrap();
+    assert_eq!(requetes[0]["request"], "GET /models HTTP/1.1");
+    assert_eq!(requetes[1]["request"], "POST /models/load HTTP/1.1");
+    assert_eq!(requetes[1]["body"], json!({"model": "Qwen3-4B-Q4_K_M"}));
+}

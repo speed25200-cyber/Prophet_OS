@@ -141,6 +141,16 @@ enum ModelAction {
         #[arg(long)]
         detach: bool,
     },
+    /// Demande au moteur local de servir un poids du catalogue, téléchargé ou fourni : le mode
+    /// routeur de llama-server le charge, et il répond ensuite sous le nom qu'il dit.
+    Serve {
+        /// Identifiant au catalogue.
+        id: String,
+        /// Base d'API du moteur local. Sans elle : `PROPHET_MODEL_ENDPOINT`, sinon
+        /// `http://127.0.0.1:8080/v1`.
+        #[arg(long)]
+        endpoint: Option<String>,
+    },
     /// Arrête un téléchargement en cours ; le début reçu reste, pour reprendre.
     Cancel {
         /// Identifiant au catalogue.
@@ -1350,6 +1360,85 @@ fn rendre_verification(rapport: &ledger::VerifyReport) -> anyhow::Result<String>
 /// Missions du service. Les captures d'agentd restent privées ; seule la liste historique
 /// hors service consulte encore le disque directement. Publier et annuler passent par agentd,
 /// qui exige le créateur de la mission et l'index exact qu'il a examiné.
+/// La base d'API du moteur local : celle donnée, sinon `PROPHET_MODEL_ENDPOINT`, sinon le port
+/// de l'image.
+fn moteur_local(endpoint: Option<&String>) -> String {
+    endpoint
+        .cloned()
+        .or_else(|| std::env::var("PROPHET_MODEL_ENDPOINT").ok())
+        .unwrap_or_else(|| "http://127.0.0.1:8080/v1".to_owned())
+}
+
+/// Délai laissé au moteur pour charger un poids.
+const CHARGEMENT_MAX: std::time::Duration = std::time::Duration::from_secs(300);
+
+fn model_serve(id: &str, endpoint: &str, as_json: bool) -> anyhow::Result<String> {
+    let catalogue = task_rpc(&socket_agentd(), "model.catalog", serde_json::json!({}))?;
+    let entree = catalogue["entries"]
+        .as_array()
+        .and_then(|e| e.iter().find(|e| e["id"] == id).cloned())
+        .ok_or_else(|| {
+            anyhow::anyhow!("« {id} » n'est pas au catalogue (prophet model catalog)")
+        })?;
+    let chemin = entree["path"]
+        .as_str()
+        .or_else(|| entree["provided"].as_str())
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| {
+            anyhow::anyhow!("{id} n'est pas sur cette machine : prophet model pull {id}")
+        })?;
+    let moteur = providers::local::LocalModel::new(
+        endpoint,
+        "catalogue",
+        std::time::Duration::from_secs(10),
+    )?;
+    let modeles = moteur.router_models()?;
+    let Some(modele) = providers::local::router_model_for(&modeles, &chemin).cloned() else {
+        anyhow::bail!(
+            "le moteur ({endpoint}) ne connaît pas {} : il ne le sert que s'il lit le dossier des téléchargements, en mode routeur",
+            chemin.display()
+        );
+    };
+    let limite = std::time::Instant::now() + CHARGEMENT_MAX;
+    let mut demande = false;
+    let etat = loop {
+        let etat = moteur
+            .router_models()?
+            .into_iter()
+            .find(|m| m.id == modele.id)
+            .and_then(|m| m.status);
+        match etat.as_deref() {
+            // Un moteur sans routeur ne dit pas d'état : ce qu'il connaît, il le sert.
+            Some("loaded") | None => break etat,
+            Some("failed") => anyhow::bail!("le moteur n'a pas pu charger {}", modele.id),
+            Some("loading") => {}
+            Some(_) if !demande => {
+                moteur.load_model(&modele.id)?;
+                demande = true;
+            }
+            Some(_) => {}
+        }
+        if std::time::Instant::now() >= limite {
+            anyhow::bail!(
+                "{} n'est pas chargé après {} s",
+                modele.id,
+                CHARGEMENT_MAX.as_secs()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    };
+    if as_json {
+        return Ok(format!(
+            "{}\n",
+            serde_json::json!({"id": id, "model": modele.id, "path": chemin, "status": etat})
+        ));
+    }
+    Ok(format!(
+        "✓ {id} servi par le moteur sous le nom « {} » : prophet provider chat --model {} \"Bonjour\"\n",
+        modele.id, modele.id
+    ))
+}
+
 /// Octets en mégaoctets ou gigaoctets, pour l'humain.
 fn octets(n: u64) -> String {
     let n = n as f64;
@@ -2078,6 +2167,9 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
         ModelAction::Ls { dir, endpoint } => (dir, endpoint),
         ModelAction::Catalog => return model_catalog(as_json),
         ModelAction::Pull { id, detach } => return model_pull(id, *detach, as_json),
+        ModelAction::Serve { id, endpoint } => {
+            return model_serve(id, &moteur_local(endpoint.as_ref()), as_json);
+        }
         ModelAction::Cancel { id } => {
             let reponse = task_rpc(
                 &socket_agentd(),
@@ -2110,10 +2202,7 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
         }
     };
     // Le moteur dit ce qu'il sert ; injoignable, le catalogue se lit quand même.
-    let endpoint = endpoint
-        .clone()
-        .or_else(|| std::env::var("PROPHET_MODEL_ENDPOINT").ok())
-        .unwrap_or_else(|| "http://127.0.0.1:8080/v1".to_owned());
+    let endpoint = moteur_local(endpoint.as_ref());
     let served = providers::local::LocalModel::new(
         &endpoint,
         "catalogue",
