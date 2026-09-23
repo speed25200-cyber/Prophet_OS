@@ -10,6 +10,12 @@ de confiance. Il ne lance aucun programme fourni par le modèle. Les plans qui e
 niveaux 1 ou 2 et les clients officiels sont refusés par `task.start`. Ce niveau ne constitue
 pas la preuve d'un lancement de processus sous `sandboxd`.
 
+Il télécharge aussi les poids du catalogue du système (`model.pull`, `model.catalog`,
+`model.cancel`, `model.remove`, module `poids`) : par egress, sous un jeton que capd émet pour
+les seuls hôtes de l'entrée, vérifiés avant d'être posés sous `PROPHET_PULL_DIR`
+(`/var/lib/prophet/models/catalogue`), journalisés (ADR 0046). `PROPHET_MODEL_CATALOG`
+remplace le catalogue ; `PROPHET_WEIGHTS` nomme les poids que la configuration fournit déjà.
+
 ## Configuration de développement
 
 Configurer le même `PROPHET_HOME` absolu pour agentd et capd. Les services doivent disposer de

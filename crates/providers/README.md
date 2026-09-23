@@ -22,11 +22,18 @@ un `ModelClient` qui décide `web.act` sur l'arbre SUP et rend la main au modèl
 optionnel et ne parle jamais au réseau directement. Voir la
 [spécification](../../docs/specs/jev-decisions.md) et l'[ADR 0042](../../docs/adr/0042-jev-decideur-rapide.md).
 
+`catalogue` est le catalogue des poids du système (`catalogue.json`, compilé dans les
+binaires : adresse épinglée, empreinte SHA-256, hôtes permis) ; `pull` télécharge une entrée
+par le socket d'egress, suit les redirections vers les seuls hôtes permis, et ne pose le
+fichier qu'une fois taille, empreinte et en-tête GGUF vérifiés ; une coupure reprend par
+`Range` ([ADR 0046](../../docs/adr/0046-les-poids-geres-par-le-catalogue-du-systeme.md)).
+
 Commandes de vérification, depuis `nix develop` :
 
 ```sh
 cargo test -p providers
 cargo test -p providers --lib -- jev            # protocole, transport, opérateur, routeur
+cargo test -p providers --lib -- catalogue pull # catalogue et téléchargement vérifié
 cargo test -p providers --lib needs_official_clients_versions_et_sessions_vierges -- --ignored --nocapture
 ```
 
