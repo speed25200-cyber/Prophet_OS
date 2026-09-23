@@ -357,6 +357,67 @@ async fn une_annulation_interrompt_l_inference_sans_action_tardive() {
     model.worker.abort();
 }
 
+/// L'arrêt d'urgence (FRONTIER, interface) : une mission en pleine inférence s'arrête, un plan
+/// pas encore lancé est annulé, rien n'est écrit ; un second arrêt ne trouve plus rien.
+#[tokio::test]
+async fn l_arret_d_urgence_arrete_la_mission_en_cours_et_annule_le_plan_en_attente() {
+    let model = controlled_model().await;
+    let chain = Chain::new(&model.endpoint).await;
+    chain.plan("controlled", "Écris une note").await;
+    chain.agents.call("task.spawn", json!({
+        "id":"local-plan", "intent":"Une autre note", "user":"prophet",
+        "manifest": {
+            "agent":{"id":"org.prophet.local-test","version":"1.0.0","name":"Test local","publisher_key":"ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+            "model":{"preferred":["local:controlled"]},
+            "sandbox":{"min_level":0},
+            "capabilities":{"max":{"fs.read":["~/docs/**"],"tool.call":["fs.read"]}},
+            "budget":{"default":{"tokens":20000,"wall_time":"90s","approvals":3}}
+        },
+        "requested":[{"res":"fs","act":"read","match":"~/docs/**"},{"res":"tool","act":"call","match":"fs.read"}],
+        "scopes":["~/docs"],"availability":{"local_models":["controlled"]}
+    })).await.unwrap();
+    chain
+        .agents
+        .call("task.start", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), model.received)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let arret = chain.agents.call("task.halt", json!({})).await.unwrap();
+    assert_eq!(arret["cancel_requested"], json!(["local-test"]), "{arret}");
+    assert_eq!(arret["cancelled"], json!(["local-plan"]), "{arret}");
+    assert_eq!(arret["errors"], json!([]), "{arret}");
+    let status = tokio::time::timeout(std::time::Duration::from_secs(2), chain.wait_terminal())
+        .await
+        .unwrap();
+    assert_eq!(status["state"], "cancelled", "{status}");
+    assert_eq!(status["reason"], "annulée par l'utilisateur", "{status}");
+    let plan = chain
+        .agents
+        .call("task.status", json!({"id":"local-plan"}))
+        .await
+        .unwrap();
+    assert_eq!(plan["state"], "cancelled", "{plan}");
+    let _ = model.release.send(());
+    assert!(
+        !chain
+            .dir
+            .path()
+            .join("home/.prophet/tasks/local-test/work/docs/note.txt")
+            .exists()
+    );
+
+    let encore = chain.agents.call("task.halt", json!({})).await.unwrap();
+    assert_eq!(
+        encore,
+        json!({"cancel_requested":[],"cancelled":[],"unattended":[],"errors":[]})
+    );
+    model.worker.abort();
+}
+
 #[tokio::test]
 async fn une_revocation_entre_inference_et_action_est_appliquee_par_le_vrai_capd() {
     let model = controlled_model().await;

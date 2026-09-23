@@ -767,12 +767,86 @@ impl Handler for Agents {
                 reponse
             }
 
+            // L'arrêt d'urgence (FRONTIER, interface) : toutes les missions en main s'arrêtent
+            // d'un geste de l'humain, comme autant de `task.cancel`.
+            "task.halt" => self.arreter_tout().await,
+
             autre => Err(commun::methode_inconnue(autre)),
         }
     }
 }
 
 impl Agents {
+    /// Arrête toutes les missions en main : chaque travailleur est prié de s'arrêter, chaque
+    /// client officiel lancé est tué par le lanceur de la session, chaque plan pas encore lancé
+    /// est annulé. Une mission non finie que rien ne mène (aucun travailleur ni client) est
+    /// dite à part : il n'y a rien à arrêter. Rien n'est publié ni défait.
+    async fn arreter_tout(&self) -> Result<Value, Error> {
+        let taches = {
+            let runtime = self.runtime.lock().await;
+            runtime
+                .tasks()
+                .into_iter()
+                .filter(|t| !t.state.is_terminal())
+                .map(|t| {
+                    let client = t
+                        .driver
+                        .as_deref()
+                        .is_some_and(|d| d.starts_with("driver:"));
+                    let plan = matches!(t.state, agentd::State::Pending | agentd::State::Planned);
+                    (t.id.clone(), plan, client)
+                })
+                .collect::<Vec<_>>()
+        };
+        let en_main = {
+            let jobs = self
+                .jobs
+                .lock()
+                .map_err(|_| Error::new(ErrorCode::InternalError, "travailleurs indisponibles"))?;
+            taches
+                .into_iter()
+                .map(|(id, plan, client)| {
+                    let travailleur =
+                        jobs.contains_key(&id) || jobs.contains_key(&cle_de_pilote(&id));
+                    (id, travailleur || plan, client)
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut arret_demande = Vec::new();
+        let mut annulees = Vec::new();
+        let mut sans_travailleur = Vec::new();
+        let mut erreurs = Vec::new();
+        for (id, en_main, client) in en_main {
+            if !en_main {
+                sans_travailleur.push(id);
+                continue;
+            }
+            if client && let Some(socket) = self.pilot.as_deref() {
+                arreter_le_pilote(socket, &id).await;
+            }
+            match self.annuler(id.clone()).await {
+                Ok(v) if v.get("cancel_requested").is_some() => arret_demande.push(id),
+                Ok(_) => annulees.push(id),
+                // Un client officiel pas encore attaché n'a pas de travailleur ici : le tuer
+                // suffit, la mission échoue en le disant.
+                Err(_) if client => arret_demande.push(id),
+                Err(e) => erreurs.push(json!({"id": id, "error": e.message})),
+            }
+        }
+        tracing::warn!(
+            arret_demande = arret_demande.len(),
+            annulees = annulees.len(),
+            erreurs = erreurs.len(),
+            "arrêt d'urgence"
+        );
+        Ok(json!({
+            "cancel_requested": arret_demande,
+            "cancelled": annulees,
+            "unattended": sans_travailleur,
+            "errors": erreurs,
+        }))
+    }
+
     /// Annule une mission : un travailleur en cours est prié de s'arrêter, une séance d'outils
     /// est conclue, une mission pas encore lancée est annulée dans l'état.
     async fn annuler(&self, id: String) -> Result<Value, Error> {

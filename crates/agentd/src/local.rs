@@ -516,9 +516,14 @@ impl Mission {
         task.budget.spent.wall_time_s = control.started.elapsed().as_secs();
         let (state, reason, mut data) = match result {
             Ok(data) => (State::Done, None, data),
-            Err(error) if self.stop.load(Ordering::Acquire) => {
-                (State::Cancelled, Some(error), json!({}))
-            }
+            // Un arrêt demandé interrompt souvent une génération en vol : l'erreur qu'elle
+            // rend (« erreur d'entrée-sortie : annulation demandée ») n'est pas la cause, que
+            // l'humain lit ici comme pour un plan annulé.
+            Err(_) if self.stop.load(Ordering::Acquire) => (
+                State::Cancelled,
+                Some("annulée par l'utilisateur".to_owned()),
+                json!({}),
+            ),
             Err(error) => (State::Failed, Some(error), json!({})),
         };
         let state = if self.stop.load(Ordering::Acquire) {

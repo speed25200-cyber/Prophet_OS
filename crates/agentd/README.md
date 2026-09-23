@@ -93,12 +93,16 @@ prophet task start note-locale
 prophet --json task ls
 prophet task result note-locale
 prophet task cancel note-locale
+prophet task halt
 prophet task apply note-locale
 prophet task undo note-locale
 ```
 
 `new` rend le plan sans démarrer. `start` accuse réception du lancement en arrière-plan.
 `cancel` accuse réception de la demande ; attendre l'état final pour confirmer l'arrêt.
+`halt` est l'arrêt d'urgence : le même geste pour toutes les missions en main, clients
+officiels compris ; il dit ce qui s'arrête, ce qui est annulé et ce qui a résisté, et sort en
+erreur si une mission n'a pas pu être arrêtée.
 `result` rend le texte, la raison d'arrêt, le budget et, en cas de fin normale, le diff SFS.
 Un identifiant déjà utilisé ne peut pas être relancé. Le jeton expire à partir de la
 planification ; un long délai de relecture peut donc nécessiter un nouveau plan.
