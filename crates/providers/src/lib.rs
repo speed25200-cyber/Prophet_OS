@@ -18,6 +18,7 @@ pub mod catalogue;
 pub mod conformance;
 pub mod jev;
 pub mod local;
+pub mod memory;
 pub mod mock;
 pub mod native;
 pub mod official;

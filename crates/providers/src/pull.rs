@@ -99,6 +99,28 @@ pub enum PullError {
     /// Arrêté à la demande ; le fichier partiel reste pour reprendre.
     #[error("téléchargement arrêté")]
     Cancelled,
+    /// Le dossier des poids n'a pas la place de ce qui reste à recevoir : rien n'est demandé.
+    #[error(
+        "place insuffisante dans {dir} : {} à recevoir, {} libres ; retirez un poids (prophet model rm) ou libérez le disque",
+        crate::memory::gigabytes(*.needed),
+        crate::memory::gigabytes(*.available)
+    )]
+    NoSpace {
+        /// Le dossier des poids.
+        dir: String,
+        /// Octets qui restent à recevoir.
+        needed: u64,
+        /// Octets libres pour un compte non privilégié.
+        available: u64,
+    },
+}
+
+/// Octets libres dans le système de fichiers de `dir`, pour un compte non privilégié ; `None` si
+/// le noyau ne le dit pas.
+#[must_use]
+pub fn free_space(dir: &Path) -> Option<u64> {
+    let stat = rustix::fs::statvfs(dir).ok()?;
+    stat.f_bavail.checked_mul(stat.f_frsize)
 }
 
 /// Le chemin partiel d'une entrée dans un dossier.
@@ -143,6 +165,17 @@ pub fn pull(
     if part.exists() {
         let mut fichier = File::open(&part).map_err(|e| PullError::Io(e.to_string()))?;
         received = hash_into(&mut fichier, &mut hasher)?;
+    }
+    // Un disque plein à 90 % du fichier, c'est des gigaoctets reçus pour rien : on le dit avant.
+    if let (Some(total), Some(available)) = (entry.bytes, free_space(dir)) {
+        let needed = total.saturating_sub(received);
+        if needed > available {
+            return Err(PullError::NoSpace {
+                dir: dir.display().to_string(),
+                needed,
+                available,
+            });
+        }
     }
     let mut url = Url::parse(&entry.url).map_err(PullError::Transport)?;
     let mut redirections = 0;
@@ -686,6 +719,27 @@ mod tests {
         let (r, _) = tirer(&entry, dir.path(), &proxy.egress());
         assert_eq!(r.unwrap(), pose);
         assert_eq!(proxy.requetes.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn un_poids_plus_gros_que_la_place_libre_n_est_pas_demande() {
+        let proxy = FauxProxy::poser(|_| ok(b"jamais"));
+        let dir = tempfile::tempdir().unwrap();
+        let libre = free_space(dir.path()).expect("le noyau dit la place libre");
+        let mut entry = entree("https://depot.example/essai.gguf", sha(b"x"));
+        entry.bytes = Some(libre.saturating_add(1 << 40));
+        let (r, _) = tirer(&entry, dir.path(), &proxy.egress());
+        let erreur = r.unwrap_err();
+        assert!(
+            matches!(erreur, PullError::NoSpace { needed, .. } if needed == libre.saturating_add(1 << 40)),
+            "{erreur:?}"
+        );
+        assert!(erreur.to_string().contains("prophet model rm"), "{erreur}");
+        assert!(
+            proxy.requetes.lock().unwrap().is_empty(),
+            "rien n'est demandé au dépôt"
+        );
+        assert!(!partial_path(dir.path(), &entry).exists());
     }
 
     #[test]

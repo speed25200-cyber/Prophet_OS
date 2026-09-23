@@ -50,6 +50,15 @@ pub struct Weights {
     pub layers: Option<u64>,
     /// Nombre de tenseurs annoncé.
     pub tensors: u64,
+    /// Octets du cache KV par token de contexte, en f16 comme le moteur le tient par défaut :
+    /// couches × têtes KV × (dimension des clés + des valeurs) × 2. Absent si l'en-tête ne donne
+    /// pas de quoi le calculer (voir [`crate::memory`]).
+    #[serde(default)]
+    pub kv_bytes_per_token: Option<u64>,
+    /// Taille du vocabulaire (`tokenizer.ggml.tokens`) : elle dimensionne les logits que le
+    /// moteur réserve.
+    #[serde(default)]
+    pub vocabulary: Option<u64>,
 }
 
 impl Weights {
@@ -60,12 +69,14 @@ impl Weights {
     }
 }
 
-/// Une valeur de métadonnée gardée : les scalaires et les chaînes, jamais les tableaux.
+/// Une valeur de métadonnée gardée : les scalaires et les chaînes ; d'un tableau, sa seule
+/// longueur.
 #[derive(Debug, Clone, PartialEq)]
 enum Value {
     Unsigned(u64),
     Signed(i64),
     Text(String),
+    Array(u64),
     Other,
 }
 
@@ -122,6 +133,19 @@ pub fn read(path: &Path) -> Result<Weights, String> {
             .as_deref()
             .and_then(|a| number(&format!("{a}.{suffix}")))
     };
+    let layers = per_arch("block_count");
+    let kv_bytes_per_token = kv_per_token(
+        layers,
+        per_arch("embedding_length"),
+        per_arch("attention.head_count"),
+        per_arch("attention.head_count_kv"),
+        per_arch("attention.key_length"),
+        per_arch("attention.value_length"),
+    );
+    let vocabulary = keys.iter().find_map(|(key, v)| match v {
+        Value::Array(n) if key == "tokenizer.ggml.tokens" => Some(*n),
+        _ => None,
+    });
     Ok(Weights {
         path: path.to_owned(),
         bytes,
@@ -130,10 +154,37 @@ pub fn read(path: &Path) -> Result<Weights, String> {
         size_label: text("general.size_label"),
         quantization: number("general.file_type").map(file_type),
         context_length: per_arch("context_length"),
-        layers: per_arch("block_count"),
+        layers,
         architecture,
         tensors,
+        kv_bytes_per_token,
+        vocabulary,
     })
+}
+
+/// Le cache KV par token, tel que llama.cpp le dimensionne : pour chaque couche, une clé et une
+/// valeur par tête KV, en f16. Les têtes KV valent les têtes d'attention quand l'en-tête ne les
+/// distingue pas (pas de GQA) ; la dimension d'une tête vaut la largeur du modèle divisée par
+/// ses têtes quand l'en-tête ne la donne pas. Des têtes KV données couche par couche (un
+/// tableau) retombent sur les têtes d'attention : l'estimation reste au-dessus du réel.
+fn kv_per_token(
+    layers: Option<u64>,
+    embedding: Option<u64>,
+    heads: Option<u64>,
+    heads_kv: Option<u64>,
+    key: Option<u64>,
+    value: Option<u64>,
+) -> Option<u64> {
+    let layers = layers.filter(|&n| n > 0)?;
+    let heads = heads.filter(|&n| n > 0)?;
+    let heads_kv = heads_kv.filter(|&n| n > 0).unwrap_or(heads);
+    let head = embedding.map(|e| e / heads);
+    let key = key.or(head).filter(|&n| n > 0)?;
+    let value = value.or(head).filter(|&n| n > 0)?;
+    layers
+        .checked_mul(heads_kv)?
+        .checked_mul(key.checked_add(value)?)?
+        .checked_mul(2)
 }
 
 /// Le catalogue d'un dossier : chaque `*.gguf`, dans l'ordre des noms, lu ou refusé avec sa
@@ -338,7 +389,7 @@ fn value<R: Read + Seek>(r: &mut R, kind: u32, file_len: u64) -> Result<Value, S
                 }
                 _ => return Err(format!("tableau d'un type {inner} non pris en charge")),
             }
-            Value::Other
+            Value::Array(len)
         }
         other => return Err(format!("type de métadonnée {other} inconnu")),
     })
@@ -396,7 +447,12 @@ mod tests {
             .text("general.size_label", "1.7B")
             .u32("general.file_type", 7)
             .u32("qwen3.context_length", 40_960)
-            .u32("qwen3.block_count", 28);
+            .u32("qwen3.block_count", 28)
+            .u32("qwen3.embedding_length", 2048)
+            .u32("qwen3.attention.head_count", 16)
+            .u32("qwen3.attention.head_count_kv", 8)
+            .u32("qwen3.attention.key_length", 128)
+            .u32("qwen3.attention.value_length", 128);
         // Un vocabulaire, qu'il faut sauter sans le garder.
         e.key("tokenizer.ggml.tokens", 9);
         e.0.extend(8u32.to_le_bytes());
@@ -428,6 +484,9 @@ mod tests {
         assert_eq!(w.quantization.as_deref(), Some("Q8_0"));
         assert_eq!(w.context_length, Some(40_960));
         assert_eq!(w.layers, Some(28));
+        // 28 couches × 8 têtes KV × (128 + 128) × 2 octets ; trois tokens de vocabulaire.
+        assert_eq!(w.kv_bytes_per_token, Some(28 * 8 * 256 * 2));
+        assert_eq!(w.vocabulary, Some(3));
         assert_eq!(w.version, 3);
         assert_eq!(w.bytes, std::fs::metadata(&path).unwrap().len());
     }
@@ -521,6 +580,43 @@ mod tests {
         let tout = installed(dir.path(), &[]);
         assert_eq!(tout.len(), 2, "{tout:?}");
         assert_eq!(tout[1].as_ref().unwrap().path, tire);
+    }
+
+    #[test]
+    fn le_cache_kv_se_deduit_des_tetes_quand_l_en_tete_ne_le_detaille_pas() {
+        // Sans GQA ni dimension de tête : autant de têtes KV que d'attention, largeur / têtes.
+        assert_eq!(
+            kv_per_token(Some(24), Some(2048), Some(32), None, None, None),
+            Some(24 * 32 * (64 + 64) * 2)
+        );
+        // Des têtes KV données couche par couche (un tableau) retombent sur les têtes.
+        let mut e = Entete::new();
+        e.text("general.architecture", "llama")
+            .u32("llama.block_count", 2)
+            .u32("llama.embedding_length", 64)
+            .u32("llama.attention.head_count", 4);
+        e.key("llama.attention.head_count_kv", 9);
+        e.0.extend(4u32.to_le_bytes());
+        e.0.extend(2u64.to_le_bytes());
+        e.0.extend([1u8, 0, 0, 0, 2, 0, 0, 0]);
+        let dir = tempfile::tempdir().unwrap();
+        let w = read(&ecrire(dir.path(), "l.gguf", &e.bytes())).unwrap();
+        assert_eq!(w.kv_bytes_per_token, Some(2 * 4 * (16 + 16) * 2));
+        assert_eq!(w.vocabulary, None);
+        // Rien pour le calculer : rien d'inventé.
+        assert_eq!(
+            kv_per_token(None, Some(64), Some(4), None, None, None),
+            None
+        );
+        assert_eq!(kv_per_token(Some(2), None, Some(4), None, None, None), None);
+        assert_eq!(
+            kv_per_token(Some(2), Some(64), Some(0), None, None, None),
+            None
+        );
+        assert_eq!(
+            kv_per_token(Some(u64::MAX), None, Some(2), None, Some(8), Some(8)),
+            None
+        );
     }
 
     #[test]
