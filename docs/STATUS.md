@@ -1653,6 +1653,10 @@ donne le détail.
   de 1,6 fois les tokens et 1,9 fois le processeur moteur de la boucle nue, qui conclut plus tôt.
   Neuvième passage (`13b3205`) : **Prophet 21/45, boucle nue 14/45** et **10/15 contre 9/15**
   (4B) ; « total-des-ventes » 3/3 des deux côtés dès que `calc.eval` renvoie vers `fs.read`.
+  Dixième passage (`c0b0f88`, `fs.copy`) : **Prophet 20/45, boucle nue 12/45** ; avec Qwen3 4B,
+  11/15 des deux côtés, « ranger-par-annee » réussie pour la première fois. Avec le petit
+  modèle, Prophet plafonne autour de 20-21 sur 45 depuis le huitième passage : le reste de
+  l'écart tient au modèle.
 - Concurrence et annulation sur le vrai moteur (FRONTIER, moteurs locaux ; essai
   `deux_requetes_se_partagent_le_moteur_et_un_abandon_le_libere`, vert sur `dd5ce52`) : sur une
   instance à une place comme celle de l'image, deux requêtes simultanées aboutissent toutes
