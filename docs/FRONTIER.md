@@ -257,6 +257,12 @@ le critère de M8-T7 est tenu en CI par les vrais binaires (`prophet model pull 
 familles sont validées sur processeur dans la même CI (`c44a349`) : Qwen3 8B, IBM Granite 3.3
 2B, SmolLM2 1.7B, Phi-3 mini et Llama 3.2 3B, chacune tirée de Hugging Face par egress,
 vérifiée, servie par le routeur épinglé et interrogée — toutes répondent juste (« Paris »), de
-13 à 31 tokens/s en génération sur quatre cœurs sans carte. Restent la VRAM, ses budgets et la
-matrice GPU, à mesurer sur une carte ; aucun critère complet de la version complète n'est
-coché.
+13 à 31 tokens/s en génération sur quatre cœurs sans carte. Le même jour, la mémoire se dit
+avant de charger (ADR 0047) : estimée depuis l'en-tête GGUF (fichier, cache KV de la fenêtre,
+calcul), confrontée à la machine, montrée par la page Modèles, rendue aux agents par
+`model.list`, et un modèle qui ne tiendrait pas n'est ni servi ni confié à une mission ; en CI,
+l'estimation couvre la mémoire anonyme du vrai moteur, qui garde en plus son fichier projeté.
+La découverte des capacités lit le gabarit de conversation (outils, réflexion), et un essai
+prouve que la surface compose ses images pendant une génération en flux (médiane 6,0 ms en
+release). Restent la VRAM, ses budgets et la matrice GPU, à mesurer sur une carte ; aucun
+critère complet de la version complète n'est coché.
