@@ -95,6 +95,11 @@ jobs:
         env:
           PROPHET_TEST_LLAMA_SERVER: ${{ github.workspace }}/moteur/bin/llama-server
         run: cargo test -p agentd --test poids -- --ignored --nocapture plusieurs_familles_se_servent_et_repondent
+      # FRONTIER : concurrence et annulation, sur une instance à une place comme l'image.
+      - name: Deux requêtes ensemble, puis un abandon qui libère le moteur
+        env:
+          PROPHET_TEST_LLAMA_SERVER: ${{ github.workspace }}/moteur/bin/llama-server
+        run: cargo test -p agentd --test poids -- --ignored --nocapture deux_requetes_se_partagent_le_moteur_et_un_abandon_le_libere
 
   chatgpt:
     name: ChatGPT sous NixOS (compatibilité)

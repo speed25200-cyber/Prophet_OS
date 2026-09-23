@@ -987,3 +987,131 @@ async fn plusieurs_familles_se_servent_et_repondent() {
     }
     eprintln!("mesure : réponse juste (« Paris ») pour {reussies:?}");
 }
+
+/// Une complétion sur le moteur local, rendue avec sa durée.
+fn completion(port: u16, nom: &str, question: &str, jetons: u32) -> (Value, std::time::Duration) {
+    let debut = std::time::Instant::now();
+    let reponse = http_local(
+        port,
+        "POST",
+        "/v1/chat/completions",
+        &json!({
+            "model": nom,
+            "messages": [{"role": "user", "content": question}],
+            "max_tokens": jetons,
+            "temperature": 0,
+        }),
+    );
+    (reponse, debut.elapsed())
+}
+
+/// FRONTIER, moteurs locaux : « concurrence et annulation », sur le vrai moteur tel que l'image
+/// le lance (une place par instance, `parallel = 1`). Deux requêtes simultanées aboutissent
+/// toutes deux, l'une après l'autre ; une génération longue que son client abandonne libère
+/// l'instance aussitôt, au lieu de courir jusqu'à sa limite de tokens.
+#[tokio::test]
+#[ignore = "needs_llama_server: PROPHET_TEST_LLAMA_SERVER (llama-server épinglé), Hugging Face joignable, 1 Go"]
+async fn deux_requetes_se_partagent_le_moteur_et_un_abandon_le_libere() {
+    let moteur = std::env::var("PROPHET_TEST_LLAMA_SERVER")
+        .expect("PROPHET_TEST_LLAMA_SERVER : le llama-server épinglé (nix build .#llama-cpp)");
+    let chaine = Chaine::new(None).await;
+    let id = "smollm2-1.7b-q4";
+    prophet(&chaine, &["model", "pull", id]).await;
+    let port = 18_130;
+    let mut routeur = routeur(&moteur, &chaine, port).await;
+    let servi: Value = serde_json::from_str(
+        &prophet(
+            &chaine,
+            &[
+                "--json",
+                "model",
+                "serve",
+                id,
+                "--endpoint",
+                &format!("http://127.0.0.1:{port}/v1"),
+            ],
+        )
+        .await,
+    )
+    .unwrap();
+    let nom = servi["model"].as_str().unwrap().to_owned();
+
+    // Seule, une requête courte, pour l'étalon.
+    let n = nom.clone();
+    let (_, seule) =
+        tokio::task::spawn_blocking(move || completion(port, &n, "Count from 1 to 10.", 40))
+            .await
+            .unwrap();
+
+    // Deux ensemble : toutes deux aboutissent.
+    let debut = std::time::Instant::now();
+    let (a, b) = (nom.clone(), nom.clone());
+    let premiere =
+        tokio::task::spawn_blocking(move || completion(port, &a, "Count from 1 to 10.", 40));
+    let seconde =
+        tokio::task::spawn_blocking(move || completion(port, &b, "Name three colours.", 40));
+    let ((r1, d1), (r2, d2)) = (premiere.await.unwrap(), seconde.await.unwrap());
+    let ensemble = debut.elapsed();
+    eprintln!(
+        "mesure : concurrence sur {id} : seule {seule:?} ; ensemble {ensemble:?} (l'une {d1:?}, l'autre {d2:?})"
+    );
+    for r in [&r1, &r2] {
+        assert!(
+            r["usage"]["completion_tokens"].as_u64().unwrap_or(0) > 0,
+            "{r}"
+        );
+    }
+
+    // Une génération longue, en flux, abandonnée par son client après son premier fragment.
+    let n = nom.clone();
+    let abandon = tokio::task::spawn_blocking(move || {
+        use std::io::{Read as _, Write as _};
+        let corps = json!({
+            "model": n,
+            "messages": [{"role": "user", "content": "Write a very long story about the sea, with many chapters."}],
+            "max_tokens": 3000,
+            // Sans fin naturelle : seule l'annulation peut l'arrêter avant 3 000 tokens.
+            "ignore_eos": true,
+            "temperature": 0.8,
+            "stream": true,
+        })
+        .to_string();
+        let mut flux = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write!(
+            flux,
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corps}",
+            corps.len()
+        )
+        .unwrap();
+        let mut debut = vec![0u8; 4096];
+        let lu = flux.read(&mut debut).unwrap_or(0);
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        drop(flux);
+        lu
+    })
+    .await
+    .unwrap();
+    assert!(abandon > 0, "le flux n'a rien rendu avant l'abandon");
+    // Sans annulation, 3 000 tokens à ~30 tokens/s tiendraient l'instance plus d'une minute ;
+    // seule, cette question répond en une ou deux secondes.
+    let n = nom.clone();
+    let (r, apres) = tokio::task::spawn_blocking(move || {
+        completion(
+            port,
+            &n,
+            "Answer in one word: what is the capital of France?",
+            8,
+        )
+    })
+    .await
+    .unwrap();
+    eprintln!(
+        "mesure : après un abandon sur {id}, la requête suivante répond en {apres:?} : {}",
+        r["choices"][0]["message"]["content"]
+    );
+    assert!(
+        apres < std::time::Duration::from_secs(15),
+        "l'instance n'a pas été libérée par l'abandon : {apres:?}"
+    );
+    arreter(&mut routeur).await;
+}
