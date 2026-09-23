@@ -723,18 +723,34 @@ impl Tool for ListModels {
             })
             .collect();
         let machine = providers::memory::system();
+        let poids = poids_locaux(
+            &providers::weights::dir(),
+            &providers::weights::configured(),
+            providers::memory::context(),
+            machine.as_ref(),
+        );
         CallResult::structured(json!({
             "drivers": pilotes,
             "local_context": providers::memory::context(),
             "system_memory": machine,
-            "local_weights": poids_locaux(
-                &providers::weights::dir(),
-                &providers::weights::configured(),
-                providers::memory::context(),
-                machine.as_ref(),
-            ),
+            "recommended_local_weight": recommande(&poids),
+            "local_weights": poids,
         }))
     }
+}
+
+/// Le poids local qu'un agent choisirait sans autre critère : le plus gros qui déclare les appels
+/// d'outils et tient dans la mémoire disponible. Aucun : `null`, plutôt qu'un choix qui ferait
+/// paginer la machine ou ne saurait pas agir.
+fn recommande(poids: &[Value]) -> Value {
+    poids
+        .iter()
+        .filter(|p| p["template"]["tool_calls"] == true && p["memory"]["fit"] == "fits")
+        .max_by(|a, b| {
+            let taille = |p: &Value| p["memory"]["weights"].as_u64().unwrap_or(0);
+            taille(a).cmp(&taille(b))
+        })
+        .map_or(Value::Null, |p| p["file"].clone())
 }
 
 /// Les poids locaux, tels que leurs en-têtes les décrivent : ce qu'un agent peut attendre d'un
@@ -834,6 +850,19 @@ mod tests {
         assert_eq!(memoire["fit"], "fits");
         // Sans gabarit de conversation, rien n'est déclaré.
         assert!(poids[1]["template"].is_null());
+        // Rien ne déclare les outils : pas de recommandation plutôt qu'un modèle muet.
+        assert!(recommande(&poids).is_null());
+        let avec_outils = |fichier: &str, octets: u64, fit: &str| {
+            json!({"file": fichier, "template": {"tool_calls": true, "reasoning": false},
+                   "memory": {"weights": octets, "fit": fit}})
+        };
+        let choix = [
+            avec_outils("petit.gguf", 1_000, "fits"),
+            avec_outils("moyen.gguf", 5_000, "fits"),
+            avec_outils("enorme.gguf", 90_000, "too_large"),
+            json!({"file": "muet.gguf", "template": {"tool_calls": false}, "memory": {"weights": 9_000, "fit": "fits"}}),
+        ];
+        assert_eq!(recommande(&choix), "moyen.gguf");
     }
 
     #[test]
