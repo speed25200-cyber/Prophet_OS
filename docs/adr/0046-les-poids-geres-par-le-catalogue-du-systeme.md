@@ -74,7 +74,10 @@ hostile.
 
 - Egress applique à ces requêtes sa détection ordinaire. Les adresses signées du CDN du dépôt
   sont longues ; au-delà de 2 000 caractères, egress les refuserait comme une exfiltration, et le
-  téléchargement échouerait avec ce motif — à mesurer au premier téléchargement réel.
+  téléchargement échouerait avec ce motif. L'essai `needs_network`
+  `un_vrai_poids_du_catalogue_arrive_de_hugging_face_par_egress` le tranche : Qwen3 0.6B tiré de
+  Hugging Face par le vrai egress, TLS et redirections compris, empreinte publiée vérifiée ; le
+  travail d'isolation de la CI le lance quand le dépôt répond.
 - `prophet model serve` n'est pas encore là : un poids téléchargé est au catalogue installé, il
   n'est pas servi tant que la configuration du moteur ne le nomme pas. Le mode routeur de
   llama-server sait lire un dossier de modèles ; le brancher sur `models/catalogue` est la suite.

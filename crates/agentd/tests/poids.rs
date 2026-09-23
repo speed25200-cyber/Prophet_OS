@@ -93,7 +93,8 @@ struct Chaine {
 }
 
 impl Chaine {
-    async fn new(catalogue: &Value) -> Self {
+    /// La chaîne, avec ce catalogue à la place de celui du système s'il est donné.
+    async fn new(catalogue: Option<&Value>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
         std::fs::create_dir_all(&home).unwrap();
@@ -125,20 +126,23 @@ impl Chaine {
             )
             .await;
         let chemin_catalogue = dir.path().join("catalogue.json");
-        std::fs::write(&chemin_catalogue, catalogue.to_string()).unwrap();
         let poids = dir.path().join("poids").join("catalogue");
+        let mut env = vec![
+            ("PROPHET_HOME", home.to_str().unwrap()),
+            ("PROPHET_CAPD_SOCKET", cap.to_str().unwrap()),
+            ("PROPHET_LEDGER_SOCKET", ledger_socket.to_str().unwrap()),
+            ("PROPHET_EGRESS_SOCKET", egress_socket.to_str().unwrap()),
+            ("PROPHET_PULL_DIR", poids.to_str().unwrap()),
+        ];
+        if let Some(catalogue) = catalogue {
+            std::fs::write(&chemin_catalogue, catalogue.to_string()).unwrap();
+            env.push(("PROPHET_MODEL_CATALOG", chemin_catalogue.to_str().unwrap()));
+        }
         let agentd = Daemon::lancer_avec(
             AGENTD,
             &dir.path().join("agents.sock"),
             &dir.path().join("agent-state"),
-            &[
-                ("PROPHET_HOME", home.to_str().unwrap()),
-                ("PROPHET_CAPD_SOCKET", cap.to_str().unwrap()),
-                ("PROPHET_LEDGER_SOCKET", ledger_socket.to_str().unwrap()),
-                ("PROPHET_EGRESS_SOCKET", egress_socket.to_str().unwrap()),
-                ("PROPHET_MODEL_CATALOG", chemin_catalogue.to_str().unwrap()),
-                ("PROPHET_PULL_DIR", poids.to_str().unwrap()),
-            ],
+            &env,
         );
         let agents = agentd.joindre().await;
         Self {
@@ -156,9 +160,15 @@ impl Chaine {
         self.dir.path().join("poids").join("catalogue")
     }
 
-    /// Attend la fin du téléchargement d'une entrée, et rend son suivi.
+    /// Attend la fin du téléchargement d'une entrée, dix secondes au plus, et rend son suivi.
     async fn attendre(&self, id: &str) -> Value {
-        for _ in 0..200 {
+        self.attendre_au_plus(id, std::time::Duration::from_secs(10))
+            .await
+    }
+
+    async fn attendre_au_plus(&self, id: &str, delai: std::time::Duration) -> Value {
+        let limite = std::time::Instant::now() + delai;
+        while std::time::Instant::now() < limite {
             let suivis = self.agents.call("model.pulls", json!({})).await.unwrap();
             if let Some(suivi) = suivis.as_array().unwrap().iter().find(|s| s["id"] == id)
                 && suivi["state"] != "running"
@@ -199,10 +209,10 @@ async fn un_poids_du_catalogue_arrive_par_le_proxy_verifie_et_journalise() {
     let recu = Arc::new(Mutex::new(Vec::new()));
     let port = depot(contenu.clone(), recu.clone()).await;
     let faux = "0".repeat(64);
-    let chaine = Chaine::new(&json!({
+    let chaine = Chaine::new(Some(&json!({
         "version": 1,
         "entries": [entree("essai", port, &empreinte), entree("faux", port, &faux)],
-    }))
+    })))
     .await;
 
     let catalogue = chaine
@@ -287,4 +297,39 @@ async fn un_poids_du_catalogue_arrive_par_le_proxy_verifie_et_journalise() {
     let retires = chaine.evenements("model.removed").await;
     assert_eq!(retires.len(), 1, "{retires:?}");
     assert_eq!(retires[0]["payload"]["file"], "essai.gguf");
+}
+
+/// Le vrai chemin, de bout en bout : une entrée du catalogue du système arrive de Hugging Face
+/// par le vrai egress, TLS terminé par le proxy, redirections du dépôt vers son CDN comprises,
+/// sous le jeton que capd émet pour les hôtes de l'entrée — et l'empreinte publiée correspond.
+/// C'est aussi ce qui dit si les adresses signées du CDN passent la détection d'exfiltration
+/// d'egress (ADR 0046). 640 Mo : réservé aux machines qui joignent le dépôt.
+#[tokio::test]
+#[ignore = "needs_network: Hugging Face joignable, 640 Mo téléchargés"]
+async fn un_vrai_poids_du_catalogue_arrive_de_hugging_face_par_egress() {
+    let chaine = Chaine::new(None).await;
+    let id = "qwen3-0.6b-q8";
+    let debut = std::time::Instant::now();
+    let depart = chaine
+        .agents
+        .call("model.pull", json!({"id": id}))
+        .await
+        .unwrap();
+    assert_eq!(depart["state"], "running", "{depart}");
+    let fin = chaine
+        .attendre_au_plus(id, std::time::Duration::from_secs(900))
+        .await;
+    let duree = debut.elapsed();
+    assert_eq!(fin["state"], "done", "{fin}");
+    let octets = fin["received"].as_u64().unwrap();
+    eprintln!(
+        "mesure : {id} téléchargé et vérifié par egress, {octets} octets en {duree:?} ({:.0} Mo/s)",
+        octets as f64 / 1e6 / duree.as_secs_f64()
+    );
+    let poses = chaine.evenements("model.pulled").await;
+    assert_eq!(poses.len(), 1, "{poses:?}");
+    assert_eq!(
+        poses[0]["payload"]["sha256"],
+        "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031"
+    );
 }

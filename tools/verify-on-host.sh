@@ -251,6 +251,15 @@ materiel_pour() {
         return 0
       fi
       echo "aucun périphérique Vulkan utilisable (un nœud /dev/dri ne suffit pas)"; return 1 ;;
+    needs_network)
+      # Le dépôt de poids du catalogue du système (ADR 0046) : joignable, ou l'essai n'a pas
+      # de sens. On le demande à son API, qui répond vite et sans rien télécharger.
+      if command -v curl >/dev/null 2>&1 \
+         && [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+               https://huggingface.co/api/models/Qwen/Qwen3-0.6B-GGUF)" = "200" ]; then
+        return 0
+      fi
+      echo "Hugging Face injoignable d'ici"; return 1 ;;
     needs_claude_login|needs_codex_login|needs_gemini_login)
       # Une session de compte ne se sonde pas : l'affirmer serait deviner.
       echo "exige un compte connecté, ce qu'aucune sonde ne peut établir"; return 1 ;;
