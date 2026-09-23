@@ -1734,8 +1734,9 @@ donne le détail.
   gardait 37 % d'un cœur indéfiniment, pris au moteur local : sur un rastériseur logiciel, il se
   fige après deux minutes sans geste et repart d'où il était (ADR 0055, `da9fd65`) — 0,2 % d'un
   cœur en veille. `--mesure` sépare le processeur de l'attente du GPU, `--repos` détaille les
-  phases du repos.
-- `just check` : **883 réussis, 0 échec, 54 ignorés** (`32a20ea`), format, clippy, contrôles
+  phases du repos. L'essai des approbations de mcp-system attendait encore qu'une décision de
+  tâche couvre une action irréversible : il suit désormais l'ADR 0054 (`73f2031`).
+- `just check` : **941 réussis, 0 échec, 67 ignorés** (`73f2031`), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
