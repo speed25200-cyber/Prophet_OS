@@ -375,6 +375,8 @@ async fn le_catalogue_porte_les_empreintes_que_le_depot_publie() {
     )
     .unwrap();
     let egress = providers::pull::Egress::new(chaine.egress.clone(), &jeton).unwrap();
+    let pour_les_entetes =
+        std::sync::Arc::new(providers::pull::Egress::new(chaine.egress.clone(), &jeton).unwrap());
     let essayer = move |url: String| {
         let url = providers::catalogue::Url::parse(&url).unwrap();
         providers::pull::get_json(&egress, &url, 4 * 1024 * 1024)
@@ -408,6 +410,36 @@ async fn le_catalogue_porte_les_empreintes_que_le_depot_publie() {
         if let Some(octets) = entree.bytes {
             assert_eq!(publie["size"], octets, "{}", entree.id);
         }
+        // L'en-tête du fichier même, lu par ses 16 premiers Mio : le cache KV et le vocabulaire
+        // qui permettent de dire la mémoire avant de télécharger (ADR 0047).
+        let (e, egress) = (entree.clone(), pour_les_entetes.clone());
+        let debut =
+            tokio::task::spawn_blocking(move || providers::pull::get_prefix(&e, &egress, 16 << 20))
+                .await
+                .unwrap()
+                .unwrap_or_else(|erreur| panic!("{} : en-tête illisible : {erreur}", entree.id));
+        let fichier = chaine.dir.path().join(format!("entete-{}", entree.file));
+        std::fs::write(&fichier, &debut).unwrap();
+        let lu = providers::weights::read(&fichier)
+            .unwrap_or_else(|erreur| panic!("{} : {erreur}", entree.id));
+        eprintln!(
+            "mesure : {} en-tête {} couches, {:?} octets de cache KV par token, vocabulaire {:?}",
+            entree.id,
+            lu.layers.unwrap_or(0),
+            lu.kv_bytes_per_token,
+            lu.vocabulary
+        );
+        assert!(
+            lu.kv_bytes_per_token.is_some() && lu.vocabulary.is_some(),
+            "{} : l'en-tête doit permettre l'estimation",
+            entree.id
+        );
+        assert_eq!(
+            (entree.kv_bytes_per_token, entree.vocabulary),
+            (lu.kv_bytes_per_token, lu.vocabulary),
+            "{} : le catalogue doit porter ce que l'en-tête dit",
+            entree.id
+        );
     }
     // D'autres familles, à licence ouverte, pour valider le moteur au-delà de Qwen3.
     for (depot, motif) in [

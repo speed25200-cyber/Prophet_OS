@@ -390,8 +390,65 @@ fn hex(octets: &[u8]) -> String {
     })
 }
 
+/// Les `max_bytes` premiers octets du fichier d'une entrée, par le proxy de sortie (`Range`),
+/// redirections suivies dans les seuls hôtes de l'entrée : de quoi lire son en-tête GGUF sans
+/// tirer des gigaoctets.
+///
+/// # Errors
+/// Proxy injoignable, refus, redirection hors des hôtes permis, réponse autre que 200 ou 206.
+pub fn get_prefix(entry: &Entry, egress: &Egress, max_bytes: u64) -> Result<Vec<u8>, PullError> {
+    let mut url = Url::parse(&entry.url).map_err(PullError::Transport)?;
+    let plage = format!("bytes=0-{}", max_bytes.saturating_sub(1));
+    for _ in 0..=MAX_REDIRECTS {
+        if !entry.permits(&url.authority) {
+            return Err(PullError::Refused {
+                status: 0,
+                detail: format!(
+                    "redirection vers {}, hôte que le catalogue ne permet pas",
+                    url.authority
+                ),
+            });
+        }
+        let mut lecteur = send(egress, &url, Some(&plage))?;
+        let (status, entetes) = read_head(&mut lecteur)?;
+        match status {
+            301 | 302 | 303 | 307 | 308 => {
+                let location = header(&entetes, "location").ok_or_else(|| {
+                    PullError::Transport(format!("redirection {status} sans Location"))
+                })?;
+                url = url.join(location).map_err(PullError::Transport)?;
+            }
+            200 | 206 => {
+                let mut octets = Vec::new();
+                body(lecteur, &entetes)?
+                    .take(max_bytes)
+                    .read_to_end(&mut octets)
+                    .map_err(|e| PullError::Transport(e.to_string()))?;
+                return Ok(octets);
+            }
+            _ => {
+                let detail = error_detail(lecteur, &entetes);
+                return Err(PullError::Refused { status, detail });
+            }
+        }
+    }
+    Err(PullError::Transport(format!(
+        "plus de {MAX_REDIRECTS} redirections"
+    )))
+}
+
 /// Envoie la requête sur le socket du proxy, en forme absolue.
 fn request(egress: &Egress, url: &Url, from: u64) -> Result<BufReader<UnixStream>, PullError> {
+    let plage = (from > 0).then(|| format!("bytes={from}-"));
+    send(egress, url, plage.as_deref())
+}
+
+/// Envoie un `GET`, avec une plage d'octets si elle est donnée.
+fn send(
+    egress: &Egress,
+    url: &Url,
+    range: Option<&str>,
+) -> Result<BufReader<UnixStream>, PullError> {
     let mut flux = UnixStream::connect(&egress.socket).map_err(|e| {
         PullError::Transport(format!(
             "proxy de sortie injoignable ({}) : {e}",
@@ -407,8 +464,8 @@ fn request(egress: &Egress, url: &Url, from: u64) -> Result<BufReader<UnixStream
         url.authority,
         egress.token_header
     );
-    if from > 0 {
-        requete.push_str(&format!("Range: bytes={from}-\r\n"));
+    if let Some(plage) = range {
+        requete.push_str(&format!("Range: {plage}\r\n"));
     }
     requete.push_str("\r\n");
     flux.write_all(requete.as_bytes())
@@ -610,6 +667,8 @@ mod tests {
             quantization: None,
             licence: None,
             note: None,
+            kv_bytes_per_token: None,
+            vocabulary: None,
         }
     }
 
@@ -740,6 +799,35 @@ mod tests {
             "rien n'est demandé au dépôt"
         );
         assert!(!partial_path(dir.path(), &entry).exists());
+    }
+
+    #[test]
+    fn le_debut_d_un_fichier_se_lit_par_une_plage_sans_tirer_le_reste() {
+        let contenu = gguf(300_000);
+        let servi = contenu.clone();
+        let proxy = FauxProxy::poser(move |requete| {
+            if requete.starts_with("GET https://depot.example/essai.gguf ") {
+                b"HTTP/1.1 302 Found\r\nLocation: https://x.cdn.example/blob\r\nContent-Length: 0\r\n\r\n".to_vec()
+            } else if requete.contains("Range: bytes=0-4095\r\n") {
+                let mut r =
+                    b"HTTP/1.1 206 Partial Content\r\nContent-Length: 4096\r\n\r\n".to_vec();
+                r.extend(&servi[..4096]);
+                r
+            } else {
+                b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\n\r\n".to_vec()
+            }
+        });
+        let entry = entree("https://depot.example/essai.gguf", sha(&contenu));
+        let debut = get_prefix(&entry, &proxy.egress(), 4096).unwrap();
+        assert_eq!(debut, contenu[..4096]);
+        assert_eq!(proxy.requetes.lock().unwrap().len(), 2);
+        // Hors des hôtes de l'entrée, rien n'est demandé.
+        let proxy = FauxProxy::poser(|_| {
+            b"HTTP/1.1 302 Found\r\nLocation: https://ailleurs.example/x\r\nContent-Length: 0\r\n\r\n".to_vec()
+        });
+        let erreur = get_prefix(&entry, &proxy.egress(), 4096).unwrap_err();
+        assert!(erreur.to_string().contains("ailleurs.example"), "{erreur}");
+        assert_eq!(proxy.requetes.lock().unwrap().len(), 1);
     }
 
     #[test]

@@ -50,6 +50,13 @@ pub struct Entry {
     /// Une phrase pour l'humain : à quoi sert ce modèle ici.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Cache KV par token, relevé dans l'en-tête du fichier (voir
+    /// [`crate::weights::Weights::kv_bytes_per_token`]) : la mémoire se dit avant de télécharger.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kv_bytes_per_token: Option<u64>,
+    /// Taille du vocabulaire, relevée dans l'en-tête du fichier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vocabulary: Option<u64>,
 }
 
 /// Le catalogue.
@@ -124,6 +131,18 @@ impl Catalogue {
 }
 
 impl Entry {
+    /// Ce que le moteur réservera pour servir cette entrée à la fenêtre `context`, d'après la
+    /// taille et l'en-tête relevés au catalogue ; `None` s'ils n'y sont pas.
+    #[must_use]
+    pub fn memory(&self, context: u64) -> Option<crate::memory::Need> {
+        crate::memory::need_from(
+            self.bytes?,
+            self.kv_bytes_per_token,
+            self.vocabulary,
+            context,
+        )
+    }
+
     /// Vérifie une entrée : identifiant et nom de fichier sûrs, empreinte bien formée, adresse
     /// HTTP(S) dont l'hôte est parmi les hôtes permis.
     ///
@@ -289,6 +308,25 @@ mod tests {
         }
         assert!(catalogue.get("qwen3-1.7b-q8").is_some());
         assert!(catalogue.get("inconnu").is_none());
+        // Chaque entrée dit la mémoire qu'elle demandera, avant d'être téléchargée.
+        for entry in &catalogue.entries {
+            let besoin = entry
+                .memory(4096)
+                .unwrap_or_else(|| panic!("{} : taille ou en-tête manquant", entry.id));
+            assert!(besoin.total > besoin.weights, "{}", entry.id);
+        }
+        // Phi-3 mini, sans GQA, demande plus de cache que Llama 3.2 3B, plus gros fichier égal.
+        let phi = catalogue
+            .get("phi-3-mini-q4")
+            .unwrap()
+            .memory(4096)
+            .unwrap();
+        let llama = catalogue
+            .get("llama-3.2-3b-q4")
+            .unwrap()
+            .memory(4096)
+            .unwrap();
+        assert!(phi.kv_cache > 3 * llama.kv_cache);
     }
 
     #[test]

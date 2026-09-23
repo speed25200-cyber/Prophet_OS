@@ -15,7 +15,9 @@
       "quantization": "Q8_0",
       "licence": "Apache-2.0",
       "note": "Le modèle de réflexion par défaut (ADR 0033) : missions réelles sur un processeur seul.",
-      "bytes": 1834426016
+      "bytes": 1834426016,
+      "kv_bytes_per_token": 114688,
+      "vocabulary": 151936
     },
     {
       "id": "qwen3-0.6b-q8",
@@ -31,7 +33,9 @@
       ],
       "quantization": "Q8_0",
       "licence": "Apache-2.0",
-      "note": "Le modèle d'exécution du relais (ADR 0034) : applique une étape décidée par le 1.7B."
+      "note": "Le modèle d'exécution du relais (ADR 0034) : applique une étape décidée par le 1.7B.",
+      "kv_bytes_per_token": 114688,
+      "vocabulary": 151936
     },
     {
       "id": "qwen3-4b-q4",
@@ -47,7 +51,9 @@
       ],
       "quantization": "Q4_K_M",
       "licence": "Apache-2.0",
-      "note": "Plus capable que le 1.7B pour la réflexion, pour une machine de 8 Go de mémoire ou plus."
+      "note": "Plus capable que le 1.7B pour la réflexion, pour une machine de 8 Go de mémoire ou plus.",
+      "kv_bytes_per_token": 147456,
+      "vocabulary": 151936
     },
     {
       "id": "qwen3-8b-q4",
@@ -63,7 +69,9 @@
       ],
       "quantization": "Q4_K_M",
       "licence": "Apache-2.0",
-      "note": "Le plus capable du catalogue, pour 16 Go de mémoire ou une carte graphique."
+      "note": "Le plus capable du catalogue, pour 16 Go de mémoire ou une carte graphique.",
+      "kv_bytes_per_token": 147456,
+      "vocabulary": 151936
     },
     {
       "id": "granite-3.3-2b-q4",
@@ -79,7 +87,9 @@
       ],
       "quantization": "Q4_K_M",
       "licence": "Apache-2.0",
-      "note": "Une autre famille pour l'exécution, publiée par IBM, entraînée à appeler des outils."
+      "note": "Une autre famille pour l'exécution, publiée par IBM, entraînée à appeler des outils.",
+      "kv_bytes_per_token": 81920,
+      "vocabulary": 49159
     },
     {
       "id": "smollm2-1.7b-q4",
@@ -95,7 +105,9 @@
       ],
       "quantization": "Q4_K_M",
       "licence": "Apache-2.0",
-      "note": "Le plus léger après Qwen3 0.6B, pour une machine de 4 Go de mémoire."
+      "note": "Le plus léger après Qwen3 0.6B, pour une machine de 4 Go de mémoire.",
+      "kv_bytes_per_token": 196608,
+      "vocabulary": 49152
     },
     {
       "id": "phi-3-mini-q4",
@@ -111,7 +123,9 @@
       ],
       "quantization": "Q4",
       "licence": "MIT",
-      "note": "La famille Phi de Microsoft, fenêtre de 4 096 tokens."
+      "note": "La famille Phi de Microsoft, fenêtre de 4 096 tokens.",
+      "kv_bytes_per_token": 393216,
+      "vocabulary": 32064
     },
     {
       "id": "llama-3.2-3b-q4",
@@ -127,7 +141,9 @@
       ],
       "quantization": "Q4_K_M",
       "licence": "Llama 3.2 Community License",
-      "note": "La famille Llama de Meta (licence communautaire Llama 3.2, à lire avant usage)."
+      "note": "La famille Llama de Meta (licence communautaire Llama 3.2, à lire avant usage).",
+      "kv_bytes_per_token": 114688,
+      "vocabulary": 128256
     }
   ]
 }

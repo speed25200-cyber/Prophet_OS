@@ -62,16 +62,32 @@ pub struct Need {
 /// KV : on ne devine pas.
 #[must_use]
 pub fn need(weights: &Weights, context: u64) -> Option<Need> {
-    let kv_cache = weights.kv_bytes_per_token?.checked_mul(context)?;
-    let compute = weights
-        .vocabulary
+    need_from(
+        weights.bytes,
+        weights.kv_bytes_per_token,
+        weights.vocabulary,
+        context,
+    )
+}
+
+/// [`need`] à partir des seuls nombres : taille du fichier, cache KV par token, vocabulaire.
+/// C'est ainsi qu'une entrée du catalogue se dit avant d'être téléchargée.
+#[must_use]
+pub fn need_from(
+    bytes: u64,
+    kv_bytes_per_token: Option<u64>,
+    vocabulary: Option<u64>,
+    context: u64,
+) -> Option<Need> {
+    let kv_cache = kv_bytes_per_token?.checked_mul(context)?;
+    let compute = vocabulary
         .and_then(|v| v.checked_mul(MICRO_BATCH * 4))
         .unwrap_or(UNKNOWN_COMPUTE_BYTES)
         .checked_add(RUNTIME_BYTES)?;
-    let total = weights.bytes.checked_add(kv_cache)?.checked_add(compute)?;
+    let total = bytes.checked_add(kv_cache)?.checked_add(compute)?;
     Some(Need {
         context,
-        weights: weights.bytes,
+        weights: bytes,
         kv_cache,
         compute,
         total,
@@ -149,11 +165,16 @@ pub struct Assessment {
 /// Estime `weights` à la fenêtre `context` et le confronte à `system`.
 #[must_use]
 pub fn assess(weights: &Weights, context: u64, system: Option<&System>) -> Option<Assessment> {
-    let need = need(weights, context)?;
-    Some(Assessment {
+    Some(assess_need(need(weights, context)?, system))
+}
+
+/// Une demande confrontée à la mémoire de la machine.
+#[must_use]
+pub fn assess_need(need: Need, system: Option<&System>) -> Assessment {
+    Assessment {
         need,
         fit: system.map(|s| s.fit(need.total)),
-    })
+    }
 }
 
 impl Fit {

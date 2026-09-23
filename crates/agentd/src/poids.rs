@@ -76,6 +76,10 @@ pub struct EntryView {
     /// Le dernier téléchargement de cette entrée depuis le démarrage du service.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pull: Option<PullStatus>,
+    /// Ce que le moteur réservera pour la servir à la fenêtre de la machine, et où cela tombe
+    /// sur sa mémoire : dit avant de télécharger (ADR 0047).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<providers::memory::Assessment>,
 }
 
 /// Ce qu'un téléchargement terminé laisse au journal.
@@ -130,6 +134,8 @@ impl Pulls {
     /// liste des poids que la configuration du système pose ailleurs (`PROPHET_WEIGHTS`).
     #[must_use]
     pub fn view(&self, catalogue: &Catalogue, configured: &[PathBuf]) -> Vec<EntryView> {
+        let contexte = providers::memory::context();
+        let machine = providers::memory::system();
         catalogue
             .entries
             .iter()
@@ -146,6 +152,9 @@ impl Pulls {
                     path: installed.then_some(chemin),
                     partial_bytes,
                     pull: self.status(&entry.id),
+                    memory: entry
+                        .memory(contexte)
+                        .map(|need| providers::memory::assess_need(need, machine.as_ref())),
                 }
             })
             .collect()
