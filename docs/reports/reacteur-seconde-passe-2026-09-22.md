@@ -169,7 +169,7 @@ La fenêtre servie se lit dans `prophet model ls` et sur la page Modèles.
 | Réserve de microVM, coureur KVM de la CI | médiane de cinq prises 8,9 ms (`41def9e`), 10,9 ms (`4aaeb50`) ; restauration 6 ms ; cinq aléas distincts sur cinq clones |
 | Landlock au niveau 0 | l'essai **échouait** avant (fichiers créés à la racine de la sandbox) ; réussit ici (ABI 7) et sur le coureur d'isolation |
 | Condensation et cache du moteur | 26 ko à réévaluer au lieu de 45 ko sur une mission simulée de huit lectures de 3 ko |
-| `just check` | **863 réussis, 0 échec, 50 ignorés** ; format, clippy, contrôles du dépôt, secrets |
+| `just check` | **865 réussis, 0 échec, 51 ignorés** ; format, clippy, contrôles du dépôt, secrets |
 
 Mesures en rendu logiciel, 1920 × 1080, scène de démonstration (5 missions, 3 actives) :
 

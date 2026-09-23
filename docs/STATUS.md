@@ -1551,8 +1551,10 @@ donne le détail.
   le pilote lit (`exceed_context_size_error`, `n_prompt_tokens` 12 013, `n_ctx` 4 096). Sur
   `6cf62c0`, les sept services sous systemd sont verts avec capd arrêté : l'humain ne peut ni
   renommer un fichier sur `capd.sock` ni le remplacer par un lien (« Operation not
-  permitted »), et capd repart sur son nom.
-- `just check` : **863 réussis, 0 échec, 50 ignorés**, format, clippy, contrôles du dépôt et
+  permitted »), et capd repart sur son nom. CI de `4aaeb50` (réserve de microVM, Landlock au
+  niveau 0, niveau 0 exigé sur le coureur d'isolation) : **verte des deux côtés**, mission réelle
+  Qwen3, système installé (UEFI et BIOS) et ISO compris.
+- `just check` : **865 réussis, 0 échec, 51 ignorés**, format, clippy, contrôles du dépôt et
   secrets (repli). Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
 
@@ -1564,9 +1566,9 @@ l'utilisateur : `task.spawn` d'agentd accepte un manifeste brut du compte de l'h
 que fait `prophet task new`) ; le réserver aux profils du catalogue fermerait la dernière voie
 par laquelle un processus de la session fait planifier une mission sous un manifeste de sa main.
 
-**Pour la session suivante.** Lire la CI de la branche (le socket posé par renommage et
-l'essai de capd arrêté, la relance des missions, la fenêtre servie, poussés après le verdict
-de `299c68d`, et les chiffres de la réserve de microVM) ; trancher avec l'utilisateur le sort de
+**Pour la session suivante.** Lire la CI de la branche (les deux microVM simultanées sans
+réseau et la condensation qui ménage le cache du moteur, poussées après le verdict de
+`4aaeb50`) ; trancher avec l'utilisateur le sort de
 `task.spawn` pour le compte de l'humain ; mesurer la surface sur une carte graphique ; écrire M5-T4 (pool d'instantanés
 Firecracker) sur un hôte KVM, la CI pouvant l'exercer sur son coureur ; faire le premier appel
 réel de Jev avec une clé déposée ; gérer le téléchargement et la suppression des poids que le
