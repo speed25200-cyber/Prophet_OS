@@ -381,7 +381,7 @@ pub(crate) fn draw(
             }
             small(
                 ui,
-                format!("· {} s observées", info.task.budget.spent.wall_time_s),
+                format!("· {}", duree_observee(info.task.budget.spent.wall_time_s)),
             );
         });
     } else {
@@ -841,6 +841,17 @@ fn issue(outcome: &Outcome) -> (&'static str, Color32, String) {
 
 /// Une cible lisible : un chemin du dossier de l'humain s'écrit à partir de `~`, comme il
 /// l'écrirait lui-même ; toute autre cible reste telle que capd l'a contrôlée.
+/// La durée qu'une mission a tenue, dite comme on la dit : « moins d'une seconde », « 42 s »,
+/// « 3 min 05 s », « 1 h 12 min ».
+fn duree_observee(secondes: u64) -> String {
+    match secondes {
+        0 => "moins d'une seconde".to_owned(),
+        1..=59 => format!("{secondes} s"),
+        60..=3599 => format!("{} min {:02} s", secondes / 60, secondes % 60),
+        _ => format!("{} h {:02} min", secondes / 3600, (secondes % 3600) / 60),
+    }
+}
+
 fn cible_lisible(cible: &str) -> String {
     cible_depuis(cible, &std::env::var("HOME").unwrap_or_default())
 }
@@ -911,6 +922,14 @@ pub(crate) fn confiees(ui: &mut egui::Ui, c: &Courant, courants: &[Courant]) {
 mod tests {
     use super::*;
     use crate::scene::Etat;
+
+    #[test]
+    fn la_duree_d_une_mission_se_dit_comme_on_la_dit() {
+        assert_eq!(duree_observee(0), "moins d'une seconde");
+        assert_eq!(duree_observee(42), "42 s");
+        assert_eq!(duree_observee(185), "3 min 05 s");
+        assert_eq!(duree_observee(4_320), "1 h 12 min");
+    }
 
     #[test]
     fn seule_une_mission_racine_echouee_ou_arretee_se_relance() {
