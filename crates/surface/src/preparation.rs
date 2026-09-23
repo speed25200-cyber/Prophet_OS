@@ -489,6 +489,7 @@ mod tests {
                 scopes: vec![],
                 limits: Default::default(),
                 route: None,
+                profile: None,
             }))))
             .unwrap();
         preparation.update();

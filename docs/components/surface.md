@@ -54,7 +54,11 @@ La préparation d'une mission possède maintenant son propre écran : objectif h
 configuré dans le service, modèle disponible et limites. `task.prepare` conserve le plan, qui
 est sélectionné dans la supervision dès réception ; il n'est jamais lancé automatiquement.
 Le dialogue peut transmettre sa demande humaine au brouillon. Après une réponse perdue,
-la référence conservée permet de relire le plan sans renvoyer la création. La fermeture de
+la référence conservée permet de relire le plan sans renvoyer la création. Une mission
+échouée ou arrêtée porte un bouton « Relancer » : la préparation s'ouvre avec la même
+intention, le même modèle et le même profil du catalogue, que le catalogue reçu confirme ou
+corrige (un moteur injoignable n'offre plus son modèle) ; l'humain prépare un nouveau plan,
+rien n'est émis avant. Une sous-mission se relance par son parent. La fermeture de
 l'interface ne conserve pas encore ces brouillons. Les profils du service doivent être configurés.
 
 ## Ce qu'elle montre, et ce qu'elle ne montre pas

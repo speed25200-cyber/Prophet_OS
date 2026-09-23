@@ -503,6 +503,31 @@ fn les_widgets_permettent_l_arret_et_montrent_un_echec_de_moteur() {
         );
         assert_eq!(bureau.missions().snapshot().unwrap().task.state, expected);
         assert!(!chain.dir.path().join("home/docs/note.txt").exists());
+        // Échouée ou arrêtée, la mission se relance : la préparation s'ouvre avec la même
+        // intention et le même modèle, et rien ne part avant que l'humain confirme le plan.
+        let intention = bureau.missions().snapshot().unwrap().task.intent.clone();
+        let events = click(&bureau, &target, "mission-relancer");
+        frame(&mut bureau, &mut source, &context, &target, events);
+        for _ in 0..3 {
+            frame(&mut bureau, &mut source, &context, &target, vec![]);
+        }
+        // Le modèle est repris lui aussi, puis confronté au catalogue : un moteur injoignable
+        // ne le propose plus, et la préparation ne l'invente pas (test unitaire de `relance`).
+        assert_eq!(bureau.preparation().intent, intention);
+        assert!(bureau.preparation().attempted_id().is_none());
+        assert!(
+            bureau
+                .ctx
+                .read_response(egui::Id::new("mission-prepare-submit"))
+                .is_some(),
+            "la préparation est ouverte"
+        );
+        capture(&context, &target, &format!("{name}-relance"));
+        assert_eq!(
+            chain.call("task.list", json!({})).as_array().unwrap().len(),
+            1,
+            "relancer ne crée rien avant la confirmation"
+        );
     }
     drop(model.release);
     model.worker.unwrap().join().unwrap();

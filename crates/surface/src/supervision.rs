@@ -635,6 +635,24 @@ impl Supervision {
         self.preparation.discover(ctx);
     }
 
+    /// Une mission échouée ou arrêtée repasse par la préparation : même intention, même modèle
+    /// et même profil du catalogue s'il est connu, que le catalogue reçu confirme ou corrige.
+    /// L'humain relit et prépare un nouveau plan ; rien n'est émis avant.
+    fn relancer(&mut self, ctx: &egui::Context, relance: crate::mission_details::Relance) {
+        // Une préparation déjà envoyée attend sa réponse : on la montre, sans l'écraser.
+        if self.preparation.pending() {
+            self.ouvrir_la_preparation(ctx);
+            return;
+        }
+        self.preparation.reset();
+        self.ouvrir_la_preparation(ctx);
+        self.preparation.intent = relance.intent;
+        self.preparation.model = relance.model;
+        if let Some(profile) = relance.profile {
+            self.preparation.profile = profile;
+        }
+    }
+
     /// L'objectif tapé dans l'espace vide devient celui de la préparation, que l'humain relit
     /// et complète avant de préparer le plan. Une tentative gardée pour sa reprise n'est pas
     /// écrasée : le brouillon de l'accueil attend alors, intact.
@@ -700,7 +718,11 @@ impl Supervision {
     fn inspecteur(&mut self, ui: &mut egui::Ui, c: &Courant, scene: &Scene) {
         let accent = Accent::de(ui.ctx());
         if self.missions.connected() {
-            crate::mission_details::draw(ui, c, &mut self.missions, &mut self.detail_tab);
+            if let Some(relance) =
+                crate::mission_details::draw(ui, c, &mut self.missions, &mut self.detail_tab)
+            {
+                self.relancer(ui.ctx(), relance);
+            }
             crate::mission_details::confiees(ui, c, &scene.courants);
             if let Some(d) = scene.decision.as_ref().filter(|d| d.tache == c.tache) {
                 ui.add_space(12.0);

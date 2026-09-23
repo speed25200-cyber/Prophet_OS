@@ -94,7 +94,14 @@ fn limited(text: &str, limit: usize) -> String {
     value
 }
 
-pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab: &mut Tab) {
+/// Dessine l'espace d'une mission ; rend la relance demandée, que la supervision confie à la
+/// préparation.
+pub(crate) fn draw(
+    ui: &mut egui::Ui,
+    c: &Courant,
+    missions: &mut Missions,
+    tab: &mut Tab,
+) -> Option<Relance> {
     ui.spacing_mut().item_spacing.y = 6.0;
     let reviewing = *tab == Tab::Files;
     let accent = Accent::de(ui.ctx());
@@ -132,6 +139,7 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
     let mut command = None;
     let mut refresh = false;
     let mut file_requested = None;
+    let mut relaunch = None;
     if let Some(info) = missions.snapshot() {
         let (label, color) = status(info.task.state, &accent);
         ui.horizontal_wrapped(|ui| {
@@ -202,6 +210,21 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
                     .clicked()
             {
                 command = Some(Action::Undo);
+            }
+            // Échouée ou arrêtée : la même intention repasse par la préparation, que l'humain
+            // relit et confirme ; rien ne part d'ici.
+            if let Some(candidate) = relance(
+                info.task.state,
+                info.task.parent.is_some(),
+                &info.task.intent,
+                info.plan
+                    .as_ref()
+                    .map(|p| p.choice.reference.as_str())
+                    .or(info.task.driver.as_deref()),
+                info.plan.as_ref().and_then(|p| p.profile.as_deref()),
+            ) && bouton(ui, "mission-relancer", "Relancer", true).clicked()
+            {
+                relaunch = Some(candidate);
             }
         });
         if let Some(state) = info.publication {
@@ -410,6 +433,41 @@ pub(crate) fn draw(ui: &mut egui::Ui, c: &Courant, missions: &mut Missions, tab:
     {
         ui.label(RichText::new(error).color(RED));
     }
+    relaunch
+}
+
+/// Ce qu'il faut pour relancer une mission : son intention, le modèle qui la menait et le profil
+/// du catalogue dont elle a été préparée, s'il est connu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Relance {
+    pub intent: String,
+    pub model: String,
+    pub profile: Option<String>,
+}
+
+/// Une mission se relance quand elle a échoué ou été arrêtée ; une sous-mission, par son parent.
+fn relance(
+    state: State,
+    child: bool,
+    intent: &str,
+    reference: Option<&str>,
+    profile: Option<&str>,
+) -> Option<Relance> {
+    if child || !matches!(state, State::Failed | State::Cancelled) || intent.trim().is_empty() {
+        return None;
+    }
+    let model = reference
+        .map(|r| {
+            r.strip_prefix("local:")
+                .or_else(|| r.strip_prefix("driver:"))
+                .unwrap_or(r)
+        })
+        .unwrap_or_default();
+    Some(Relance {
+        intent: intent.to_owned(),
+        model: model.to_owned(),
+        profile: profile.map(str::to_owned),
+    })
 }
 
 fn phases(ui: &mut egui::Ui, info: &Inspection) {
@@ -853,6 +911,40 @@ pub(crate) fn confiees(ui: &mut egui::Ui, c: &Courant, courants: &[Courant]) {
 mod tests {
     use super::*;
     use crate::scene::Etat;
+
+    #[test]
+    fn seule_une_mission_racine_echouee_ou_arretee_se_relance() {
+        let relancee = relance(
+            State::Failed,
+            false,
+            "Rédiger la note",
+            Some("local:qwen3-1.7b"),
+            Some("documents"),
+        )
+        .unwrap();
+        assert_eq!(relancee.intent, "Rédiger la note");
+        assert_eq!(relancee.model, "qwen3-1.7b");
+        assert_eq!(relancee.profile.as_deref(), Some("documents"));
+        // Un client officiel garde son palier (ADR 0040).
+        let client = relance(
+            State::Cancelled,
+            false,
+            "Coder",
+            Some("driver:claude-code@opus"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(client.model, "claude-code@opus");
+        assert_eq!(client.profile, None);
+        for state in [State::Planned, State::Running, State::Done] {
+            assert!(
+                relance(state, false, "x", None, None).is_none(),
+                "{state:?}"
+            );
+        }
+        assert!(relance(State::Failed, true, "x", None, None).is_none());
+        assert!(relance(State::Failed, false, "  ", None, None).is_none());
+    }
 
     #[test]
     fn une_cible_du_dossier_de_l_humain_se_lit_depuis_le_tilde() {
