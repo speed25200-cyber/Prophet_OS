@@ -916,6 +916,19 @@ impl Supervision {
                             if let Some(manque) = &scene.isolation.manque {
                                 ui.label(RichText::new(manque).color(DISCRET));
                             }
+                            // Les microVM que sandboxd tient prêtes : une exécution de niveau 2
+                            // part sans attendre le démarrage d'un noyau (ADR 0045).
+                            if let Some(reserve) = &scene.isolation.reserve {
+                                ui.add_space(8.0);
+                                let texte = reserve_en_mots(reserve);
+                                let ligne = ui.label(
+                                    RichText::new(&texte)
+                                        .size(13.0)
+                                        .color(if reserve.erreur.is_some() { ATTENTE } else { accent.vif }),
+                                );
+                                ui.interact(ligne.rect, egui::Id::new("isolation-reserve"), egui::Sense::hover())
+                                    .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &texte));
+                            }
                             ui.add_space(8.0);
                             petit(
                                 ui,
@@ -1487,6 +1500,21 @@ fn poids_installes(ui: &mut egui::Ui, atelier: &Atelier) {
     }
 }
 
+/// La réserve de microVM, dite en une ligne.
+fn reserve_en_mots(reserve: &crate::scene::Reserve) -> String {
+    match &reserve.erreur {
+        Some(erreur) if reserve.pretes == 0 => {
+            format!("Réserve de microVM vide : {erreur}. Le niveau 2 démarre à froid.")
+        }
+        _ => format!(
+            "Réserve : {} microVM prête{} sur {} — le niveau 2 part sans attendre de démarrage.",
+            reserve.pretes,
+            if reserve.pretes > 1 { "s" } else { "" },
+            reserve.cible
+        ),
+    }
+}
+
 /// Ce que la conversation a laissé hors de l'envoi pour tenir dans la fenêtre du modèle.
 fn oubli(messages: usize) -> String {
     if messages == 1 {
@@ -1621,6 +1649,30 @@ mod tests {
         assert_eq!(groupes(7), "7");
         assert_eq!(groupes(40_960), "40\u{202f}960");
         assert_eq!(groupes(1_048_576), "1\u{202f}048\u{202f}576");
+    }
+
+    #[test]
+    fn la_reserve_se_dit_pleine_partielle_ou_vide() {
+        use crate::scene::Reserve;
+        let pleine = Reserve {
+            pretes: 2,
+            cible: 2,
+            erreur: None,
+        };
+        assert!(reserve_en_mots(&pleine).starts_with("Réserve : 2 microVM prêtes sur 2"));
+        let une = Reserve {
+            pretes: 1,
+            cible: 2,
+            erreur: None,
+        };
+        assert!(reserve_en_mots(&une).starts_with("Réserve : 1 microVM prête sur 2"));
+        let vide = Reserve {
+            pretes: 0,
+            cible: 2,
+            erreur: Some("instantané refusé".into()),
+        };
+        assert!(reserve_en_mots(&vide).contains("instantané refusé"));
+        assert!(reserve_en_mots(&vide).contains("à froid"));
     }
 
     #[test]

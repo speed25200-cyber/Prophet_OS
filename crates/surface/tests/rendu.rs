@@ -56,6 +56,7 @@ fn scene(avec_decision: bool) -> Scene {
         isolation: Isolation {
             niveau_max: 1,
             manque: None,
+            reserve: None,
         },
     };
     scene.ordonner();

@@ -69,6 +69,19 @@ pub struct Isolation {
     pub niveau_max: u8,
     /// Ce qui manque pour aller plus haut, si quelque chose manque.
     pub manque: Option<String>,
+    /// Les microVM que `sandboxd` tient prêtes pour le niveau 2 (ADR 0045), s'il en tient.
+    pub reserve: Option<Reserve>,
+}
+
+/// La réserve de microVM de `sandboxd`, telle qu'il la dit.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Reserve {
+    /// Machines prêtes.
+    pub pretes: usize,
+    /// Machines voulues.
+    pub cible: usize,
+    /// Pourquoi elle ne se remplit pas, le cas échéant.
+    pub erreur: Option<String>,
 }
 
 /// Ce qu'il y a à voir, à un instant.
@@ -206,6 +219,7 @@ impl Scene {
         }
         self.isolation.niveau_max.hash(&mut h);
         self.isolation.manque.hash(&mut h);
+        self.isolation.reserve.hash(&mut h);
         h.finish()
     }
 }
@@ -280,6 +294,7 @@ mod tests {
             isolation: Isolation {
                 niveau_max: 1,
                 manque: None,
+                reserve: None,
             },
         };
         scene.ordonner();
@@ -300,6 +315,7 @@ mod tests {
             isolation: Isolation {
                 niveau_max: 2,
                 manque: None,
+                reserve: None,
             },
         };
         assert_eq!(scene.attenuation_du_champ(), 1.0);
@@ -333,6 +349,7 @@ mod tests {
             isolation: Isolation {
                 niveau_max: 1,
                 manque: None,
+                reserve: None,
             },
         };
         assert_eq!(faire().empreinte(), faire().empreinte());
@@ -378,6 +395,7 @@ mod tests {
             isolation: Isolation {
                 niveau_max: 1,
                 manque: None,
+                reserve: None,
             },
         };
         let avant = scene.empreinte();
@@ -400,6 +418,7 @@ mod tests {
             isolation: Isolation {
                 niveau_max: 0,
                 manque: Some("gVisor".to_owned()),
+                reserve: None,
             },
         };
         let mut une = faire();

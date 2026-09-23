@@ -15,6 +15,7 @@ fn scene() -> Scene {
         isolation: Isolation {
             niveau_max: 0,
             manque: Some("services absents dans ce test".into()),
+            reserve: None,
         },
     }
 }
@@ -1245,5 +1246,59 @@ fn la_page_modeles_marque_le_poids_servi_et_sa_fenetre() {
             .read_response(egui::Id::new("poids-servi-gemma.gguf"))
             .is_none(),
         "seul le poids chargé est marqué"
+    );
+}
+
+#[test]
+#[ignore = "needs_gpu: rendu wgpu hors écran"]
+fn la_page_systeme_dit_la_reserve_de_microvm() {
+    // Niveau 2 et deux microVM prêtes : la page Système le dit, en une ligne lisible et
+    // nommée pour l'accessibilité ; sans réserve, la ligne n'existe pas (ADR 0045).
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1440, 1000);
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.figer_transitions();
+    bureau.atelier.page = Page::Activite;
+    let mut avec = scene();
+    avec.isolation = Isolation {
+        niveau_max: 2,
+        manque: None,
+        reserve: Some(surface::scene::Reserve {
+            pretes: 2,
+            cible: 2,
+            erreur: None,
+        }),
+    };
+    let composer = |bureau: &mut Bureau, scene: &Scene| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1440.0, 1000.0),
+            )),
+            time: Some(8.0),
+            focused: true,
+            ..Default::default()
+        };
+        let (mut output, _) = bureau.composer(input, scene);
+        bureau.rendre(&context, &target, &mut output);
+    };
+    for _ in 0..3 {
+        composer(&mut bureau, &avec);
+    }
+    capture(&context, &target, "systeme-reserve");
+    let ligne = bureau
+        .ctx
+        .read_response(egui::Id::new("isolation-reserve"))
+        .expect("la réserve est dite");
+    assert!(ligne.rect.width() > 200.0, "{:?}", ligne.rect);
+    for _ in 0..3 {
+        composer(&mut bureau, &scene());
+    }
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("isolation-reserve"))
+            .is_none(),
+        "sans réserve, rien n'est inventé"
     );
 }

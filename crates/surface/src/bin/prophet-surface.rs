@@ -663,6 +663,7 @@ fn demonstration(avec_decision: bool) -> Scene {
         isolation: Isolation {
             niveau_max: 1,
             manque: Some("les images d'invité pour le niveau 2".to_owned()),
+            reserve: None,
         },
     }
 }

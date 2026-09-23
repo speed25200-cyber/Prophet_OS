@@ -378,6 +378,7 @@ mod tests {
             isolation: Isolation {
                 niveau_max: 1,
                 manque: None,
+                reserve: None,
             },
         }
     }

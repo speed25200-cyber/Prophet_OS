@@ -117,7 +117,11 @@ pub fn scene(
         date,
         courants,
         decision,
-        isolation: Isolation { niveau_max, manque },
+        isolation: Isolation {
+            niveau_max,
+            manque,
+            reserve: None,
+        },
     };
     scene.ordonner();
     scene

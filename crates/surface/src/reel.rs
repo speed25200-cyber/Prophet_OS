@@ -129,6 +129,7 @@ impl Source for Reel {
                         .panne
                         .clone()
                         .or_else(|| Some("isolation inconnue".to_owned())),
+                    reserve: None,
                 }),
             )
         };
@@ -142,6 +143,7 @@ impl Source for Reel {
             date(maintenant),
             maintenant,
         );
+        scene.isolation.reserve = isolation.reserve;
         self.montree = scene
             .decision
             .as_ref()
@@ -260,6 +262,16 @@ fn manque_pour_monter(capacites: &serde_json::Value) -> Option<String> {
     Some(format!("{} et {dernier}", manques.join(", ")))
 }
 
+/// La réserve de microVM que `sandboxd` dit tenir (ADR 0045), s'il en tient une.
+fn reserve_de(capacites: &serde_json::Value) -> Option<crate::scene::Reserve> {
+    let reserve = capacites.get("reserve").filter(|r| r.is_object())?;
+    Some(crate::scene::Reserve {
+        pretes: usize::try_from(reserve["pretes"].as_u64()?).ok()?,
+        cible: usize::try_from(reserve["cible"].as_u64()?).ok()?,
+        erreur: reserve["erreur"].as_str().map(str::to_owned),
+    })
+}
+
 /// La boucle qui interroge tant que sa source existe.
 fn interroger(sockets: &Sockets, partage: &Weak<Mutex<Partage>>) {
     let Ok(execution) = tokio::runtime::Builder::new_current_thread()
@@ -303,6 +315,7 @@ fn interroger(sockets: &Sockets, partage: &Weak<Mutex<Partage>>) {
                     niveau_max: u8::try_from(valeur["max_level"].as_u64().unwrap_or(0))
                         .unwrap_or(0),
                     manque: manque_pour_monter(&valeur),
+                    reserve: reserve_de(&valeur),
                 });
                 etat.panne = panne;
             }
@@ -459,6 +472,32 @@ mod tests {
     fn au_niveau_deux_il_n_y_a_plus_rien_a_manquer() {
         let complet = serde_json::json!({ "max_level": 2 });
         assert!(manque_pour_monter(&complet).is_none());
+    }
+
+    #[test]
+    fn la_reserve_de_microvm_se_lit_telle_que_sandboxd_la_dit() {
+        let pleine = serde_json::json!({ "max_level": 2,
+            "reserve": {"cible": 2, "pretes": 1, "restauration_ms": 43, "erreur": null} });
+        assert_eq!(
+            reserve_de(&pleine),
+            Some(crate::scene::Reserve {
+                pretes: 1,
+                cible: 2,
+                erreur: None
+            })
+        );
+        let en_panne = serde_json::json!({ "max_level": 2,
+            "reserve": {"cible": 2, "pretes": 0, "erreur": "restauration refusée"} });
+        assert_eq!(
+            reserve_de(&en_panne).and_then(|r| r.erreur).as_deref(),
+            Some("restauration refusée")
+        );
+        // Sans réserve (niveau 1, ou `PROPHET_MICROVM_POOL=0`), rien n'est inventé.
+        assert_eq!(
+            reserve_de(&serde_json::json!({ "max_level": 1, "reserve": null })),
+            None
+        );
+        assert_eq!(reserve_de(&serde_json::json!({ "max_level": 2 })), None);
     }
 
     #[test]
