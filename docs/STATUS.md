@@ -1545,7 +1545,9 @@ donne le détail.
   « Servir » (`93bd678`) ; reste à faire lire au routeur de l'image le dossier des
   téléchargements. `model.list` dit aux agents les poids locaux et leur fenêtre (`d49724d`),
   `prophet status` les modèles locaux et le catalogue (`6118608`). Un essai `needs_network`
-  tire Qwen3 0.6B de Hugging Face par le vrai egress sur une machine qui le joint (`dd4ff44`).
+  tire Qwen3 0.6B de Hugging Face par le vrai egress sur une machine qui le joint (`dd4ff44`) :
+  vert sur le coureur de la CI (`468324a`), 639 446 688 octets en 23 s, empreinte publiée
+  vérifiée ; les adresses signées du CDN passent la détection d'egress.
 - Conversation longue (M8-T7, `f93e591`) : au-delà de 32 Kio ou de 32 tours, la page
   Conversation refusait d'envoyer ; elle envoie les tours récents qui tiennent, dit combien
   elle en laisse de côté, et garde le fil affiché entier.

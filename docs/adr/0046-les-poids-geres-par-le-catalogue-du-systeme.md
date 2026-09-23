@@ -77,7 +77,9 @@ hostile.
   téléchargement échouerait avec ce motif. L'essai `needs_network`
   `un_vrai_poids_du_catalogue_arrive_de_hugging_face_par_egress` le tranche : Qwen3 0.6B tiré de
   Hugging Face par le vrai egress, TLS et redirections compris, empreinte publiée vérifiée ; le
-  travail d'isolation de la CI le lance quand le dépôt répond.
+  travail d'isolation de la CI le lance quand le dépôt répond. Premier passage (`468324a`) :
+  **vert**, 639 446 688 octets en 23 s (28 Mo/s) — les adresses signées du CDN passent la
+  détection. Cette taille, vérifiée par l'empreinte, entre au catalogue.
 - Servir : `prophet model serve <id>` et le geste « Servir » de la page Modèles demandent au
   routeur de llama-server de charger le poids (`POST /models/load`), reconnu dans `GET /models`
   par le chemin de son fichier, sinon par son nom. Le routeur de l'image ne connaît encore que
