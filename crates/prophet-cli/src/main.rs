@@ -3021,6 +3021,26 @@ fn status_modeles(
             lus.len(),
             noms.join(", ")
         ));
+        // Ce qui ne tiendrait pas : l'humain le lit avant qu'un chargement fasse paginer.
+        let machine = providers::memory::system();
+        let trop_grands: Vec<String> = lus
+            .iter()
+            .filter(|w| {
+                providers::memory::assess(w, providers::memory::context(), machine.as_ref())
+                    .is_some_and(|a| a.fit == Some(providers::memory::Fit::TooLarge))
+            })
+            .map(|w| {
+                w.path
+                    .file_name()
+                    .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+            })
+            .collect();
+        if !trop_grands.is_empty() {
+            out.push_str(&format!(
+                "    ✗ ne tient pas en mémoire ici : {} (prophet model ls)\n",
+                trop_grands.join(", ")
+            ));
+        }
     }
     let refuses = poids.iter().filter(|p| p.is_err()).count();
     if refuses > 0 {
@@ -3443,6 +3463,7 @@ mod tests {
         ]});
         let dit = status_modeles(&poids, Some(&catalogue));
         assert!(dit.contains("✓ 1 poids : Qwen3 1.7B (Q8_0)"), "{dit}");
+        assert!(!dit.contains("ne tient pas"), "{dit}");
         assert!(dit.contains("1 fichier(s) illisible(s)"), "{dit}");
         assert!(dit.contains("↓ 1 téléchargement(s) en cours"), "{dit}");
         assert!(dit.contains("à télécharger : autre"), "{dit}");
