@@ -1586,7 +1586,7 @@ fn poids_installes(ui: &mut egui::Ui, atelier: &Atelier) {
         ui.label(titre("Aucun poids sur cette machine.", 22.0));
         petit(
             ui,
-            "L'installation dépose le modèle par défaut dans ce dossier ; `prophet model ls` le relit.",
+            "L'installation fournit le modèle par défaut ; le catalogue du système, plus bas, en télécharge d'autres, vérifiés.",
         );
         return;
     }
