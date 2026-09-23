@@ -342,7 +342,7 @@ pub(crate) fn chrome(root: &mut egui::Ui, atelier: &mut Atelier, scene: &Scene, 
                         ui.add_space(22.);
                         hud::etiquette(
                             ui,
-                            "CTRL K RECHERCHER · CTRL N OBJECTIF · CTRL 1–4 PAGES · ÉCHAP FERMER",
+                            "CTRL K RECHERCHER · CTRL N OBJECTIF · CTRL 1–4 PAGES · ÉCHAP FERMER · CTRL MAJ ÉCHAP TOUT ARRÊTER",
                             EFFACE,
                         );
                     }

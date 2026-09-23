@@ -1736,6 +1736,15 @@ donne le détail.
   cœur en veille. `--mesure` sépare le processeur de l'attente du GPU, `--repos` détaille les
   phases du repos. L'essai des approbations de mcp-system attendait encore qu'une décision de
   tâche couvre une action irréversible : il suit désormais l'ADR 0054 (`73f2031`).
+- Arrêt d'urgence (FRONTIER, interface) : `task.halt` d'agentd arrête d'un geste toutes les
+  missions en main — travailleurs priés de s'arrêter, séances conclues, clients officiels tués
+  par le lanceur, plans annulés — et dit ce qui a résisté ; `prophet task halt` le demande en
+  ligne de commande (sortie en erreur si l'arrêt est partiel) ; la surface affiche « Tout
+  arrêter » dès qu'une mission n'est pas finie (Ctrl+Maj+Échap), demande confirmation, puis
+  dit la réponse du service. Éprouvé avec les vrais services : une mission en pleine inférence
+  finit annulée sans rien écrire, un plan en attente est annulé, un second arrêt ne trouve
+  rien. Une mission arrêtée en vol dit désormais « annulée par l'utilisateur » au lieu de
+  « erreur d'entrée-sortie : annulation demandée ».
 - `just check` : **941 réussis, 0 échec, 67 ignorés** (`73f2031`), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,

@@ -15,6 +15,8 @@ use crate::theme::{ACCENTS, Accent};
 pub(crate) struct Supervision {
     pub(crate) missions: crate::missions::Missions,
     pub(crate) preparation: crate::preparation::Preparation,
+    /// L'arrêt d'urgence de toutes les missions en main.
+    pub(crate) arret: crate::arret::Arret,
     composing: bool,
     prepared_selection: Option<String>,
     detail_tab: crate::mission_details::Tab,
@@ -167,6 +169,18 @@ fn largeur(ui: &mut egui::Ui, max: f32, contenu: impl FnOnce(&mut egui::Ui)) {
     });
 }
 
+/// Les missions que l'arrêt d'urgence arrêterait : toutes celles qui ne sont pas finies.
+fn a_arreter(scene: &Scene) -> usize {
+    scene
+        .courants
+        .iter()
+        .filter(|c| {
+            c.task_state
+                .map_or(c.etat != Etat::Fini, |state| !state.is_terminal())
+        })
+        .count()
+}
+
 fn statut(etat: Etat, accent: &Accent) -> (&'static str, Color32) {
     match etat {
         Etat::Court => ("En cours", accent.vif),
@@ -206,6 +220,7 @@ impl Supervision {
     ) {
         let ctx = root.ctx().clone();
         self.preparation.update();
+        self.arret.update();
         // Les ordres dits pendant l'écoute : préparer l'objectif relu, lancer la mission choisie
         // (l'approbation de l'humain, dite), entendre son résultat. Un refus se lit sous le
         // brouillon, comme une erreur de préparation.
@@ -371,6 +386,9 @@ impl Supervision {
         if self.examen.is_some() {
             self.decision(&ctx, scene, reponse);
         }
+        if self.arret.confirmation() {
+            self.confirmer_l_arret(&ctx, scene);
+        }
         self.focus_precedent = ctx.memory(|m| m.focused().is_some());
     }
 
@@ -389,8 +407,44 @@ impl Supervision {
                 {
                     self.ouvrir_la_preparation(ui.ctx());
                 }
+                // L'arrêt d'urgence n'apparaît que s'il y a quelque chose à arrêter.
+                if a_arreter(scene) > 0 || self.arret.en_cours() {
+                    let en_cours = self.arret.en_cours();
+                    if ui
+                        .add_enabled_ui(!en_cours, |ui| {
+                            bouton(
+                                ui,
+                                "arret-tout",
+                                if en_cours {
+                                    "Arrêt…"
+                                } else {
+                                    "Tout arrêter"
+                                },
+                                false,
+                            )
+                        })
+                        .inner
+                        .on_hover_text("Ctrl Maj Échap")
+                        .clicked()
+                    {
+                        self.arret.demander();
+                    }
+                }
             });
         });
+        if let Some(issue) = self.arret.issue().cloned() {
+            ui.add_space(8.0);
+            hud::rangee(ui, |ui| {
+                ui.label(
+                    RichText::new(&issue.texte)
+                        .size(13.0)
+                        .color(if issue.erreur { ATTENTE } else { ACCOMPLI }),
+                );
+                if bouton(ui, "arret-ecarter", "Compris", false).clicked() {
+                    self.arret.ecarter();
+                }
+            });
+        }
         ui.add_space(if compact { 10.0 } else { 14.0 });
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
@@ -669,6 +723,7 @@ impl Supervision {
     }
 
     /// Le clavier seul suffit : Ctrl+1 à 4 pour les pages, Ctrl+N pour un nouvel objectif,
+    /// Ctrl+Maj+Échap pour l'arrêt d'urgence (sa confirmation d'abord),
     /// Échap pour refermer l'examen ou la préparation. Échap ne ferme rien tant qu'un champ a
     /// le focus : il lui rend d'abord la main. Refermer l'examen n'autorise ni ne refuse rien.
     fn raccourcis(&mut self, ctx: &egui::Context, atelier: &mut Atelier) {
@@ -679,16 +734,25 @@ impl Supervision {
             (egui::Key::Num4, Page::Activite),
         ];
         let saisie = self.focus_precedent || ctx.memory(|m| m.focused().is_some());
-        let (page, nouveau, echap) = ctx.input_mut(|i| {
+        let (page, nouveau, arret, echap) = ctx.input_mut(|i| {
             (
                 pages
                     .into_iter()
                     .find(|(key, _)| i.consume_key(egui::Modifiers::CTRL, *key))
                     .map(|(_, page)| page),
                 i.consume_key(egui::Modifiers::CTRL, egui::Key::N),
+                // L'arrêt d'urgence se demande même depuis un champ : il ouvre sa
+                // confirmation, rien de plus.
+                i.consume_key(
+                    egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+                    egui::Key::Escape,
+                ),
                 !saisie && i.key_pressed(egui::Key::Escape),
             )
         });
+        if arret {
+            self.arret.demander();
+        }
         if let Some(page) = page {
             atelier.page = page;
         }
@@ -821,6 +885,80 @@ impl Supervision {
         );
         ui.add_space(6.0);
         ui.label(RichText::new(&c.tache).size(11.0).color(EFFACE));
+    }
+
+    /// La confirmation de l'arrêt d'urgence : ce qui s'arrête, ce qui reste. Rien ne part avant
+    /// le second geste.
+    fn confirmer_l_arret(&mut self, ctx: &egui::Context, scene: &Scene) {
+        let n = a_arreter(scene);
+        let id = egui::Id::new("arret-urgence");
+        let reponse = egui::Modal::new(id)
+            .area(egui::Modal::default_area(id).fade_in(false))
+            .backdrop_color(VOILE)
+            .frame(
+                Frame::new()
+                    .fill(Color32::from_rgb(10, 12, 16))
+                    .stroke(Stroke::new(1.0, hud::voile(ATTENTE, 160)))
+                    .corner_radius(4)
+                    .inner_margin(32),
+            )
+            .show(ctx, |ui| {
+                let largeur =
+                    (ctx.content_rect().width() - 2.0 * (16.0 + 32.0)).clamp(260.0, 560.0);
+                ui.set_max_width(largeur);
+                ui.horizontal(|ui| {
+                    let (dot, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
+                    ui.painter().circle_filled(dot.center(), 3.0, ATTENTE);
+                    hud::etiquette(ui, "ARRÊT D'URGENCE", ATTENTE);
+                });
+                ui.add_space(14.0);
+                ui.label(
+                    titre(
+                        &match n {
+                            0 => "Arrêter les missions en main ?".to_owned(),
+                            1 => "Arrêter la mission en cours ?".to_owned(),
+                            n => format!("Arrêter les {n} missions en cours ?"),
+                        },
+                        30.0,
+                    )
+                    .line_height(Some(36.0)),
+                );
+                ui.add_space(14.0);
+                ui.label(
+                    RichText::new(
+                        "Chaque agent s'arrête à son prochain pas ; un client officiel lancé \
+                         pour une mission est fermé ; les plans en attente sont annulés.",
+                    )
+                    .size(15.0)
+                    .color(ENCRE),
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(
+                        "Les fichiers déjà préparés restent à examiner : rien n'est publié ni \
+                         défait dans vos documents.",
+                    )
+                    .size(14.0)
+                    .color(DISCRET),
+                );
+                ui.add_space(22.0);
+                let mut choix = None;
+                hud::rangee(ui, |ui| {
+                    if bouton(ui, "arret-retour", "Revenir", false).clicked() {
+                        choix = Some(false);
+                    }
+                    if action(ui, "arret-confirmer", "Tout arrêter").clicked() {
+                        choix = Some(true);
+                    }
+                });
+                choix
+            });
+        match reponse.inner {
+            Some(true) => self.arret.confirmer(),
+            Some(false) => self.arret.renoncer(),
+            None if reponse.should_close() => self.arret.renoncer(),
+            None => {}
+        }
     }
 
     fn decision(&mut self, ctx: &egui::Context, scene: &Scene, reponse: &mut Option<Reponse>) {

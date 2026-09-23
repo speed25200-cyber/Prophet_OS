@@ -46,7 +46,10 @@ qu'avec les missions en cours. Voir l'[ADR 0019](../adr/0019-atelier-et-focale.m
 
 Les filtres et la sélection pilotent l'inspecteur. À petite taille, celui-ci remplace la liste
 avec un retour aux missions. Une décision attend dans une bande persistante ; l'humain ouvre
-son examen, lit les conséquences puis choisit. Les [captures et limites de la supervision](../reports/supervision-2026-09-13.md)
+son examen, lit les conséquences puis choisit. Dès qu'une mission n'est pas finie, « Tout
+arrêter » (ou Ctrl+Maj+Échap) ouvre l'arrêt d'urgence : une confirmation dit ce qui s'arrête et
+ce qui reste, puis `task.halt` arrête toutes les missions en main, et la réponse du service
+se lit sous l'en-tête. Échap referme la confirmation sans rien arrêter. Les [captures et limites de la supervision](../reports/supervision-2026-09-13.md)
 remplacent la direction Iris précédente. L'inspecteur lit maintenant `task.inspect` : plan et
 accès, état exact, réponse finale, métadonnées de changements et parcours des états. Les missions
 terminées restent accessibles. Les contrôles de lancement et d'arrêt envoient une commande

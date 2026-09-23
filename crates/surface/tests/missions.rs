@@ -965,6 +965,66 @@ fn les_widgets_comparent_les_versions_et_refusent_un_travail_altere() {
     );
 }
 
+/// L'arrêt d'urgence avec les vrais services : la mission est en pleine inférence, l'humain
+/// demande « Tout arrêter » puis confirme ; agentd arrête le travailleur, la mission finit
+/// annulée, rien n'est écrit, et la surface dit l'issue.
+#[test]
+#[ignore = "needs_gpu: arrêt d'urgence avec les services réels"]
+fn l_arret_d_urgence_arrete_la_mission_en_cours_par_le_service() {
+    let model = Model::new();
+    let context = Contexte::hors_ecran().unwrap();
+    let chain = Chain::new(&model.endpoint);
+    let mut source = Reel::demarrer(chain.sockets.clone());
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.brancher_missions(chain.sockets.agentd.clone());
+    bureau.figer_transitions();
+    let target = Cible::nouvelle(&context, 1440, 1000);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        if bureau.missions().snapshot().is_some() {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    let events = click(&bureau, &target, "mission-start");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    model
+        .received
+        .recv_timeout(Duration::from_secs(10))
+        .unwrap();
+    chain.wait(bureau.missions(), State::Running);
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    let events = click(&bureau, &target, "arret-tout");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    for _ in 0..2 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    let events = click(&bureau, &target, "arret-confirmer");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    chain.wait(bureau.missions(), State::Cancelled);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while bureau
+        .ctx
+        .read_response(egui::Id::new("arret-ecarter"))
+        .is_none()
+    {
+        assert!(Instant::now() < deadline, "l'issue de l'arrêt se lit");
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    capture(&context, &target, "arret-urgence");
+    assert!(!chain.dir.path().join("home/docs/note.txt").exists());
+    drop(model.release);
+    model.worker.unwrap().join().unwrap();
+}
+
 /// Un moteur scripté : il rend ses réponses dans l'ordre, une par requête de complétion, et le
 /// catalogue de modèles à qui le demande ; la réponse de rang `retenue` attend que le test la
 /// libère, pour qu'il observe la mission en cours.

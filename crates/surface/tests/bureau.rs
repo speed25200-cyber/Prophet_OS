@@ -1912,3 +1912,104 @@ fn la_surface_ne_bloque_pas_pendant_une_generation_en_flux() {
         "une image a duré {maximum:.0} ms sur {flux_ms:.0}"
     );
 }
+
+/// L'arrêt d'urgence (FRONTIER, interface) : il n'apparaît qu'avec une mission à arrêter, un
+/// premier geste n'ouvre que sa confirmation, Échap la referme sans rien arrêter, Ctrl+Maj+Échap
+/// la rouvre, et la confirmation dit l'issue. Ici sans service : rien de réel ne s'arrête, et
+/// la surface le dit.
+#[test]
+#[ignore = "needs_gpu"]
+fn l_arret_d_urgence_demande_une_confirmation_avant_tout() {
+    let context = Contexte::hors_ecran().unwrap();
+    for (largeur, hauteur) in [(1440, 1000), (640, 900)] {
+        let target = Cible::nouvelle(&context, largeur, hauteur);
+        let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+        bureau.figer_transitions();
+        let vide = scene();
+        for _ in 0..3 {
+            avec_scene(&mut bureau, &context, &target, &vide, vec![]);
+        }
+        assert!(
+            bureau
+                .ctx
+                .read_response(egui::Id::new("arret-tout"))
+                .is_none(),
+            "rien à arrêter, pas de bouton"
+        );
+        let mut scene = scene();
+        scene.courants.push(surface::scene::Courant {
+            tache: "t-1".into(),
+            intitule: "Relire la branche".into(),
+            agent: "claude-code".into(),
+            etat: surface::scene::Etat::Court,
+            debit: 12.0,
+            budget_consomme: 0.2,
+            etapes: 8,
+            task_state: None,
+            task_revision: 0,
+        });
+        for _ in 0..3 {
+            avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+        }
+        let events = click_widget(&bureau, "arret-tout");
+        avec_scene(&mut bureau, &context, &target, &scene, events);
+        for _ in 0..2 {
+            avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+        }
+        assert!(
+            bureau
+                .ctx
+                .read_response(egui::Id::new("arret-confirmer"))
+                .is_some(),
+            "la confirmation est ouverte"
+        );
+        capture(&context, &target, "arret-confirmation");
+        avec_scene(
+            &mut bureau,
+            &context,
+            &target,
+            &scene,
+            touche(egui::Key::Escape, Modifiers::NONE),
+        );
+        for _ in 0..2 {
+            avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+        }
+        assert!(
+            bureau
+                .ctx
+                .read_response(egui::Id::new("arret-confirmer"))
+                .is_none(),
+            "Échap referme la confirmation"
+        );
+        assert!(
+            bureau
+                .ctx
+                .read_response(egui::Id::new("arret-ecarter"))
+                .is_none(),
+            "rien n'est parti"
+        );
+        avec_scene(
+            &mut bureau,
+            &context,
+            &target,
+            &scene,
+            touche(egui::Key::Escape, Modifiers::CTRL | Modifiers::SHIFT),
+        );
+        for _ in 0..2 {
+            avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+        }
+        let events = click_widget(&bureau, "arret-confirmer");
+        avec_scene(&mut bureau, &context, &target, &scene, events);
+        for _ in 0..2 {
+            avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+        }
+        assert!(
+            bureau
+                .ctx
+                .read_response(egui::Id::new("arret-ecarter"))
+                .is_some(),
+            "l'issue se lit sous l'en-tête"
+        );
+        capture(&context, &target, "arret-issue");
+    }
+}

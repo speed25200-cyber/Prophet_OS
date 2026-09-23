@@ -583,12 +583,22 @@ impl Missions {
 }
 
 pub(crate) fn rpc(socket: PathBuf, method: &str, params: Value) -> Result<Value, String> {
+    rpc_dans(socket, method, params, Duration::from_secs(5))
+}
+
+/// Un appel au service, avec son propre délai.
+pub(crate) fn rpc_dans(
+    socket: PathBuf,
+    method: &str,
+    params: Value,
+    delai: Duration,
+) -> Result<Value, String> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
     runtime.block_on(async {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(delai, async {
             let client = prophet_ipc::Client::connect(socket)
                 .await
                 .map_err(|e| e.to_string())?;

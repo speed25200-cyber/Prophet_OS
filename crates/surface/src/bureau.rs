@@ -140,6 +140,7 @@ impl Bureau {
     pub fn brancher_missions(&mut self, socket: std::path::PathBuf) {
         if !self.atelier.demonstration {
             self.supervision.missions = crate::missions::Missions::connect(socket.clone());
+            self.supervision.arret = crate::arret::Arret::connect(socket.clone());
             self.supervision.preparation = crate::preparation::Preparation::connect(socket);
         }
     }

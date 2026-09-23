@@ -277,3 +277,13 @@ outils qui comptent pour le modèle, Prophet réussit au huitième passage 21 ex
 contre 12 pour la boucle nue, et avec Qwen3 4B 10 sur 15 contre 8 ; ses services coûtent 0,3 à
 0,5 s de processeur et 47 Mo par mission, et ses missions dépensent plus de calcul du modèle. Restent la VRAM, ses budgets et la matrice GPU, à
 mesurer sur une carte ; aucun critère complet de la version complète n'est coché.
+
+Toujours le 23 septembre, le critère d'interface gagne l'arrêt d'urgence qu'il nomme : « Tout
+arrêter » (ou Ctrl+Maj+Échap), après une confirmation, arrête par `task.halt` toutes les
+missions en main — travailleurs, séances, clients officiels, plans en attente — et la surface
+dit l'issue ; éprouvé avec les vrais services (`prophet task halt` en ligne de commande).
+L'[audit visuel et de fluidité](reports/audit-visuel-2026-09-23.md) corrige les grands écrans
+(la surface tombait en 2560 × 1440), l'empilement des cartes et l'alignement des rangées en
+fenêtre étroite, et mesure en release sur un rastériseur logiciel : moins de 0,75 ms de
+processeur par image pour l'interface à toutes les tailles, et 0,2 % d'un cœur au repos une fois
+le champ en veille (ADR 0055). La même mesure sur une carte graphique reste à faire.
