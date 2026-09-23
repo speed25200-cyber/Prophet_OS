@@ -1001,7 +1001,8 @@ Les trois ont un test qui échoue sur le code d'avant : trois dans `crates/proph
   seul exerce le durcissement réel — mais il évite d'y aller pour une faute qui se lit dans le
   fichier. Ajouté à `just check` et au travail `check` de l'intégration continue
 
-- [ ] `image/tests/services.nix` demande aussi, désormais, si `agentd` peut écrire là où sa
+- [x] (vérifié en CI, « Les sept services sous systemd » vert sur `468324a` et `12daf73`)
+  `image/tests/services.nix` demande aussi, désormais, si `agentd` peut écrire là où sa
   configuration le prétend. `ReadWritePaths = [ "/home/prophet" … ]` et `ProtectHome = true` se
   contredisent en apparence, et c'est systemd qui tranche sans que le fichier dise dans quel sens.
   Le contrôle regarde depuis l'intérieur de l'espace de montage du service, par `nsenter` : le
@@ -1031,7 +1032,8 @@ Les trois ont un test qui échoue sur le code d'avant : trois dans `crates/proph
   avec elle `{"task": "task:confirme", "pid": 792, "level": 0}`. Noté en ADR-0005, ajouté au
   garde-fou, et le refus lui-même nomme désormais laquelle de ses quatre causes s'applique
 
-- [ ] **Le maillon jamais exercé : `nixos-install` lui-même.** Le travail « installeur » s'arrête
+- [x] (vérifié en CI, « Construire le système installé » vert sur `468324a` et `12daf73`)
+  **Le maillon jamais exercé : `nixos-install` lui-même.** Le travail « installeur » s'arrête
   au montage ; le travail « système installé » démarre une configuration que le cadre de test
   fabrique. Entre les deux, personne n'avait jamais posé ce système sur la disposition que
   l'installeur crée. Le travail `systeme` reprend maintenant là où l'installeur s'arrête, avec la
@@ -1081,7 +1083,8 @@ avec `lockdown=integrity` et `module.sig_enforce=1` sur la ligne de commande. Ce
 étaient les candidats les plus plausibles à un refus de démarrer — un noyau qui exige des modules
 signés et n'en trouve aucun ne monte pas sa racine. Ce n'est pas ce qui se produit.
 
-- [ ] `image/tests/installe.nix` — démarre la configuration installée **par son chargeur
+- [x] (vérifié en CI, « Le système installé démarre » vert sur `468324a` et `12daf73`)
+  `image/tests/installe.nix` — démarre la configuration installée **par son chargeur
   d'amorçage**, en UEFI, depuis un vrai disque, et vérifie dans l'ordre : le chargeur a bien
   lancé le système, les comptes ont été écrits, aucune unité n'a échoué, les sept services
   tournent, `prophet-surface` a au moins été lancée, le propriétaire ouvre une session sur `tty1`
