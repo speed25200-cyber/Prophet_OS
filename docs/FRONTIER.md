@@ -253,6 +253,10 @@ le cycle de vie des poids (ADR 0046) : un catalogue du système à empreintes, u
 par egress sous un jeton borné au dépôt, vérifié avant d'être posé, repris après une coupure,
 retiré sur demande, depuis la CLI ou la page Modèles, puis servi par le routeur du moteur :
 le critère de M8-T7 est tenu en CI par les vrais binaires (`prophet model pull qwen3-8b-q4`,
-5 Go par egress en 168 s ; `prophet model serve` en 3 s ; une complétion en 2,9 s). Restent la
-VRAM, ses budgets et la matrice GPU, à mesurer sur une carte ; aucun critère complet de la
-version complète n'est coché.
+5 Go par egress en 168 s ; `prophet model serve` en 3 s ; une complétion en 2,9 s). Cinq
+familles sont validées sur processeur dans la même CI (`c44a349`) : Qwen3 8B, IBM Granite 3.3
+2B, SmolLM2 1.7B, Phi-3 mini et Llama 3.2 3B, chacune tirée de Hugging Face par egress,
+vérifiée, servie par le routeur épinglé et interrogée — toutes répondent juste (« Paris »), de
+13 à 31 tokens/s en génération sur quatre cœurs sans carte. Restent la VRAM, ses budgets et la
+matrice GPU, à mesurer sur une carte ; aucun critère complet de la version complète n'est
+coché.

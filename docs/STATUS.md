@@ -1554,7 +1554,11 @@ donne le détail.
   catalogue avec leur taille exacte (`qwen3-4b-q4`, `qwen3-8b-q4`, l'exemple du plan), puis
   quatre autres familles à licence ouverte — Granite 3.3 2B, SmolLM2 1.7B, Phi-3 mini, Llama 3.2
   3B — que le travail « Poids du catalogue servis (réels) » tire, sert et interroge une à une
-  (FRONTIER : valider plusieurs familles). Servir : `prophet model serve <id>`
+  (FRONTIER : valider plusieurs familles). **Vert sur `c44a349`**, quatre cœurs sans carte :
+  Granite tiré en 99 s, réponse en 2,5 s (21 tokens/s) ; SmolLM2 36 s, 1,2 s (31 tokens/s) ;
+  Phi-3 mini 77 s, 0,9 s (13 tokens/s) ; Llama 3.2 66 s, 2,2 s (17 tokens/s) ; toutes
+  répondent juste (« Paris »), et Qwen3 8B, dans le même travail, tiré en 158 s, servi en 3 s,
+  complétion en 2,8 s. Servir : `prophet model serve <id>`
   fait charger un poids par le routeur du moteur (`GET /models`, `POST /models/load`), reconnu
   par le chemin de son fichier (`bc001d2`), et la page Modèles dit « Servi » ou propose
   « Servir » (`93bd678`). En mode relais, le routeur de l'image lit le dossier des

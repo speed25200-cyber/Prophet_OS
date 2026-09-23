@@ -17,6 +17,23 @@ disque (`docs/installation.md`, section 3) dit, depuis la clé, ce qu'une machin
 | Mémoire | 8 Gio au minimum pour le bureau et un modèle local ; en dessous, l'installeur le dit | VM du bureau à 4 Gio |
 | Disque | 80 Gio au minimum : deux racines de 24, 32 d'état chiffré, le reste en données chiffrées ; SATA (chipsets AMD, Intel, NVIDIA, VIA, SiI de 2010 et après), NVMe, USB (UHCI à xHCI), lecteurs de cartes SDHCI et Realtek dans l'initrd | VM (virtio) ; disque en boucle pour l'installeur ; installation complète et redémarrage avec phrase de passe dans QEMU le 15 septembre 2026 |
 
+## Modèles locaux sur processeur
+
+Vus sur le coureur de la CI (quatre cœurs x86-64, sans carte), travail « Poids du catalogue
+servis (réels) », `c44a349` : chaque poids tiré de Hugging Face par egress, vérifié par son
+empreinte, servi par le routeur épinglé (fenêtre 4 096, section `[*]` de l'image) et interrogé.
+Les débits sont ceux d'une seule requête ; la mémoire et la VRAM n'y sont pas mesurées.
+
+| Entrée du catalogue | Taille | Réponse | Génération | Vu |
+|---|---|---|---|---|
+| `qwen3-8b-q4` (Qwen3 8B, Q4_K_M) | 5,0 Go | « bonjour », 2,8 s | 7,4 tokens/s (relevé sur `4ecf15c`) | hôte CI |
+| `granite-3.3-2b-q4` (IBM Granite 3.3 2B) | 1,5 Go | « Paris. », 2,5 s | 21 tokens/s | hôte CI |
+| `smollm2-1.7b-q4` (SmolLM2 1.7B) | 1,1 Go | « Paris », 1,2 s | 31 tokens/s | hôte CI |
+| `phi-3-mini-q4` (Phi-3 mini 4k) | 2,4 Go | « Paris », 0,9 s | 13 tokens/s | hôte CI |
+| `llama-3.2-3b-q4` (Llama 3.2 3B) | 2,0 Go | « Paris. », 2,2 s | 17 tokens/s | hôte CI |
+| `qwen3-1.7b-q8`, `qwen3-0.6b-q8` (modèles du relais) | 1,8 et 0,6 Go | missions réelles | — | VM (mission locale sous NixOS) |
+| Tout modèle, sur carte (Vulkan) | — | — | — | non |
+
 ## Affichage
 
 | Carte | Pilote | Ce que ça donne | Vu |

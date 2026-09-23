@@ -74,7 +74,9 @@ hostile.
   familles à licence ouverte et d'accès libre (`8a259f1`) : IBM Granite 3.3 2B et SmolLM2 1.7B
   (Apache-2.0), Phi-3 mini 4k (MIT), Llama 3.2 3B (licence communautaire Llama 3.2, dite dans
   l'entrée). L'essai `plusieurs_familles_se_servent_et_repondent` les tire, les sert et les
-  interroge l'une après l'autre dans le même travail de la CI.
+  interroge l'une après l'autre dans le même travail de la CI : vert sur `c44a349`, chacune
+  répond juste à la même question (« Paris »), de 13 tokens/s (Phi-3 mini) à 31 (SmolLM2) en
+  génération sur quatre cœurs sans carte.
 
 ## Conséquences
 
