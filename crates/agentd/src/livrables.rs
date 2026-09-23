@@ -6,9 +6,10 @@
 //! vérifie à chaque conclusion qu'il existe dans l'espace de travail ; sinon, il le rappelle au
 //! modèle et le laisse continuer — de nouveau seulement s'il a progressé depuis le rappel
 //! précédent, au plus [`RAPPELS`] fois par mission.
-//! Le rappel dit un fait (ce chemin n'existe pas encore) et laisse le modèle juger : un chemin
-//! nommé comme une entrée absente se décline. Il ne donne aucun droit : l'écriture passe par le
-//! même outil, le même jeton et la même politique.
+//! Le rappel demande d'abord d'écrire — un petit modèle suit une consigne, il décline une
+//! condition — puis laisse une issue : un chemin nommé comme une entrée absente se dit au lieu
+//! de s'écrire. Il ne donne aucun droit : l'écriture passe par le même outil, le même jeton et
+//! la même politique.
 use std::path::{Component, Path, PathBuf};
 
 use providers::DriverError;
@@ -102,20 +103,22 @@ pub fn manquants(attendus: &[Attendu]) -> Vec<String> {
 }
 
 /// Le message que le modèle reçoit quand il conclut alors qu'un chemin que l'objectif nomme
-/// n'existe toujours pas. Il dit le fait et laisse le modèle juger : le service ne sait pas si
-/// l'objectif demandait de produire ce chemin ou le nommait comme une entrée.
+/// n'existe toujours pas. La consigne vient d'abord : au banc, un rappel qui commençait par une
+/// condition (« s'il vous revient de le produire ») a été décliné treize fois sur vingt-neuf,
+/// un rappel impératif jamais (ADR 0049). L'issue vient ensuite : le service ne sait pas si
+/// l'objectif demandait ce chemin ou le nommait comme une entrée absente.
 #[must_use]
 pub fn rappel(manquants: &[String]) -> String {
     match manquants {
         [seul] => format!(
-            "L'objectif nomme {seul}, qui n'existe pas encore. S'il vous revient de le \
-             produire, écrivez-le avec l'outil d'écriture de fichiers, puis concluez ; sinon, \
-             concluez en disant pourquoi."
+            "Vous n'avez pas encore écrit {seul}. Écrivez-le avec l'outil d'écriture de \
+             fichiers, puis concluez. Si l'objectif le nommait comme un fichier à lire, dites \
+             qu'il est absent au lieu de l'écrire."
         ),
         _ => format!(
-            "L'objectif nomme {}, qui n'existent pas encore. S'il vous revient de les \
-             produire, écrivez-les avec l'outil d'écriture de fichiers, puis concluez ; sinon, \
-             concluez en disant pourquoi.",
+            "Vous n'avez pas encore écrit {}. Écrivez-les avec l'outil d'écriture de \
+             fichiers, puis concluez. Si l'objectif les nommait comme des fichiers à lire, \
+             dites qu'ils sont absents au lieu de les écrire.",
             manquants.join(", ")
         ),
     }

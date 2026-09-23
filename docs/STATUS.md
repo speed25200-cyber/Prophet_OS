@@ -1621,7 +1621,12 @@ donne le détail.
   revient au modèle en disant où agir, la révocation (revérifiée auprès de capd) et le troisième
   refus arrêtent ; erreurs de nature de chemin en `Invalid` avec l'outil qui convient ;
   `fs.search` fouille un fichier ; `fs.read` compte les lignes ; le banc mesure aussi le temps
-  processeur du moteur et des services et leur pic de mémoire.
+  processeur du moteur et des services et leur pic de mémoire. Troisième passage
+  (`63586c6`) : **Prophet 8/45, boucle nue 6/45** ; les services de Prophet coûtent 0,27 s de
+  processeur par mission et 47 Mo au plus, contre 114 s de processeur pour le moteur (0,2 %).
+  `compter-les-erreurs` passe à 3/3 par Prophet ; le rappel conditionnel se déclinait (13 sur
+  29) : la consigne revient en tête ; la boucle nue offre désormais les outils dans l'ordre du
+  registre.
 - Concurrence et annulation sur le vrai moteur (FRONTIER, moteurs locaux ; essai
   `deux_requetes_se_partagent_le_moteur_et_un_abandon_le_libere`, vert sur `dd5ce52`) : sur une
   instance à une place comme celle de l'image, deux requêtes simultanées aboutissent toutes

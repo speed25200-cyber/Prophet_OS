@@ -26,11 +26,11 @@ message. Le service sait, sans interpréter l'objectif, ce qu'il nomme et ce qui
 - **À chaque conclusion du modèle**, agentd (`agentd::livrables::Rappel`, autour du compteur
   commun) vérifie que chaque livrable existe dans l'espace de travail. S'il en manque, la
   conclusion et un message de l'utilisateur sont insérés à cette place dans l'historique que le
-  modèle reçoit, et il est interrogé de nouveau. Le message dit un fait et laisse juger :
-  « L'objectif nomme ~/…, qui n'existe pas encore. S'il vous revient de le produire,
-  écrivez-le avec l'outil d'écriture de fichiers, puis concluez ; sinon, concluez en disant
-  pourquoi. » — le service ne sait pas si l'objectif demandait ce chemin ou le nommait comme
-  une entrée absente (« lis ~/notes/todo.txt »).
+  modèle reçoit, et il est interrogé de nouveau. Le message donne d'abord la consigne, puis
+  une issue : « Vous n'avez pas encore écrit ~/…. Écrivez-le avec l'outil d'écriture de
+  fichiers, puis concluez. Si l'objectif le nommait comme un fichier à lire, dites qu'il est
+  absent au lieu de l'écrire. » — le service ne sait pas si l'objectif demandait ce chemin ou
+  le nommait comme une entrée absente (« lis ~/notes/todo.txt »).
 - **Borné** : un nouveau rappel n'a lieu que si le modèle a produit un livrable depuis le
   précédent (il en manque moins) ; un rappel décliné ne se répète donc pas. Au plus **deux
   rappels** par mission ; au-delà, sa conclusion est rendue telle quelle.
@@ -63,8 +63,12 @@ message. Le service sait, sans interpréter l'objectif, ce qu'il nomme et ce qui
 - Premier passage du banc avec le rappel (`6d01c38`) : message impératif (« Vous n'avez pas
   encore écrit … »), deux rappels sans condition. Les quinze exécutions rappelées (sur 45) ont
   toutes écrit le fichier demandé, et « ne-pas-toucher-au-reste » passe de 0 à 3 sur 3 ; le
-  contenu, lui, reste celui du modèle (« 0 € » quand il n'a rien lu). Le message factuel et la
-  condition de progrès viennent ensuite, pour ne pas pousser le modèle à créer une entrée
-  absente.
+  contenu, lui, reste celui du modèle (« 0 € » quand il n'a rien lu).
+- Deuxième version (`63586c6`) : un message factuel et conditionnel (« L'objectif nomme ~/…,
+  qui n'existe pas encore. S'il vous revient de le produire, écrivez-le… ; sinon, concluez en
+  disant pourquoi ») et la condition de progrès, pour ne pas pousser le modèle à créer une
+  entrée absente. Le petit modèle y lit une permission : 13 des 29 exécutions rappelées
+  déclinent, et « ne-pas-toucher-au-reste » retombe de 3 à 0 sur 3. La version retenue garde
+  la condition de progrès et l'issue, mais met la consigne en tête.
 - Un livrable produit hors de la portée n'est pas vu ; c'est voulu : la mission ne peut pas y
   écrire.

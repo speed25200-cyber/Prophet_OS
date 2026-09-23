@@ -270,6 +270,8 @@ ses poids sans projection, ce qui a réduit sa mémoire résidente d'un tiers. L
 avec une base Linux commence (ADR 0048) : le banc M13 joue la suite de tâches avec le modèle
 de l'image, par Prophet et par une boucle nue qui appelle les mêmes outils sans capd ni
 journal. Le premier passage (0/7 contre 2/7) mesure surtout le petit modèle, qui lit puis
-conclut sans écrire le fichier demandé ; agentd le lui rappelle désormais (ADR 0049), et le
-banc rejoue chaque tâche trois fois. Restent la VRAM, ses budgets et la matrice GPU, à
+conclut sans écrire le fichier demandé ; agentd le lui rappelle désormais (ADR 0049), rend au
+modèle un refus de chemin en disant où agir (ADR 0050), et le banc rejoue chaque tâche trois
+fois : au troisième passage, Prophet réussit 8 exécutions sur 45 contre 6 pour la boucle nue,
+pour 0,27 s de processeur et 47 Mo de services par mission (le moteur en prend 114 s). Restent la VRAM, ses budgets et la matrice GPU, à
 mesurer sur une carte ; aucun critère complet de la version complète n'est coché.
