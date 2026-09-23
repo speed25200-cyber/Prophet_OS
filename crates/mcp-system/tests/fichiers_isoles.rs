@@ -204,6 +204,24 @@ fn la_recherche_verifie_chaque_descendant_et_rend_des_chemins_logiques() {
 }
 
 #[test]
+fn la_lecture_compte_les_lignes_du_contenu_rendu() {
+    // Compter les lignes d'un texte relu est une erreur courante d'un petit modèle : le
+    // service les compte, avec ou sans fin de ligne finale, fichier vide compris.
+    let m = monde(&["~/docs/**"]);
+    for (nom, texte, lignes) in [
+        ("a.txt", "un\ndeux\ntrois\n", 3),
+        ("b.txt", "un\ndeux", 2),
+        ("c.txt", "", 0),
+        ("d.txt", "\n\n", 2),
+    ] {
+        std::fs::write(m.home.join("docs").join(nom), texte).unwrap();
+        let r = m.call("fs.read", json!({"path": format!("~/docs/{nom}")}));
+        assert!(!r.is_error, "{r:?}");
+        assert_eq!(r.structured.unwrap()["lines"], lignes, "{nom}");
+    }
+}
+
+#[test]
 fn un_plafond_fourni_par_le_modele_ne_supprime_pas_la_borne_de_lecture() {
     let m = monde(&["~/docs/**"]);
     std::fs::write(m.home.join("docs/grand.txt"), vec![b'a'; 600_000]).unwrap();

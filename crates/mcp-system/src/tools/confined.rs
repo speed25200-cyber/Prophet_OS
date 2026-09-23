@@ -512,7 +512,10 @@ fn run(
                     .ok_or_else(|| invalid("offset doit être un entier positif ou nul"))?,
             };
             let chunk = view.read_from(&relative, offset, max)?;
-            let mut result = json!({"path":logical, "content":chunk.text, "total_bytes":chunk.total, "truncated":chunk.next.is_some()});
+            // Les lignes sont comptées pour le modèle : un petit modèle compte mal les `\n`
+            // d'un texte qu'il relit, le service le fait exactement.
+            let lines = chunk.text.lines().count();
+            let mut result = json!({"path":logical, "content":chunk.text, "lines":lines, "total_bytes":chunk.total, "truncated":chunk.next.is_some()});
             if args.get("offset").is_some() {
                 result["offset"] = json!(chunk.start);
             }

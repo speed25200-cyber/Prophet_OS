@@ -17,7 +17,7 @@
 
 | Outil | `requires` | irreversible | external | Notes |
 |---|---|---|---|---|
-| `fs.read` | fs.read chemin | non | non | `max_bytes` défaut et plafond 256 Kio ; `offset` et `next_offset` pour lire par morceaux, sans couper de caractère |
+| `fs.read` | fs.read chemin | non | non | `max_bytes` défaut et plafond 256 Kio ; `offset` et `next_offset` pour lire par morceaux, sans couper de caractère ; `lines`, nombre de lignes du contenu rendu |
 | `fs.write` | fs.write chemin | non (réversible via sfs) | non | remplacement atomique dans le travail, contenu ≤ 1 Mio |
 | `fs.list` | fs.list chemin et descendants | non | non | fusion travail/origine ; ≤ 2000 résultats |
 | `fs.stat` | fs.read chemin | non | non | |

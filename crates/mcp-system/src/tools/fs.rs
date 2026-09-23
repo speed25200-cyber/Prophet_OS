@@ -40,7 +40,7 @@ macro_rules! file_tool {
 file_tool!(
     Read,
     "fs.read",
-    "Lit un fichier texte autorisé, sans suivre de liens symboliques ni de liens physiques multiples. Rend au plus 256 Kio à partir de `offset` et signale la troncature ; `next_offset` dit où reprendre pour lire la suite par morceaux.",
+    "Lit un fichier texte autorisé, sans suivre de liens symboliques ni de liens physiques multiples. Rend au plus 256 Kio à partir de `offset`, avec `lines`, le nombre de lignes du contenu rendu, et signale la troncature ; `next_offset` dit où reprendre pour lire la suite par morceaux.",
     "fs.read",
     Read,
     "path",
