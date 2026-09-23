@@ -772,7 +772,7 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 
 ### M5 — sandboxd : Sandbox Manager
 
-- [x] M5-T1 — Niveau 0 (bwrap + Landlock + seccomp) (2026-09-12, 24b8338) — 8 tests d'évasion réels, démarrage en 2,6 ms
+- [x] M5-T1 — Niveau 0 (bwrap + Landlock + seccomp) (2026-09-12, 24b8338) — 8 tests d'évasion réels, démarrage en 2,6 ms ; Landlock n'était pas appliqué, il l'est depuis le 23 septembre (`9b3ae7e`)
 - [x] M5-T2 — Niveau 1 (gVisor) (2026-09-12, 3c0b7cd) — vérifié sur matériel réel en intégration continue : exécution effective sous gVisor et absence d'interface réseau, tests `needs_gvisor` verts
 - [x] M5-T3 — Niveau 2 (Firecracker) (2026-09-12, faca93c) — vérifié sur matériel réel en intégration continue : microVM démarrée avec noyau et racine d'invité, et refus explicite plutôt que repli quand le niveau est inatteignable
 - [x] M5-T4 — Pool de snapshots (2026-09-23, 1e3ff79) — vérifié sur matériel réel en intégration continue (`3314b74`) : réserve de deux microVM restaurées de l'instantané d'un invité en attente, disque de la tâche confié à la reprise ; microVM rendue en 8,9 ms (médiane de cinq prises, de 8,4 à 10,0 ms, `41def9e`) pour un objectif de 150 ms, machine neuve à chaque prise, programme exécuté et fichiers rapatriés comme à froid, réserve régénérée (ADR 0045) ; un seul profil, l'invité du dépôt (`node` et `browser` n'ont pas d'invité)
@@ -1518,6 +1518,13 @@ donne le détail.
   8,9 ms** (médiane de cinq prises, de 8,4 à 10,0 ms) pour un objectif de 150 ms, machine
   neuve à chaque fois, réserve régénérée. Le script d'isolation fait désormais remonter les
   lignes « mesure : » des essais réussis (`41def9e`).
+- **Correction** : M5-T1 cochait « bwrap + Landlock + seccomp », mais l'amorçage n'appliquait
+  jamais Landlock (`apply_landlock` sondait l'ABI puis rendait faux) ; le niveau 0 reposait sur
+  la racine minimale et seccomp seuls, et une sandbox pouvait créer des fichiers à sa propre
+  racine. Landlock est désormais appliqué (`9b3ae7e`) : rien ne se crée à la racine, rien ne
+  s'écrit hors des chemins accordés, rien ne s'exécute hors des montages en lecture seule ;
+  prouvé ici, sous Landlock ABI 7, par un essai qui échouait avant. La page Système dit la
+  réserve de microVM (`471364e`).
 - Erreurs et reprise (FRONTIER) : une mission échouée ou arrêtée se relance depuis
   l'inspecteur (« Relancer », `93db17c`) ou par `prophet task retry` (`6bc1b56`) : la
   préparation repasse par le même contexte du catalogue, que le plan retient désormais
@@ -1535,7 +1542,7 @@ donne le détail.
   `6cf62c0`, les sept services sous systemd sont verts avec capd arrêté : l'humain ne peut ni
   renommer un fichier sur `capd.sock` ni le remplacer par un lien (« Operation not
   permitted »), et capd repart sur son nom.
-- `just check` : **856 réussis, 0 échec, 48 ignorés**, format, clippy, contrôles du dépôt et
+- `just check` : **863 réussis, 0 échec, 50 ignorés**, format, clippy, contrôles du dépôt et
   secrets (repli). Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
 
