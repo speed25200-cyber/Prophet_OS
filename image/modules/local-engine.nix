@@ -286,7 +286,14 @@ in {
 
     systemd.services.prophet-local-engine = let
       # Les réglages d'un modèle, identiques en mode simple et en mode routeur.
+      #
+      # `--load-mode none` : les poids sont lus dans les tampons du moteur, sans projection du
+      # fichier (ADR 0047). Projeté, un poids dont le processeur reçoit une copie réarrangée
+      # reste aussi résident par sa projection — llama.cpp recopie ces tenseurs depuis elle et
+      # n'en libère que le début et la fin (`llama-model-loader.cpp`) : mesuré en CI, 8,8 Go
+      # résidents pour Qwen3 8B au lieu de 5,8, et l'OOM compte les deux.
       reglages = [
+        "--load-mode" "none"
         "--jinja" "--reasoning" "off" "--ctx-size" (toString cfg.contextSize)
         "--threads" (toString cfg.threads) "--parallel" "1" "--gpu-layers" couches
         "--temp" "0.7" "--top-p" "0.8" "--top-k" "20" "--min-p" "0"
@@ -297,6 +304,7 @@ in {
       section = nom: poids: ''
         [${nom}]
         model = ${toString poids}
+        load-mode = none
         jinja = 1
         reasoning = off
         ctx-size = ${toString cfg.contextSize}
@@ -314,6 +322,7 @@ in {
       # un tel poids chargerait avec toute sa fenêtre d'entraînement, et la mémoire qui va avec.
       globale = ''
         [*]
+        load-mode = none
         jinja = 1
         ctx-size = ${toString cfg.contextSize}
         threads = ${toString cfg.threads}

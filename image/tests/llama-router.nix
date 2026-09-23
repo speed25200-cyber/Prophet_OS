@@ -25,6 +25,7 @@ pkgs.runCommand "prophet-llama-router" {
   PYTHON
   cat > prereglages.ini <<INI
   [*]
+  load-mode = none
   jinja = 1
   ctx-size = 4096
   threads = 2
@@ -66,6 +67,8 @@ pkgs.runCommand "prophet-llama-router" {
   # La section globale [*] vaut pour lui : la fenêtre de l'image, pas celle d'entraînement.
   assert "--ctx-size" in args and args[args.index("--ctx-size") + 1] == "4096", args
   assert "--threads" in args and args[args.index("--threads") + 1] == "2", args
+  # Les poids se lisent sans projection (ADR 0047) : l'option passe telle quelle à l'instance.
+  assert "--load-mode" in args and args[args.index("--load-mode") + 1] == "none", args
   print(f"poids du dossier servi sous le nom {tires[0]['id']!r} ({tires[0].get('source')}), réglages {args}")
   PYTHON
   then
