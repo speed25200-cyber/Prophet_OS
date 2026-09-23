@@ -1521,7 +1521,16 @@ donne le détail.
   restauration d'une machine en 6 ms, prise médiane de 10,9 ms, et cinq clones tirent cinq
   aléas distincts de `/dev/urandom`. Sur `41df4f5`, deux microVM tournent ensemble (deux
   programmes d'une seconde en 1,49 s), sans autre interface que la boucle locale et sans
-  connexion sortante possible.
+  connexion sortante possible. La réserve garde désormais son instantané d'un démarrage de
+  sandboxd à l'autre (`f14d01a`, complément de l'ADR 0045) : sous
+  `/var/lib/prophet/sandboxd/reserve` sur l'image, avec une empreinte du moniteur, de l'invité
+  et de l'hôte ; même empreinte, la première machine est restaurée aussitôt, sans invité à
+  démarrer ni gigaoctet à réécrire. L'essai `needs_kvm` exige une réserve reprise pleine en
+  moins d'une seconde. `sandbox.run` et `proc.exec` rendent `elapsed_ms` et `warm_start` :
+  l'agent sait ce que son exécution a coûté et si la réserve a servi (`637d706`).
+- Conversation longue (M8-T7, `f93e591`) : au-delà de 32 Kio ou de 32 tours, la page
+  Conversation refusait d'envoyer ; elle envoie les tours récents qui tiennent, dit combien
+  elle en laisse de côté, et garde le fil affiché entier.
 - **Correction** : M5-T1 cochait « bwrap + Landlock + seccomp », mais l'amorçage n'appliquait
   jamais Landlock (`apply_landlock` sondait l'ABI puis rendait faux) ; le niveau 0 reposait sur
   la racine minimale et seccomp seuls, et une sandbox pouvait créer des fichiers à sa propre
@@ -1556,25 +1565,25 @@ donne le détail.
   permitted »), et capd repart sur son nom. CI de `4aaeb50` (réserve de microVM, Landlock au
   niveau 0, niveau 0 exigé sur le coureur d'isolation) : **verte des deux côtés**, mission réelle
   Qwen3, système installé (UEFI et BIOS) et ISO compris.
-- `just check` : **865 réussis, 0 échec, 51 ignorés**, format, clippy, contrôles du dépôt et
-  secrets (repli). Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
+- `just check` : **867 réussis, 0 échec, 52 ignorés** (`f14d01a`), format, clippy, contrôles
+  du dépôt et secrets (repli). Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
 
-**Bloqué.** Rien n'est vérifiable ici sous Nix, en VM ou sur matériel : pas de KVM (M5-T4
-reste à écrire sur un coureur qui l'a), pas de carte graphique (fluidité et consommation
-réelles à mesurer avec `prophet-surface --mesure` et `--repos`). Le premier appel réel de Jev
+**Bloqué.** Rien n'est vérifiable ici sous Nix, en VM ou sur matériel : pas de KVM (les essais
+de la réserve de microVM tournent sur le coureur KVM de la CI, qui les a verdis), pas de carte
+graphique (fluidité et consommation réelles à mesurer avec `prophet-surface --mesure` et
+`--repos`). Le premier appel réel de Jev
 attend une clé. Aucun compte Claude, ChatGPT ou Codex n'est connecté. Une décision revient à
 l'utilisateur : `task.spawn` d'agentd accepte un manifeste brut du compte de l'humain (c'est ce
 que fait `prophet task new`) ; le réserver aux profils du catalogue fermerait la dernière voie
 par laquelle un processus de la session fait planifier une mission sous un manifeste de sa main.
 
-**Pour la session suivante.** Lire la CI de la branche (les deux microVM simultanées sans
-réseau et la condensation qui ménage le cache du moteur, poussées après le verdict de
-`4aaeb50`) ; trancher avec l'utilisateur le sort de
-`task.spawn` pour le compte de l'humain ; mesurer la surface sur une carte graphique ; écrire M5-T4 (pool d'instantanés
-Firecracker) sur un hôte KVM, la CI pouvant l'exercer sur son coureur ; faire le premier appel
-réel de Jev avec une clé déposée ; gérer le téléchargement et la suppression des poids que le
-catalogue lit désormais.
+**Pour la session suivante.** Lire la CI de la branche (l'instantané de la réserve repris au
+redémarrage, poussé après le verdict de `41df4f5`) ; trancher avec l'utilisateur le sort de
+`task.spawn` pour le compte de l'humain, et le chemin de confiance qui distinguerait la surface
+d'un autre programme du compte pour `approval.resolve` (ADR 0044) ; mesurer la surface sur une
+carte graphique ; faire le premier appel réel de Jev avec une clé déposée ; gérer le
+téléchargement vérifié et la suppression des poids que le catalogue lit désormais (M8-T7).
 
 ### 15 septembre 2026, nuit et matin : l'ISO installée dans une machine virtuelle, deux fautes
 
