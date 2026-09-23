@@ -111,6 +111,12 @@ pub enum EventKind {
     /// Écriture en mémoire.
     #[serde(rename = "memory.write")]
     MemoryWrite,
+    /// Poids du catalogue téléchargé et vérifié.
+    #[serde(rename = "model.pulled")]
+    ModelPulled,
+    /// Poids téléchargé retiré.
+    #[serde(rename = "model.removed")]
+    ModelRemoved,
     /// Scellement périodique de la chaîne.
     #[serde(rename = "ledger.seal")]
     LedgerSeal,

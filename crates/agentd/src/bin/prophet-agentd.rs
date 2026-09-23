@@ -65,6 +65,8 @@ struct Agents {
     jev: Option<JevSetup>,
     /// Où l'état est écrit entre deux démarrages.
     etat: std::path::PathBuf,
+    /// Les téléchargements de poids du catalogue du système (ADR 0046).
+    pulls: agentd::poids::Pulls,
     pairs: commun::Pairs,
 }
 
@@ -431,6 +433,77 @@ impl Handler for Agents {
                     .await
                     .unwrap_or_else(|| Route::static_choice(statique, "routage impossible"));
                 commun::repondre(&route)
+            }
+
+            // Les poids gérés (M8-T7, ADR 0046) : le catalogue du système, avec ce que la
+            // machine en a ; un téléchargement par le proxy de sortie, sous un jeton borné aux
+            // hôtes de l'entrée ; son suivi, son arrêt, et le retrait d'un poids téléchargé.
+            "model.catalog" => {
+                let catalogue = providers::catalogue::Catalogue::load()
+                    .map_err(|e| Error::new(ErrorCode::InternalError, e))?;
+                commun::repondre(&json!({
+                    "dir": self.pulls.dir(),
+                    "entries": self.pulls.view(&catalogue),
+                }))
+            }
+            "model.pull" => {
+                let entree = entree_du_catalogue(&params)?;
+                if let Some(statut) = self.pulls.status(&entree.id)
+                    && statut.state == agentd::poids::PullState::Running
+                {
+                    return commun::repondre(&statut);
+                }
+                let manifeste = agentd::poids::manifest(&entree)
+                    .map_err(|e| Error::new(ErrorCode::InternalError, e))?;
+                let reference = format!(
+                    "model-pull:{}:{}",
+                    entree.id,
+                    prophet_types::ids::Id::new(prophet_types::ids::Kind::Task)
+                );
+                let acteur = format!("uid:{}", pair.uid);
+                let jeton = self
+                    .jeton_avec_duree(
+                        &manifeste,
+                        &reference,
+                        &acteur,
+                        &agentd::poids::grants(&entree),
+                        agentd::poids::TOKEN_TTL_SECONDS,
+                    )
+                    .await?;
+                let egress = providers::pull::Egress::new(self.egress.clone(), &jeton)
+                    .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?;
+                let ledger = self.ledger.clone();
+                let tokio = tokio::runtime::Handle::current();
+                let statut = self
+                    .pulls
+                    .start(entree, egress, move |pose| {
+                        tokio.spawn(journaliser_un_poids(ledger, "model.pulled", acteur, pose));
+                    })
+                    .map_err(|e| Error::new(ErrorCode::InternalError, e))?;
+                commun::repondre(&statut)
+            }
+            "model.pulls" => commun::repondre(&self.pulls.all()),
+            "model.cancel" => {
+                let id = commun::texte(&params, "id")?;
+                commun::repondre(&json!({"cancelled": self.pulls.cancel(&id)}))
+            }
+            "model.remove" => {
+                let entree = entree_du_catalogue(&params)?;
+                let retire = self
+                    .pulls
+                    .remove(&entree)
+                    .map_err(|e| Error::new(ErrorCode::Conflict, e))?;
+                let removed = retire.is_some();
+                if let Some(retire) = retire {
+                    journaliser_un_poids(
+                        self.ledger.clone(),
+                        "model.removed",
+                        format!("uid:{}", pair.uid),
+                        retire,
+                    )
+                    .await;
+                }
+                commun::repondre(&json!({"removed": removed}))
             }
 
             "task.list" => {
@@ -2397,10 +2470,59 @@ async fn main() -> anyhow::Result<()> {
             seances: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
             jev,
             etat: fichier_etat,
+            pulls: agentd::poids::Pulls::new(providers::catalogue::pulled_dir()),
             pairs: commun::Pairs::detecter()?,
         }))
         .await?;
     Ok(())
+}
+
+/// L'entrée du catalogue que nomme `id`.
+fn entree_du_catalogue(params: &Value) -> Result<providers::catalogue::Entry, Error> {
+    let id = commun::texte(params, "id")?;
+    let catalogue = providers::catalogue::Catalogue::load()
+        .map_err(|e| Error::new(ErrorCode::InternalError, e))?;
+    catalogue.get(&id).cloned().ok_or_else(|| {
+        Error::new(
+            ErrorCode::NotFound,
+            format!(
+                "« {id} » n'est pas au catalogue ; connus : {}",
+                catalogue
+                    .entries
+                    .iter()
+                    .map(|e| e.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        )
+    })
+}
+
+/// Journalise un poids posé ou retiré. Un journal injoignable n'annule rien — le fichier est
+/// là, ou n'y est plus —, mais il est dit.
+async fn journaliser_un_poids(
+    ledger: std::path::PathBuf,
+    kind: &'static str,
+    acteur: String,
+    poids: agentd::poids::Pulled,
+) {
+    let params = json!({
+        "kind": kind,
+        "actor": acteur,
+        "payload": {
+            "id": poids.id,
+            "file": poids.file,
+            "sha256": poids.sha256,
+            "bytes": poids.bytes,
+        },
+    });
+    let ecrit = match Client::connect(&ledger).await {
+        Ok(client) => client.call("ledger.append", params).await.map(|_| ()),
+        Err(e) => Err(Error::new(ErrorCode::InternalError, e.to_string())),
+    };
+    if let Err(erreur) = ecrit {
+        tracing::error!(%kind, motif = %erreur.message, "un poids n'a pas été journalisé");
+    }
 }
 
 fn chemin(variable: &str, daemon: &str) -> std::path::PathBuf {

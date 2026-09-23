@@ -140,6 +140,8 @@ pub const fn kind_label(kind: EventKind) -> &'static str {
         EventKind::UiTree => "lecture d'interface",
         EventKind::UiAct => "action d'interface",
         EventKind::MemoryWrite => "mémoire écrite",
+        EventKind::ModelPulled => "poids téléchargé",
+        EventKind::ModelRemoved => "poids retiré",
         EventKind::LedgerSeal => "journal scellé",
     }
 }

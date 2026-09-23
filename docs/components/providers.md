@@ -5,7 +5,7 @@ des exigences de Prophet OS ; elle n'est pas encore livrée.
 
 | Composant | Preuve acquise | Reste à livrer |
 |---|---|---|
-| LLM local | HTTP, flux annulable et réponse Qwen3 réelle | Cycle de vie des poids, GPU et chaîne agentique installée |
+| LLM local | HTTP, flux annulable et réponse Qwen3 réelle ; poids du catalogue téléchargés par egress et vérifiés | Servir un poids téléchargé, GPU et chaîne agentique installée |
 | Codex CLI 0.153.4 | Paquet Nix officiel, version et diagnostic en profil vierge | Connexion utilisateur et exécution contrôlée depuis l'interface |
 | Claude Code 2.1.266 | Paquet Nix officiel, version et diagnostic en profil vierge | Connexion utilisateur, outils, permissions et reprise de bout en bout |
 | ChatGPT graphique | Paquet officiel FHS, écran de connexion visible en VM, plugins initialisés | Erreur Fontconfig secondaire, session de bureau et parcours authentifiés |
@@ -121,6 +121,17 @@ poids qu'il sert. `prophet model ls` et la page Modèles de l'atelier le lisent 
 `LocalModel::served` lit dans `/props` de llama-server le fichier chargé et la fenêtre servie,
 que `prophet model ls` place en face du fichier (un routeur de modèles n'est pas interrogé
 modèle par modèle : cela en chargerait un).
+
+## Poids téléchargés
+
+`providers::catalogue` est le catalogue du système (`catalogue.json`, compilé dans les
+binaires) : adresse épinglée sur une révision, empreinte SHA-256 publiée, hôtes permis,
+redirections comprises. `providers::pull` télécharge une entrée par le socket d'egress, en
+forme absolue, jeton dans `Proxy-Authorization` ; refuse toute redirection hors des hôtes de
+l'entrée ; écrit sous `.<fichier>.part` et ne pose le fichier qu'après la taille, l'empreinte et
+l'en-tête GGUF vérifiés ; reprend un téléchargement interrompu par `Range`. Les fichiers posés
+vont sous le sous-dossier `catalogue` du dossier des poids, que le catalogue installé lit avec
+le reste. C'est agentd qui l'emploie (`model.pull`), sous un jeton que capd émet (ADR 0046).
 
 ## Fenêtre de contexte du moteur
 

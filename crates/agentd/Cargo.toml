@@ -31,6 +31,7 @@ prophet-daemon = { workspace = true, features = ["essai"] }
 tempfile = { workspace = true }
 ed25519-dalek = { workspace = true }
 rand = { workspace = true }
+sha2 = { workspace = true }
 
 [lints]
 workspace = true

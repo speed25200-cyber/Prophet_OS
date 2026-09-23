@@ -129,6 +129,28 @@ enum ModelAction {
         #[arg(long)]
         endpoint: Option<String>,
     },
+    /// Le catalogue du système : les poids qu'il sait télécharger, avec leur empreinte, et ce
+    /// que la machine en a déjà (ADR 0046).
+    Catalog,
+    /// Télécharge un poids du catalogue par le proxy de sortie, vérifié avant d'être posé ; un
+    /// téléchargement interrompu reprend où il s'était arrêté.
+    Pull {
+        /// Identifiant au catalogue (`prophet model catalog` les donne).
+        id: String,
+        /// Rend la main aussitôt ; `prophet model catalog` dit ensuite où il en est.
+        #[arg(long)]
+        detach: bool,
+    },
+    /// Arrête un téléchargement en cours ; le début reçu reste, pour reprendre.
+    Cancel {
+        /// Identifiant au catalogue.
+        id: String,
+    },
+    /// Retire un poids téléchargé du catalogue (jamais un poids posé par la configuration).
+    Rm {
+        /// Identifiant au catalogue.
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1328,6 +1350,131 @@ fn rendre_verification(rapport: &ledger::VerifyReport) -> anyhow::Result<String>
 /// Missions du service. Les captures d'agentd restent privées ; seule la liste historique
 /// hors service consulte encore le disque directement. Publier et annuler passent par agentd,
 /// qui exige le créateur de la mission et l'index exact qu'il a examiné.
+/// Octets en mégaoctets ou gigaoctets, pour l'humain.
+fn octets(n: u64) -> String {
+    let n = n as f64;
+    if n >= 1e9 {
+        format!("{:.2} Go", n / 1e9)
+    } else {
+        format!("{:.0} Mo", n / 1e6)
+    }
+}
+
+fn model_catalog(as_json: bool) -> anyhow::Result<String> {
+    let catalogue = task_rpc(&socket_agentd(), "model.catalog", serde_json::json!({}))?;
+    if as_json {
+        return Ok(format!("{catalogue}\n"));
+    }
+    Ok(catalogue_lisible(&catalogue))
+}
+
+/// Le catalogue, dit à l'humain.
+fn catalogue_lisible(catalogue: &serde_json::Value) -> String {
+    let entrees = catalogue["entries"].as_array().cloned().unwrap_or_default();
+    if entrees.is_empty() {
+        return "Le catalogue du système est vide.\n".to_owned();
+    }
+    let mut out = format!(
+        "Catalogue du système — téléchargés dans {}\n",
+        catalogue["dir"].as_str().unwrap_or("?")
+    );
+    for e in &entrees {
+        let id = e["id"].as_str().unwrap_or("?");
+        let etat = match (e["installed"].as_bool(), e["pull"]["state"].as_str()) {
+            (_, Some("running")) => {
+                let recu = e["pull"]["received"].as_u64().unwrap_or(0);
+                match e["pull"]["total"].as_u64() {
+                    Some(total) if total > 0 => format!(
+                        "↓ {} %, {} sur {}",
+                        recu * 100 / total,
+                        octets(recu),
+                        octets(total)
+                    ),
+                    _ => format!("↓ {}", octets(recu)),
+                }
+            }
+            (Some(true), _) => "✓ téléchargé".to_owned(),
+            (_, Some("failed")) => format!("✗ {}", e["pull"]["error"].as_str().unwrap_or("échec")),
+            _ => match e["partial_bytes"].as_u64() {
+                Some(n) => format!("· interrompu à {}, reprendra", octets(n)),
+                None => "· disponible".to_owned(),
+            },
+        };
+        out.push_str(&format!(
+            "  {id:<16} {:<14} {:<7} {etat}\n",
+            e["name"].as_str().unwrap_or(""),
+            e["quantization"].as_str().unwrap_or("")
+        ));
+        if let Some(note) = e["note"].as_str() {
+            out.push_str(&format!("  {:<16} {note}\n", ""));
+        }
+    }
+    out.push_str("Télécharger : prophet model pull <id>\n");
+    out
+}
+
+fn model_pull(id: &str, detach: bool, as_json: bool) -> anyhow::Result<String> {
+    let socket = socket_agentd();
+    let depart = task_rpc(&socket, "model.pull", serde_json::json!({"id": id}))?;
+    if detach {
+        return Ok(if as_json {
+            format!("{depart}\n")
+        } else {
+            format!("Téléchargement de {id} lancé ; `prophet model catalog` dit où il en est.\n")
+        });
+    }
+    let mut dernier = String::new();
+    let fin = loop {
+        let suivis = task_rpc(&socket, "model.pulls", serde_json::json!({}))?;
+        let suivi = suivis
+            .as_array()
+            .and_then(|s| s.iter().find(|s| s["id"] == id).cloned())
+            .ok_or_else(|| anyhow::anyhow!("agentd ne suit plus le téléchargement de {id}"))?;
+        if suivi["state"] != "running" {
+            break suivi;
+        }
+        if !as_json {
+            let recu = suivi["received"].as_u64().unwrap_or(0);
+            let ligne = match suivi["total"].as_u64() {
+                Some(total) if total > 0 => format!(
+                    "{id} : {} % ({} sur {})",
+                    recu * 100 / total,
+                    octets(recu),
+                    octets(total)
+                ),
+                _ => format!("{id} : {}", octets(recu)),
+            };
+            if ligne != dernier {
+                use std::io::Write as _;
+                let mut err = std::io::stderr();
+                let _ = write!(err, "\r{ligne}   ");
+                let _ = err.flush();
+                dernier = ligne;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    };
+    if !dernier.is_empty() {
+        eprintln!();
+    }
+    if as_json {
+        return Ok(format!("{fin}\n"));
+    }
+    match fin["state"].as_str() {
+        Some("done") => Ok(format!(
+            "✓ {id} téléchargé et vérifié (SHA-256) : {}\n",
+            fin["path"].as_str().unwrap_or("?")
+        )),
+        Some("cancelled") => Ok(format!(
+            "Téléchargement de {id} arrêté ; `prophet model pull {id}` le reprendra.\n"
+        )),
+        _ => anyhow::bail!(
+            "{id} non téléchargé : {}",
+            fin["error"].as_str().unwrap_or("motif inconnu")
+        ),
+    }
+}
+
 fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
     let maison = home();
     match action {
@@ -1926,7 +2073,41 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
 }
 
 fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
-    let ModelAction::Ls { dir, endpoint } = action;
+    let (dir, endpoint) = match action {
+        ModelAction::Ls { dir, endpoint } => (dir, endpoint),
+        ModelAction::Catalog => return model_catalog(as_json),
+        ModelAction::Pull { id, detach } => return model_pull(id, *detach, as_json),
+        ModelAction::Cancel { id } => {
+            let reponse = task_rpc(
+                &socket_agentd(),
+                "model.cancel",
+                serde_json::json!({"id": id}),
+            )?;
+            if as_json {
+                return Ok(format!("{reponse}\n"));
+            }
+            return Ok(if reponse["cancelled"] == true {
+                format!("Téléchargement de {id} arrêté ; `prophet model pull {id}` le reprendra.\n")
+            } else {
+                format!("Aucun téléchargement de {id} en cours.\n")
+            });
+        }
+        ModelAction::Rm { id } => {
+            let reponse = task_rpc(
+                &socket_agentd(),
+                "model.remove",
+                serde_json::json!({"id": id}),
+            )?;
+            if as_json {
+                return Ok(format!("{reponse}\n"));
+            }
+            return Ok(if reponse["removed"] == true {
+                format!("{id} retiré.\n")
+            } else {
+                format!("{id} n'était pas téléchargé.\n")
+            });
+        }
+    };
     // Le moteur dit ce qu'il sert ; injoignable, le catalogue se lit quand même.
     let endpoint = endpoint
         .clone()
@@ -2903,6 +3084,26 @@ mod sondes {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn le_catalogue_dit_ce_qui_est_telecharge_en_cours_ou_interrompu() {
+        let catalogue = serde_json::json!({"dir": "/var/lib/prophet/models/catalogue", "entries": [
+            {"id": "qwen3-1.7b-q8", "name": "Qwen3 1.7B", "quantization": "Q8_0", "installed": true, "note": "Le modèle de réflexion."},
+            {"id": "qwen3-0.6b-q8", "name": "Qwen3 0.6B", "installed": false, "pull": {"state": "running", "received": 320_000_000u64, "total": 640_000_000u64}},
+            {"id": "autre", "name": "Autre", "installed": false, "partial_bytes": 12_000_000u64},
+            {"id": "faux", "name": "Faux", "installed": false, "pull": {"state": "failed", "error": "fichier refusé : empreinte"}}
+        ]});
+        let dit = catalogue_lisible(&catalogue);
+        assert!(
+            dit.contains("qwen3-1.7b-q8") && dit.contains("✓ téléchargé"),
+            "{dit}"
+        );
+        assert!(dit.contains("↓ 50 %, 320 Mo sur 640 Mo"), "{dit}");
+        assert!(dit.contains("interrompu à 12 Mo, reprendra"), "{dit}");
+        assert!(dit.contains("✗ fichier refusé : empreinte"), "{dit}");
+        assert!(dit.contains("Le modèle de réflexion."), "{dit}");
+        assert_eq!(octets(1_834_000_000), "1.83 Go");
+    }
 
     #[test]
     fn la_reserve_de_microvm_se_dit_dans_prophet_status() {

@@ -1,0 +1,393 @@
+//! Les poids gérés (M8-T7, ADR 0046) : télécharger un poids du catalogue du système, suivre le
+//! téléchargement, l'arrêter, retirer un poids téléchargé.
+//!
+//! Le téléchargement lui-même est [`providers::pull`] : par le proxy de sortie, avec un jeton
+//! que capd émet pour les seuls hôtes de l'entrée, et vérifié avant d'être posé. Ce module tient
+//! ce que le service en sait : un suivi par entrée, un fil par téléchargement en cours. Il ne
+//! touche qu'au dossier des téléchargements ; les poids que la configuration du système pose
+//! ailleurs ne se retirent pas d'ici.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+use prophet_types::cap::{Act, Grant, Res};
+use prophet_types::manifest::Manifest;
+use providers::catalogue::{Catalogue, Entry};
+use providers::pull::{Egress, Progress, PullError, partial_path, pull};
+use serde::Serialize;
+
+/// Durée du jeton d'un téléchargement : de quoi tirer plusieurs gigaoctets sur une ligne lente.
+pub const TOKEN_TTL_SECONDS: i64 = 6 * 3600;
+
+/// Où en est le téléchargement d'une entrée.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PullState {
+    /// En cours.
+    Running,
+    /// Posé et vérifié.
+    Done,
+    /// Échoué ; le motif est dit.
+    Failed,
+    /// Arrêté à la demande ; la suite reprendra où il en était.
+    Cancelled,
+}
+
+/// Le suivi d'un téléchargement, tel que le service le rend.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PullStatus {
+    /// Identifiant de l'entrée du catalogue.
+    pub id: String,
+    /// État.
+    pub state: PullState,
+    /// Octets reçus.
+    pub received: u64,
+    /// Taille totale, si elle est connue.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    /// Motif d'un échec.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Fichier posé.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<PathBuf>,
+}
+
+/// Une entrée du catalogue, avec ce que la machine en a.
+#[derive(Debug, Clone, Serialize)]
+pub struct EntryView {
+    /// L'entrée.
+    #[serde(flatten)]
+    pub entry: Entry,
+    /// Le fichier est posé dans le dossier des téléchargements.
+    pub installed: bool,
+    /// Son chemin, s'il l'est.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<PathBuf>,
+    /// Octets déjà reçus d'un téléchargement interrompu, qui reprendra d'ici.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partial_bytes: Option<u64>,
+    /// Le dernier téléchargement de cette entrée depuis le démarrage du service.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pull: Option<PullStatus>,
+}
+
+/// Ce qu'un téléchargement terminé laisse au journal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pulled {
+    /// L'entrée.
+    pub id: String,
+    /// Le fichier posé.
+    pub file: String,
+    /// Son empreinte, celle du catalogue.
+    pub sha256: String,
+    /// Sa taille.
+    pub bytes: u64,
+}
+
+struct Suivi {
+    statut: PullStatus,
+    arret: Arc<AtomicBool>,
+}
+
+/// Les téléchargements du service.
+pub struct Pulls {
+    dir: PathBuf,
+    suivis: Arc<Mutex<BTreeMap<String, Suivi>>>,
+}
+
+impl std::fmt::Debug for Pulls {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pulls")
+            .field("dir", &self.dir)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Pulls {
+    /// Les téléchargements vers `dir`, le dossier des poids téléchargés.
+    #[must_use]
+    pub fn new(dir: impl Into<PathBuf>) -> Self {
+        Self {
+            dir: dir.into(),
+            suivis: Arc::new(Mutex::new(BTreeMap::new())),
+        }
+    }
+
+    /// Le dossier des téléchargements.
+    #[must_use]
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// Le catalogue, entrée par entrée, avec ce que la machine en a.
+    #[must_use]
+    pub fn view(&self, catalogue: &Catalogue) -> Vec<EntryView> {
+        catalogue
+            .entries
+            .iter()
+            .map(|entry| {
+                let chemin = self.dir.join(&entry.file);
+                let installed = chemin.is_file();
+                let partial_bytes = std::fs::metadata(partial_path(&self.dir, entry))
+                    .ok()
+                    .map(|m| m.len());
+                EntryView {
+                    entry: entry.clone(),
+                    installed,
+                    path: installed.then_some(chemin),
+                    partial_bytes,
+                    pull: self.status(&entry.id),
+                }
+            })
+            .collect()
+    }
+
+    /// Le suivi d'une entrée.
+    #[must_use]
+    pub fn status(&self, id: &str) -> Option<PullStatus> {
+        self.suivis.lock().ok()?.get(id).map(|s| s.statut.clone())
+    }
+
+    /// Tous les suivis.
+    #[must_use]
+    pub fn all(&self) -> Vec<PullStatus> {
+        self.suivis
+            .lock()
+            .map(|s| s.values().map(|s| s.statut.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Vrai si un téléchargement de cette entrée est en cours.
+    #[must_use]
+    pub fn running(&self, id: &str) -> bool {
+        self.status(id)
+            .is_some_and(|s| s.state == PullState::Running)
+    }
+
+    /// Démarre le téléchargement d'une entrée, dans un fil ; `fini` reçoit ce qu'il faut
+    /// journaliser quand le poids est posé. Un téléchargement déjà en cours est rendu tel quel.
+    ///
+    /// # Errors
+    /// Le fil n'a pas pu être lancé.
+    pub fn start(
+        &self,
+        entry: Entry,
+        egress: Egress,
+        fini: impl FnOnce(Pulled) + Send + 'static,
+    ) -> Result<PullStatus, String> {
+        let arret = Arc::new(AtomicBool::new(false));
+        let depart = PullStatus {
+            id: entry.id.clone(),
+            state: PullState::Running,
+            received: 0,
+            total: entry.bytes,
+            error: None,
+            path: None,
+        };
+        {
+            let mut suivis = self.suivis.lock().map_err(|e| e.to_string())?;
+            if let Some(suivi) = suivis.get(&entry.id)
+                && suivi.statut.state == PullState::Running
+            {
+                return Ok(suivi.statut.clone());
+            }
+            suivis.insert(
+                entry.id.clone(),
+                Suivi {
+                    statut: depart.clone(),
+                    arret: arret.clone(),
+                },
+            );
+        }
+        let suivis = self.suivis.clone();
+        let dir = self.dir.clone();
+        let id = entry.id.clone();
+        let lance = std::thread::Builder::new()
+            .name(format!("pull-{}", entry.id))
+            .spawn(move || {
+                let mettre = |f: &dyn Fn(&mut PullStatus)| {
+                    if let Ok(mut suivis) = suivis.lock()
+                        && let Some(suivi) = suivis.get_mut(&entry.id)
+                    {
+                        f(&mut suivi.statut);
+                    }
+                };
+                let resultat = pull(&entry, &dir, &egress, &arret, &mut |p: Progress| {
+                    mettre(&|s| {
+                        s.received = p.received;
+                        s.total = p.total;
+                    });
+                });
+                match resultat {
+                    Ok(chemin) => {
+                        let bytes = std::fs::metadata(&chemin).map_or(0, |m| m.len());
+                        mettre(&|s| {
+                            s.state = PullState::Done;
+                            s.received = bytes;
+                            s.total = Some(bytes);
+                            s.path = Some(chemin.clone());
+                        });
+                        tracing::info!(id = %entry.id, fichier = %chemin.display(), "poids téléchargé et vérifié");
+                        fini(Pulled {
+                            id: entry.id.clone(),
+                            file: entry.file.clone(),
+                            sha256: entry.sha256.clone(),
+                            bytes,
+                        });
+                    }
+                    Err(PullError::Cancelled) => {
+                        mettre(&|s| s.state = PullState::Cancelled);
+                        tracing::info!(id = %entry.id, "téléchargement arrêté");
+                    }
+                    Err(erreur) => {
+                        let motif = erreur.to_string();
+                        tracing::warn!(id = %entry.id, motif = %motif, "téléchargement échoué");
+                        mettre(&|s| {
+                            s.state = PullState::Failed;
+                            s.error = Some(motif.clone());
+                        });
+                    }
+                }
+            });
+        if let Err(erreur) = lance {
+            if let Ok(mut suivis) = self.suivis.lock() {
+                suivis.remove(&id);
+            }
+            return Err(format!("téléchargement non lancé : {erreur}"));
+        }
+        Ok(depart)
+    }
+
+    /// Demande l'arrêt d'un téléchargement en cours ; faux s'il n'y en a pas.
+    #[must_use]
+    pub fn cancel(&self, id: &str) -> bool {
+        self.suivis.lock().is_ok_and(|suivis| {
+            suivis.get(id).is_some_and(|s| {
+                let en_cours = s.statut.state == PullState::Running;
+                if en_cours {
+                    s.arret.store(true, Ordering::Relaxed);
+                }
+                en_cours
+            })
+        })
+    }
+
+    /// Retire le poids téléchargé d'une entrée, et le début d'un téléchargement interrompu.
+    /// Rend ce qu'il faut journaliser, `None` s'il n'y avait rien.
+    ///
+    /// # Errors
+    /// Téléchargement en cours, ou fichier impossible à retirer.
+    pub fn remove(&self, entry: &Entry) -> Result<Option<Pulled>, String> {
+        if self.running(&entry.id) {
+            return Err(format!(
+                "{} est en cours de téléchargement : arrêtez-le d'abord",
+                entry.id
+            ));
+        }
+        let chemin = self.dir.join(&entry.file);
+        let bytes = std::fs::metadata(&chemin).ok().map(|m| m.len());
+        let partiel = partial_path(&self.dir, entry);
+        let _ = std::fs::remove_file(&partiel);
+        if let Ok(mut suivis) = self.suivis.lock() {
+            suivis.remove(&entry.id);
+        }
+        let Some(bytes) = bytes else {
+            return Ok(None);
+        };
+        std::fs::remove_file(&chemin).map_err(|e| format!("{} : {e}", chemin.display()))?;
+        Ok(Some(Pulled {
+            id: entry.id.clone(),
+            file: entry.file.clone(),
+            sha256: entry.sha256.clone(),
+            bytes,
+        }))
+    }
+}
+
+/// Le manifeste du téléchargement d'une entrée : sortie réseau vers ses seuls hôtes, rien
+/// d'autre. capd émet le jeton sous ce plafond, et la politique Cedar tranche comme pour toute
+/// sortie.
+///
+/// # Errors
+/// Manifeste invalide (hôte du catalogue refusé par le schéma des manifestes).
+pub fn manifest(entry: &Entry) -> Result<Manifest, String> {
+    let hotes = entry
+        .hosts
+        .iter()
+        .map(|h| serde_json::to_string(h).unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let texte = format!(
+        r#"
+[agent]
+id = "org.prophet.model-pull"
+version = "1.0.0"
+name = "Téléchargement de poids"
+publisher_key = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+[model]
+# Le schéma exige un modèle ; ce jeton n'en appelle aucun.
+preferred = ["local:catalogue"]
+[capabilities.max]
+"net.egress" = [{hotes}]
+"#
+    );
+    let manifeste = Manifest::from_toml(&texte).map_err(|e| e.to_string())?;
+    manifeste.validate().map_err(|e| e.to_string())?;
+    Ok(manifeste)
+}
+
+/// Les grants demandés pour une entrée : un par hôte permis.
+#[must_use]
+pub fn grants(entry: &Entry) -> Vec<Grant> {
+    entry
+        .hosts
+        .iter()
+        .map(|h| Grant::new(Res::Net, Act::Egress, h))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn le_manifeste_d_un_telechargement_ne_permet_que_ses_hotes() {
+        let entry = Catalogue::builtin().entries[0].clone();
+        let manifeste = manifest(&entry).unwrap();
+        let plafond = manifeste.ceiling().unwrap();
+        assert_eq!(plafond.len(), entry.hosts.len());
+        assert!(
+            plafond
+                .iter()
+                .all(|g| g.res == Res::Net && g.act == Act::Egress)
+        );
+        let demandes = grants(&entry);
+        assert!(
+            demandes
+                .iter()
+                .all(|g| plafond.iter().any(|c| g.is_subset_of(c)))
+        );
+    }
+
+    #[test]
+    fn retirer_ne_touche_que_le_dossier_des_telechargements() {
+        let dir = tempfile::tempdir().unwrap();
+        let pulls = Pulls::new(dir.path().join("catalogue"));
+        let entry = Catalogue::builtin().entries[0].clone();
+        assert_eq!(pulls.remove(&entry).unwrap(), None, "rien à retirer");
+        std::fs::create_dir_all(pulls.dir()).unwrap();
+        std::fs::write(pulls.dir().join(&entry.file), b"GGUF").unwrap();
+        std::fs::write(partial_path(pulls.dir(), &entry), b"GG").unwrap();
+        let vue = pulls.view(&Catalogue::builtin());
+        assert!(vue[0].installed);
+        assert_eq!(vue[0].partial_bytes, Some(2));
+        let retire = pulls.remove(&entry).unwrap().unwrap();
+        assert_eq!(retire.bytes, 4);
+        assert!(!pulls.dir().join(&entry.file).exists());
+        assert!(!partial_path(pulls.dir(), &entry).exists());
+        assert!(!pulls.view(&Catalogue::builtin())[0].installed);
+    }
+}

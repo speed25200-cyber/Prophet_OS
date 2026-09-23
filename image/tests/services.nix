@@ -112,6 +112,31 @@ let
     print(json.dumps(plan, ensure_ascii=False, indent=2))
     PYTHON
   '';
+
+  # Un poids d'essai et le catalogue qui le nomme, empreinte comprise, faits ensemble : la
+  # machine le télécharge d'un dépôt local par le vrai proxy de sortie (ADR 0046). Le catalogue
+  # du système, lui, nomme Hugging Face, que la machine de test ne joint pas.
+  poidsEssai = pkgs.runCommand "prophet-poids-essai" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+    mkdir -p $out
+    python3 - $out <<'PYTHON'
+    import hashlib, json, struct, sys
+    sortie = sys.argv[1]
+    cle = b"general.architecture"
+    entete = b"GGUF" + struct.pack("<IQQ", 3, 0, 1) + struct.pack("<Q", len(cle)) + cle
+    entete += struct.pack("<IQ", 8, 5) + b"qwen3"
+    contenu = entete + bytes(range(256)) * 4096
+    open(f"{sortie}/essai.gguf", "wb").write(contenu)
+    json.dump({"version": 1, "entries": [{
+        "id": "essai-vm",
+        "name": "Poids d'essai",
+        "file": "essai.gguf",
+        "url": "http://127.0.0.1:8097/essai.gguf",
+        "sha256": hashlib.sha256(contenu).hexdigest(),
+        "bytes": len(contenu),
+        "hosts": ["127.0.0.1"],
+    }]}, open(f"{sortie}/catalogue.json", "w"))
+    PYTHON
+  '';
 in
 pkgs.testers.runNixOSTest {
   name = "prophet-services";
@@ -127,6 +152,7 @@ pkgs.testers.runNixOSTest {
     # Pas de surface : elle exige un écran et un adaptateur graphique, qui n'ont rien à faire ici.
     # Ce qu'on vérifie est ce qui tourne en dessous.
     environment.systemPackages = [ essai ];
+    systemd.services.prophet-agentd.environment.PROPHET_MODEL_CATALOG = "${poidsEssai}/catalogue.json";
     virtualisation.memorySize = 2048;
     virtualisation.diskSize = 4096;
   };
@@ -234,7 +260,7 @@ pkgs.testers.runNixOSTest {
         pid = machine.succeed(
             "systemctl show -p MainPID --value prophet-agentd.service"
         ).strip()
-        for chemin in ["/home/prophet", "/var/lib/prophet"]:
+        for chemin in ["/home/prophet", "/var/lib/prophet", "/var/lib/prophet/models/catalogue"]:
             vu = machine.succeed(
                 f"nsenter -t {pid} -m -- sh -c "
                 f"'test -d {chemin} && test -w {chemin} && echo inscriptible || echo refusé'"
@@ -390,6 +416,40 @@ pkgs.testers.runNixOSTest {
         journal = machine.succeed("prophet log tail -n 20")
         print(journal)
         assert "task.created" in journal or "créée" in journal, journal
+
+    with subtest("un poids du catalogue arrive par egress, vérifié, sous le compte de l'humain"):
+        # Tout le chemin réel : la CLI de l'humain demande à agentd, capd émet un jeton borné à
+        # l'hôte de l'entrée, egress relaie, agentd vérifie l'empreinte et pose le fichier sous
+        # son durcissement systemd, le journal le dit (ADR 0046).
+        machine.succeed(
+            "${pkgs.python3}/bin/python3 -m http.server 8097 --bind 127.0.0.1 "
+            "--directory ${poidsEssai} >/tmp/depot.log 2>&1 &"
+        )
+        machine.wait_until_succeeds(
+            "${pkgs.python3}/bin/python3 -c \"import urllib.request; "
+            "urllib.request.urlopen('http://127.0.0.1:8097/catalogue.json')\"",
+            timeout=30,
+        )
+        catalogue = machine.succeed("su - prophet -c 'timeout 30 prophet model catalog'")
+        print(catalogue)
+        assert "essai-vm" in catalogue and "disponible" in catalogue, catalogue
+        vu = machine.succeed("su - prophet -c 'timeout 120 prophet model pull essai-vm' 2>&1")
+        print(vu)
+        assert "téléchargé et vérifié" in vu, vu
+        pose = "/var/lib/prophet/models/catalogue/essai.gguf"
+        attendu = machine.succeed("sha256sum ${poidsEssai}/essai.gguf").split()[0]
+        assert machine.succeed(f"sha256sum {pose}").split()[0] == attendu
+        droits = machine.succeed(f"stat -c '%U %a' {pose}").strip()
+        assert droits == "agentd 644", f"{pose} : {droits}"
+        installes = machine.succeed("su - prophet -c 'timeout 30 prophet model ls'")
+        print(installes)
+        assert "essai.gguf" in installes, installes
+        journal = machine.succeed("prophet log tail -n 20")
+        assert "model.pulled" in journal or "poids téléchargé" in journal, journal
+        assert "GET /essai.gguf" in machine.succeed("cat /tmp/depot.log")
+        retrait = machine.succeed("su - prophet -c 'timeout 30 prophet model rm essai-vm'")
+        assert "retiré" in retrait, retrait
+        machine.fail(f"test -e {pose}")
 
     with subtest("arrêté, capd garde son nom, et le reprend d'un coup au démarrage"):
         # Retirer puis recréer un socket laissait un instant où le nom était libre, et un

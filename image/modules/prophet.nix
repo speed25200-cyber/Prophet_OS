@@ -385,6 +385,10 @@ in
       "d /var/lib/prophet/ledger 0700 ledger prophet-system -"
       "d /var/lib/prophet/vault 0700 vault prophet-system -"
       "d /var/lib/prophet/models 0755 root prophet-system -"
+      # Les poids que `prophet model pull` télécharge du catalogue du système, vérifiés avant
+      # d'être posés (ADR 0046) : agentd y écrit, le moteur local y lit ; les poids que la
+      # configuration pose ailleurs ne sont jamais touchés.
+      "d /var/lib/prophet/models/catalogue 0755 agentd prophet-system -"
       # Les sessions d'abonnement des clients d'éditeurs : lisibles par le seul runtime qui les
       # monte dans la sandbox du client, jamais par les outils ni par un agent.
       "d /var/lib/prophet/providers 0700 agentd prophet-system -"

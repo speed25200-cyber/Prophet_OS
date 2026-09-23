@@ -51,6 +51,7 @@
 | `sandbox.started` / `sandbox.frozen` / `sandbox.killed` | `level`, `profile`, `cgroup`, `startup_ms` |
 | `ui.tree` / `ui.act` | `app`, `window`, `detail` ou `action`, `irreversible`, `result_code` |
 | `memory.write` | `space`, `entry_id`, `source_task` |
+| `model.pulled` / `model.removed` | `id`, `file`, `sha256`, `bytes` (ADR 0046) |
 | `ledger.seal` | `up_to_seq`, `signature`, `signer` |
 
 ## Vérification

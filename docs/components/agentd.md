@@ -5,6 +5,7 @@
 - État : `/var/lib/prophet/agentd/taches.json`
 - Dépendances du lancement local : capd, ledger, home autorisé et moteur HTTP local configuré
 - Sortie réseau des outils : le socket d'egress (`PROPHET_EGRESS_SOCKET`, `/run/prophet/egress.sock` par défaut)
+- Poids téléchargés : `/var/lib/prophet/models/catalogue` (`PROPHET_PULL_DIR`), depuis le catalogue du système (`PROPHET_MODEL_CATALOG` le remplace) ; vérifiés avant d'être posés, journalisés (`model.pulled`, `model.removed`, ADR 0046)
 - Navigateur piloté : absent sauf `PROPHET_BROWSER` ; profils par tâche sous l'état du service ;
 `PROPHET_SUP_SOCKET` nomme le socket de l'adaptateur d'accessibilité de la session (ADR 0027) ; sans lui, aucun outil `ui.*`. `doc.read` lit tout format sous `fs.read` et emploie `pdftotext`, `pdfinfo`, `ffprobe` et `tesseract` s'ils sont sur le chemin du service (ADR 0028). `task.status` rend à l'agent l'état de sa mission, dont le budget restant, et `task.diff` ses propres changements, pour un profil qui les accorde. `task.delegate` crée, lance et attend une sous-mission sous un jeton délégué par capd, pour un profil qui accorde `task.spawn` sur un contexte nommé (ADR 0029). Avec un rôle (`role` : `reflect`, `execute`, `code`), le service choisit le modèle que le contexte visé admet pour ce rôle parmi ceux que le moteur sert, briefe chaque mission sur son rôle, condense les anciens résultats d'outils avant chaque envoi, et compte les tokens par modèle (ADR 0034). Si `PROPHET_PILOT_SOCKET` nomme le lanceur de pilotes de la session, un rôle peut désigner un client officiel (`driver:claude-code`, `driver:codex`, `driver:gemini`) : la sous-mission devient une séance d'outils que le client rejoint par le pont, lancé sous l'identité de l'humain, et son texte revient au parent (ADR 0035) ; sans lanceur ou client connecté, le rôle retombe sur le modèle local suivant. `task.delegate {model}` nomme un modèle local ou un client officiel connecté, avec son palier de modèle s'il y a lieu (`claude-code@haiku`, ADR 0040) ; sans modèle ni rôle, une mission menée par un client confie à ce même client. Une sous-mission part de l'espace de travail de son parent et, finie, y rapporte son diff (`carried` dans le résultat de `task.delegate`) ; elle ne se publie pas seule, le parent publie le tout (ADR 0039).
   sondé une fois au démarrage, verdict rendu par `task.options` (`browser`)
@@ -30,6 +31,11 @@
 | `task.call` | Exécute un outil de la séance, compté comme une étape (`{id, name, arguments}`) |
 | `task.detach` | Retire le client, scelle les versions et conclut la mission en `done` (`{id, text?}`) |
 | `task.route` | Dit quel modèle Jev choisirait pour une intention, sans planifier ; sélection statique sans Jev |
+| `model.catalog` | Rend le catalogue des poids du système, entrée par entrée : téléchargé ou non, début d'un téléchargement interrompu, dernier suivi (ADR 0046) |
+| `model.pull` | Télécharge une entrée (`{id}`) par le proxy de sortie, sous un jeton de capd borné à ses hôtes, dans un fil ; rend le suivi, ou celui du téléchargement déjà en cours |
+| `model.pulls` | Rend les suivis : `running`, `done`, `failed` (motif), `cancelled` ; octets reçus et total |
+| `model.cancel` | Arrête un téléchargement en cours ; le début reçu reste, pour reprendre |
+| `model.remove` | Retire le poids téléchargé d'une entrée et le début d'un téléchargement interrompu ; refuse pendant un téléchargement |
 
 `task.start`, `task.status`, `task.inspect`, `task.result`, `task.cancel`, `task.apply` et
 `task.undo` prennent `{"id":"…"}`.
