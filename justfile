@@ -117,9 +117,14 @@ vm:
 image:
     @echo "pas encore disponible (M9)" && exit 2
 
-# Lance la suite de mesure.
+# Lance la suite de mesure : les suites sans modèle, puis la suite de tâches jouée par le vrai
+# modèle de l'image à travers Prophet et à travers une boucle nue (PROPHET_TEST_LLAMA_SERVER :
+# le llama-server épinglé, `nix build .#llama-cpp` ; le modèle se tire par egress).
 bench:
-    @echo "pas encore disponible (M13)" && exit 2
+    cargo test -p bench
+    @test -n "${PROPHET_TEST_LLAMA_SERVER:-}" || { echo "PROPHET_TEST_LLAMA_SERVER : chemin du llama-server épinglé (nix build .#llama-cpp)"; exit 2; }
+    cargo build -p capd -p ledger -p egress -p agentd --bins
+    mkdir -p bench/results && PROPHET_BENCH_RESULTS=bench/results/$(date -u +%F).json cargo test -p bench --test suite_reelle -- --ignored --nocapture la_suite_se_joue
 
 # Rejoue la démonstration d'un jalon.
 demo MILESTONE:

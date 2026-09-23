@@ -100,6 +100,30 @@ jobs:
         env:
           PROPHET_TEST_LLAMA_SERVER: ${{ github.workspace }}/moteur/bin/llama-server
         run: cargo test -p agentd --test poids -- --ignored --nocapture deux_requetes_se_partagent_le_moteur_et_un_abandon_le_libere
+      # M13 et FRONTIER : la suite de tâches jouée par le vrai modèle de l'image, à travers
+      # Prophet et à travers une boucle nue — même modèle, mêmes outils, mêmes vérificateurs.
+      - name: Banc M13 — la suite par Prophet et par une boucle nue
+        env:
+          PROPHET_TEST_LLAMA_SERVER: ${{ github.workspace }}/moteur/bin/llama-server
+          PROPHET_BENCH_RESULTS: ${{ github.workspace }}/banc.json
+        run: |
+          cargo test -p bench --test suite_reelle -- --ignored --nocapture la_suite_se_joue 2>&1 | tee banc.log
+          {
+            echo "## Banc M13 — Prophet et boucle nue, même modèle"
+            echo '```'
+            grep '^mesure : banc' banc.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Conserver les résultats du banc
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: banc-m13
+          path: |
+            banc.json
+            banc.log
+          if-no-files-found: warn
+          retention-days: 30
 
   chatgpt:
     name: ChatGPT sous NixOS (compatibilité)

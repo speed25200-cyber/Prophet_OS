@@ -1600,6 +1600,12 @@ donne le détail.
   **verte des deux côtés** : la mission locale sous NixOS (vrais préréglages du relais avec
   `load-mode = none`, Qwen3 1.7B), le contrôle `llama-router`, le système installé en UEFI et
   sans UEFI, les sept services, l'ISO et l'installeur.
+- Banc M13 (ADR 0048, FRONTIER : comparaison) : `just bench` existe. La suite de tâches sans
+  navigateur se joue avec le modèle de l'image deux fois — par Prophet (mission planifiée,
+  lancée, publiée) et par une boucle nue qui appelle les mêmes outils sans registre ni capd —,
+  et le banc mesure réussite, durée médiane et p95, tokens et étapes ; la CI le joue dans le
+  travail « Poids du catalogue servis (réels) ». Sa plomberie est éprouvée sans modèle dans
+  `just check`.
 - Concurrence et annulation sur le vrai moteur (FRONTIER, moteurs locaux ; essai
   `deux_requetes_se_partagent_le_moteur_et_un_abandon_le_libere`, vert sur `dd5ce52`) : sur une
   instance à une place comme celle de l'image, deux requêtes simultanées aboutissent toutes
