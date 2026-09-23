@@ -170,12 +170,14 @@ pub fn configured() -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-/// Le catalogue d'une machine : celui du dossier, puis chaque fichier nommé qui n'y figure pas
-/// déjà. Un fichier nommé mais absent est dit refusé : la configuration promet un modèle que la
-/// machine n'a pas.
+/// Le catalogue d'une machine : celui du dossier, ceux que le catalogue du système y a
+/// téléchargés (sous-dossier [`crate::catalogue::PULLED_DIR`]), puis chaque fichier nommé qui
+/// n'y figure pas déjà. Un fichier nommé mais absent est dit refusé : la configuration promet un
+/// modèle que la machine n'a pas.
 #[must_use]
 pub fn installed(dir: &Path, files: &[PathBuf]) -> Vec<Result<Weights, String>> {
     let mut all = catalog(dir);
+    all.extend(catalog(&dir.join(crate::catalogue::PULLED_DIR)));
     let seen: Vec<PathBuf> = all
         .iter()
         .filter_map(|e| e.as_ref().ok())
@@ -511,6 +513,14 @@ mod tests {
         assert_eq!(tout.len(), 3, "{tout:?}");
         assert_eq!(tout[1].as_ref().unwrap().path, ailleurs);
         assert!(tout[2].as_ref().unwrap_err().contains("promis.gguf"));
+        // Les poids téléchargés par le catalogue du système en font partie, pas leurs morceaux.
+        let telecharges = dir.path().join(crate::catalogue::PULLED_DIR);
+        std::fs::create_dir_all(&telecharges).unwrap();
+        let tire = ecrire(&telecharges, "tire.gguf", &qwen().bytes());
+        ecrire(&telecharges, ".suivant.gguf.part", b"GGUF");
+        let tout = installed(dir.path(), &[]);
+        assert_eq!(tout.len(), 2, "{tout:?}");
+        assert_eq!(tout[1].as_ref().unwrap().path, tire);
     }
 
     #[test]

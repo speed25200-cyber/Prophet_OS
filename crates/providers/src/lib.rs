@@ -14,12 +14,14 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod catalogue;
 pub mod conformance;
 pub mod jev;
 pub mod local;
 pub mod mock;
 pub mod native;
 pub mod official;
+pub mod pull;
 pub mod selection;
 pub mod stream;
 pub mod weights;
