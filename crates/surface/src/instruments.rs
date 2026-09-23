@@ -232,20 +232,30 @@ pub(crate) fn echelle_isolation(ui: &mut egui::Ui, niveau_max: u8, manque: Optio
                 accent,
             );
         }
-        let text = if !reached && i as u8 == niveau_max + 1 {
-            manque.unwrap_or(detail)
-        } else {
-            detail
-        };
+        // Le niveau garde sa description ; celui qu'on ne peut pas encore atteindre dit
+        // dessous ce qui lui manque, en toutes lettres.
+        let manquant = manque.filter(|_| !reached && i as u8 == niveau_max + 1);
         let mut job = egui::text::LayoutJob::simple(
-            text.to_owned(),
+            (*detail).to_owned(),
             FontId::proportional(11.0),
             DISCRET,
             tile_width - 40.0,
         );
-        job.wrap.max_rows = 3;
+        job.wrap.max_rows = if manquant.is_some() { 2 } else { 3 };
         let galley = painter.layout_job(job);
+        let bas = r.min.y + 62.0 + galley.size().y;
         painter.galley(r.min + vec2(20.0, 62.0), galley, DISCRET);
+        if let Some(manque) = manquant {
+            let mut job = egui::text::LayoutJob::simple(
+                format!("Il manque : {manque}."),
+                FontId::proportional(11.0),
+                ENCRE,
+                tile_width - 40.0,
+            );
+            job.wrap.max_rows = 1;
+            let galley = painter.layout_job(job);
+            painter.galley(pos2(r.min.x + 20.0, bas + 4.0), galley, ENCRE);
+        }
     }
 }
 

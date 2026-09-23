@@ -927,7 +927,7 @@ impl Supervision {
                         ui.vertical(|ui| {
                             ui.label(titre(format!("Niveau {} sur 2", scene.isolation.niveau_max), 26.0));
                             if let Some(manque) = &scene.isolation.manque {
-                                ui.label(RichText::new(manque).color(DISCRET));
+                                ui.label(RichText::new(format!("Il manque : {manque}.")).color(DISCRET));
                             }
                             // Les microVM que sandboxd tient prêtes : une exécution de niveau 2
                             // part sans attendre le démarrage d'un noyau (ADR 0045).
