@@ -1524,7 +1524,10 @@ donne le détail.
   mission réelle Qwen3 sous NixOS, le système installé (UEFI et BIOS) et l'ISO. CI de
   `299c68d` (sandboxd et memoryd réservés, `/run/prophet` collant, fenêtre du moteur) :
   **verte des deux côtés** ; sur le llama-server épinglé, le refus a exactement la forme que
-  le pilote lit (`exceed_context_size_error`, `n_prompt_tokens` 12 013, `n_ctx` 4 096).
+  le pilote lit (`exceed_context_size_error`, `n_prompt_tokens` 12 013, `n_ctx` 4 096). Sur
+  `6cf62c0`, les sept services sous systemd sont verts avec capd arrêté : l'humain ne peut ni
+  renommer un fichier sur `capd.sock` ni le remplacer par un lien (« Operation not
+  permitted »), et capd repart sur son nom.
 - `just check` : **856 réussis, 0 échec, 48 ignorés**, format, clippy, contrôles du dépôt et
   secrets (repli). Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
