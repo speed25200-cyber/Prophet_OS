@@ -749,6 +749,7 @@ fn poids_locaux(
     context: u64,
     machine: Option<&providers::memory::System>,
 ) -> Vec<Value> {
+    let instances = providers::memory::engine_instances();
     providers::weights::installed(dir, files)
         .into_iter()
         .flatten()
@@ -763,6 +764,7 @@ fn poids_locaux(
                 "gigabytes": w.gigabytes(),
                 "memory": providers::memory::assess(&w, context, machine),
                 "template": w.template,
+                "resident": providers::memory::resident_for(&w.path, &instances),
             })
         })
         .collect()

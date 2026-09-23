@@ -50,6 +50,11 @@ mémoire vive non.
   une plage d'octets, redirections bornées aux hôtes de l'entrée) et exige que le catalogue
   porte ce que l'en-tête dit. Relevé le 23 septembre sur les huit entrées : de 80 Kio par token
   (Granite 3.3 2B) à 384 Kio (Phi-3 mini, sans GQA).
+- **Montrer ce que le moteur tient vraiment** : `providers::memory::engine_instances` lit dans
+  `/proc` les instances de llama-server, le poids que chacune a chargé (`--model`) et leur
+  mémoire résidente et anonyme ; la page Modèles en fait un repère sur la jauge du poids servi
+  (« le moteur en tient 8,8 Go résidents, dont 3,7 anonymes »), `model.list` le rend aux agents
+  (`resident`), `prophet model ls` l'ajoute au poids servi.
 - **Refuser de télécharger ce qui ne tient pas sur le disque** : `providers::pull` compare ce
   qui reste à recevoir à la place libre du dossier (`statvfs`) avant toute requête.
 

@@ -47,7 +47,7 @@
 | `ui.tree` | ui.read app | non | non | SUP, provenance accessibilité |
 | `ui.act` | ui.act app + `requires` de l'action | selon action | selon action | SUP |
 | `ui.screenshot` | ui.vision | non | non | confiance basse, hors défaut |
-| `model.list` | aucune | non | non | clients officiels et poids locaux (architecture, quantification, fenêtre d'entraînement) ; pour chacun, `memory` : ce que le moteur réservera à la fenêtre `local_context` (`weights`, `kv_cache`, `compute`, `total`, en octets) et `fit` face à `system_memory` (`fits`, `tight`, `too_large`) ; `template` : ce que le gabarit de conversation du fichier déclare (`tool_calls`, `reasoning`) |
+| `model.list` | aucune | non | non | clients officiels et poids locaux (architecture, quantification, fenêtre d'entraînement) ; pour chacun, `memory` : ce que le moteur réservera à la fenêtre `local_context` (`weights`, `kv_cache`, `compute`, `total`, en octets) et `fit` face à `system_memory` (`fits`, `tight`, `too_large`) ; `template` : ce que le gabarit de conversation du fichier déclare (`tool_calls`, `reasoning`) ; `resident` : ce que l'instance du moteur qui le sert tient en mémoire (`rss`, `anonymous`, `file`), s'il est servi |
 | `model.status` | aucune | non | non | |
 
 Un outil sans `requires` explicite (autre que `aucune`) est refusé par le test `mcp_system::registry::all_tools_declare_requires`.

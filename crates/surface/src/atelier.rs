@@ -177,6 +177,10 @@ const RELECTURE_AU_REPOS: Duration = Duration::from_secs(5);
 enum Evenement {
     Modeles(Result<Vec<String>, String>),
     Poids(Vec<Poids>, Option<Servi>, Option<providers::memory::System>),
+    Instances(
+        Vec<(std::path::PathBuf, providers::memory::Resident)>,
+        Option<providers::memory::System>,
+    ),
     Catalogue(Result<Vec<EntreeCatalogue>, String>),
     ErreurDePoids(String),
     Clients(Vec<ClientCard>),
@@ -226,6 +230,9 @@ pub struct Atelier {
     pub memoire: Option<providers::memory::System>,
     /// La fenêtre avec laquelle le moteur de cette machine charge un poids.
     pub contexte_local: u64,
+    /// Les instances du moteur et le poids que chacune tient, relues avec le catalogue : ce que
+    /// la mémoire porte vraiment, à côté de l'estimation.
+    pub instances: Vec<(std::path::PathBuf, providers::memory::Resident)>,
     /// Le catalogue du système, tel qu'agentd le rend ; `None` tant qu'il n'a pas répondu.
     pub catalogue: Option<Result<Vec<EntreeCatalogue>, String>>,
     /// Le dernier refus d'une commande sur un poids (téléchargement refusé par capd…).
@@ -269,6 +276,7 @@ impl Atelier {
             servi: None,
             memoire: None,
             contexte_local: providers::memory::context(),
+            instances: Vec::new(),
             catalogue: None,
             erreur_de_poids: None,
             socket_agentd: std::env::var_os("PROPHET_AGENTD_SOCKET").map_or_else(
@@ -427,6 +435,10 @@ impl Atelier {
         std::thread::spawn(move || {
             let lu = execution().and_then(|runtime| runtime.block_on(lire_catalogue(&socket)));
             let _ = tx.send(Evenement::Catalogue(lu.map(|e| au_moteur(e, &endpoint))));
+            let _ = tx.send(Evenement::Instances(
+                providers::memory::engine_instances(),
+                providers::memory::system(),
+            ));
             ctx.request_repaint();
         });
     }
@@ -532,6 +544,12 @@ impl Atelier {
                 }
                 Evenement::Clients(cards) => {
                     self.clients = cards;
+                }
+                Evenement::Instances(instances, memoire) => {
+                    self.instances = instances;
+                    if memoire.is_some() {
+                        self.memoire = memoire;
+                    }
                 }
                 Evenement::Poids(poids, servi, memoire) => {
                     self.poids = poids;

@@ -1740,7 +1740,15 @@ fn poids_installes(ui: &mut egui::Ui, atelier: &Atelier) {
                 if let Some(estimation) =
                     providers::memory::assess(w, atelier.contexte_local, atelier.memoire.as_ref())
                 {
-                    jauge_de_memoire(ui, &fichier, &estimation, atelier.memoire.as_ref(), &accent);
+                    let tenue = providers::memory::resident_for(&w.path, &atelier.instances);
+                    jauge_de_memoire(
+                        ui,
+                        &fichier,
+                        &estimation,
+                        tenue,
+                        atelier.memoire.as_ref(),
+                        &accent,
+                    );
                 }
             }
             Err(raison) => {
@@ -1758,6 +1766,7 @@ fn jauge_de_memoire(
     ui: &mut egui::Ui,
     fichier: &str,
     estimation: &providers::memory::Assessment,
+    tenue: Option<providers::memory::Resident>,
     machine: Option<&providers::memory::System>,
     accent: &Accent,
 ) {
@@ -1788,12 +1797,21 @@ fn jauge_de_memoire(
             3.0,
             couleur,
         );
-        if estimation.fit != Some(Fit::Fits) {
+        if estimation.fit != Some(Fit::Fits) && tenue.is_none() {
             // Le bord de la machine : ce qui dépasse n'a pas de place.
             peintre.circle_filled(
                 pos2(rect.right(), rect.center().y),
                 5.0,
                 ATTENTE.gamma_multiply(0.45),
+            );
+        }
+        // Servi, le poids est déjà compté dans ce que d'autres occupent : un repère dit ce que
+        // l'instance du moteur tient vraiment, mesuré depuis le début de la barre.
+        if let Some(t) = tenue {
+            let x = rect.left() + rect.width() * part(t.rss);
+            peintre.line_segment(
+                [pos2(x, rect.top() - 3.0), pos2(x, rect.bottom() + 3.0)],
+                Stroke::new(2.0, ENCRE),
             );
         }
     }
@@ -1811,12 +1829,27 @@ fn jauge_de_memoire(
         ))
     );
     let etiquette = ui.label(RichText::new(&texte).size(11.0).color(couleur));
+    if let Some(t) = tenue {
+        ui.label(
+            RichText::new(format!(
+                "Servi : le moteur en tient {} résidents, dont {} anonymes",
+                gigabytes(t.rss),
+                gigabytes(t.anonymous)
+            ))
+            .size(11.0)
+            .color(ENCRE),
+        );
+    }
     let detail = format!(
-        "{fichier} : mémoire estimée {} (poids {}, cache KV {}, calcul {}) — {verdict}",
+        "{fichier} : mémoire estimée {} (poids {}, cache KV {}, calcul {}) — {verdict}{}",
         gigabytes(besoin.total),
         gigabytes(besoin.weights),
         gigabytes(besoin.kv_cache),
-        gigabytes(besoin.compute)
+        gigabytes(besoin.compute),
+        tenue.map_or_else(String::new, |t| format!(
+            " ; le moteur en tient {} résidents",
+            gigabytes(t.rss)
+        ))
     );
     ui.interact(
         etiquette.rect,

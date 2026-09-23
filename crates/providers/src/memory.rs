@@ -189,6 +189,92 @@ impl Fit {
     }
 }
 
+/// La mémoire qu'une instance du moteur tient, telle que le noyau la compte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Resident {
+    /// Le processus.
+    pub pid: u32,
+    /// Mémoire résidente (`VmRSS`).
+    pub rss: u64,
+    /// Sa part anonyme (`RssAnon`) : ce que le noyau ne peut pas relire d'un fichier.
+    pub anonymous: u64,
+    /// Sa part projetée depuis des fichiers (`RssFile`), récupérable sous pression si elle est
+    /// propre.
+    pub file: u64,
+}
+
+/// Les instances de llama-server de cette machine et le poids que chacune a chargé (l'argument
+/// de `--model`), lues dans `/proc` : ce que le moteur tient vraiment, à côté de ce que
+/// [`need`] prévoit. Un processus qu'on ne peut pas lire est omis.
+#[must_use]
+pub fn engine_instances() -> Vec<(std::path::PathBuf, Resident)> {
+    let Ok(entrees) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entrees
+        .flatten()
+        .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
+        .filter_map(|pid| {
+            let ligne = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+            let modele = model_of(&ligne)?;
+            let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+            let (rss, anonymous, file) = parse_status(&status)?;
+            Some((
+                modele,
+                Resident {
+                    pid,
+                    rss,
+                    anonymous,
+                    file,
+                },
+            ))
+        })
+        .collect()
+}
+
+/// Le poids d'une ligne de commande de llama-server (`--model <chemin>` ou `-m <chemin>`) ;
+/// `None` pour tout autre programme.
+#[must_use]
+pub fn model_of(cmdline: &[u8]) -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt as _;
+    let args: Vec<&[u8]> = cmdline.split(|&b| b == 0).collect();
+    let programme = std::path::Path::new(std::ffi::OsStr::from_bytes(args.first()?));
+    if programme.file_name()? != "llama-server" {
+        return None;
+    }
+    let rang = args.iter().position(|a| *a == b"--model" || *a == b"-m")?;
+    let chemin = args.get(rang + 1).filter(|a| !a.is_empty())?;
+    Some(std::path::PathBuf::from(std::ffi::OsStr::from_bytes(
+        chemin,
+    )))
+}
+
+/// `VmRSS`, `RssAnon` et `RssFile` (en kio) d'un texte au format de `/proc/<pid>/status`.
+#[must_use]
+pub fn parse_status(text: &str) -> Option<(u64, u64, u64)> {
+    let field = |name: &str| {
+        text.lines().find_map(|line| {
+            let rest = line.strip_prefix(name)?.strip_prefix(':')?;
+            let kib: u64 = rest.trim().trim_end_matches("kB").trim().parse().ok()?;
+            kib.checked_mul(1024)
+        })
+    };
+    Some((field("VmRSS")?, field("RssAnon")?, field("RssFile")?))
+}
+
+/// L'instance qui sert `weights`, s'il y en a une : même fichier, liens résolus.
+#[must_use]
+pub fn resident_for(
+    path: &std::path::Path,
+    instances: &[(std::path::PathBuf, Resident)],
+) -> Option<Resident> {
+    let cible = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+    instances
+        .iter()
+        .find(|(p, _)| std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()) == cible)
+        .map(|(_, r)| *r)
+}
+
 /// Des octets en gigaoctets au dixième, pour l'humain : `5,9 Go` ; en téraoctets au-delà.
 #[must_use]
 pub fn gigabytes(bytes: u64) -> String {
@@ -274,5 +360,56 @@ mod tests {
             serde_json::to_value(Fit::TooLarge).unwrap(),
             serde_json::json!("too_large")
         );
+    }
+
+    #[test]
+    fn une_instance_du_moteur_se_reconnait_a_sa_ligne_de_commande() {
+        let ligne = b"/nix/store/x-llama-cpp/bin/llama-server\x00--host\x00127.0.0.1\x00--model\0/var/lib/prophet/models/catalogue/Qwen3-8B-Q4_K_M.gguf\0--ctx-size\x002048\x00";
+        assert_eq!(
+            model_of(ligne),
+            Some("/var/lib/prophet/models/catalogue/Qwen3-8B-Q4_K_M.gguf".into())
+        );
+        assert_eq!(
+            model_of(b"llama-server\0-m\0/m.gguf\0"),
+            Some("/m.gguf".into())
+        );
+        // Le routeur, sans poids à lui ; un autre programme qui nomme un modèle.
+        assert_eq!(model_of(b"llama-server\0--models-dir\0/d\0"), None);
+        assert_eq!(model_of(b"python3\0--model\0/m.gguf\0"), None);
+        assert_eq!(model_of(b"llama-server\0--model\0"), None);
+        assert_eq!(
+            parse_status(
+                "Name:\tllama-server\nVmRSS:\t 8545116 kB\nRssAnon:\t 3632860 kB\nRssFile:\t 4912256 kB\n"
+            ),
+            Some((8_545_116 * 1024, 3_632_860 * 1024, 4_912_256 * 1024))
+        );
+        assert_eq!(parse_status("VmRSS: 1 kB\n"), None);
+    }
+
+    #[test]
+    fn la_memoire_d_une_instance_vivante_se_lit_dans_proc() {
+        use std::os::unix::process::CommandExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let poids = dir.path().join("essai.gguf");
+        std::fs::write(&poids, b"GGUF").unwrap();
+        // Un processus qui se nomme llama-server et nomme un poids : `sh` le garde tel quel.
+        let mut enfant = std::process::Command::new("sh")
+            .arg0("llama-server")
+            .args(["-c", "sleep 30; true", "--model"])
+            .arg(&poids)
+            .spawn()
+            .unwrap();
+        let limite = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let trouve = loop {
+            if let Some(r) = resident_for(&poids, &engine_instances()) {
+                break r;
+            }
+            assert!(std::time::Instant::now() < limite, "instance introuvable");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        assert_eq!(trouve.pid, enfant.id());
+        assert!(trouve.rss > 0 && trouve.rss >= trouve.anonymous);
+        let _ = enfant.kill();
+        let _ = enfant.wait();
     }
 }

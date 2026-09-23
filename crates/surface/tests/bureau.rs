@@ -1197,7 +1197,7 @@ fn les_poids_installes_se_lisent_sur_la_page_modeles() {
 #[ignore = "needs_gpu"]
 fn la_page_modeles_dit_la_memoire_que_chaque_poids_demande() {
     let context = Contexte::hors_ecran().unwrap();
-    let target = Cible::nouvelle(&context, 1440, 1000);
+    let target = Cible::nouvelle(&context, 1440, 1400);
     let dir = tempfile::tempdir().unwrap();
     let tetes = |couches| {
         [
@@ -1272,6 +1272,25 @@ fn la_page_modeles_dit_la_memoire_que_chaque_poids_demande() {
         Some((true, true))
     );
     assert_eq!(bureau.atelier.poids[0].as_ref().unwrap().template, None);
+    // Servi : le repère de ce que l'instance du moteur tient vraiment.
+    let chemin = qwen.path.clone();
+    bureau.atelier.instances = vec![(
+        chemin.clone(),
+        providers::memory::Resident {
+            pid: 1,
+            rss: 2_300_000_000,
+            anonymous: 1_100_000_000,
+            file: 1_200_000_000,
+        },
+    )];
+    for _ in 0..2 {
+        frame(&mut bureau, &context, &target, vec![]);
+    }
+    capture(&context, &target, "poids-memoire-servi");
+    assert_eq!(
+        providers::memory::resident_for(&chemin, &bureau.atelier.instances).map(|r| r.rss),
+        Some(2_300_000_000)
+    );
 }
 
 /// Un moteur simulé : `/props` comme llama-server, un 404 pour le reste, le temps de l'essai.

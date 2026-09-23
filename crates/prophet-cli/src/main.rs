@@ -2303,6 +2303,7 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
     };
     let contexte = providers::memory::context();
     let machine = providers::memory::system();
+    let instances = providers::memory::engine_instances();
     let memoire =
         |w: &providers::weights::Weights| providers::memory::assess(w, contexte, machine.as_ref());
     if as_json {
@@ -2313,6 +2314,9 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
             .map(|w| {
                 let mut v = serde_json::to_value(&w).unwrap_or_default();
                 v["memory"] = serde_json::to_value(memoire(&w)).unwrap_or_default();
+                v["resident"] =
+                    serde_json::to_value(providers::memory::resident_for(&w.path, &instances))
+                        .unwrap_or_default();
                 v
             })
             .collect();
@@ -2359,13 +2363,19 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
                             .map_or_else(tiret, |n| n.to_string_lossy().into_owned()),
                     );
                 }
+                let tenue = providers::memory::resident_for(&w.path, &instances)
+                    .map_or_else(String::new, |r| {
+                        format!(", {} résidents", providers::memory::gigabytes(r.rss))
+                    });
                 let marque = if is_served(&w.path) {
                     match served.as_ref().ok().and_then(|s| s.n_ctx) {
-                        Some(n_ctx) => format!("  ← servi, fenêtre {n_ctx}"),
-                        None => "  ← servi".to_owned(),
+                        Some(n_ctx) => format!("  ← servi, fenêtre {n_ctx}{tenue}"),
+                        None => format!("  ← servi{tenue}"),
                     }
-                } else {
+                } else if tenue.is_empty() {
                     String::new()
+                } else {
+                    format!("  ← chargé par le moteur{tenue}")
                 };
                 let outils = match w.template {
                     Some(t) if t.tool_calls && t.reasoning => "✓ +réfl.",

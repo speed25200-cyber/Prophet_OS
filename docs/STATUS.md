@@ -1582,7 +1582,9 @@ donne le détail.
   mission locale sur un tel modèle (le routeur le chargerait à la demande). Le catalogue porte
   l'en-tête relevé de chaque fichier (cache KV par token, vocabulaire), revérifié à la source
   par l'essai `needs_network` : la mémoire se dit avant de télécharger (`prophet model catalog`,
-  page Modèles). `prophet model pull` refuse, avant
+  page Modèles). Ce que le moteur tient vraiment se lit aussi, dans `/proc` : la jauge du poids
+  servi porte un repère de sa mémoire résidente, `model.list` la rend (`resident`).
+  `prophet model pull` refuse, avant
   toute requête, ce qui ne tient pas sur le disque. L'essai des familles en CI relève la
   mémoire résidente de chaque instance du vrai llama-server et la confronte à l'estimation :
   vert sur `89b1b3a` — l'estimation couvre la part anonyme (Qwen3 8B : 5,8 Go estimés, 3,7 Go
