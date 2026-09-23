@@ -13,5 +13,13 @@ pkgs.runCommand "prophet-llama-tool-grammar" {
     echo "$template" >> "$out/result.txt"
     ./regression ${engine.src}/models/templates/"$template" >> "$out/result.txt"
   done
+  # Le mode routeur du llama-server épinglé sait-il lire un dossier de modèles, et comment
+  # nomme-t-il ce qu'il y trouve ? C'est ce qui permettrait de servir un poids téléchargé du
+  # catalogue sans reconfigurer le moteur (ADR 0046). Relevé ici, dans la source même du paquet.
+  {
+    echo "--- routeur : dossier de modèles ---"
+    grep -rn -- '--models-dir' ${engine.src}/common/arg.cpp || echo "absent : --models-dir"
+    grep -rn -A12 'models_dir' ${engine.src}/tools/server/server-models.cpp | head -80 || true
+  } >> "$out/result.txt"
   cat "$out/result.txt"
 ''
