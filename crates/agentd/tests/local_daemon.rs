@@ -1363,3 +1363,69 @@ async fn l_agent_lit_son_budget_restant_et_ses_propres_changements() {
     );
     assert!(!chain.dir.path().join("home/docs/note.txt").exists());
 }
+
+/// Un en-tête GGUF dont les têtes demandent des téraoctets de cache KV.
+fn gguf_demesure() -> Vec<u8> {
+    let mut out = b"GGUF".to_vec();
+    out.extend(3u32.to_le_bytes());
+    out.extend(0u64.to_le_bytes());
+    let nombres = [
+        ("qwen3.block_count", 400_000u32),
+        ("qwen3.attention.head_count", 16),
+        ("qwen3.attention.key_length", 128),
+        ("qwen3.attention.value_length", 128),
+    ];
+    out.extend((nombres.len() as u64 + 1).to_le_bytes());
+    let cle = "general.architecture";
+    out.extend((cle.len() as u64).to_le_bytes());
+    out.extend(cle.as_bytes());
+    out.extend(8u32.to_le_bytes());
+    out.extend(5u64.to_le_bytes());
+    out.extend(b"qwen3");
+    for (cle, valeur) in nombres {
+        out.extend((cle.len() as u64).to_le_bytes());
+        out.extend(cle.as_bytes());
+        out.extend(4u32.to_le_bytes());
+        out.extend(valeur.to_le_bytes());
+    }
+    out
+}
+
+/// ADR 0047 : le routeur charge à la demande le modèle qu'une mission nomme ; un modèle qui ne
+/// tient pas en mémoire ferait paginer la machine. La mission ne démarre pas, reste planifiée,
+/// et le refus dit ce que le modèle demande — le moteur n'est même pas contacté.
+#[tokio::test]
+async fn une_mission_sur_un_modele_qui_ne_tient_pas_en_memoire_ne_demarre_pas() {
+    let poids = tempfile::tempdir().unwrap();
+    let catalogue = poids.path().join("catalogue");
+    std::fs::create_dir_all(&catalogue).unwrap();
+    std::fs::write(catalogue.join("Demesure-Q4_K_M.gguf"), gguf_demesure()).unwrap();
+    let chain = Chain::with_env(
+        "http://127.0.0.1:1/v1",
+        &[
+            ("PROPHET_MODELS_DIR", poids.path().to_str().unwrap()),
+            ("PROPHET_WEIGHTS", ""),
+            ("PROPHET_LOCAL_CONTEXT", "4096"),
+        ],
+    )
+    .await;
+    chain.plan("Demesure-Q4_K_M", "Écris une note").await;
+    let refus = chain
+        .agents
+        .call("task.start", json!({"id":"local-test"}))
+        .await
+        .unwrap_err();
+    assert_eq!(refus.code, prophet_ipc::ErrorCode::Conflict, "{refus:?}");
+    assert!(
+        refus.message.contains("paginer") && refus.message.contains("4096 tokens"),
+        "{}",
+        refus.message
+    );
+    let info = chain
+        .agents
+        .call("task.inspect", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    assert_eq!(info["task"]["state"], "planned", "{info}");
+    assert_eq!(info["can_start"], true);
+}

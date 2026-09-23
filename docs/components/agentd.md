@@ -83,6 +83,10 @@ journalisée dans `task.planned`. Voir l'[ADR 0042](../adr/0042-jev-decideur-rap
 ## Exécution
 
 Deux missions au maximum peuvent être actives. Les plans et jetons restent côté service.
+Une mission locale dont le modèle ne tiendrait pas en mémoire ne se prépare ni ne se lance
+(`Conflict`, avec ce que le modèle demande) : le routeur le chargerait à la demande et ferait
+paginer la machine. Le modèle est retrouvé parmi les poids installés par le nom que le routeur
+lui donne, et estimé depuis son en-tête à la fenêtre `PROPHET_LOCAL_CONTEXT` (ADR 0047).
 Les outils offerts au modèle sont les accès fichiers, `http.fetch` par egress et, si un
 navigateur est nommé, `web.open`, `web.tree` et `web.act` ; voir l'[ADR 0024](../adr/0024-navigateur-integre-et-applications-web.md).
 Quand `PROPHET_JEV_SECRET` nomme un secret du coffre, qu'un navigateur est configuré, que le

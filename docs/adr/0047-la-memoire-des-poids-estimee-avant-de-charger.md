@@ -35,6 +35,12 @@ mémoire vive non.
 - **Refuser de charger ce qui ne tient pas** : `prophet model serve` refuse un poids
   `too_large`, en disant poste par poste ce qu'il demande et ce que la machine a ; `--force`
   charge quand même, en connaissance de cause. `tight` charge : la mémoire peut se libérer.
+- **Ne pas lancer de mission sur ce qui ne tient pas** : le routeur charge à la demande le
+  modèle qu'une requête nomme ; agentd refuse donc la préparation (`task.prepare`) et le
+  lancement (`task.start`) d'une mission locale dont le modèle, retrouvé parmi les poids
+  installés par le nom que le routeur lui donne (son fichier sans `.gguf`), est `too_large`.
+  La mission reste planifiée ; le refus dit ce que le modèle demande. Aucune requête au moteur
+  n'est faite pour cela.
 - **Refuser de télécharger ce qui ne tient pas sur le disque** : `providers::pull` compare ce
   qui reste à recevoir à la place libre du dossier (`statvfs`) avant toute requête.
 

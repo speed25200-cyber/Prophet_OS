@@ -242,6 +242,9 @@ impl Handler for Agents {
                         "Le modèle choisi n'est plus disponible.",
                     ));
                 }
+                if !sans_moteur {
+                    refuser_un_modele_trop_grand(&request.model).await?;
+                }
                 let models = if request.client && !models.contains(&request.model) {
                     vec![request.model.clone()]
                 } else {
@@ -1271,6 +1274,12 @@ impl Agents {
         let endpoint = self.local_endpoint.clone().ok_or_else(|| {
             Error::new(ErrorCode::Conflict, "moteur local du service non configuré")
         })?;
+        // Le routeur charge à la demande le modèle qu'on lui nomme : un modèle qui ne tient pas
+        // ferait paginer toute la machine. La mission reste planifiée, et l'on dit pourquoi.
+        let modele = self.runtime.lock().await.planned_local_model(&id);
+        if let Some(modele) = modele {
+            refuser_un_modele_trop_grand(&modele).await?;
+        }
         let stop = Arc::new(AtomicBool::new(false));
         {
             let mut jobs = self
@@ -2490,6 +2499,32 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// L'entrée du catalogue que nomme `id`.
+/// Refuse une mission sur un modèle local qui ne tiendrait pas en mémoire (ADR 0047) : retrouvé
+/// parmi les poids installés par le nom que le routeur lui donne, estimé depuis son en-tête à la
+/// fenêtre du moteur, confronté à la mémoire de la machine.
+async fn refuser_un_modele_trop_grand(model: &str) -> Result<(), Error> {
+    let model = model.to_owned();
+    let refus = tokio::task::spawn_blocking(move || {
+        let installed = providers::weights::installed(
+            &providers::weights::dir(),
+            &providers::weights::configured(),
+        );
+        let system = providers::memory::system();
+        agentd::poids::too_large(
+            &model,
+            &installed,
+            providers::memory::context(),
+            system.as_ref(),
+        )
+        .map(|a| agentd::poids::too_large_reason(&model, &a, system.as_ref()))
+    })
+    .await
+    .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?;
+    refus.map_or(Ok(()), |raison| {
+        Err(Error::new(ErrorCode::Conflict, raison))
+    })
+}
+
 fn entree_du_catalogue(params: &Value) -> Result<providers::catalogue::Entry, Error> {
     let id = commun::texte(params, "id")?;
     let catalogue = providers::catalogue::Catalogue::load()

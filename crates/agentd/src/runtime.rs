@@ -849,6 +849,15 @@ impl Runtime {
         Ok((task.clone(), token.clone(), plan.clone(), self.home.clone()))
     }
 
+    /// Le modèle local qu'un plan désigne (`local:<nom>`), sans son préfixe.
+    #[must_use]
+    pub fn planned_local_model(&self, id: &str) -> Option<String> {
+        self.plans
+            .get(id)
+            .and_then(|p| p.choice.reference.strip_prefix("local:"))
+            .map(str::to_owned)
+    }
+
     /// Politique de confidentialité du manifeste d'une tâche planifiée.
     #[must_use]
     pub fn privacy(&self, id: &str) -> Option<prophet_types::manifest::Privacy> {

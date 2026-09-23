@@ -331,6 +331,48 @@ pub fn provided_by_system(entry: &Entry, configured: &[PathBuf]) -> Option<PathB
         .cloned()
 }
 
+/// Ce qu'un modèle du moteur demanderait en mémoire, quand il ne tient pas sur cette machine
+/// (ADR 0047). Le routeur nomme un poids de son dossier par son fichier sans `.gguf` : c'est
+/// par ce nom qu'on le retrouve parmi les poids installés. Un modèle que rien ne désigne, ou
+/// dont l'en-tête ne s'estime pas, n'est pas refusé : on ne devine pas.
+#[must_use]
+pub fn too_large(
+    model: &str,
+    installed: &[Result<providers::weights::Weights, String>],
+    context: u64,
+    system: Option<&providers::memory::System>,
+) -> Option<providers::memory::Assessment> {
+    let weights = installed.iter().flatten().find(|w| {
+        w.path
+            .file_stem()
+            .is_some_and(|stem| stem.to_string_lossy() == model)
+    })?;
+    providers::memory::assess(weights, context, system)
+        .filter(|a| a.fit == Some(providers::memory::Fit::TooLarge))
+}
+
+/// Pourquoi une mission sur `model` ne démarre pas : ce qu'il demande, et ce que la machine a.
+#[must_use]
+pub fn too_large_reason(
+    model: &str,
+    assessment: &providers::memory::Assessment,
+    system: Option<&providers::memory::System>,
+) -> String {
+    use providers::memory::gigabytes;
+    format!(
+        "« {model} » demande environ {} pour une fenêtre de {} tokens (poids {}, cache KV {}){} : le charger ferait paginer toute la machine. Choisissez un modèle plus petit (prophet model ls dit ce que chacun demande).",
+        gigabytes(assessment.need.total),
+        assessment.need.context,
+        gigabytes(assessment.need.weights),
+        gigabytes(assessment.need.kv_cache),
+        system.map_or_else(String::new, |s| format!(
+            " ; cette machine a {}, et le système en garde {}",
+            gigabytes(s.total),
+            gigabytes(providers::memory::SYSTEM_RESERVE)
+        ))
+    )
+}
+
 /// Le manifeste du téléchargement d'une entrée : sortie réseau vers ses seuls hôtes, rien
 /// d'autre. capd émet le jeton sous ce plafond, et la politique Cedar tranche comme pour toute
 /// sortie.
