@@ -1511,10 +1511,15 @@ donne le détail.
   sans couper de caractère, `71d9a98`) et `fs.search` rend les lignes trouvées, numéro et
   extrait (`2513326`) : un agent à petite fenêtre lit ce qui l'intéresse sans relire le
   fichier. L'essai NixOS du moteur vérifie la forme du refus sur le llama-server épinglé.
+- Erreurs et reprise (FRONTIER) : une mission échouée ou arrêtée se relance depuis
+  l'inspecteur (« Relancer », `93db17c`) ou par `prophet task retry` (`6bc1b56`) : la
+  préparation repasse par le même contexte du catalogue, que le plan retient désormais
+  (`7cdc1d7`), avec le même modèle et la même intention ; rien n'est émis avant la
+  confirmation. Un moteur injoignable se dit en français, avec son adresse (`ee2015f`).
 - CI de `6e1a152` et `c6e4979` (restriction de capd et du journal, essai des droits sous le
   compte de l'humain) : **verte des deux côtés**, dont les sept services sous systemd, la
   mission réelle Qwen3 sous NixOS, le système installé (UEFI et BIOS) et l'ISO.
-- `just check` : **852 réussis, 0 échec, 47 ignorés**, format, clippy, contrôles du dépôt et
+- `just check` : **855 réussis, 0 échec, 47 ignorés**, format, clippy, contrôles du dépôt et
   secrets (repli). Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
 

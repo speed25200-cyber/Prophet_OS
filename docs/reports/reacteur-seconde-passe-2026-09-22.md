@@ -142,7 +142,7 @@ oubliés dans une conversation, qui le dit. Pour que l'agent n'ait pas à tout r
 | Refus de fenêtre : mission resserrée puis renvoyée, fenêtre apprise au tour suivant, intention démesurée rendue en erreur chiffrée, longue mission (quarante résultats), conversation qui oublie ses débuts | tests contre des serveurs qui rendent le refus exact de llama-server, **échouaient** avant (« HTTP 400 ») ; réussissent |
 | `fs.read` par morceaux, `fs.search` par lignes | échouaient avant ; réussissent (morceaux recollés = texte exact, aucun caractère coupé) |
 | Guet du nom de socket pendant 200 démarrages | vu libre **125 371 fois** avant ; jamais après |
-| `just check` | **852 réussis, 0 échec, 47 ignorés** ; format, clippy, contrôles du dépôt, secrets |
+| `just check` | **855 réussis, 0 échec, 47 ignorés** ; format, clippy, contrôles du dépôt, secrets |
 
 Mesures en rendu logiciel, 1920 × 1080, scène de démonstration (5 missions, 3 actives) :
 
