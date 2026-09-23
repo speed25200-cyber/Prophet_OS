@@ -4,8 +4,11 @@
 //! que l'objectif demande : la mission réussit, rien n'est produit. Quand l'objectif nomme un
 //! chemin `~/…` que la portée de la mission couvre et qui n'existe pas au départ, le service
 //! vérifie à chaque conclusion qu'il existe dans l'espace de travail ; sinon, il le rappelle au
-//! modèle et le laisse continuer, au plus [`RAPPELS`] fois. Le rappel ne donne aucun droit :
-//! l'écriture passe par le même outil, le même jeton et la même politique.
+//! modèle et le laisse continuer — de nouveau seulement s'il a progressé depuis le rappel
+//! précédent, au plus [`RAPPELS`] fois par mission.
+//! Le rappel dit un fait (ce chemin n'existe pas encore) et laisse le modèle juger : un chemin
+//! nommé comme une entrée absente se décline. Il ne donne aucun droit : l'écriture passe par le
+//! même outil, le même jeton et la même politique.
 use std::path::{Component, Path, PathBuf};
 
 use providers::DriverError;
@@ -98,18 +101,21 @@ pub fn manquants(attendus: &[Attendu]) -> Vec<String> {
         .collect()
 }
 
-/// Le message que le modèle reçoit quand il conclut sans avoir produit ce que l'objectif
-/// demande.
+/// Le message que le modèle reçoit quand il conclut alors qu'un chemin que l'objectif nomme
+/// n'existe toujours pas. Il dit le fait et laisse le modèle juger : le service ne sait pas si
+/// l'objectif demandait de produire ce chemin ou le nommait comme une entrée.
 #[must_use]
 pub fn rappel(manquants: &[String]) -> String {
     match manquants {
         [seul] => format!(
-            "Vous n'avez pas encore écrit {seul}, que l'objectif demande. \
-             Écrivez-le avec l'outil d'écriture de fichiers, puis concluez."
+            "L'objectif nomme {seul}, qui n'existe pas encore. S'il vous revient de le \
+             produire, écrivez-le avec l'outil d'écriture de fichiers, puis concluez ; sinon, \
+             concluez en disant pourquoi."
         ),
         _ => format!(
-            "Vous n'avez pas encore écrit {}, que l'objectif demande. \
-             Écrivez-les avec l'outil d'écriture de fichiers, puis concluez.",
+            "L'objectif nomme {}, qui n'existent pas encore. S'il vous revient de les \
+             produire, écrivez-les avec l'outil d'écriture de fichiers, puis concluez ; sinon, \
+             concluez en disant pourquoi.",
             manquants.join(", ")
         ),
     }
@@ -131,6 +137,9 @@ pub struct Rappel {
     consigner: Consigner,
     /// Insertions déjà faites : position dans l'historique de la boucle, messages insérés.
     inserts: Vec<(usize, [Value; 2])>,
+    /// Livrables qui manquaient au dernier rappel : un rappel ne se répète que si le modèle a
+    /// produit quelque chose depuis ; décliné, il ne se répète pas.
+    dernier: Option<usize>,
     restants: u8,
 }
 
@@ -143,6 +152,7 @@ impl Rappel {
             attendus,
             consigner,
             inserts: Vec::new(),
+            dernier: None,
             restants: RAPPELS,
         }
     }
@@ -183,10 +193,12 @@ impl ModelClient for Rappel {
                 return Ok((turn, total));
             };
             let manquants = manquants(&self.attendus);
-            if manquants.is_empty() || self.restants == 0 {
+            let progres = self.dernier.is_none_or(|avant| manquants.len() < avant);
+            if manquants.is_empty() || self.restants == 0 || !progres {
                 return Ok((turn, total));
             }
             self.restants -= 1;
+            self.dernier = Some(manquants.len());
             (self.consigner)(&manquants, RAPPELS - self.restants).map_err(DriverError::Io)?;
             self.inserts.push((
                 history.len(),
@@ -349,11 +361,14 @@ mod tests {
     }
 
     #[test]
-    fn les_rappels_sont_bornes() {
+    fn un_rappel_decline_ne_se_repete_pas() {
         let dossier = tempfile::tempdir().expect("dossier");
         let mut modele = Rappel::new(
             Box::new(Script {
-                tours: VecDeque::from([final_("un"), final_("deux"), final_("trois")]),
+                tours: VecDeque::from([
+                    final_("Le fichier ~/x.txt n'existe pas."),
+                    final_("Il fallait le lire, pas l'écrire."),
+                ]),
                 vus: Arc::new(Mutex::new(Vec::new())),
             }),
             vec![Attendu {
@@ -363,10 +378,51 @@ mod tests {
             Box::new(|_, _| Ok(())),
         );
         let (tour, usage) = modele
+            .next_turn(&[json!({"role": "user", "content": "lis ~/x.txt"})])
+            .expect("tour");
+        assert!(matches!(tour, ModelTurn::Final { ref text } if text.starts_with("Il fallait")));
+        assert_eq!(usage.tokens_out, 4);
+        assert_eq!(modele.faits(), 1);
+    }
+
+    #[test]
+    fn les_rappels_sont_bornes() {
+        let dossier = tempfile::tempdir().expect("dossier");
+        let attendus: Vec<Attendu> = ["a", "b", "c", "d", "e"]
+            .iter()
+            .map(|nom| Attendu {
+                tel_quel: format!("~/{nom}.txt"),
+                travail: dossier.path().join(format!("{nom}.txt")),
+            })
+            .collect();
+        // Chaque conclusion produit un fichier de plus : le modèle progresse, il en manque
+        // toujours d'autres, et le plafond arrête les rappels.
+        let chemins: Vec<PathBuf> = attendus.iter().map(|a| a.travail.clone()).collect();
+        struct Producteur {
+            chemins: Vec<PathBuf>,
+            n: usize,
+        }
+        impl ModelClient for Producteur {
+            fn next_turn(&mut self, _: &[Value]) -> Result<(ModelTurn, Usage), DriverError> {
+                if let Some(chemin) = self.chemins.get(self.n) {
+                    std::fs::write(chemin, "x").expect("écriture");
+                }
+                self.n += 1;
+                Ok((final_(&format!("tour {}", self.n)), Usage::default()))
+            }
+            fn model_name(&self) -> String {
+                "producteur".into()
+            }
+        }
+        let mut modele = Rappel::new(
+            Box::new(Producteur { chemins, n: 0 }),
+            attendus,
+            Box::new(|_, _| Ok(())),
+        );
+        let (tour, _) = modele
             .next_turn(&[json!({"role": "user", "content": "o"})])
             .expect("tour");
-        assert!(matches!(tour, ModelTurn::Final { ref text } if text == "trois"));
-        assert_eq!(usage.tokens_out, 6);
+        assert!(matches!(tour, ModelTurn::Final { ref text } if text == "tour 3"));
         assert_eq!(modele.faits(), usize::from(RAPPELS));
     }
 

@@ -25,10 +25,15 @@ message. Le service sait, sans interpréter l'objectif, ce qu'il nomme et ce qui
   entrée ; un chemin hors de la portée n'est pas au service de le réclamer.
 - **À chaque conclusion du modèle**, agentd (`agentd::livrables::Rappel`, autour du compteur
   commun) vérifie que chaque livrable existe dans l'espace de travail. S'il en manque, la
-  conclusion et un message de l'utilisateur (« Vous n'avez pas encore écrit ~/…, que l'objectif
-  demande. Écrivez-le avec l'outil d'écriture de fichiers, puis concluez. ») sont insérés à
-  cette place dans l'historique que le modèle reçoit, et il est interrogé de nouveau. Au plus
-  **deux rappels** par mission ; au-delà, sa conclusion est rendue telle quelle.
+  conclusion et un message de l'utilisateur sont insérés à cette place dans l'historique que le
+  modèle reçoit, et il est interrogé de nouveau. Le message dit un fait et laisse juger :
+  « L'objectif nomme ~/…, qui n'existe pas encore. S'il vous revient de le produire,
+  écrivez-le avec l'outil d'écriture de fichiers, puis concluez ; sinon, concluez en disant
+  pourquoi. » — le service ne sait pas si l'objectif demandait ce chemin ou le nommait comme
+  une entrée absente (« lis ~/notes/todo.txt »).
+- **Borné** : un nouveau rappel n'a lieu que si le modèle a produit un livrable depuis le
+  précédent (il en manque moins) ; un rappel décliné ne se répète donc pas. Au plus **deux
+  rappels** par mission ; au-delà, sa conclusion est rendue telle quelle.
 - **Chaque interrogation est une étape** : elle passe par le compteur commun (plafond d'étapes
   vérifié avant, tokens imputés au modèle qui a répondu), comme toute autre.
 - **Le rappel se journalise** : événement `task.reminded` (`missing`, `nth`) avant l'envoi ; le
@@ -53,7 +58,10 @@ message. Le service sait, sans interpréter l'objectif, ce qu'il nomme et ce qui
 
 - La boucle nue du banc n'a pas ce rappel : il fait partie de ce que Prophet ajoute, et le banc
   en mesure l'effet (réussites, tokens, exécutions rappelées).
-- Un objectif qui nomme un chemin à ne pas créer (« sans créer ~/x ») recevra, au pire, deux
-  rappels que le modèle peut décliner ; le banc n'en contient pas.
+- Un objectif qui nomme un chemin à ne pas créer (« sans créer ~/x ») ou une entrée absente
+  reçoit, au pire, un rappel que le modèle peut décliner ; le banc n'en contient pas.
+- Premier passage du banc avec le rappel (`6d01c38`) : message impératif (« Vous n'avez pas
+  encore écrit … »), deux rappels sans condition. Le message factuel et la condition de
+  progrès viennent ensuite, pour ne pas pousser le modèle à créer une entrée absente.
 - Un livrable produit hors de la portée n'est pas vu ; c'est voulu : la mission ne peut pas y
   écrire.
