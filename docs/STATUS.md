@@ -1604,11 +1604,15 @@ par laquelle un processus de la session fait planifier une mission sous un manif
 détection de session ; le plan demandait aussi de lancer chaque client officiel **dans une
 sandbox** (niveau 1, niveau 2 s'il exécute du code). `prophet-pilotd` les lance sous l'identité
 de l'humain, sans confinement (ADR 0026, pilotd « Limites ») : un client peut donc joindre
-`capd.sock` et trancher une approbation (ADR 0044). Un premier pas sans toucher aux clients :
-les lancer dans un espace de montage et de processus propre, où `/run/prophet` ne montre que le
-socket d'agentd que le pont emploie. Le reste — leur sortie réseau par egress, le niveau 1 —
-est une décision de conception à prendre avec l'utilisateur, les clients parlant à leur
-éditeur sous son abonnement.
+`capd.sock` et trancher une approbation (ADR 0044). Masquer `/run/prophet` dans un espace de
+montage propre ne suffirait pas, et le dire serait promettre une isolation qui n'a pas lieu :
+le même compte atteint aussi l'IPC de sway et le bus de session (`swaymsg exec`, `systemd-run
+--user` lancent un programme hors de tout espace), et son home entier, où un fichier de
+démarrage s'exécute à la session suivante. Un confinement réel borne donc les fichiers au
+travail de la mission et au profil privé du client, masque `/run/prophet` et
+`$XDG_RUNTIME_DIR` sauf le pont, et fait passer la sortie réseau par egress — une décision de
+conception à prendre avec l'utilisateur, les clients parlant à leur éditeur sous son
+abonnement.
 
 **Pour la session suivante.** Lire la CI de la branche (l'instantané de la réserve repris au
 redémarrage sur le coureur KVM ; le téléchargement de poids sous systemd dans l'essai des
