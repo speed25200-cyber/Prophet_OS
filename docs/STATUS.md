@@ -1749,7 +1749,12 @@ donne le détail.
   en attente » la montrait encore : la surface ne montre plus une demande dont la mission est
   finie, et la réponse de l'humain va toujours à la demande montrée (une seule sélection pour les
   deux, `depuis::demande_montree`).
-- `just check` : **941 réussis, 0 échec, 67 ignorés** (`73f2031`), format, clippy, contrôles
+- CI de `3c4bea7` (audit visuel, veille du champ, arrêt d'urgence, demandes des missions
+  finies) : **verte des deux côtés** — `check`, surface, isolation sur matériel réel, mission
+  réelle Qwen3 sous NixOS, sept services, système installé (UEFI et BIOS), ISO et installeur.
+  Onzième passage du banc, sans changement du chemin des outils : **Prophet 18/45, boucle nue
+  11/45** (Qwen3 1.7B), 11/15 contre 12/15 (Qwen3 4B) — le bruit de l'échantillonnage.
+- `just check` : **946 réussis, 0 échec, 69 ignorés** (`3c4bea7`), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
@@ -1777,14 +1782,15 @@ travail de la mission et au profil privé du client, masque `/run/prophet` et
 conception à prendre avec l'utilisateur, les clients parlant à leur éditeur sous son
 abonnement.
 
-**Pour la session suivante.** Lire la CI de la branche (le travail « Poids du catalogue servis
-(réels) » porte désormais cinq familles, la mémoire de chaque instance sans projection, et un
-essai de concurrence et d'annulation sur le vrai moteur) ; mesurer la mémoire et la VRAM sur
-une machine à carte graphique, où l'estimation de l'ADR 0047 vaudra pour les couches
-déchargées ; décider avec l'utilisateur du confinement des clients officiels ; trancher avec l'utilisateur le sort de
-`task.spawn` pour le compte de l'humain, et le chemin de confiance qui distinguerait la surface
-d'un autre programme du compte pour `approval.resolve` (ADR 0044) ; mesurer la surface sur une
-carte graphique ; faire le premier appel réel de Jev avec une clé déposée.
+**Pour la session suivante.** La CI de `3c4bea7` est verte des deux côtés. Sur une machine à
+carte graphique : mesurer la surface avec les mêmes commandes que l'audit du 23 septembre
+(`prophet-surface --mesure 120 --champ-complet`, `--repos 150`) et la mémoire et la VRAM des
+poids, où l'estimation de l'ADR 0047 vaudra pour les couches déchargées. Avec l'utilisateur :
+décider du confinement des clients officiels (M8-T4) ; trancher le sort de `task.spawn` pour le
+compte de l'humain, et le chemin de confiance qui distinguerait la surface d'un autre programme
+du compte pour `approval.resolve` (ADR 0044) ; faire le premier appel réel de Jev avec une clé
+déposée. Côté banc, Prophet plafonne avec Qwen3 1.7B (18 à 21 sur 45) : le prochain gain viendra
+d'un modèle plus grand servi par défaut, ou d'une suite élargie aux tâches avec navigateur.
 
 ### 15 septembre 2026, nuit et matin : l'ISO installée dans une machine virtuelle, deux fautes
 
