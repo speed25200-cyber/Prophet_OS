@@ -21,7 +21,13 @@ fn helper() -> PathBuf {
 }
 
 fn namespaces_disponibles() -> bool {
-    Capabilities::probe().user_namespaces && helper().exists()
+    let disponibles = Capabilities::probe().user_namespaces && helper().exists();
+    // Sur une machine qui doit les avoir (le coureur d'isolation), se taire serait mentir.
+    assert!(
+        disponibles || std::env::var("PROPHET_EXIGER_ESPACES_DE_NOMS").as_deref() != Ok("1"),
+        "espaces de noms ou amorçage indisponibles alors que PROPHET_EXIGER_ESPACES_DE_NOMS=1"
+    );
+    disponibles
 }
 
 /// Exécute une spécification quelconque et renvoie (code de sortie, sortie standard, erreur,
@@ -257,6 +263,10 @@ fn landlock_borne_l_ecriture_et_l_execution_au_niveau_zero() {
         return;
     }
     if Capabilities::probe().landlock_abi.is_none() {
+        assert!(
+            std::env::var("PROPHET_EXIGER_LANDLOCK").as_deref() != Ok("1"),
+            "Landlock absent alors que PROPHET_EXIGER_LANDLOCK=1"
+        );
         eprintln!("Landlock absent de ce noyau : test sans effet");
         return;
     }

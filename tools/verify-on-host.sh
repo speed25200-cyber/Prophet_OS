@@ -75,7 +75,18 @@ import ctypes, sys
 libc = ctypes.CDLL("libc.so.6", use_errno=True)
 sys.exit(0 if libc.syscall(444, None, 0, 1) > 0 else 1)
 PY
-then ok "Landlock disponible"; else ko "Landlock absent"; MANQUES+=("landlock"); fi
+then ok "Landlock disponible"; LANDLOCK=1; else ko "Landlock absent"; LANDLOCK=0; MANQUES+=("landlock"); fi
+
+# Espaces de noms utilisateur : `unshare` figure dans les profils AppArmor d'Ubuntu et passe même
+# sous restriction ; c'est le réglage qui dit si un programme quelconque — l'amorçage de
+# sandboxd, un binaire d'essai — pourra s'en servir.
+restriction_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)
+if unshare --user true 2>/dev/null && [ "$restriction_userns" != "1" ]; then
+  ok "espaces de noms utilisateur utilisables"; USERNS=1
+else
+  ko "espaces de noms utilisateur inutilisables par un programme quelconque"; USERNS=0
+  MANQUES+=("userns")
+fi
 
 if [ -f /sys/fs/cgroup/cgroup.controllers ]; then ok "cgroups v2 montés"
 else ko "cgroups v2 absents"; MANQUES+=("cgroups-v2"); fi
@@ -223,6 +234,9 @@ materiel_pour() {
       [ "$IMAGES" = "1" ] || manquants="$manquants images-microvm"
       [ -z "$manquants" ] && return 0
       echo "il manque${manquants}"; return 1 ;;
+    needs_userns)
+      [ "$USERNS" = "1" ] && return 0
+      echo "espaces de noms utilisateur inutilisables"; return 1 ;;
     needs_gpu)
       # Un nœud /dev/dri existe sur des machines qui n'ont aucun pilote Vulkan chargé — c'est le
       # cas des coureurs d'intégration. Le constater revenait à annoncer une capacité qu'on n'a
@@ -276,6 +290,19 @@ etape_niveaux() {
       ECHECS=$((ECHECS + 1))
       return 1
     }
+  fi
+
+  # Le niveau 0 lui-même : ses essais ne portent pas de marqueur et se taisent là où les
+  # espaces de noms manquent — ce qui fait verdir « check » sans rien confiner. Ici, où ils
+  # existent, on les exige, et Landlock avec eux s'il est dans le noyau.
+  if [ "$USERNS" = "1" ]; then
+    lancer "Niveau 0 réellement confiné (espaces de noms$([ "$LANDLOCK" = 1 ] && echo ', Landlock'), seccomp)" \
+      env PROPHET_EXIGER_ESPACES_DE_NOMS=1 PROPHET_EXIGER_LANDLOCK="$LANDLOCK" \
+      cargo test -p sandboxd --test enforcement $JOBS -- --nocapture \
+      || ECHECS=$((ECHECS + 1))
+  else
+    hors "Niveau 0 réellement confiné — non vérifiable : espaces de noms utilisateur inutilisables"
+    NON_VERIFIES+=("niveau 0 réellement confiné — espaces de noms utilisateur inutilisables")
   fi
 
   local marqueur crate nom raison
