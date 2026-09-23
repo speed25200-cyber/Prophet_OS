@@ -82,7 +82,7 @@ hostile.
   détection. Cette taille, vérifiée par l'empreinte, entre au catalogue.
 - Servir : `prophet model serve <id>` et le geste « Servir » de la page Modèles demandent au
   routeur de llama-server de charger le poids (`POST /models/load`), reconnu dans `GET /models`
-  par le chemin de son fichier, sinon par son nom. En mode relais, le routeur de l'image lit
+  par le chemin de son fichier (lu dans les arguments de l'instance), sinon par son nom. En mode relais, le routeur de l'image lit
   aussi `models/catalogue` (`--models-dir`), relevé d'abord dans la source même du moteur
   épinglé : l'option existe, le dossier est lu **au démarrage** du routeur (« the server must be
   restarted after adding a new model ») et doit exister, et la section globale `[*]` des
@@ -90,7 +90,11 @@ hostile.
   threads et les couches de l'image, au lieu de toute leur fenêtre d'entraînement. Un poids
   téléchargé se sert donc après un redémarrage du moteur ; `prophet model serve` le dit. Le
   contrôle `llama-router` démarre le vrai routeur épinglé avec ces options et vérifie qu'il
-  connaît le poids du dossier et dit son chemin : aucun essai en VM n'exerce le mode relais.
+  connaît le poids du dossier (nommé par son fichier, source `models_dir`), avec la fenêtre et
+  les threads de la section `[*]` : aucun essai en VM n'exerce le mode relais. Son premier
+  passage a corrigé une hypothèse : `GET /models` ne rend pas de champ `path` ; le fichier est
+  dans les arguments de l'instance (`status.args`, après `--model`), et c'est là que le client
+  le lit désormais.
 - Le catalogue grandit par le dépôt, avec une empreinte relevée par entrée.
 - Vérifié : essais unitaires du téléchargement (redirection, reprise, empreinte, en-tête, taille,
   refus du proxy, arrêt), parcours `agentd` avec les vrais capd, ledger et egress

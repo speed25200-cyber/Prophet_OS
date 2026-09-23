@@ -56,10 +56,17 @@ pkgs.runCommand "prophet-llama-router" {
   donnees = modeles["data"]
   ids = [m["id"] for m in donnees]
   assert "defaut" in ids, f"le préréglage manque : {ids}"
-  tires = [m for m in donnees if m.get("path") == tire or "Tire-Q4_K_M" in m["id"]]
-  assert tires, f"le poids du dossier manque : {ids}"
-  assert tires[0].get("path") == tire, f"le routeur ne dit pas le chemin du poids : {tires[0]}"
-  print(f"poids du dossier servi sous le nom {tires[0]['id']!r}, état {tires[0].get('status')}")
+  def chemin(m):
+      # Pas de `path` dans la réponse : le fichier est dans les arguments de l'instance.
+      args = m.get("status", {}).get("args", [])
+      return m.get("path") or next((args[i + 1] for i, a in enumerate(args[:-1]) if a in ("--model", "-m")), None)
+  tires = [m for m in donnees if chemin(m) == tire]
+  assert tires, f"le poids du dossier manque, ou sans son chemin : {ids}"
+  args = tires[0]["status"]["args"]
+  # La section globale [*] vaut pour lui : la fenêtre de l'image, pas celle d'entraînement.
+  assert "--ctx-size" in args and args[args.index("--ctx-size") + 1] == "4096", args
+  assert "--threads" in args and args[args.index("--threads") + 1] == "2", args
+  print(f"poids du dossier servi sous le nom {tires[0]['id']!r} ({tires[0].get('source')}), réglages {args}")
   PYTHON
   then
     echo "--- journal du routeur ---"

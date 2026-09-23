@@ -1464,8 +1464,9 @@ fn routeur_qui_connait(chemin: std::path::PathBuf) -> (String, Recues) {
             } else if premiere.starts_with("GET /models ") {
                 (
                     "200 OK",
-                    serde_json::json!({"data": [{"id": "essai", "path": chemin,
-                        "status": {"value": if charge { "loaded" } else { "unloaded" }}}]}),
+                    serde_json::json!({"data": [{"id": "essai",
+                        "status": {"value": if charge { "loaded" } else { "unloaded" },
+                                   "args": ["llama-server", "--model", chemin]}}]}),
                 )
             } else {
                 ("404 Not Found", serde_json::json!({}))

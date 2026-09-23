@@ -589,9 +589,15 @@ fn le_routeur_dit_ses_modeles_et_charge_celui_qu_on_lui_nomme() {
     let (endpoint, thread) = server(vec![
         (
             200,
+            // La forme exacte du routeur épinglé (relevée par le contrôle `llama-router`) :
+            // pas de `path`, le fichier dans les arguments de l'instance.
             json!({"data": [
-                {"id": "qwen3-1.7b", "status": {"value": "loaded"}},
-                {"id": "Qwen3-4B-Q4_K_M", "path": tire, "status": {"value": "unloaded"}}
+                {"id": "qwen3-1.7b", "status": {"value": "loaded",
+                    "args": ["llama-server", "--alias", "qwen3-1.7b", "--model", "/nix/store/x-Qwen3-1.7B-Q8_0.gguf"]},
+                 "source": "preset"},
+                {"id": "Qwen3-4B-Q4_K_M", "status": {"value": "unloaded",
+                    "args": ["llama-server", "--jinja", "--alias", "Qwen3-4B-Q4_K_M", "--ctx-size", "4096", "--model", tire]},
+                 "source": "models_dir"}
             ]}),
         ),
         (200, json!({"success": true})),
@@ -600,6 +606,7 @@ fn le_routeur_dit_ses_modeles_et_charge_celui_qu_on_lui_nomme() {
     let modeles = moteur.router_models().unwrap();
     assert_eq!(modeles.len(), 2);
     assert_eq!(modeles[0].status.as_deref(), Some("loaded"));
+    assert_eq!(modeles[1].path.as_deref(), Some(tire.as_path()));
     let trouve = providers::local::router_model_for(&modeles, &tire).unwrap();
     assert_eq!(trouve.id, "Qwen3-4B-Q4_K_M");
     // Sans chemin rendu, le nom du fichier suffit.

@@ -170,7 +170,12 @@ impl LocalModel {
             .filter_map(|m| {
                 Some(RouterModel {
                     id: m["id"].as_str()?.to_owned(),
-                    path: m["path"].as_str().map(std::path::PathBuf::from),
+                    // Le routeur épinglé ne rend pas `path` : le fichier est dans les arguments
+                    // de l'instance qu'il lancerait (`status.args`, après `--model`).
+                    path: m["path"]
+                        .as_str()
+                        .map(std::path::PathBuf::from)
+                        .or_else(|| model_arg(&m["status"]["args"])),
                     // `status` est un objet (`{"value": "loaded"}`) ; certaines versions le
                     // rendent en simple chaîne.
                     status: m["status"]["value"]
@@ -202,6 +207,16 @@ impl LocalModel {
             .join(path)
             .map_err(|_| invalid("chemin d'API invalide"))
     }
+}
+
+/// Le fichier de poids nommé dans les arguments d'une instance (`--model <chemin>` ou `-m`).
+fn model_arg(args: &Value) -> Option<std::path::PathBuf> {
+    let args = args.as_array()?;
+    args.iter()
+        .position(|a| matches!(a.as_str(), Some("--model" | "-m")))
+        .and_then(|i| args.get(i + 1))
+        .and_then(Value::as_str)
+        .map(std::path::PathBuf::from)
 }
 
 /// Un modèle que le routeur de llama-server connaît.

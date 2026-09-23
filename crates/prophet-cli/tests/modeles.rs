@@ -231,10 +231,12 @@ fn routeur(chemin: std::path::PathBuf) -> (String, std::sync::Arc<std::sync::Mut
                 charge = true;
                 serde_json::json!({"success": true})
             } else {
+                // La forme du routeur épinglé : le fichier dans les arguments de l'instance.
                 serde_json::json!({"data": [
                     {"id": "qwen3-1.7b", "status": {"value": "loaded"}},
-                    {"id": "Qwen3-4B-Q4_K_M", "path": chemin,
-                     "status": {"value": if charge { "loaded" } else { "unloaded" }}}
+                    {"id": "Qwen3-4B-Q4_K_M",
+                     "status": {"value": if charge { "loaded" } else { "unloaded" },
+                                "args": ["llama-server", "--model", chemin]}}
                 ]})
             }
             .to_string();
