@@ -43,7 +43,7 @@ dernière durée de restauration, erreur. L'instantané (1 Gio de mémoire) va s
 | `sandbox.capabilities` | Ce que cette machine sait isoler, et ce qui lui manque |
 | `sandbox.min_level` | Le niveau exigé : le plus élevé du manifeste et du jeton, au moins 2 si la tâche exécute du code |
 | `sandbox.start` | Lance un programme sous sandbox |
-| `sandbox.run` | Lance, attend (délai borné, tue au-delà) et rend code de retour, sortie et erreur bornées ; c'est `proc.exec` (ADR 0031) |
+| `sandbox.run` | Lance, attend (délai borné, tue au-delà) et rend code de retour, sortie et erreur bornées, durée (`elapsed_ms`) et `warm_start` si la microVM venait de la réserve ; c'est `proc.exec` (ADR 0031) |
 | `sandbox.freeze` / `sandbox.thaw` | Gèle et dégèle le groupe de processus entier — une tâche gelée se reprend, une tâche tuée a perdu son état |
 | `sandbox.kill` | Termine |
 | `sandbox.status`, `sandbox.list` | Ce qui vit |

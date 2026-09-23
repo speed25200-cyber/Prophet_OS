@@ -122,7 +122,8 @@ home lisible selon le jeton et jamais inscriptible. La liste blanche (`cat`, `ls
 `tail`, `sort`, `uniq`, `grep`, `rg`, `cut`, `tr`, `diff`, `file`), par le nom nu seulement,
 tourne au niveau 0 sans décision humaine ; tout autre programme, et tout chemin même nommé
 `cat`, exige le niveau 2 et est irréversible. Rend `exit_code`, `stdout` (256 Kio au plus,
-`truncated` sinon), `stderr`, `timed_out`. Sans sandboxd, l'outil le dit et ne lance rien. Voir
+`truncated` sinon), `stderr`, `timed_out`, `elapsed_ms` (lancement compris) et `warm_start`
+(la microVM venait de la réserve, ADR 0045). Sans sandboxd, l'outil le dit et ne lance rien. Voir
 l'[ADR 0031](../adr/0031-execution-de-programmes-sous-sandboxd.md).
 
 ## Sortie réseau et navigation actuellement implémentées

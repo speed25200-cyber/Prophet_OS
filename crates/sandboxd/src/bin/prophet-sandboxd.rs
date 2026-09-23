@@ -149,6 +149,8 @@ impl Handler for Isolation {
                 )
                 .unwrap_or(256 * 1024);
                 let niveau = spec.level;
+                // Ce que l'exécution a coûté, lancement compris : l'agent en tient compte.
+                let chrono = std::time::Instant::now();
                 // La commande reste contrôlable pendant l'attente. Seul l'accès bref à
                 // sa poignée est verrouillé, jamais l'attente ni la lecture des sorties.
                 let poignee = {
@@ -170,6 +172,7 @@ impl Handler for Isolation {
                         let p = poignee.blocking_lock();
                         (p.pid, p.microvm.clone(), p.workdir.clone())
                     };
+                    let tiede = microvm.as_ref().is_some_and(|vm| vm.depuis_la_reserve);
                     let sortie = executer_bornee(
                         &self.manager,
                         &poignee,
@@ -213,6 +216,8 @@ impl Handler for Isolation {
                         "stdout": stdout,
                         "stderr": stderr,
                         "truncated": sortie.truncated,
+                        "elapsed_ms": u64::try_from(chrono.elapsed().as_millis()).unwrap_or(u64::MAX),
+                        "warm_start": tiede,
                     }))
                 })?;
                 let mut vivantes = self.vivantes.lock().await;

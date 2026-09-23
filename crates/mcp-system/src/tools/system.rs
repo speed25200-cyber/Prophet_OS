@@ -234,6 +234,8 @@ impl Tool for Exec {
                     "stderr": value["stderr"],
                     "timed_out": value["timed_out"],
                     "truncated": value["truncated"],
+                    "elapsed_ms": value["elapsed_ms"],
+                    "warm_start": value["warm_start"],
                 });
                 if value["timed_out"].as_bool().unwrap_or(false) {
                     rendu["note"] = json!(format!("commande interrompue après {timeout} s"));

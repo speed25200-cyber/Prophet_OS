@@ -609,6 +609,10 @@ fn la_reserve_rend_une_microvm_de_niveau_deux_en_moins_de_150_ms() {
         durees.push(lance.elapsed());
         assert_eq!(handle.level, 2);
         let vm = handle.microvm.clone().expect("un disque de travail");
+        assert!(
+            vm.depuis_la_reserve,
+            "tour {tour} : la réserve pleine n'a pas servi"
+        );
         // La console est lue avec un délai : une machine qui ne verrait pas son disque arriver
         // ne doit pas retenir le coureur des heures durant.
         let sortie = handle_child(&mut handle)

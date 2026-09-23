@@ -133,6 +133,9 @@ async fn une_commande_confinee_rend_sa_sortie_et_son_code_et_le_delai_la_tue() {
     assert!(rendu["stderr"].as_str().unwrap().contains("erreur"));
     assert_eq!(rendu["timed_out"], false);
     assert_eq!(rendu["level"], 0);
+    // L'agent sait ce que l'exécution a coûté, et qu'aucune machine de réserve n'a servi.
+    assert!(rendu["elapsed_ms"].as_u64().is_some(), "{rendu}");
+    assert_eq!(rendu["warm_start"], false, "{rendu}");
     // Rien ne reste vivant après une commande finie.
     let liste = client.call("sandbox.list", json!({})).await.unwrap();
     assert_eq!(liste.as_array().map(Vec::len), Some(0), "{liste}");

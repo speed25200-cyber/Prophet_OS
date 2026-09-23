@@ -34,6 +34,8 @@ pub struct MicrovmRun {
     pub base: std::path::PathBuf,
     /// L'image ext4 de l'espace de travail, montée par l'invité en `/dev/vdb`.
     pub disque: std::path::PathBuf,
+    /// La machine venait de la réserve, restaurée d'un instantané (ADR 0045).
+    pub depuis_la_reserve: bool,
 }
 
 /// Erreur de lancement.
@@ -129,6 +131,7 @@ pub fn depuis_la_reserve(
             microvm: Some(MicrovmRun {
                 base: membre.dossier,
                 disque,
+                depuis_la_reserve: true,
             }),
         }),
         Err(raison) => {
@@ -302,7 +305,11 @@ fn launch_microvm(
     Ok(Launched {
         child,
         needs_handshake: false,
-        microvm: Some(MicrovmRun { base, disque }),
+        microvm: Some(MicrovmRun {
+            base,
+            disque,
+            depuis_la_reserve: false,
+        }),
     })
 }
 
