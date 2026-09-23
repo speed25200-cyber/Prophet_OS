@@ -124,8 +124,8 @@ apprise sert ensuite d'emblée (ADR 0034, complément du 22 septembre).
 Un chemin `~/…` que l'intention nomme, que la portée couvre et qui n'existe pas au départ dans
 l'espace de travail est un livrable. Si le modèle conclut sans l'avoir produit, sa conclusion et
 un rappel qui nomme le chemin manquant (et laisse le modèle décliner s'il s'agissait d'une
-entrée) sont insérés dans l'historique qu'il reçoit, et il est interrogé de nouveau ; un
-nouveau rappel n'a lieu que s'il a produit quelque chose depuis, deux au plus par mission.
+entrée) sont insérés dans l'historique qu'il reçoit, et il est interrogé de nouveau ; deux
+rappels au plus par mission, le second plus net.
 Chaque interrogation est une étape du budget. Le rappel
 est journalisé (`task.reminded`, `missing`, `nth`) et le résultat porte `reminded`. Il ne donne
 aucun droit : l'écriture passe par le même outil, le même jeton et la même politique

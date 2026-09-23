@@ -724,6 +724,33 @@ fn search(view: &View<'_>, root: &Path, args: &Value) -> Result<Value> {
     };
     let name = text_arg("name_contains")?;
     let content = text_arg("content_contains")?;
+    let found = search_with(view, root, name, content)?;
+    // Un modèle cherche souvent par nom ce qui figure dans le contenu (« la référence
+    // ZX-99417 ») : quand aucun nom ne correspond, le même texte est cherché dans le contenu,
+    // et le résultat le dit. Mêmes droits, mêmes bornes.
+    if let (Some(needle), None) = (name, content)
+        && found["results"].as_array().is_some_and(Vec::is_empty)
+    {
+        let mut in_content = search_with(view, root, None, Some(needle))?;
+        if in_content["results"]
+            .as_array()
+            .is_some_and(|results| !results.is_empty())
+        {
+            in_content["note"] = json!(format!(
+                "aucun nom ne contient « {needle} » ; voici les fichiers dont le contenu le contient"
+            ));
+            return Ok(in_content);
+        }
+    }
+    Ok(found)
+}
+
+fn search_with(
+    view: &View<'_>,
+    root: &Path,
+    name: Option<&str>,
+    content: Option<&str>,
+) -> Result<Value> {
     if !view.permits(Act::Read, root) {
         return Err(denied());
     }

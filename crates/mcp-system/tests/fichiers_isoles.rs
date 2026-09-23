@@ -227,6 +227,35 @@ fn une_recherche_dans_un_fichier_nomme_porte_sur_lui_seul() {
 }
 
 #[test]
+fn chercher_par_nom_ce_qui_est_dans_le_contenu_trouve_quand_meme() {
+    let m = monde(&["~/docs/**"]);
+    std::fs::write(
+        m.home.join("docs/contrat-b.txt"),
+        "Référence ZX-99417, signé.\n",
+    )
+    .unwrap();
+    std::fs::write(m.home.join("docs/autre.txt"), "rien\n").unwrap();
+    let r = m.call(
+        "fs.search",
+        json!({"root":"~/docs","name_contains":"ZX-99417"}),
+    );
+    assert!(!r.is_error, "{r:?}");
+    let d = r.structured.unwrap();
+    let results = d["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1, "{d}");
+    assert_eq!(results[0]["path"], json!(m.home.join("docs/contrat-b.txt")));
+    assert!(d["note"].as_str().unwrap().contains("contenu"), "{d}");
+    // Un nom qui correspond garde la recherche par nom, sans note.
+    let r = m.call(
+        "fs.search",
+        json!({"root":"~/docs","name_contains":"autre"}),
+    );
+    let d = r.structured.unwrap();
+    assert_eq!(d["results"].as_array().unwrap().len(), 1, "{d}");
+    assert!(d.get("note").is_none(), "{d}");
+}
+
+#[test]
 fn se_tromper_de_nature_de_chemin_dit_l_outil_qui_convient() {
     let m = monde(&["~/docs/**"]);
     std::fs::write(m.home.join("docs/a.txt"), "un\n").unwrap();

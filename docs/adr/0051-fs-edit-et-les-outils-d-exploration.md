@@ -32,7 +32,14 @@ d'exemple (`examples/missions/profils-locaux.json`) et le banc les accordent.
 - **Les contextes de l'image explorent leur portée** : chaque contexte qui lit reçoit `fs.list`
   sur les mêmes motifs, et les outils `fs.list`, `fs.stat`, `fs.search` et `fs.edit`. Le
   catalogue de l'image admet `fs.edit` parmi les outils fichiers.
-- **Le banc l'offre des deux côtés** : même implémentation, même ordre, même description.
+- **Un nom introuvable se cherche dans le contenu** : au quatrième passage du banc, un seul
+  `fs.search` qui ne rend rien (« aucun fichier ne contient la référence ZX-99417 », alors
+  qu'un fichier la contient) suffit au modèle pour conclure. Quand `name_contains` seul ne
+  correspond à aucun nom, `fs.search` cherche le même texte dans le contenu, sous les mêmes
+  droits et bornes, et `note` le dit.
+- **Le banc l'offre des deux côtés** : même implémentation, même ordre, même description ; il
+  relève aussi, pour la boucle nue, les arguments abrégés de chaque appel (le journal de
+  Prophet n'en garde que l'empreinte, et c'est voulu).
 
 ## Alternatives écartées
 

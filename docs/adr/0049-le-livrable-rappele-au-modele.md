@@ -31,9 +31,10 @@ message. Le service sait, sans interpréter l'objectif, ce qu'il nomme et ce qui
   fichiers, puis concluez. Si l'objectif le nommait comme un fichier à lire, dites qu'il est
   absent au lieu de l'écrire. » — le service ne sait pas si l'objectif demandait ce chemin ou
   le nommait comme une entrée absente (« lis ~/notes/todo.txt »).
-- **Borné** : un nouveau rappel n'a lieu que si le modèle a produit un livrable depuis le
-  précédent (il en manque moins) ; un rappel décliné ne se répète donc pas. Au plus **deux
-  rappels** par mission ; au-delà, sa conclusion est rendue telle quelle.
+- **Borné** : au plus **deux rappels** par mission ; au-delà, la conclusion du modèle est
+  rendue telle quelle. Le second redit la consigne plus nettement (« Vous n'avez toujours pas
+  écrit ~/… : appelez maintenant l'outil d'écriture de fichiers avec son contenu, au lieu de
+  l'annoncer. S'il s'agissait d'un fichier à lire, répondez seulement qu'il est absent. »).
 - **Chaque interrogation est une étape** : elle passe par le compteur commun (plafond d'étapes
   vérifié avant, tokens imputés au modèle qui a répondu), comme toute autre.
 - **Le rappel se journalise** : événement `task.reminded` (`missing`, `nth`) avant l'envoi ; le
@@ -68,7 +69,10 @@ message. Le service sait, sans interpréter l'objectif, ce qu'il nomme et ce qui
   qui n'existe pas encore. S'il vous revient de le produire, écrivez-le… ; sinon, concluez en
   disant pourquoi ») et la condition de progrès, pour ne pas pousser le modèle à créer une
   entrée absente. Le petit modèle y lit une permission : 13 des 29 exécutions rappelées
-  déclinent, et « ne-pas-toucher-au-reste » retombe de 3 à 0 sur 3. La version retenue garde
-  la condition de progrès et l'issue, mais met la consigne en tête.
+  déclinent, et « ne-pas-toucher-au-reste » retombe de 3 à 0 sur 3.
+- Troisième version (`390aed1`) : consigne en tête, issue en fin, condition de progrès. 25 des
+  30 exécutions rappelées écrivent ; les cinq autres *annoncent* l'écriture (« Je vais créer le
+  fichier… ») sans appeler l'outil, et la condition de progrès interdit alors le second rappel.
+  La version retenue la retire : le second rappel a toujours lieu, plus net, deux au plus.
 - Un livrable produit hors de la portée n'est pas vu ; c'est voulu : la mission ne peut pas y
   écrire.

@@ -56,6 +56,9 @@ struct Issue {
     reponse: String,
     /// Livrables rappelés par Prophet (ADR 0049) ; toujours vide pour la boucle nue.
     rappels: Vec<String>,
+    /// Les arguments de chaque appel, abrégés (boucle nue seule : le journal de Prophet n'en
+    /// garde que l'empreinte, et c'est voulu).
+    arguments: Vec<String>,
     /// Temps processeur du moteur pendant l'exécution, en secondes.
     moteur_cpu_s: f64,
     /// Temps processeur de capd, du journal et d'agentd pendant l'exécution (Prophet seul).
@@ -106,6 +109,27 @@ fn tronquer(texte: &str) -> String {
         Some((i, _)) => format!("{}…", &texte[..i]),
         None => texte.to_owned(),
     }
+}
+
+/// Les arguments d'un appel, abrégés : les textes à 40 caractères, un contenu à écrire par sa
+/// seule taille.
+fn abreger(outil: &str, arguments: &Value) -> String {
+    let champs: Vec<String> = arguments
+        .as_object()
+        .map(|objet| {
+            objet
+                .iter()
+                .map(|(cle, valeur)| match (cle.as_str(), valeur.as_str()) {
+                    ("content" | "new", Some(texte)) => format!("{cle}:<{} o>", texte.len()),
+                    (_, Some(texte)) => {
+                        format!("{cle}:{}", texte.chars().take(40).collect::<String>())
+                    }
+                    _ => format!("{cle}:{valeur}"),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    format!("{outil}{{{}}}", champs.join(", "))
 }
 
 /// Les appels d'outils d'une mission, relus dans son journal.
@@ -324,6 +348,7 @@ struct OutilsNus {
     outils: Vec<Box<dyn Tool>>,
     contexte: ToolContext,
     appels: Arc<Mutex<Vec<String>>>,
+    arguments: Arc<Mutex<Vec<String>>>,
 }
 
 impl OutilsNus {
@@ -362,6 +387,7 @@ impl OutilsNus {
                 step: 1,
             },
             appels: Arc::new(Mutex::new(Vec::new())),
+            arguments: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -388,6 +414,10 @@ impl OutilsNus {
 
 impl ToolExecutor for OutilsNus {
     fn call(&self, tool: &str, arguments: &Value) -> (bool, Value) {
+        self.arguments
+            .lock()
+            .unwrap()
+            .push(abreger(tool, arguments));
         let Some(outil) = self.outils.iter().find(|o| o.spec().name == tool) else {
             self.appels.lock().unwrap().push(format!("{tool} ✗"));
             return (false, json!({"code":"NotFound","detail":"outil inconnu"}));
@@ -483,6 +513,7 @@ fn par_la_boucle_nue(tache: &Task, endpoint: &str, modele: &str, moteur: Option<
     };
     let workdir = outils.contexte.workdir.clone();
     let appels = outils.appels.clone();
+    let arguments = outils.arguments.clone();
     let mut boucle = NativeDriver::new(Box::new(modele_nu), Box::new(outils));
     let moteur_avant = moteur.map_or(0.0, cpu_secondes);
     let debut = Instant::now();
@@ -529,6 +560,7 @@ fn par_la_boucle_nue(tache: &Task, endpoint: &str, modele: &str, moteur: Option<
         tokens: tokens.load(Ordering::Relaxed),
         etapes: tours.load(Ordering::Relaxed),
         outils: appels.lock().unwrap().clone(),
+        arguments: arguments.lock().unwrap().clone(),
         reponse: tronquer(&reponse),
         moteur_cpu_s: moteur.map_or(0.0, cpu_secondes) - moteur_avant,
         ..Issue::default()
@@ -764,10 +796,11 @@ async fn la_suite_se_joue_par_prophet_et_par_une_boucle_nue() {
                 )
             };
             eprintln!(
-                "mesure : banc {} #{passage} | Prophet {} | nue {}",
+                "mesure : banc {} #{passage} | Prophet {} | nue {} ; appels nus : {}",
                 tache.id,
                 decrire(&prophet, "étapes"),
                 decrire(&nue, "tours"),
+                nue.arguments.join(" → "),
             );
             executions.push((tache, passage, prophet, nue));
         }
@@ -977,6 +1010,11 @@ async fn le_banc_joue_une_tache_des_deux_cotes_avec_un_faux_moteur() {
     assert_eq!(nue.tokens, 30 + 12 + 40 + 5, "{nue:?}");
     assert_eq!(nue.etapes, 2);
     assert_eq!(nue.outils, ["fs.write"], "{nue:?}");
+    assert_eq!(
+        nue.arguments,
+        ["fs.write{path:~/notes/out/total.txt, content:<1 o>}"],
+        "{nue:?}"
+    );
     assert_eq!(nue.reponse, "Le total est écrit.");
     assert!(nue.services_cpu_s.is_none() && nue.services_pic_octets.is_none());
     // Une tâche que le faux moteur ne sait pas faire échoue au vérificateur, des deux côtés.

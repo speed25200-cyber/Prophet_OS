@@ -4,8 +4,9 @@
 //! que l'objectif demande : la mission réussit, rien n'est produit. Quand l'objectif nomme un
 //! chemin `~/…` que la portée de la mission couvre et qui n'existe pas au départ, le service
 //! vérifie à chaque conclusion qu'il existe dans l'espace de travail ; sinon, il le rappelle au
-//! modèle et le laisse continuer — de nouveau seulement s'il a progressé depuis le rappel
-//! précédent, au plus [`RAPPELS`] fois par mission.
+//! modèle et le laisse continuer, au plus [`RAPPELS`] fois par mission : un petit modèle
+//! annonce souvent l'écriture (« je vais créer le fichier ») au lieu de la faire, et le second
+//! rappel le lui redit plus nettement.
 //! Le rappel demande d'abord d'écrire — un petit modèle suit une consigne, il décline une
 //! condition — puis laisse une issue : un chemin nommé comme une entrée absente se dit au lieu
 //! de s'écrire. Il ne donne aucun droit : l'écriture passe par le même outil, le même jeton et
@@ -108,7 +109,15 @@ pub fn manquants(attendus: &[Attendu]) -> Vec<String> {
 /// un rappel impératif jamais (ADR 0049). L'issue vient ensuite : le service ne sait pas si
 /// l'objectif demandait ce chemin ou le nommait comme une entrée absente.
 #[must_use]
-pub fn rappel(manquants: &[String]) -> String {
+pub fn rappel(manquants: &[String], rang: u8) -> String {
+    if rang > 1 {
+        let liste = manquants.join(", ");
+        return format!(
+            "Vous n'avez toujours pas écrit {liste} : appelez maintenant l'outil d'écriture de \
+             fichiers avec son contenu, au lieu de l'annoncer. S'il s'agissait d'un fichier à \
+             lire, répondez seulement qu'il est absent."
+        );
+    }
     match manquants {
         [seul] => format!(
             "Vous n'avez pas encore écrit {seul}. Écrivez-le avec l'outil d'écriture de \
@@ -140,9 +149,6 @@ pub struct Rappel {
     consigner: Consigner,
     /// Insertions déjà faites : position dans l'historique de la boucle, messages insérés.
     inserts: Vec<(usize, [Value; 2])>,
-    /// Livrables qui manquaient au dernier rappel : un rappel ne se répète que si le modèle a
-    /// produit quelque chose depuis ; décliné, il ne se répète pas.
-    dernier: Option<usize>,
     restants: u8,
 }
 
@@ -155,7 +161,6 @@ impl Rappel {
             attendus,
             consigner,
             inserts: Vec::new(),
-            dernier: None,
             restants: RAPPELS,
         }
     }
@@ -196,18 +201,17 @@ impl ModelClient for Rappel {
                 return Ok((turn, total));
             };
             let manquants = manquants(&self.attendus);
-            let progres = self.dernier.is_none_or(|avant| manquants.len() < avant);
-            if manquants.is_empty() || self.restants == 0 || !progres {
+            if manquants.is_empty() || self.restants == 0 {
                 return Ok((turn, total));
             }
             self.restants -= 1;
-            self.dernier = Some(manquants.len());
-            (self.consigner)(&manquants, RAPPELS - self.restants).map_err(DriverError::Io)?;
+            let rang = RAPPELS - self.restants;
+            (self.consigner)(&manquants, rang).map_err(DriverError::Io)?;
             self.inserts.push((
                 history.len(),
                 [
                     json!({"role": "assistant", "content": text}),
-                    json!({"role": "user", "content": rappel(&manquants)}),
+                    json!({"role": "user", "content": rappel(&manquants, rang)}),
                 ],
             ));
         }
@@ -364,15 +368,17 @@ mod tests {
     }
 
     #[test]
-    fn un_rappel_decline_ne_se_repete_pas() {
+    fn un_rappel_decline_se_repete_une_fois_plus_nettement() {
         let dossier = tempfile::tempdir().expect("dossier");
+        let vus = Arc::new(Mutex::new(Vec::new()));
         let mut modele = Rappel::new(
             Box::new(Script {
                 tours: VecDeque::from([
-                    final_("Le fichier ~/x.txt n'existe pas."),
-                    final_("Il fallait le lire, pas l'écrire."),
+                    final_("Je vais créer le fichier ~/x.txt."),
+                    final_("Je vais maintenant l'écrire."),
+                    final_("Il fallait le lire : il est absent."),
                 ]),
-                vus: Arc::new(Mutex::new(Vec::new())),
+                vus: vus.clone(),
             }),
             vec![Attendu {
                 tel_quel: "~/x.txt".into(),
@@ -381,11 +387,17 @@ mod tests {
             Box::new(|_, _| Ok(())),
         );
         let (tour, usage) = modele
-            .next_turn(&[json!({"role": "user", "content": "lis ~/x.txt"})])
+            .next_turn(&[json!({"role": "user", "content": "écris ~/x.txt"})])
             .expect("tour");
         assert!(matches!(tour, ModelTurn::Final { ref text } if text.starts_with("Il fallait")));
-        assert_eq!(usage.tokens_out, 4);
-        assert_eq!(modele.faits(), 1);
+        assert_eq!(usage.tokens_out, 6);
+        assert_eq!(modele.faits(), 2);
+        let vus = vus.lock().expect("vus");
+        let second = vus[2].last().expect("rappel")["content"]
+            .as_str()
+            .expect("texte")
+            .to_owned();
+        assert!(second.contains("toujours pas écrit ~/x.txt"), "{second}");
     }
 
     #[test]
