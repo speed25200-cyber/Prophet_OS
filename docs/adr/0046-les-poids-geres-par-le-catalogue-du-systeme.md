@@ -70,7 +70,11 @@ hostile.
   `le_catalogue_porte_les_empreintes_que_le_depot_publie` relève, par le vrai egress, ce que
   l'API du dépôt publie de chaque fichier à sa révision épinglée, et exige que le catalogue le
   porte. C'est ainsi que Qwen3 4B et 8B en Q4_K_M (`qwen3-4b-q4`, `qwen3-8b-q4`, l'exemple du
-  plan) y sont entrés, avec leur taille exacte, le 23 septembre (`e49bad3`).
+  plan) y sont entrés, avec leur taille exacte, le 23 septembre (`e49bad3`), puis quatre autres
+  familles à licence ouverte et d'accès libre (`8a259f1`) : IBM Granite 3.3 2B et SmolLM2 1.7B
+  (Apache-2.0), Phi-3 mini 4k (MIT), Llama 3.2 3B (licence communautaire Llama 3.2, dite dans
+  l'entrée). L'essai `plusieurs_familles_se_servent_et_repondent` les tire, les sert et les
+  interroge l'une après l'autre dans le même travail de la CI.
 
 ## Conséquences
 

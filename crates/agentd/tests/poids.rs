@@ -656,3 +656,134 @@ async fn le_critere_pull_serve_puis_une_completion() {
     );
     let _ = routeur.kill().await;
 }
+
+/// Le routeur épinglé, lancé comme l'image le lance, sur le dossier des téléchargements.
+async fn routeur(moteur: &str, chaine: &Chaine, port: u16) -> tokio::process::Child {
+    let prereglages = chaine.dir.path().join("prereglages.ini");
+    std::fs::write(
+        &prereglages,
+        "[*]\njinja = 1\nctx-size = 2048\nthreads = 4\nparallel = 1\nn-gpu-layers = 0\n",
+    )
+    .unwrap();
+    let enfant = tokio::process::Command::new(moteur)
+        .args(["--host", "127.0.0.1", "--port", &port.to_string()])
+        .arg("--models-preset")
+        .arg(&prereglages)
+        .args(["--models-max", "1", "--models-dir"])
+        .arg(chaine.poids())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let limite = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+        assert!(
+            std::time::Instant::now() < limite,
+            "le routeur ne répond pas"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    enfant
+}
+
+/// La CLI réelle sur la chaîne ; rend sa sortie, ou échoue en la disant.
+async fn prophet(chaine: &Chaine, args: &[&str]) -> String {
+    let sortie = tokio::process::Command::new(binaire_voisin("prophet"))
+        .args(args)
+        .env(
+            "PROPHET_AGENTD_SOCKET",
+            chaine.dir.path().join("agents.sock"),
+        )
+        .output()
+        .await
+        .unwrap();
+    let dit = String::from_utf8_lossy(&sortie.stdout).into_owned();
+    assert!(
+        sortie.status.success(),
+        "prophet {args:?} : {dit}\n{}",
+        String::from_utf8_lossy(&sortie.stderr)
+    );
+    dit
+}
+
+/// FRONTIER, moteurs locaux : « valider des modèles de plusieurs familles ». Chaque famille du
+/// catalogue hors Qwen3 — Granite, SmolLM2, Phi-3, Llama 3.2 — est tirée par egress, servie par
+/// le routeur épinglé, interrogée, puis retirée ; la réponse et sa vitesse sont relevées.
+#[tokio::test]
+#[ignore = "needs_llama_server: PROPHET_TEST_LLAMA_SERVER (llama-server épinglé), Hugging Face joignable, 7 Go"]
+async fn plusieurs_familles_se_servent_et_repondent() {
+    let moteur = std::env::var("PROPHET_TEST_LLAMA_SERVER")
+        .expect("PROPHET_TEST_LLAMA_SERVER : le llama-server épinglé (nix build .#llama-cpp)");
+    let chaine = Chaine::new(None).await;
+    let mut reussies = Vec::new();
+    for (rang, id) in [
+        "granite-3.3-2b-q4",
+        "smollm2-1.7b-q4",
+        "phi-3-mini-q4",
+        "llama-3.2-3b-q4",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let debut = std::time::Instant::now();
+        prophet(&chaine, &["model", "pull", id]).await;
+        let tire = debut.elapsed();
+        // Le routeur lit le dossier à son démarrage : un par poids.
+        let port = 18_110 + u16::try_from(rang).unwrap();
+        let mut routeur = routeur(&moteur, &chaine, port).await;
+        let servi: Value = serde_json::from_str(
+            &prophet(
+                &chaine,
+                &[
+                    "--json",
+                    "model",
+                    "serve",
+                    id,
+                    "--endpoint",
+                    &format!("http://127.0.0.1:{port}/v1"),
+                ],
+            )
+            .await,
+        )
+        .unwrap();
+        let nom = servi["model"].as_str().unwrap().to_owned();
+        let debut = std::time::Instant::now();
+        let reponse = tokio::task::spawn_blocking(move || {
+            http_local(
+                port,
+                "POST",
+                "/v1/chat/completions",
+                &json!({
+                    "model": nom,
+                    "messages": [{"role": "user", "content": "What is the capital of France? Answer in one word."}],
+                    "max_tokens": 16,
+                    "temperature": 0,
+                }),
+            )
+        })
+        .await
+        .unwrap();
+        let texte = reponse["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        eprintln!(
+            "mesure : famille {id} tirée en {tire:?}, réponse en {:?} : {texte:?} ({} tokens/s en génération)",
+            debut.elapsed(),
+            reponse["timings"]["predicted_per_second"]
+        );
+        assert!(
+            reponse["usage"]["completion_tokens"].as_u64().unwrap_or(0) > 0,
+            "{id} : {reponse}"
+        );
+        if texte.to_ascii_lowercase().contains("paris") {
+            reussies.push(id);
+        }
+        let _ = routeur.kill().await;
+        // Retirer avant le suivant : la place du coureur est comptée.
+        prophet(&chaine, &["model", "rm", id]).await;
+    }
+    eprintln!("mesure : réponse juste (« Paris ») pour {reussies:?}");
+}

@@ -1551,7 +1551,10 @@ donne le détail.
   Les empreintes du catalogue sont vérifiées à la source : un essai `needs_network` demande à
   l'API de Hugging Face, par le vrai egress, ce qu'elle publie de chaque entrée à sa révision
   épinglée (`e49bad3`, vert en CI) ; il a relevé Qwen3 4B et 8B en Q4_K_M, désormais au
-  catalogue avec leur taille exacte (`qwen3-4b-q4`, `qwen3-8b-q4`, l'exemple du plan). Servir : `prophet model serve <id>`
+  catalogue avec leur taille exacte (`qwen3-4b-q4`, `qwen3-8b-q4`, l'exemple du plan), puis
+  quatre autres familles à licence ouverte — Granite 3.3 2B, SmolLM2 1.7B, Phi-3 mini, Llama 3.2
+  3B — que le travail « Poids du catalogue servis (réels) » tire, sert et interroge une à une
+  (FRONTIER : valider plusieurs familles). Servir : `prophet model serve <id>`
   fait charger un poids par le routeur du moteur (`GET /models`, `POST /models/load`), reconnu
   par le chemin de son fichier (`bc001d2`), et la page Modèles dit « Servi » ou propose
   « Servir » (`93bd678`). En mode relais, le routeur de l'image lit le dossier des

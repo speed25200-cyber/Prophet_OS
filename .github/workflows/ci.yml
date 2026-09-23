@@ -90,6 +90,11 @@ jobs:
         env:
           PROPHET_TEST_LLAMA_SERVER: ${{ github.workspace }}/moteur/bin/llama-server
         run: cargo test -p agentd --test poids -- --ignored --nocapture le_critere_pull_serve_puis_une_completion
+      # FRONTIER : valider des modèles de plusieurs familles, sur processeur.
+      - name: Servir et interroger Granite, SmolLM2, Phi-3 et Llama 3.2
+        env:
+          PROPHET_TEST_LLAMA_SERVER: ${{ github.workspace }}/moteur/bin/llama-server
+        run: cargo test -p agentd --test poids -- --ignored --nocapture plusieurs_familles_se_servent_et_repondent
 
   chatgpt:
     name: ChatGPT sous NixOS (compatibilité)
