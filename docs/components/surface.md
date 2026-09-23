@@ -93,7 +93,9 @@ Le modèle doit déjà être servi sur une adresse HTTP de boucle locale, config
 les autres adresses IP. La conversation directe n'expose pas d'outils système ; quand elle ne
 tient plus dans la fenêtre du moteur, ses premiers messages sont laissés hors de l'envoi et la
 page dit combien ; au-delà de 32 Kio, seuls les tours les plus récents partent, au lieu que la
-conversation s'arrête, et le fil affiché reste entier. La page Modèles lit l'en-tête de chaque poids installé et marque celui que le
+conversation s'arrête, et le fil affiché reste entier. La génération tourne dans un fil à elle : l'essai
+`la_surface_ne_bloque_pas_pendant_une_generation_en_flux` mesure les images composées pendant
+un flux du moteur (en release : médiane 0,5 ms, maximum 5,3 ms). La page Modèles lit l'en-tête de chaque poids installé et marque celui que le
 moteur a chargé, avec la fenêtre qu'il accorde par requête (`/props`) ; elle montre aussi le
 catalogue du système qu'agentd rend (`model.catalog`, ADR 0046) — fourni, téléchargé et
 vérifié, en cours avec sa barre de progression, échoué avec son motif — et demande à agentd de

@@ -1634,3 +1634,122 @@ fn servir_depuis_la_page_modeles_fait_charger_le_poids_par_le_routeur() {
     };
     assert!(!recues.is_empty());
 }
+
+/// Un moteur qui répond en flux, un fragment toutes les `pas` millisecondes, comme llama-server
+/// en SSE ; rend l'adresse.
+fn moteur_en_flux(fragments: usize, pas: u64) -> String {
+    use std::io::{BufRead as _, Read as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { return };
+            let mut lecture = std::io::BufReader::new(stream);
+            let mut premiere = String::new();
+            if lecture.read_line(&mut premiere).is_err() {
+                continue;
+            }
+            let mut longueur = 0;
+            loop {
+                let mut ligne = String::new();
+                if lecture.read_line(&mut ligne).unwrap_or(0) == 0 || ligne == "\r\n" {
+                    break;
+                }
+                if let Some(v) = ligne.to_ascii_lowercase().strip_prefix("content-length:") {
+                    longueur = v.trim().parse().unwrap_or(0);
+                }
+            }
+            let mut corps = vec![0; longueur];
+            let _ = lecture.read_exact(&mut corps);
+            let flux = lecture.get_mut();
+            let _ = write!(
+                flux,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"
+            );
+            for _ in 0..fragments {
+                let fragment = serde_json::json!({"choices": [{"index": 0, "delta": {"content": "mot "}, "finish_reason": null}]});
+                let _ = write!(flux, "data: {fragment}\n\n");
+                let _ = flux.flush();
+                std::thread::sleep(std::time::Duration::from_millis(pas));
+            }
+            let fin = serde_json::json!({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]});
+            let usage = serde_json::json!({"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": fragments}});
+            let _ = write!(flux, "data: {fin}\n\ndata: {usage}\n\ndata: [DONE]\n\n");
+        }
+    });
+    endpoint
+}
+
+/// FRONTIER, interface : « absence de blocage pendant l'inférence ». Le moteur répond en flux,
+/// 30 fragments espacés de 60 ms ; la surface continue de composer ses images pendant ce temps,
+/// affiche la réponse au fil des fragments, et aucune image n'attend le moteur. En build de
+/// débogage, la première image d'une taille de police nouvelle coûte jusqu'à 150 ms : les
+/// seuils sont relatifs au flux, pas à une carte. La CI relève les temps en release.
+#[test]
+#[ignore = "needs_gpu"]
+fn la_surface_ne_bloque_pas_pendant_une_generation_en_flux() {
+    const PAS_MS: u64 = 60;
+    const FRAGMENTS: usize = 30;
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1440, 1000);
+    let endpoint = moteur_en_flux(FRAGMENTS, PAS_MS);
+    let mut bureau = Bureau::nouveau(&context, endpoint, false);
+    bureau.figer_transitions();
+    bureau.atelier.modeles = vec!["essai".into()];
+    bureau.atelier.choisi = "essai".into();
+    bureau.atelier.page = Page::Conversation;
+    // Cinq images de mise en route : pipelines, glyphes, premières allocations.
+    for _ in 0..5 {
+        frame(&mut bureau, &context, &target, vec![]);
+    }
+    bureau.atelier.brouillon = "Dis trente mots.".into();
+    let ctx = bureau.ctx.clone();
+    bureau.atelier.envoyer(&ctx);
+    assert!(bureau.atelier.generation);
+    let mut durees = Vec::new();
+    let mut longueurs = std::collections::BTreeSet::new();
+    let debut = std::time::Instant::now();
+    let limite = debut + std::time::Duration::from_secs(15);
+    while bureau.atelier.generation {
+        assert!(
+            std::time::Instant::now() < limite,
+            "génération jamais finie"
+        );
+        let depart = std::time::Instant::now();
+        frame(&mut bureau, &context, &target, vec![]);
+        durees.push(depart.elapsed().as_secs_f64() * 1000.0);
+        if let Some(tour) = bureau.atelier.tours.last() {
+            longueurs.insert(tour.reponse.len());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(8));
+    }
+    let flux_ms = debut.elapsed().as_secs_f64() * 1000.0;
+    let tour = bureau.atelier.tours.last().unwrap();
+    assert!(tour.erreur.is_none(), "{:?}", tour.erreur);
+    assert_eq!(tour.reponse, "mot ".repeat(FRAGMENTS));
+    durees.sort_by(f64::total_cmp);
+    let centile = |p: f64| durees[((durees.len() - 1) as f64 * p).round() as usize];
+    let maximum = durees[durees.len() - 1];
+    eprintln!(
+        "mesure : {} images composées pendant une génération en flux de {:.0} ms ({} états de la réponse vus) : médiane {:.1} ms, p95 {:.1} ms, maximum {:.1} ms",
+        durees.len(),
+        flux_ms,
+        longueurs.len(),
+        centile(0.5),
+        centile(0.95),
+        maximum
+    );
+    // La réponse s'affiche au fil du flux, pas d'un bloc à la fin.
+    assert!(longueurs.len() >= FRAGMENTS / 3, "{longueurs:?}");
+    // Une surface qui attendrait le moteur composerait au rythme des fragments, ou gèlerait une
+    // image le temps de toute la génération.
+    assert!(
+        centile(0.5) < PAS_MS as f64,
+        "médiane {:.0} ms",
+        centile(0.5)
+    );
+    assert!(
+        maximum < flux_ms / 2.0,
+        "une image a duré {maximum:.0} ms sur {flux_ms:.0}"
+    );
+}

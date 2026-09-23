@@ -1585,6 +1585,13 @@ donne le détail.
   page Modèles). `prophet model pull` refuse, avant
   toute requête, ce qui ne tient pas sur le disque. L'essai des familles en CI relève la
   mémoire résidente de chaque instance du vrai llama-server et la confronte à l'estimation.
+- Pas de blocage pendant l'inférence (FRONTIER, interface) : un essai rend la page Conversation
+  pendant qu'un moteur répond en flux (30 fragments espacés de 60 ms) et mesure chaque image.
+  En release sur lavapipe, ici : médiane 0,5 ms, p95 0,6 ms, maximum 5,3 ms, la réponse
+  affichée au fil des fragments ; la génération tourne dans son fil, jamais dans celui des
+  images. En débogage, la première image d'une taille de police nouvelle coûte jusqu'à 150 ms
+  (préparation de la police par egui) ; l'essai borne donc par rapport au flux. La CI relève
+  ces temps en release dans le résumé du travail « Surface d'observation ».
 - Conversation longue (M8-T7, `f93e591`) : au-delà de 32 Kio ou de 32 tours, la page
   Conversation refusait d'envoyer ; elle envoie les tours récents qui tiennent, dit combien
   elle en laisse de côté, et garde le fil affiché entier.

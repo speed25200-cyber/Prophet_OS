@@ -272,6 +272,9 @@ jobs:
             echo
             echo "# activité : cinq missions, champ vivant, dix secondes"
             $S --repos 10 --demonstration --largeur 1920 --hauteur 1080
+            echo
+            echo "# conversation en flux : 30 fragments du moteur, images composées pendant la génération"
+            cargo test -q -p surface --release --test bureau la_surface_ne_bloque_pas_pendant_une_generation_en_flux -- --ignored --nocapture 2>&1 | grep '^mesure'
             echo '```'
           } 2>/dev/null | tee surface-mesures.md
           cat surface-mesures.md >> "$GITHUB_STEP_SUMMARY"
