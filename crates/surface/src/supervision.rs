@@ -1454,10 +1454,20 @@ fn catalogue_du_systeme(ui: &mut egui::Ui, atelier: &Atelier) -> Option<(Command
                     }
                     etat_du_poids(ui, e, &accent);
                 });
-                if e.provided.is_some() && !e.installed {
+                // Le routeur du moteur connaît ce poids sans le servir : un clic le fait charger.
+                let a_servir = e.au_moteur.as_ref().is_some_and(|m| !m.charge());
+                if e.provided.is_some() && !e.installed && !a_servir {
                     return;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if e.provided.is_some() && !e.installed {
+                        if bouton(ui, &format!("catalogue-servir-{}", e.id), "Servir", true)
+                            .clicked()
+                        {
+                            demande = Some((CommandeDePoids::Servir, e.id.clone()));
+                        }
+                        return;
+                    }
                     let (commande, texte, cle) = if e.en_cours() {
                         (CommandeDePoids::Arreter, "Arrêter", "arreter")
                     } else if e.installed {
@@ -1469,6 +1479,12 @@ fn catalogue_du_systeme(ui: &mut egui::Ui, atelier: &Atelier) -> Option<(Command
                     };
                     if bouton(ui, &format!("catalogue-{cle}-{}", e.id), texte, true).clicked() {
                         demande = Some((commande, e.id.clone()));
+                    }
+                    if a_servir
+                        && bouton(ui, &format!("catalogue-servir-{}", e.id), "Servir", true)
+                            .clicked()
+                    {
+                        demande = Some((CommandeDePoids::Servir, e.id.clone()));
                     }
                 });
             })
@@ -1520,12 +1536,26 @@ fn etat_du_poids(ui: &mut egui::Ui, e: &EntreeCatalogue, accent: &Accent) {
         ui.label(RichText::new(texte).size(12.0).color(accent.vif));
         return;
     }
-    if e.installed {
-        pastille(ui, "Téléchargé · vérifié", ACCOMPLI);
-        return;
-    }
-    if e.provided.is_some() {
-        pastille(ui, "Fourni par le système", ACCOMPLI);
+    let origine = if e.installed {
+        Some("Téléchargé · vérifié")
+    } else if e.provided.is_some() {
+        Some("Fourni par le système")
+    } else {
+        None
+    };
+    if let Some(origine) = origine {
+        ui.horizontal(|ui| {
+            pastille(ui, origine, ACCOMPLI);
+            match &e.au_moteur {
+                Some(m) if m.charge() => {
+                    pastille(ui, &format!("Servi · {}", m.nom), accent.vif);
+                }
+                Some(m) if m.etat.as_deref() == Some("loading") => {
+                    pastille(ui, &format!("Chargement · {}", m.nom), accent.sourd);
+                }
+                _ => {}
+            }
+        });
         return;
     }
     if let Some(erreur) = e

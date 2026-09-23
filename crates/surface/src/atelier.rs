@@ -83,6 +83,9 @@ pub struct EntreeCatalogue {
     /// Posé et vérifié.
     #[serde(default)]
     pub installed: bool,
+    /// Le fichier posé, quand il l'est.
+    #[serde(default)]
+    pub path: Option<std::path::PathBuf>,
     /// Déjà fourni par la configuration du système (le modèle par défaut, dans `/nix/store`).
     #[serde(default)]
     pub provided: Option<std::path::PathBuf>,
@@ -92,6 +95,26 @@ pub struct EntreeCatalogue {
     /// Le dernier téléchargement depuis le démarrage d'agentd.
     #[serde(default)]
     pub pull: Option<SuiviDePoids>,
+    /// Ce que le routeur du moteur local en dit, s'il connaît ce fichier.
+    #[serde(skip)]
+    pub au_moteur: Option<AuMoteur>,
+}
+
+/// Un poids tel que le routeur du moteur local le connaît.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AuMoteur {
+    /// Le nom sous lequel le moteur le sert.
+    pub nom: String,
+    /// Chargé (`loaded`), en cours (`loading`), déchargé…
+    pub etat: Option<String>,
+}
+
+impl AuMoteur {
+    /// Le moteur le sert en ce moment.
+    #[must_use]
+    pub fn charge(&self) -> bool {
+        self.etat.as_deref() == Some("loaded")
+    }
 }
 
 /// Où en est un téléchargement.
@@ -127,14 +150,17 @@ pub enum CommandeDePoids {
     Arreter,
     /// Retirer un poids téléchargé.
     Retirer,
+    /// Le faire charger par le routeur du moteur local.
+    Servir,
 }
 
 impl CommandeDePoids {
-    const fn methode(self) -> &'static str {
+    const fn methode(self) -> Option<&'static str> {
         match self {
-            Self::Telecharger => "model.pull",
-            Self::Arreter => "model.cancel",
-            Self::Retirer => "model.remove",
+            Self::Telecharger => Some("model.pull"),
+            Self::Arreter => Some("model.cancel"),
+            Self::Retirer => Some("model.remove"),
+            Self::Servir => None,
         }
     }
 }
@@ -381,9 +407,10 @@ impl Atelier {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         let socket = self.socket_agentd.clone();
+        let endpoint = self.endpoint.clone();
         std::thread::spawn(move || {
             let lu = execution().and_then(|runtime| runtime.block_on(lire_catalogue(&socket)));
-            let _ = tx.send(Evenement::Catalogue(lu));
+            let _ = tx.send(Evenement::Catalogue(lu.map(|e| au_moteur(e, &endpoint))));
             ctx.request_repaint();
         });
     }
@@ -398,19 +425,45 @@ impl Atelier {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         let socket = self.socket_agentd.clone();
+        let endpoint = self.endpoint.clone();
+        let au_moteur_avant = match &self.catalogue {
+            Some(Ok(entrees)) => entrees
+                .iter()
+                .find(|e| e.id == id)
+                .and_then(|e| e.au_moteur.clone()),
+            _ => None,
+        };
         let id = id.to_owned();
         std::thread::spawn(move || {
+            if commande == CommandeDePoids::Servir {
+                // Le routeur répond aussitôt ; le chargement se voit ensuite à l'état.
+                let charge = au_moteur_avant
+                    .ok_or_else(|| "le moteur ne connaît pas ce poids".to_owned())
+                    .and_then(|m| {
+                        providers::local::LocalModel::new(
+                            &endpoint,
+                            "catalogue",
+                            Duration::from_secs(5),
+                        )
+                        .and_then(|moteur| moteur.load_model(&m.nom))
+                        .map_err(|e| e.to_string())
+                    });
+                if let Err(erreur) = charge {
+                    let _ = tx.send(Evenement::ErreurDePoids(format!("{id} : {erreur}")));
+                }
+            }
             let lu = execution().and_then(|runtime| {
                 runtime.block_on(async {
-                    if let Err(erreur) =
-                        appeler_agentd(&socket, commande.methode(), json!({"id": id})).await
+                    if let Some(methode) = commande.methode()
+                        && let Err(erreur) =
+                            appeler_agentd(&socket, methode, json!({"id": id})).await
                     {
                         let _ = tx.send(Evenement::ErreurDePoids(format!("{id} : {erreur}")));
                     }
                     lire_catalogue(&socket).await
                 })
             });
-            let _ = tx.send(Evenement::Catalogue(lu));
+            let _ = tx.send(Evenement::Catalogue(lu.map(|e| au_moteur(e, &endpoint))));
             ctx.request_repaint();
         });
     }
@@ -640,6 +693,10 @@ fn catalogue_d_exemple() -> Vec<EntreeCatalogue> {
             quantization: Some("Q8_0".into()),
             note: Some("Le modèle de réflexion par défaut.".into()),
             installed: true,
+            au_moteur: Some(AuMoteur {
+                nom: "qwen3-1.7b".into(),
+                etat: Some("loaded".into()),
+            }),
             ..EntreeCatalogue::default()
         },
         EntreeCatalogue {
@@ -671,6 +728,27 @@ async fn appeler_agentd(
     })
     .await
     .map_err(|_| "agentd ne répond pas".to_owned())?
+}
+
+/// Ce que le routeur du moteur local dit de chaque poids posé : sous quel nom il le sert, et
+/// s'il est chargé. Un moteur muet, ou qui ne connaît pas le fichier, n'ajoute rien.
+fn au_moteur(mut entrees: Vec<EntreeCatalogue>, endpoint: &str) -> Vec<EntreeCatalogue> {
+    let Ok(modeles) =
+        providers::local::LocalModel::new(endpoint, "catalogue", Duration::from_secs(2))
+            .and_then(|moteur| moteur.router_models())
+    else {
+        return entrees;
+    };
+    for e in &mut entrees {
+        let fichier = e.path.clone().or_else(|| e.provided.clone());
+        e.au_moteur = fichier
+            .and_then(|f| providers::local::router_model_for(&modeles, &f).cloned())
+            .map(|m| AuMoteur {
+                nom: m.id,
+                etat: m.status,
+            });
+    }
+    entrees
 }
 
 async fn lire_catalogue(socket: &std::path::Path) -> Result<Vec<EntreeCatalogue>, String> {

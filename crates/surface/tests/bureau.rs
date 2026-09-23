@@ -1421,3 +1421,120 @@ fn telecharger_depuis_la_page_modeles_le_demande_a_agentd_et_suit_la_progression
         "{recues:?}"
     );
 }
+
+/// Un faux routeur de llama-server : un modèle, déchargé tant qu'on ne demande pas de le
+/// charger ; toute autre adresse répond 404. Rend l'adresse et les requêtes reçues.
+fn routeur_qui_connait(chemin: std::path::PathBuf) -> (String, Recues) {
+    use std::io::{BufRead as _, Read as _, Write as _};
+    let ecoute = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let adresse = format!("http://{}/v1", ecoute.local_addr().unwrap());
+    let recues: Recues = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let notees = recues.clone();
+    std::thread::spawn(move || {
+        let mut charge = false;
+        for flux in ecoute.incoming() {
+            let Ok(flux) = flux else { return };
+            let _ = flux.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+            let mut lecteur = std::io::BufReader::new(flux);
+            let mut premiere = String::new();
+            if lecteur.read_line(&mut premiere).is_err() {
+                continue;
+            }
+            let mut longueur = 0;
+            loop {
+                let mut ligne = String::new();
+                if lecteur.read_line(&mut ligne).unwrap_or(0) == 0 || ligne == "\r\n" {
+                    break;
+                }
+                if let Some(v) = ligne.to_ascii_lowercase().strip_prefix("content-length:") {
+                    longueur = v.trim().parse().unwrap_or(0);
+                }
+            }
+            let mut corps = vec![0; longueur];
+            let _ = lecteur.read_exact(&mut corps);
+            let corps: serde_json::Value =
+                serde_json::from_slice(&corps).unwrap_or(serde_json::Value::Null);
+            notees
+                .lock()
+                .unwrap()
+                .push((premiere.trim().to_owned(), corps));
+            let (etat, reponse) = if premiere.starts_with("POST /models/load ") {
+                charge = true;
+                ("200 OK", serde_json::json!({"success": true}))
+            } else if premiere.starts_with("GET /models ") {
+                (
+                    "200 OK",
+                    serde_json::json!({"data": [{"id": "essai", "path": chemin,
+                        "status": {"value": if charge { "loaded" } else { "unloaded" }}}]}),
+                )
+            } else {
+                ("404 Not Found", serde_json::json!({}))
+            };
+            let reponse = reponse.to_string();
+            let _ = write!(
+                lecteur.get_mut(),
+                "HTTP/1.1 {etat}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reponse}",
+                reponse.len()
+            );
+        }
+    });
+    (adresse, recues)
+}
+
+#[test]
+#[ignore = "needs_gpu: rendu wgpu hors écran"]
+fn servir_depuis_la_page_modeles_fait_charger_le_poids_par_le_routeur() {
+    let poids = tempfile::tempdir().unwrap();
+    let chemin = poids.path().join("essai.gguf");
+    std::fs::write(&chemin, b"GGUF").unwrap();
+    let catalogue_chemin = chemin.clone();
+    let (_dir, socket, _) = faux_agentd(move || {
+        serde_json::json!({"dir": "/var/lib/prophet/models/catalogue", "entries": [
+            {"id": "essai", "name": "Poids d'essai", "installed": true, "path": catalogue_chemin}
+        ]})
+    });
+    let (moteur, recues) = routeur_qui_connait(chemin);
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1440, 2000);
+    let mut bureau = Bureau::nouveau(&context, moteur, false);
+    bureau.figer_transitions();
+    bureau.atelier.socket_agentd = socket;
+    bureau.atelier.page = Page::Modeles;
+    let limite = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while bureau
+        .ctx
+        .read_response(egui::Id::new("catalogue-servir-essai"))
+        .is_none()
+    {
+        frame(&mut bureau, &context, &target, vec![]);
+        assert!(
+            std::time::Instant::now() < limite,
+            "« Servir » jamais proposé"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let clic = click_widget(&bureau, "catalogue-servir-essai");
+    frame(&mut bureau, &context, &target, clic);
+    // Chargé, le poids est dit servi et le geste disparaît.
+    let limite = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while bureau
+        .ctx
+        .read_response(egui::Id::new("catalogue-servir-essai"))
+        .is_some()
+    {
+        frame(&mut bureau, &context, &target, vec![]);
+        assert!(
+            std::time::Instant::now() < limite,
+            "le poids n'est jamais dit servi"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    capture(&context, &target, "catalogue-servi");
+    let recues = recues.lock().unwrap().clone();
+    assert!(
+        recues
+            .iter()
+            .any(|(r, corps)| r.starts_with("POST /models/load ") && corps["model"] == "essai"),
+        "{recues:?}"
+    );
+}
