@@ -244,3 +244,12 @@ le catalogue des poids lu dans les en-têtes GGUF ; celui des permissions inters
 méthodes réservées par classe de pair dans capd et le journal (ADR 0044), avec ce qu'elles
 laissent ouvert. Aucun critère complet n'est coché : ni PC réel, ni carte graphique, ni compte
 connecté n'ont été exercés.
+
+Le 23 septembre, le critère d'isolation gagne la réserve de microVM (ADR 0045) : une machine de
+niveau 2 rendue en une dizaine de millisecondes sur le coureur KVM de la CI, cinq clones aux
+aléas distincts, deux machines ensemble sans réseau, et l'instantané repris d'un démarrage à
+l'autre ; le niveau 0 applique enfin Landlock, qu'il annonçait. Celui des moteurs locaux gagne
+le cycle de vie des poids (ADR 0046) : un catalogue du système à empreintes, un téléchargement
+par egress sous un jeton borné au dépôt, vérifié avant d'être posé, repris après une coupure,
+retiré sur demande, depuis la CLI ou la page Modèles. Restent servir un poids téléchargé sans
+reconfigurer le moteur, les budgets VRAM et la matrice GPU ; aucun critère complet n'est coché.
