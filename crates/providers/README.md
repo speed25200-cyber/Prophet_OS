@@ -28,12 +28,19 @@ par le socket d'egress, suit les redirections vers les seuls hôtes permis, et n
 fichier qu'une fois taille, empreinte et en-tête GGUF vérifiés ; une coupure reprend par
 `Range` ([ADR 0046](../../docs/adr/0046-les-poids-geres-par-le-catalogue-du-systeme.md)).
 
+`memory` estime ce que le moteur réservera pour servir un poids — fichier, cache KV de la
+fenêtre, calcul — depuis son en-tête (`weights`) ou son entrée au catalogue, le confronte à
+`/proc/meminfo` (`fits`, `tight`, `too_large`) et lit dans `/proc` ce que les instances de
+llama-server tiennent vraiment ; `weights` lit aussi ce que le gabarit de conversation
+déclare (outils, réflexion) ([ADR 0047](../../docs/adr/0047-la-memoire-des-poids-estimee-avant-de-charger.md)).
+
 Commandes de vérification, depuis `nix develop` :
 
 ```sh
 cargo test -p providers
 cargo test -p providers --lib -- jev            # protocole, transport, opérateur, routeur
 cargo test -p providers --lib -- catalogue pull # catalogue et téléchargement vérifié
+cargo test -p providers --lib -- memory weights # mémoire estimée, instances, gabarits
 cargo test -p providers --lib needs_official_clients_versions_et_sessions_vierges -- --ignored --nocapture
 ```
 
