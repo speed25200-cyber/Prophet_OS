@@ -1539,7 +1539,13 @@ donne le détail.
   Prouvé avec les vrais capd, ledger et egress (`crates/agentd/tests/poids.rs`), et, sous
   systemd, par l'essai des services qui télécharge d'un dépôt local sous le compte de l'humain.
   Le catalogue ne porte que Qwen3 1.7B et 0.6B : l'empreinte de `qwen3-8b-q4`, exemple du plan,
-  n'a pas été relevée (Hugging Face est injoignable d'ici).
+  n'a pas été relevée (Hugging Face est injoignable d'ici). Servir : `prophet model serve <id>`
+  fait charger un poids par le routeur du moteur (`GET /models`, `POST /models/load`), reconnu
+  par le chemin de son fichier (`bc001d2`), et la page Modèles dit « Servi » ou propose
+  « Servir » (`93bd678`) ; reste à faire lire au routeur de l'image le dossier des
+  téléchargements. `model.list` dit aux agents les poids locaux et leur fenêtre (`d49724d`),
+  `prophet status` les modèles locaux et le catalogue (`6118608`). Un essai `needs_network`
+  tire Qwen3 0.6B de Hugging Face par le vrai egress sur une machine qui le joint (`dd4ff44`).
 - Conversation longue (M8-T7, `f93e591`) : au-delà de 32 Kio ou de 32 tours, la page
   Conversation refusait d'envoyer ; elle envoie les tours récents qui tiennent, dit combien
   elle en laisse de côté, et garde le fil affiché entier.
