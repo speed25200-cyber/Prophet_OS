@@ -1530,6 +1530,11 @@ donne le détail.
   lançait que les essais marqués : il les exige désormais, Landlock compris, et reconnaît
   `needs_userns` (`4aaeb50`, vert sur le coureur). La page Système et `prophet status` disent
   la réserve de microVM (`471364e`, `1059502`).
+- Cache du moteur local (ADR 0034, complément du 23 septembre, `2bb8a06`) : la condensation
+  ne garde plus intact que le dernier résultat d'outil. En garder deux faisait réévaluer à
+  llama-server, à chaque tour, un résultat entier déjà envoyé ; sur une mission simulée de
+  huit lectures de 3 ko, 26 ko à réévaluer au lieu de 45 ko, à environ 24 ms par token sur le
+  processeur de la CI.
 - Erreurs et reprise (FRONTIER) : une mission échouée ou arrêtée se relance depuis
   l'inspecteur (« Relancer », `93db17c`) ou par `prophet task retry` (`6bc1b56`) : la
   préparation repasse par le même contexte du catalogue, que le plan retient désormais
