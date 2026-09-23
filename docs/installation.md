@@ -212,7 +212,18 @@ intégration d'agent contrôlée par capd et sandboxd.
 
 La supervision utilise les services sous votre identité. Fermer sa fenêtre ne supprime pas
 les missions du service ; « Supervision » dans le lanceur la rouvre. Le modèle local nécessite
-des poids installés : consultez le [guide du moteur](../crates/providers/README.md).
+des poids installés : consultez le [guide du moteur](../crates/providers/README.md). La
+configuration de référence fournit Qwen3 1.7B et 0.6B ; d'autres poids du catalogue du système
+se téléchargent depuis la machine, par le proxy de sortie, vérifiés avant d'être posés
+(ADR 0046) :
+
+```sh
+prophet model catalog               # ce que le système sait télécharger, et ce que la machine a
+prophet model pull qwen3-0.6b-q8    # progression affichée ; une coupure reprend où elle s'arrêtait
+prophet model rm qwen3-0.6b-q8      # retire un poids téléchargé (jamais un poids de la configuration)
+```
+
+La page Modèles de la surface fait de même, barre de progression comprise.
 
 ```sh
 prophet status                        # les services, l'isolation, les limites de la machine
