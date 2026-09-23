@@ -810,7 +810,7 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 - [x] M8-T4 — Pilote `claude-code` (2026-09-12, 24b8338) — ligne de commande, environnement, détection de session
 - [x] M8-T5 — Pilote `codex` (2026-09-12, 24b8338) — pilote Codex CLI
 - [x] M8-T6 — Pilote `gemini` (2026-09-12, 24b8338) — pilote Gemini CLI
-- [ ] M8-T7 — Moteurs locaux — client HTTP, flux annulable, interface de conversation et essai Qwen3/CPU réalisés ; le 13 septembre, budgets de tokens par modèle, condensation du contexte et deux modèles servis par un llama-server en mode routeur, prouvés en relais réel (ADR 0034) ; le même jour, l'image sert deux modèles en mode routeur (Qwen3-1.7B en réflexion, Qwen3-0.6B en exécution, téléchargés à l'installation), préréglages vérifiés sur le vrai moteur et configuration évaluée ; le 22 septembre, le catalogue des poids se lit dans l'en-tête GGUF de chaque fichier (`prophet model ls`, page Modèles : architecture, quantification, fenêtre de contexte), et un historique plus long que la fenêtre du moteur est resserré à sa mesure au lieu de faire échouer la mission ou la conversation ; restent le téléchargement et la suppression gérés des poids, les budgets VRAM et la matrice GPU/modèles
+- [ ] M8-T7 — Moteurs locaux — client HTTP, flux annulable, interface de conversation et essai Qwen3/CPU réalisés ; le 13 septembre, budgets de tokens par modèle, condensation du contexte et deux modèles servis par un llama-server en mode routeur, prouvés en relais réel (ADR 0034) ; le même jour, l'image sert deux modèles en mode routeur (Qwen3-1.7B en réflexion, Qwen3-0.6B en exécution, téléchargés à l'installation), préréglages vérifiés sur le vrai moteur et configuration évaluée ; le 22 septembre, le catalogue des poids se lit dans l'en-tête GGUF de chaque fichier (`prophet model ls`, page Modèles : architecture, quantification, fenêtre de contexte), et un historique plus long que la fenêtre du moteur est resserré à sa mesure au lieu de faire échouer la mission ou la conversation ; le 23 septembre, les poids du catalogue du système se téléchargent par egress sous un jeton de capd borné au dépôt, vérifiés (SHA-256, taille, en-tête GGUF) avant d'être posés, reprennent après une coupure et se retirent (`prophet model pull`, page Modèles, ADR 0046, `114ef7b`, `1752d7a`, `78b7791`, `32a20ea`) ; restent servir un poids téléchargé (`prophet model serve`), les budgets VRAM et la matrice GPU/modèles
 - [x] M8-T8 — Pilote `prophet-agent` (2026-09-12, 24b8338) — boucle native : points de reprise, fork, rejeu
 - [x] M8-T9 — Sélection de pilote (2026-09-12, 24b8338) — sélection expliquée, confidentialité locale respectée
 - [x] M8-T10 — CLI (2026-09-12, 24b8338) — `prophet provider ls|login`
@@ -1528,6 +1528,17 @@ donne le détail.
   démarrer ni gigaoctet à réécrire. L'essai `needs_kvm` exige une réserve reprise pleine en
   moins d'une seconde. `sandbox.run` et `proc.exec` rendent `elapsed_ms` et `warm_start` :
   l'agent sait ce que son exécution a coûté et si la réserve a servi (`637d706`).
+- Poids gérés (M8-T7, ADR 0046) : un catalogue du système compilé dans les binaires (adresse
+  épinglée, empreinte SHA-256 publiée, hôtes permis) ; agentd télécharge une entrée par egress
+  sous un jeton que capd émet pour ses seuls hôtes, refuse toute redirection hors d'eux, ne pose
+  le fichier qu'une fois taille, empreinte et en-tête GGUF vérifiés, reprend par `Range` après
+  une coupure, journalise `model.pulled` et `model.removed` (`114ef7b`, `1752d7a`). `prophet
+  model catalog | pull | cancel | rm` et la page Modèles, barre de progression comprise
+  (`78b7791`) ; un poids que la configuration fournit déjà n'est pas retéléchargé (`32a20ea`).
+  Prouvé avec les vrais capd, ledger et egress (`crates/agentd/tests/poids.rs`), et, sous
+  systemd, par l'essai des services qui télécharge d'un dépôt local sous le compte de l'humain.
+  Le catalogue ne porte que Qwen3 1.7B et 0.6B : l'empreinte de `qwen3-8b-q4`, exemple du plan,
+  n'a pas été relevée (Hugging Face est injoignable d'ici).
 - Conversation longue (M8-T7, `f93e591`) : au-delà de 32 Kio ou de 32 tours, la page
   Conversation refusait d'envoyer ; elle envoie les tours récents qui tiennent, dit combien
   elle en laisse de côté, et garde le fil affiché entier.
@@ -1565,8 +1576,12 @@ donne le détail.
   permitted »), et capd repart sur son nom. CI de `4aaeb50` (réserve de microVM, Landlock au
   niveau 0, niveau 0 exigé sur le coureur d'isolation) : **verte des deux côtés**, mission réelle
   Qwen3, système installé (UEFI et BIOS) et ISO compris.
-- `just check` : **867 réussis, 0 échec, 52 ignorés** (`f14d01a`), format, clippy, contrôles
-  du dépôt et secrets (repli). Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
+- CI de `41df4f5` (deux microVM ensemble sans réseau, condensation qui ménage le cache) :
+  **verte des deux côtés**, mission réelle Qwen3, sept services, système installé (UEFI et BIOS)
+  et ISO compris.
+- `just check` : **883 réussis, 0 échec, 54 ignorés** (`32a20ea`), format, clippy, contrôles
+  du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
+  `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
 
 **Bloqué.** Rien n'est vérifiable ici sous Nix, en VM ou sur matériel : pas de KVM (les essais
@@ -1579,11 +1594,13 @@ que fait `prophet task new`) ; le réserver aux profils du catalogue fermerait l
 par laquelle un processus de la session fait planifier une mission sous un manifeste de sa main.
 
 **Pour la session suivante.** Lire la CI de la branche (l'instantané de la réserve repris au
-redémarrage, poussé après le verdict de `41df4f5`) ; trancher avec l'utilisateur le sort de
+redémarrage sur le coureur KVM ; le téléchargement de poids sous systemd dans l'essai des
+services) ; servir un poids téléchargé (mode routeur de llama-server sur
+`/var/lib/prophet/models/catalogue`, `prophet model serve`) ; relever l'empreinte de
+`qwen3-8b-q4` pour l'inscrire au catalogue ; trancher avec l'utilisateur le sort de
 `task.spawn` pour le compte de l'humain, et le chemin de confiance qui distinguerait la surface
 d'un autre programme du compte pour `approval.resolve` (ADR 0044) ; mesurer la surface sur une
-carte graphique ; faire le premier appel réel de Jev avec une clé déposée ; gérer le
-téléchargement vérifié et la suppression des poids que le catalogue lit désormais (M8-T7).
+carte graphique ; faire le premier appel réel de Jev avec une clé déposée.
 
 ### 15 septembre 2026, nuit et matin : l'ISO installée dans une machine virtuelle, deux fautes
 
