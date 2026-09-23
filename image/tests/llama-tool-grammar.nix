@@ -28,6 +28,14 @@ pkgs.runCommand "prophet-llama-tool-grammar" {
     grep -n -B2 -A6 '\[\*\]\|models-dir\|global' ${engine.src}/tools/server/README.md | head -80 || true
     echo "--- routeur : arguments transmis aux instances ---"
     grep -rn -B2 -A8 'router.*arg\|forward.*arg\|base_args\|child.*args' ${engine.src}/tools/server/server-models.cpp | head -60 || true
+    # La mémoire résidente d'une instance dépasse l'estimation de l'ADR 0047 : une copie
+    # réarrangée des poids pour le processeur, le fichier restant projeté ? Et comment un
+    # préréglage dirait-il « sans projection » ?
+    echo "--- projection et réarrangement des poids ---"
+    grep -n -B1 -A6 '"--mmap"\|"--no-mmap"' ${engine.src}/common/arg.cpp | head -40 || true
+    grep -rn -B2 -A12 'negat\|"no-"\|is_neg\|"false"' ${engine.src}/common/preset.cpp | head -60 || true
+    grep -rn -B1 -A3 'repack\|extra_buf' ${engine.src}/src/llama-model-loader.cpp ${engine.src}/src/llama-model.cpp | head -60 || true
+    grep -rn -B1 -A5 'repack\|extra-buf\|extra_buf' ${engine.src}/common/arg.cpp | head -30 || true
   } >> "$out/result.txt"
   cat "$out/result.txt"
 ''
