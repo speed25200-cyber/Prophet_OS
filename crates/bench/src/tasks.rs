@@ -270,7 +270,232 @@ pub fn suite() -> Vec<Task> {
                 Ok(())
             },
         },
+        Task {
+            id: "compter-les-erreurs",
+            root: "journaux",
+            family: Family::Data,
+            requires: Requires::Nothing,
+            intent: "combien de lignes de ~/journaux/app.log sont des erreurs (ERROR) ? écris le nombre dans ~/journaux/out/erreurs.txt",
+            setup: |home| {
+                ecrire(
+                    home,
+                    "journaux/app.log",
+                    "INFO démarrage\nERROR base injoignable\nINFO nouvel essai\nWARN lent\nERROR délai dépassé\nINFO reprise\nERROR disque plein\nINFO arrêt\n",
+                )
+            },
+            verify: |home| {
+                let contenu = lire(home, "journaux/out/erreurs.txt")?;
+                match premier_nombre(&contenu) {
+                    Some(3) => Ok(()),
+                    autre => Err(format!("3 erreurs attendues, trouvé : {autre:?}")),
+                }
+            },
+        },
+        Task {
+            id: "le-plus-gros-achat",
+            root: "achats",
+            family: Family::Data,
+            requires: Requires::Nothing,
+            intent: "quel fournisseur a reçu le plus gros achat dans ~/achats/2026.csv ? écris son nom dans ~/achats/out/fournisseur.txt",
+            setup: |home| {
+                ecrire(
+                    home,
+                    "achats/2026.csv",
+                    "date,fournisseur,montant\n2026-01-04,Lumen,1200\n2026-02-11,Brillant,4800\n2026-03-02,Lumen,950\n2026-04-19,Caravelle,3100\n",
+                )
+            },
+            verify: |home| {
+                let contenu = lire(home, "achats/out/fournisseur.txt")?;
+                if contenu.contains("Brillant") && !contenu.contains("Caravelle") {
+                    Ok(())
+                } else {
+                    Err(format!("Brillant attendu, trouvé : {}", contenu.trim()))
+                }
+            },
+        },
+        Task {
+            id: "corriger-une-faute",
+            root: "lettres",
+            family: Family::Authoring,
+            requires: Requires::Nothing,
+            intent: "corrige la faute « sincèrment » en « sincèrement » dans ~/lettres/candidature.txt, sans rien changer d'autre",
+            setup: |home| {
+                ecrire(
+                    home,
+                    "lettres/candidature.txt",
+                    "Madame, Monsieur,\n\nJe vous adresse ma candidature au poste proposé.\n\nJe vous prie d'agréer, sincèrment, mes salutations.\n",
+                )
+            },
+            verify: |home| {
+                let attendu = "Madame, Monsieur,\n\nJe vous adresse ma candidature au poste proposé.\n\nJe vous prie d'agréer, sincèrement, mes salutations.\n";
+                let contenu = lire(home, "lettres/candidature.txt")?;
+                if contenu.trim_end() == attendu.trim_end() {
+                    Ok(())
+                } else if contenu.contains("sincèrment") {
+                    Err("la faute est toujours là".to_owned())
+                } else {
+                    Err("la lettre a changé au-delà de la faute".to_owned())
+                }
+            },
+        },
+        Task {
+            id: "tableau-de-l-equipe",
+            root: "equipe",
+            family: Family::Authoring,
+            requires: Requires::Nothing,
+            intent: "transforme ~/equipe/membres.csv en tableau Markdown dans ~/equipe/out/membres.md",
+            setup: |home| {
+                ecrire(
+                    home,
+                    "equipe/membres.csv",
+                    "nom,rôle\nAda,développement\nLin,design\nSam,support\n",
+                )
+            },
+            verify: |home| {
+                let contenu = lire(home, "equipe/out/membres.md")?;
+                let lignes: Vec<&str> = contenu.lines().filter(|l| l.contains('|')).collect();
+                if !lignes.iter().any(|l| l.contains("---")) {
+                    return Err("pas de ligne de séparation d'en-tête".to_owned());
+                }
+                for (nom, role) in [
+                    ("Ada", "développement"),
+                    ("Lin", "design"),
+                    ("Sam", "support"),
+                ] {
+                    if !lignes.iter().any(|l| l.contains(nom) && l.contains(role)) {
+                        return Err(format!("{nom} et son rôle ne sont pas sur une même ligne"));
+                    }
+                }
+                Ok(())
+            },
+        },
+        Task {
+            id: "changer-le-port",
+            root: "service",
+            family: Family::Files,
+            requires: Requires::Nothing,
+            intent: "passe le port de ~/service/config.toml à 9090, sans toucher au reste du fichier",
+            setup: |home| {
+                ecrire(
+                    home,
+                    "service/config.toml",
+                    "host = \"0.0.0.0\"\nport = 8080\nworkers = 4\n",
+                )
+            },
+            verify: |home| {
+                let contenu = lire(home, "service/config.toml")?;
+                if contenu.trim_end() == "host = \"0.0.0.0\"\nport = 9090\nworkers = 4" {
+                    Ok(())
+                } else if contenu.contains("8080") {
+                    Err("le port n'a pas changé".to_owned())
+                } else {
+                    Err(format!("le fichier a changé au-delà du port : {contenu}"))
+                }
+            },
+        },
+        Task {
+            id: "fusionner-les-listes",
+            root: "courses",
+            family: Family::Composite,
+            requires: Requires::Nothing,
+            intent: "fusionne les listes de ~/courses en une seule, sans doublons, par ordre alphabétique, un article par ligne, dans ~/courses/out/liste.txt",
+            setup: |home| {
+                ecrire(home, "courses/lundi.txt", "pain\nlait\noeufs\n")?;
+                ecrire(home, "courses/mardi.txt", "lait\npommes\npain\n")
+            },
+            verify: |home| {
+                let contenu = lire(home, "courses/out/liste.txt")?;
+                let articles: Vec<String> = contenu
+                    .lines()
+                    .map(|l| {
+                        l.trim()
+                            .trim_start_matches(['-', '*', ' '])
+                            .trim()
+                            .to_lowercase()
+                    })
+                    .filter(|l| !l.is_empty())
+                    .collect();
+                if articles == ["lait", "oeufs", "pain", "pommes"] {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "lait, oeufs, pain, pommes attendus, trouvé : {articles:?}"
+                    ))
+                }
+            },
+        },
+        Task {
+            id: "extraire-les-adresses",
+            root: "contacts",
+            family: Family::Data,
+            requires: Requires::Nothing,
+            intent: "extrais les adresses électroniques de ~/contacts/notes.txt, une par ligne, dans ~/contacts/out/adresses.txt",
+            setup: |home| {
+                ecrire(
+                    home,
+                    "contacts/notes.txt",
+                    "Réunion avec Claire (claire.martin@exemple.fr) et Paul.\nPaul préfère paul@atelier.test pour les devis.\nLe support répond à aide@service.example, pas au standard.\n",
+                )
+            },
+            verify: |home| {
+                let contenu = lire(home, "contacts/out/adresses.txt")?;
+                let lignes: Vec<&str> = contenu
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .collect();
+                for adresse in [
+                    "claire.martin@exemple.fr",
+                    "paul@atelier.test",
+                    "aide@service.example",
+                ] {
+                    if !lignes.iter().any(|l| l.contains(adresse)) {
+                        return Err(format!("adresse manquante : {adresse}"));
+                    }
+                }
+                if lignes.len() == 3 {
+                    Ok(())
+                } else {
+                    Err(format!("3 lignes attendues, {} trouvées", lignes.len()))
+                }
+            },
+        },
+        Task {
+            id: "la-derniere-sauvegarde",
+            root: "sauvegardes",
+            family: Family::Files,
+            requires: Requires::Nothing,
+            intent: "quelle est la sauvegarde la plus récente dans ~/sauvegardes ? écris le nom de son fichier dans ~/sauvegardes/out/derniere.txt",
+            setup: |home| {
+                for date in ["2026-03-01", "2026-09-12", "2025-12-24", "2026-06-30"] {
+                    ecrire(home, &format!("sauvegardes/sauvegarde-{date}.tar"), "x")?;
+                }
+                Ok(())
+            },
+            verify: |home| {
+                let contenu = lire(home, "sauvegardes/out/derniere.txt")?;
+                if contenu.contains("2026-09-12") && !contenu.contains("2026-06-30") {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "sauvegarde-2026-09-12.tar attendue, trouvé : {}",
+                        contenu.trim()
+                    ))
+                }
+            },
+        },
     ]
+}
+
+/// Le premier nombre entier d'un texte.
+fn premier_nombre(texte: &str) -> Option<u64> {
+    let debut = texte.find(|c: char| c.is_ascii_digit())?;
+    texte[debut..]
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>()
+        .parse()
+        .ok()
 }
 
 /// Résultat de l'exécution d'une tâche.
@@ -328,7 +553,7 @@ mod tests {
     #[test]
     fn la_suite_est_equilibree() {
         let suite = suite();
-        assert!(suite.len() >= 8);
+        assert!(suite.len() >= 16);
         let familles: std::collections::BTreeSet<Family> = suite.iter().map(|t| t.family).collect();
         assert_eq!(
             familles.len(),
@@ -356,6 +581,72 @@ mod tests {
                 task.id
             );
         }
+    }
+
+    #[test]
+    fn chaque_tache_ajoutee_accepte_une_solution_correcte() {
+        // Un vérificateur qui refuserait le bon travail mesurerait l'échec du banc, pas celui
+        // de l'agent.
+        let solutions: [(&str, &[(&str, &str)]); 8] = [
+            (
+                "compter-les-erreurs",
+                &[("journaux/out/erreurs.txt", "3 erreurs\n")],
+            ),
+            (
+                "le-plus-gros-achat",
+                &[("achats/out/fournisseur.txt", "Brillant\n")],
+            ),
+            (
+                "corriger-une-faute",
+                &[(
+                    "lettres/candidature.txt",
+                    "Madame, Monsieur,\n\nJe vous adresse ma candidature au poste proposé.\n\nJe vous prie d'agréer, sincèrement, mes salutations.\n",
+                )],
+            ),
+            (
+                "tableau-de-l-equipe",
+                &[(
+                    "equipe/out/membres.md",
+                    "| nom | rôle |\n|---|---|\n| Ada | développement |\n| Lin | design |\n| Sam | support |\n",
+                )],
+            ),
+            (
+                "changer-le-port",
+                &[(
+                    "service/config.toml",
+                    "host = \"0.0.0.0\"\nport = 9090\nworkers = 4\n",
+                )],
+            ),
+            (
+                "fusionner-les-listes",
+                &[("courses/out/liste.txt", "lait\noeufs\npain\npommes\n")],
+            ),
+            (
+                "extraire-les-adresses",
+                &[(
+                    "contacts/out/adresses.txt",
+                    "claire.martin@exemple.fr\npaul@atelier.test\naide@service.example\n",
+                )],
+            ),
+            (
+                "la-derniere-sauvegarde",
+                &[(
+                    "sauvegardes/out/derniere.txt",
+                    "sauvegarde-2026-09-12.tar\n",
+                )],
+            ),
+        ];
+        for (id, fichiers) in solutions {
+            let task = suite().into_iter().find(|t| t.id == id).unwrap();
+            let dir = tempfile::tempdir().unwrap();
+            (task.setup)(dir.path()).unwrap();
+            for (chemin, contenu) in fichiers {
+                ecrire(dir.path(), chemin, contenu).unwrap();
+            }
+            (task.verify)(dir.path()).unwrap_or_else(|e| panic!("{id} : {e}"));
+        }
+        assert_eq!(premier_nombre("il y en a 13"), Some(13));
+        assert_eq!(premier_nombre("aucune"), None);
     }
 
     #[test]
