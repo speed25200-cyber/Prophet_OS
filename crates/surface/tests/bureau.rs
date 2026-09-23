@@ -153,6 +153,39 @@ fn click_widget(bureau: &Bureau, id: &str) -> Vec<Event> {
 
 #[test]
 #[ignore = "needs_gpu"]
+fn un_dialogue_vide_propose_des_departs_qui_remplissent_le_brouillon_sans_rien_envoyer() {
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1440, 1000);
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    for _ in 0..3 {
+        frame(&mut bureau, &context, &target, vec![]);
+    }
+    let events = click_widget(&bureau, "nav-conversation");
+    frame(&mut bureau, &context, &target, events);
+    for _ in 0..3 {
+        frame(&mut bureau, &context, &target, vec![]);
+    }
+    capture(&context, &target, "dialogue-vide");
+    let events = click_widget(&bureau, "suggestion-corriger");
+    frame(&mut bureau, &context, &target, events);
+    frame(&mut bureau, &context, &target, vec![]);
+    assert!(
+        bureau.atelier.brouillon.contains("corriger un document"),
+        "{}",
+        bureau.atelier.brouillon
+    );
+    assert!(!bureau.atelier.generation, "une suggestion n'envoie rien");
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("intention"))
+            .is_some_and(|r| r.has_focus()),
+        "la saisie reçoit le focus pour compléter"
+    );
+}
+
+#[test]
+#[ignore = "needs_gpu"]
 fn la_navigation_et_la_saisie_unicode_fonctionnent_dans_les_widgets_rendus() {
     let context = Contexte::hors_ecran().unwrap();
     let target = Cible::nouvelle(&context, 1280, 720);

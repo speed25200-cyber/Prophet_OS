@@ -1169,6 +1169,58 @@ fn composer(ui: &mut egui::Ui, atelier: &mut Atelier) {
     });
 }
 
+/// Les départs proposés à un dialogue vide : ce qu'on confie le plus souvent à un agent, formulé
+/// pour que le modèle aide à le cadrer avant de le déléguer.
+const SUGGESTIONS: [(&str, &str, &str); 3] = [
+    (
+        "suggestion-resumer",
+        "Résumer un dossier",
+        "Aide-moi à cadrer une mission qui résume les documents de ~/Documents/Prophet dans un fichier de synthèse : que dois-je préciser avant de la confier ? ",
+    ),
+    (
+        "suggestion-corriger",
+        "Corriger un document",
+        "Je veux faire corriger un document sans rien changer d'autre. Aide-moi à écrire l'objectif : le fichier visé, ce qui doit changer, ce qui ne doit pas bouger. ",
+    ),
+    (
+        "suggestion-comparer",
+        "Comparer des offres",
+        "Aide-moi à cadrer une comparaison d'offres : les critères, les sources à consulter et la forme du résultat attendu. ",
+    ),
+];
+
+/// Une suggestion : une pastille arrondie, discrète, qui s'éclaire au survol.
+fn suggestion(ui: &mut egui::Ui, id: &str, texte: &str) -> egui::Response {
+    let accent = Accent::de(ui.ctx());
+    let survol = ui
+        .ctx()
+        .read_response(egui::Id::new(id))
+        .is_some_and(|r| r.hovered());
+    let reponse = Frame::new()
+        .fill(if survol {
+            hud::voile(accent.vif, 26)
+        } else {
+            VERRE_HAUT
+        })
+        .stroke(Stroke::new(
+            1.0,
+            if survol { accent.fil_vif } else { accent.fil },
+        ))
+        .corner_radius(16)
+        .inner_margin(egui::Margin::symmetric(14, 7))
+        .show(ui, |ui| {
+            ui.label(RichText::new(texte).size(13.0).color(if survol {
+                ENCRE
+            } else {
+                accent.sourd
+            }));
+        })
+        .response;
+    let reponse = ui.interact(reponse.rect, egui::Id::new(id), egui::Sense::click());
+    reponse.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, texte));
+    reponse.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 fn conversation(ui: &mut egui::Ui, atelier: &mut Atelier) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
@@ -1195,6 +1247,19 @@ fn conversation(ui: &mut egui::Ui, atelier: &mut Atelier) {
                     atelier.brouillon = "Aide-moi à préciser cet objectif, ses contraintes et les critères qui permettront de vérifier le résultat : ".into();
                     ui.ctx().memory_mut(|m| m.request_focus(egui::Id::new("intention")));
                 }
+                ui.add_space(18.0);
+                etiquette(ui, "POUR COMMENCER");
+                ui.add_space(6.0);
+                // Trois départs : le brouillon se remplit, rien n'est envoyé ; l'humain complète.
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
+                    for (id, titre, amorce) in SUGGESTIONS {
+                        if suggestion(ui, id, titre).clicked() {
+                            atelier.brouillon = (*amorce).into();
+                            ui.ctx().memory_mut(|m| m.request_focus(egui::Id::new("intention")));
+                        }
+                    }
+                });
             });
         }
         for (i, tour) in atelier.tours.iter().enumerate() {
