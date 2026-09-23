@@ -1594,7 +1594,9 @@ donne le détail.
   (llama.cpp `v0.4.0`, `llama-model-loader.cpp` : tenseurs recopiés depuis la projection, dont
   seuls le début et la fin sont libérés) : l'image charge désormais les poids sans projection
   (`--load-mode none`, `load-mode = none` dans chaque préréglage), et l'essai des familles le
-  mesure ainsi (matrice matérielle, ADR 0047).
+  mesure ainsi : **vert sur `227a63e`**, mémoire résidente en baisse de 28 à 38 % (Qwen3 8B :
+  5,46 Go au lieu de 8,76), presque toute anonyme, et l'estimation 5 à 10 % au-dessus ; servir
+  Qwen3 8B prend 6,3 s au lieu de 2,9 (matrice matérielle, ADR 0047).
 - Découverte des capacités (FRONTIER, moteurs locaux) : l'en-tête GGUF dit ce que le gabarit de
   conversation déclare — appels d'outils, réflexion. Relevé sur les huit fichiers du catalogue :
   Qwen3, Granite 3.3 et Llama 3.2 déclarent les outils, Phi-3 mini et SmolLM2 non. Les agents le

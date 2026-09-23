@@ -742,22 +742,15 @@ fn bilan_du_moteur(chaine: &Chaine, port: u16) -> Vec<String> {
         .map(|l| l.trim().to_owned())
         .take(40)
         .collect();
-    if !bilan.is_empty() {
-        return bilan;
+    if bilan.is_empty() {
+        // Cette version du moteur n'écrit pas ses tampons à la verbosité par défaut ; la
+        // mémoire résidente, relevée à côté, suffit à juger l'estimation.
+        return vec![format!(
+            "journal sans bilan des tampons ({} lignes)",
+            journal.lines().count()
+        )];
     }
-    // Rien de reconnu : la fin du journal, pour voir ce que le routeur relaie de ses instances.
-    let lignes: Vec<&str> = journal.lines().collect();
-    let mut fin = vec![format!(
-        "journal sans bilan ({} lignes, {} octets) ; fin :",
-        lignes.len(),
-        journal.len()
-    )];
-    fin.extend(
-        lignes[lignes.len().saturating_sub(25)..]
-            .iter()
-            .map(|l| l.chars().take(200).collect::<String>()),
-    );
-    fin
+    bilan
 }
 
 /// Le routeur épinglé, lancé comme l'image le lance, sur le dossier des téléchargements. Son

@@ -22,24 +22,27 @@ disque (`docs/installation.md`, section 3) dit, depuis la clé, ce qu'une machin
 Vus sur le coureur de la CI (quatre cœurs x86-64, sans carte), travail « Poids du catalogue
 servis (réels) » : chaque poids tiré de Hugging Face par egress, vérifié par son empreinte,
 servi par le routeur épinglé et interrogé. Débits et réponses de `c44a349` (fenêtre 4 096) ;
-mémoire de `89b1b3a`, fenêtre 2 048 : l'estimation de `providers::memory` (ADR 0047) face à la
-mémoire résidente de l'instance du moteur une fois la réponse rendue, dont sa part anonyme.
+mémoire à la fenêtre 2 048 : l'estimation de `providers::memory` (ADR 0047) face à la mémoire
+résidente de l'instance du moteur une fois la réponse rendue — avec projection des poids
+(`89b1b3a`, dont la part anonyme entre parenthèses) puis sans, comme l'image les charge
+désormais (`227a63e`).
 
-| Entrée du catalogue | Taille | Réponse | Génération | Mémoire estimée | Résidente (anonyme) | Vu |
-|---|---|---|---|---|---|---|
-| `qwen3-8b-q4` (Qwen3 8B, Q4_K_M) | 5,0 Go | « bonjour », 2,8 s | 7,4 tokens/s (relevé sur `4ecf15c`) | 5,8 Go | 8,8 Go (3,7 Go) | hôte CI |
-| `granite-3.3-2b-q4` (IBM Granite 3.3 2B) | 1,5 Go | « Paris. », 2,5 s | 21 tokens/s | 2,0 Go | 3,0 Go (1,5 Go) | hôte CI |
-| `smollm2-1.7b-q4` (SmolLM2 1.7B) | 1,1 Go | « Paris », 1,2 s | 31 tokens/s | 1,8 Go | 2,4 Go (1,3 Go) | hôte CI |
-| `phi-3-mini-q4` (Phi-3 mini 4k) | 2,4 Go | « Paris », 0,9 s | 13 tokens/s | 3,5 Go | 4,6 Go (2,1 Go) | hôte CI |
-| `llama-3.2-3b-q4` (Llama 3.2 3B) | 2,0 Go | « Paris. », 2,2 s | 17 tokens/s | 2,7 Go | 3,9 Go (1,8 Go) | hôte CI |
-| `qwen3-1.7b-q8`, `qwen3-0.6b-q8` (modèles du relais) | 1,8 et 0,6 Go | missions réelles | — | — | — | VM (mission locale sous NixOS) |
-| Tout modèle, sur carte (Vulkan) | — | — | — | — | — | non |
+| Entrée du catalogue | Taille | Réponse | Génération | Mémoire estimée | Résidente projetée (anonyme) | Résidente sans projection | Vu |
+|---|---|---|---|---|---|---|---|
+| `qwen3-8b-q4` (Qwen3 8B, Q4_K_M) | 5,0 Go | « bonjour », 2,8 s | 7,4 tokens/s (relevé sur `4ecf15c`) | 5,8 Go | 8,8 Go (3,7 Go) | 5,5 Go | hôte CI |
+| `granite-3.3-2b-q4` (IBM Granite 3.3 2B) | 1,5 Go | « Paris. », 2,5 s | 21 tokens/s | 2,0 Go | 3,0 Go (1,5 Go) | 1,9 Go | hôte CI |
+| `smollm2-1.7b-q4` (SmolLM2 1.7B) | 1,1 Go | « Paris », 1,2 s | 31 tokens/s | 1,8 Go | 2,4 Go (1,3 Go) | 1,6 Go | hôte CI |
+| `phi-3-mini-q4` (Phi-3 mini 4k) | 2,4 Go | « Paris », 0,9 s | 13 tokens/s | 3,5 Go | 4,6 Go (2,1 Go) | 3,3 Go | hôte CI |
+| `llama-3.2-3b-q4` (Llama 3.2 3B) | 2,0 Go | « Paris. », 2,2 s | 17 tokens/s | 2,7 Go | 3,9 Go (1,8 Go) | 2,5 Go | hôte CI |
+| `qwen3-1.7b-q8`, `qwen3-0.6b-q8` (modèles du relais) | 1,8 et 0,6 Go | missions réelles | — | — | — | — | VM (mission locale sous NixOS) |
+| Tout modèle, sur carte (Vulkan) | — | — | — | — | — | — | non |
 
-Ces relevés sont ceux d'un moteur qui projette ses poids : la mémoire résidente dépasse
-l'estimation de 30 à 50 %, parce que llama.cpp recopie les poids réarrangés pour le processeur
-depuis la projection et garde celle-ci résidente (confirmé dans la source épinglée,
-ADR 0047). L'image charge désormais sans projection (`--load-mode none`) ; les relevés suivants
-diront la mémoire de cette configuration. La VRAM n'est pas mesurée.
+Projetés, les poids restaient résidents deux fois : llama.cpp recopie depuis la projection les
+tenseurs réarrangés pour le processeur et garde celle-ci (source épinglée, ADR 0047). L'image
+les charge désormais sans projection (`--load-mode none`) : la mémoire résidente baisse de 28 à
+38 %, et l'estimation la dépasse de 5 à 10 %. Mémoire minimale : Qwen3 8B à 4 096 tokens
+demande environ 6,1 Go, que 8 Gio tiennent en laissant 1,5 Gio au système. La VRAM n'est pas
+mesurée.
 
 ## Affichage
 

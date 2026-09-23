@@ -1,7 +1,7 @@
 # ADR-0047 — Estimer la mémoire qu'un poids demande, et ne pas charger ce qui ne tient pas
 
 - **Statut** : accepté ; estimation vérifiée contre le vrai moteur en CI (travail « Poids du
-  catalogue servis (réels) »)
+  catalogue servis (réels) », `227a63e` : 5 à 10 % au-dessus de la mémoire résidente)
 - **Date** : 2026-09-23
 - **Tâche liée** : M8-T7 (FRONTIER : moteurs locaux, « mémoire »)
 
@@ -103,6 +103,15 @@ mémoire vive non.
   familles tourne désormais ainsi, et exige que l'estimation couvre au moins 90 % de la mémoire
   anonyme sans dépasser 1,3 fois la résidente. Le journal du routeur, tamponné, était perdu
   quand l'essai le tuait (SIGKILL) : il est arrêté par SIGTERM avant d'être lu.
+  Verdict (`227a63e`) : **vert**. La mémoire résidente tombe de 28 à 38 % et devient presque
+  toute anonyme (fichier projeté : 20 à 37 Mo, le binaire et ses bibliothèques) ; l'estimation
+  la dépasse de 5 à 10 %, du côté sûr. Qwen3 8B : 5,46 Go résidents au lieu de 8,76, pour
+  5,84 estimés ; Granite 3.3 2B 1,88 au lieu de 3,03 ; SmolLM2 1,61 au lieu de 2,36 ; Phi-3
+  mini 3,29 au lieu de 4,57 ; Llama 3.2 3B 2,50 au lieu de 3,85. Les cinq répondent juste.
+  Prix payé : Qwen3 8B met 6,3 s à être servi au lieu de 2,9 (5 Go lus d'un coup au lieu d'être
+  projetés à la demande). Le contrôle `llama-router` est vert : l'instance reçoit
+  `--load-mode none` de la section `[*]`. Cette version du moteur n'écrit pas ses tampons à la
+  verbosité par défaut ; la mémoire résidente suffit à juger l'estimation.
 - Les architectures à fenêtre glissante (Gemma 3) ou à attention latente (DeepSeek) ont un
   cache plus petit que la formule : l'estimation les surestime, du côté sûr.
 - La VRAM reste à mesurer sur une carte (`needs_gpu`) : la même estimation vaudra pour les

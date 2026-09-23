@@ -66,6 +66,19 @@ l'OOM. L'image charge donc les poids sans projection : `--load-mode none` en mod
 version ; un préréglage nomme l'option sans tirets). Le contrôle `llama-router` vérifie que
 l'instance reçoit l'option.
 
+| Famille | Estimée | Résidente avec projection | Résidente sans projection | Gain |
+|---|---|---|---|---|
+| Qwen3 8B | 5,84 Go | 8,76 Go | 5,46 Go | −38 % |
+| Granite 3.3 2B | 2,02 Go | 3,03 Go | 1,88 Go | −38 % |
+| SmolLM2 1.7B | 1,76 Go | 2,36 Go | 1,61 Go | −32 % |
+| Phi-3 mini | 3,47 Go | 4,57 Go | 3,29 Go | −28 % |
+| Llama 3.2 3B | 2,72 Go | 3,85 Go | 2,50 Go | −35 % |
+
+Sans projection (`227a63e`), la mémoire résidente est presque toute anonyme (20 à 37 Mo de
+fichiers projetés : le binaire et ses bibliothèques) et l'estimation la dépasse de 5 à 10 %.
+Les cinq familles répondent toujours juste ; servir Qwen3 8B prend 6,3 s au lieu de 2,9, les
+5 Go étant lus d'un coup.
+
 ## 4. Vérification
 
 | Élément | Où | Verdict |
@@ -76,7 +89,8 @@ l'instance reçoit l'option.
 | Jauge, repère du poids servi, capacités | `crates/surface/tests/bureau.rs` (`needs_gpu`, lavapipe) | vert |
 | En-têtes du catalogue relus à la source | essai `needs_network`, travail d'isolation, `b2f97f9` | vert |
 | Estimation face au vrai moteur, avec projection | travail « Poids du catalogue servis (réels) », `89b1b3a`, `b2f97f9` | vert (écart expliqué ci-dessus) |
-| Estimation face au vrai moteur, sans projection | même travail, `227a63e` | à lire |
+| Estimation face au vrai moteur, sans projection | même travail, `227a63e` | vert : estimation 5 à 10 % au-dessus |
+| L'instance reçoit `--load-mode none` | contrôle `llama-router`, `227a63e` | vert |
 
 ## 5. Ce qui reste
 
