@@ -270,6 +270,14 @@ fn chercher_par_nom_ce_qui_est_dans_le_contenu_trouve_quand_meme() {
     assert_eq!(results.len(), 1, "{d}");
     assert_eq!(results[0]["path"], json!(m.home.join("docs/contrat-b.txt")));
     assert!(d["note"].as_str().unwrap().contains("contenu"), "{d}");
+    // Un filtre de contenu vide, passé à côté du nom, ne change rien.
+    let r = m.call(
+        "fs.search",
+        json!({"root":"~/docs","name_contains":"ZX-99417","content_contains":""}),
+    );
+    let d = r.structured.unwrap();
+    assert_eq!(d["results"].as_array().unwrap().len(), 1, "{d}");
+    assert_eq!(d["results"][0]["matching_lines"], 1, "{d}");
     // Un nom qui correspond garde la recherche par nom, sans note.
     let r = m.call(
         "fs.search",

@@ -738,8 +738,10 @@ fn search(view: &View<'_>, root: &Path, args: &Value) -> Result<Value> {
             })
             .transpose()
     };
-    let name = text_arg("name_contains")?;
-    let content = text_arg("content_contains")?;
+    // Un filtre vide n'en est pas un : un modèle passe souvent `content_contains: ""` à côté
+    // du filtre qu'il voulait, et le vide ne doit ni tout accepter ni empêcher le repli.
+    let name = text_arg("name_contains")?.filter(|t| !t.is_empty());
+    let content = text_arg("content_contains")?.filter(|t| !t.is_empty());
     let found = search_with(view, root, name, content)?;
     // Un modèle cherche souvent par nom ce qui figure dans le contenu (« la référence
     // ZX-99417 ») : quand aucun nom ne correspond, le même texte est cherché dans le contenu,
