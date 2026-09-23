@@ -417,6 +417,9 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
                             .map_or(shell::Navigateur::Aucun, shell::Navigateur::Sonde)
                     }),
             );
+            out.push_str(&status_reserve(
+                capacites_du_bac(&socket_sandboxd()).as_ref(),
+            ));
             out.push_str(&status_parole_et_pilotes(options.as_ref()));
             out.push_str(&status_machine(&chemin_de_l_inventaire()));
             Ok(out)
@@ -2553,6 +2556,61 @@ fn options_du_service(socket: &std::path::Path) -> Option<agentd::preparation::O
     .ok()
 }
 
+fn socket_sandboxd() -> std::path::PathBuf {
+    std::env::var("PROPHET_SANDBOXD_SOCKET").map_or_else(
+        |_| prophet_ipc::socket_path("sandboxd"),
+        std::path::PathBuf::from,
+    )
+}
+
+/// Ce que sandboxd dit savoir isoler, réserve de microVM comprise ; `None` s'il se tait.
+fn capacites_du_bac(socket: &std::path::Path) -> Option<serde_json::Value> {
+    sous_delai(async {
+        let client = prophet_ipc::Client::connect(socket)
+            .await
+            .map_err(|e| e.to_string())?;
+        client
+            .call("sandbox.capabilities", serde_json::json!({}))
+            .await
+            .map_err(|e| e.message.clone())
+    })
+    .ok()
+}
+
+/// Les lignes de `prophet status` sur la réserve de microVM du niveau 2 (ADR 0045).
+fn status_reserve(capacites: Option<&serde_json::Value>) -> String {
+    let mut out = String::from("\n  Réserve de microVM\n");
+    let Some(capacites) = capacites else {
+        out.push_str("    ? sandboxd ne répond pas\n");
+        return out;
+    };
+    let reserve = &capacites["reserve"];
+    if !reserve.is_object() {
+        out.push_str(
+            "    — aucune : le niveau 2 est inatteignable ici, ou PROPHET_MICROVM_POOL=0\n",
+        );
+        return out;
+    }
+    let pretes = reserve["pretes"].as_u64().unwrap_or(0);
+    let cible = reserve["cible"].as_u64().unwrap_or(0);
+    match reserve["erreur"].as_str() {
+        Some(erreur) if pretes == 0 => out.push_str(&format!(
+            "    ✗ vide — {erreur} ; le niveau 2 démarre à froid\n"
+        )),
+        _ => {
+            let signe = if pretes >= cible { "✓" } else { "·" };
+            out.push_str(&format!(
+                "    {signe} {pretes} prête{} sur {cible} — le niveau 2 part sans démarrer de noyau{}\n",
+                if pretes > 1 { "s" } else { "" },
+                reserve["restauration_ms"]
+                    .as_u64()
+                    .map_or_else(String::new, |ms| format!(" ; restauration en {ms} ms"))
+            ));
+        }
+    }
+    out
+}
+
 /// Les lignes de `prophet status` sur ce que l'humain peut dire et entendre, et sur les clients
 /// officiels que le lanceur de session sait lancer (ADR 0035, 0036). Rien n'est inventé : un
 /// service muet donne « inconnu », une chaîne absente le dit.
@@ -2840,6 +2898,24 @@ mod sondes {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn la_reserve_de_microvm_se_dit_dans_prophet_status() {
+        let pleine = serde_json::json!({"reserve": {"cible": 2, "pretes": 2, "restauration_ms": 41, "erreur": null}});
+        let dit = status_reserve(Some(&pleine));
+        assert!(
+            dit.contains("✓ 2 prêtes sur 2") && dit.contains("41 ms"),
+            "{dit}"
+        );
+        let vide = serde_json::json!({"reserve": {"cible": 2, "pretes": 0, "erreur": "instantané refusé"}});
+        let dit = status_reserve(Some(&vide));
+        assert!(
+            dit.contains("✗ vide") && dit.contains("instantané refusé"),
+            "{dit}"
+        );
+        assert!(status_reserve(Some(&serde_json::json!({"reserve": null}))).contains("— aucune"));
+        assert!(status_reserve(None).contains("ne répond pas"));
+    }
     use clap::CommandFactory as _;
 
     #[test]
