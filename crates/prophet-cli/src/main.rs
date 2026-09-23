@@ -1717,6 +1717,9 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                 out.push_str(reason);
                 out.push('\n');
             }
+            if let Some(ligne) = ligne_des_rappels(&result) {
+                out.push_str(&ligne);
+            }
             // Ce que chaque modèle a coûté, et la part prise en charge hors du modèle de la
             // mission : la mesure du relais (ADR 0034).
             if let Ok(usage) = serde_json::from_value::<agentd::UsageByModel>(
@@ -3410,8 +3413,34 @@ mod sondes {
     }
 }
 
+/// Les livrables que le service a rappelés au modèle (ADR 0049), en une ligne.
+fn ligne_des_rappels(result: &serde_json::Value) -> Option<String> {
+    let rappels: Vec<&str> = result["reminded"]
+        .as_array()?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    (!rappels.is_empty()).then(|| {
+        format!(
+            "Rappelé au modèle, qui avait conclu sans : {}\n",
+            rappels.join(", ")
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn le_resultat_dit_les_livrables_rappeles() {
+        let result = serde_json::json!({"reminded": ["~/ventes/out/total.txt"]});
+        assert_eq!(
+            super::ligne_des_rappels(&result).as_deref(),
+            Some("Rappelé au modèle, qui avait conclu sans : ~/ventes/out/total.txt\n")
+        );
+        assert!(super::ligne_des_rappels(&serde_json::json!({"reminded": []})).is_none());
+        assert!(super::ligne_des_rappels(&serde_json::json!({})).is_none());
+    }
+
     use super::*;
 
     #[test]
