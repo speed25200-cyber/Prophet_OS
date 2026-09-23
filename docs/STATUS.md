@@ -1626,7 +1626,12 @@ donne le détail.
   processeur par mission et 47 Mo au plus, contre 114 s de processeur pour le moteur (0,2 %).
   `compter-les-erreurs` passe à 3/3 par Prophet ; le rappel conditionnel se déclinait (13 sur
   29) : la consigne revient en tête ; la boucle nue offre désormais les outils dans l'ordre du
-  registre.
+  registre. Quatrième passage (`390aed1`, même ordre des deux côtés) : **Prophet 8/45, boucle
+  nue 5/45** — la boucle nue perd les réussites qu'elle devait à l'ordre de sa liste ; 25 des 30
+  exécutions rappelées écrivent ; Prophet paie ses réussites en calcul du modèle (96 s de
+  processeur moteur contre 48, 1,7 fois les tokens), ses services restant à 0,28 s et 47 Mo.
+  ADR 0051 : `fs.edit` (remplacer un passage exact, sous le droit de `fs.write`) et, dans les
+  contextes de l'image, `fs.list`, `fs.stat`, `fs.search` et `fs.edit`.
 - Concurrence et annulation sur le vrai moteur (FRONTIER, moteurs locaux ; essai
   `deux_requetes_se_partagent_le_moteur_et_un_abandon_le_libere`, vert sur `dd5ce52`) : sur une
   instance à une place comme celle de l'image, deux requêtes simultanées aboutissent toutes
