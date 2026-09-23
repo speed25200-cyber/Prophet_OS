@@ -2,7 +2,8 @@
 //! travers une boucle nue sur Linux. Même modèle, même moteur, mêmes outils fichiers — leurs
 //! implémentations mêmes —, mêmes vérificateurs. Ce qui diffère est exactement ce que Prophet
 //! ajoute : le jeton de capd et le contrôle de chaque accès, le journal, l'espace de travail SFS
-//! scellé puis publié, la consigne et la condensation du moteur local.
+//! scellé puis publié, la condensation des anciens résultats d'outils (sans rôle ni relais, une
+//! mission du banc ne reçoit pas de consigne).
 //!
 //! La boucle nue appelle les outils de `mcp-system` sans registre (un contrôleur qui autorise
 //! tout), écrit dans le même espace de travail, puis le recopie dans le répertoire personnel :
@@ -273,7 +274,7 @@ impl ToolExecutor for OutilsNus {
     }
 }
 
-/// Le modèle local, appelé sans consigne ni condensation, ses tokens comptés.
+/// Le modèle local, appelé sans condensation, ses tokens comptés.
 struct ModeleNu {
     client: AsyncLocalModel,
     runtime: tokio::runtime::Runtime,

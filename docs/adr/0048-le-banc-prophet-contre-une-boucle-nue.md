@@ -28,8 +28,9 @@ mesurant réussite, latences médiane et p95, tokens et interventions humaines.
     capd, journal, consigne ni condensation ; l'espace de travail est recopié dans le
     répertoire personnel, et le même vérificateur tranche.
 - **Ce qui diffère est exactement ce que Prophet ajoute** : jeton et contrôle de chaque accès,
-  journal, espace de travail scellé puis publié, consigne et condensation du moteur local. Le
-  banc mesure donc le prix et le gain de ces couches, pas un autre agent.
+  journal, espace de travail scellé puis publié, condensation des anciens résultats d'outils
+  (une mission du banc n'a ni rôle ni relais : agentd ne lui donne pas de consigne). Le banc
+  mesure donc le prix et le gain de ces couches, pas un autre agent.
 - **Mesures** : réussite par tâche (vérificateur), durée, tokens, étapes (Prophet) ou tours
   (boucle nue) ; par côté, taux de réussite, durée médiane et p95, tokens moyens. `just bench`
   les écrit dans `bench/results/<date>.json` ; le travail « Poids du catalogue servis (réels) »
