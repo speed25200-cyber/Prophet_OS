@@ -60,7 +60,16 @@ let
     if [ "$reserve" = 1 ]; then
       attente=$(cat /sys/block/vdb/size 2>/dev/null)
       echo "PROPHET_INVITE_ATTENTE"
+      # L'attente ne court que machine en marche : en pause, rien ne tourne. Bornée à quelques
+      # milliers de tours, elle ne retient pas un moniteur dont le disque ne viendrait jamais.
+      tours=0
       while [ "$(cat /sys/block/vdb/size 2>/dev/null)" = "$attente" ]; do
+        tours=$((tours + 1))
+        if [ "$tours" -gt 4000 ]; then
+          echo "PROPHET_INVITE_ERREUR le disque de la tâche n'est jamais venu"
+          echo "PROPHET_INVITE_FIN code=125"
+          reboot -f
+        fi
         sleep 0.005 2>/dev/null || true
       done
       # Le noyau a lu le début du disque d'attente en le découvrant : on oublie ce qu'il en

@@ -529,12 +529,25 @@ fn la_reserve_rend_une_microvm_de_niveau_deux_en_moins_de_150_ms() {
         durees.push(lance.elapsed());
         assert_eq!(handle.level, 2);
         let vm = handle.microvm.clone().expect("un disque de travail");
-        let mut console = String::new();
-        if let Some(child) = handle_child(&mut handle)
-            && let Some(out) = child.stdout.as_mut()
-        {
-            let _ = out.read_to_string(&mut console);
-        }
+        // La console est lue avec un délai : une machine qui ne verrait pas son disque arriver
+        // ne doit pas retenir le coureur des heures durant.
+        let sortie = handle_child(&mut handle)
+            .and_then(|child| child.stdout.take())
+            .expect("console du moniteur");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut sortie = sortie;
+            let mut console = String::new();
+            let _ = sortie.read_to_string(&mut console);
+            let _ = tx.send(console);
+        });
+        let Ok(console) = rx.recv_timeout(std::time::Duration::from_secs(60)) else {
+            let _ = manager.kill(&mut handle);
+            panic!(
+                "tour {tour} : l'invité n'a pas fini en 60 s ; réserve {:?}",
+                reserve.statut()
+            );
+        };
         let code_moniteur = handle.wait().unwrap();
         let lu = sandboxd::invite::lire_console(&console);
         assert!(
