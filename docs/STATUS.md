@@ -1516,10 +1516,13 @@ donne le détail.
   préparation repasse par le même contexte du catalogue, que le plan retient désormais
   (`7cdc1d7`), avec le même modèle et la même intention ; rien n'est émis avant la
   confirmation. Un moteur injoignable se dit en français, avec son adresse (`ee2015f`).
+- La fenêtre servie se lit : `prophet model ls` (`5c2ce2e`) et la page Modèles (`1c15cfb`)
+  marquent le poids que le moteur a chargé et la fenêtre qu'il accorde par requête (`/props`) :
+  4 096 tokens sur l'image, pour un fichier qui en annonce 40 960.
 - CI de `6e1a152` et `c6e4979` (restriction de capd et du journal, essai des droits sous le
   compte de l'humain) : **verte des deux côtés**, dont les sept services sous systemd, la
   mission réelle Qwen3 sous NixOS, le système installé (UEFI et BIOS) et l'ISO.
-- `just check` : **855 réussis, 0 échec, 47 ignorés**, format, clippy, contrôles du dépôt et
+- `just check` : **856 réussis, 0 échec, 48 ignorés**, format, clippy, contrôles du dépôt et
   secrets (repli). Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
 
