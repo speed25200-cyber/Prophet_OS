@@ -227,6 +227,31 @@ fn une_recherche_dans_un_fichier_nomme_porte_sur_lui_seul() {
 }
 
 #[test]
+fn une_recherche_par_contenu_compte_toutes_les_lignes_trouvees() {
+    let m = monde(&["~/docs/**"]);
+    let journal: String = (0..8)
+        .map(|n| {
+            if n % 2 == 0 {
+                format!("ERROR {n}\n")
+            } else {
+                format!("INFO {n}\n")
+            }
+        })
+        .chain((0..4).map(|n| format!("ERROR tard {n}\n")))
+        .collect();
+    std::fs::write(m.home.join("docs/app.log"), journal).unwrap();
+    let r = m.call(
+        "fs.search",
+        json!({"root":"~/docs/app.log","content_contains":"ERROR"}),
+    );
+    let d = r.structured.unwrap();
+    let fichier = &d["results"][0];
+    assert_eq!(fichier["matching_lines"], 8, "{d}");
+    assert_eq!(fichier["matches"].as_array().unwrap().len(), 5, "{d}");
+    assert_eq!(fichier["more_matches"], true);
+}
+
+#[test]
 fn chercher_par_nom_ce_qui_est_dans_le_contenu_trouve_quand_meme() {
     let m = monde(&["~/docs/**"]);
     std::fs::write(

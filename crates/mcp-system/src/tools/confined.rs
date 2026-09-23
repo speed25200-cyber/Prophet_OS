@@ -695,17 +695,21 @@ const EXCERPT_CHARS: usize = 200;
 
 /// Les premières lignes qui contiennent le motif, numérotées depuis 1, chacune réduite à un
 /// extrait centré sur le motif ; vrai s'il y en a d'autres.
-fn matching_lines(text: &str, needle: &str) -> (Vec<Value>, bool) {
+fn matching_lines(text: &str, needle: &str) -> (Vec<Value>, bool, usize) {
     let mut found = text
         .lines()
         .enumerate()
         .filter(|(_, line)| line.contains(needle));
-    let lines = found
+    let lines: Vec<Value> = found
         .by_ref()
         .take(MAX_MATCHES)
         .map(|(index, line)| json!({"line": index + 1, "text": excerpt(line.trim(), needle)}))
         .collect();
-    (lines, found.next().is_some())
+    // Le compte exact des lignes trouvées : un modèle qui doit dénombrer ne le peut pas
+    // au-delà des cinq extraits rendus.
+    let reste = found.count();
+    let total = lines.len() + reste;
+    (lines, reste > 0, total)
 }
 
 fn excerpt(line: &str, needle: &str) -> String {
@@ -841,8 +845,9 @@ fn search_with(
                 found = Some(matching_lines(&text, needle));
             }
             let mut value = json!({"path":view.logical.join(&child),"size":m.len()});
-            if let Some((lines, more)) = found.take() {
+            if let Some((lines, more, total)) = found.take() {
                 value["matches"] = json!(lines);
+                value["matching_lines"] = json!(total);
                 if more {
                     value["more_matches"] = json!(true);
                 }
