@@ -1377,9 +1377,18 @@ fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
     }
     let width = ui.available_width();
     let gap = 12.0;
-    let tile = ((width - 2.0 * gap) / 3.0).max(150.0);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = gap;
+    // Trois cartes de front seulement s'il y a la place : sous 250 points, l'état et le bouton
+    // « Ouvrir » se recouvrent ; les cartes passent alors à deux, puis à une par ligne.
+    let colonnes: f32 = if width >= 3.0 * 250.0 + 2.0 * gap {
+        3.0
+    } else if width >= 2.0 * 250.0 + gap {
+        2.0
+    } else {
+        1.0
+    };
+    let tile = ((width - (colonnes - 1.0) * gap) / colonnes - 0.5).floor();
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(gap, gap);
         for card in &atelier.clients {
             let (rect, _) = ui.allocate_exact_size(vec2(tile, 118.0), egui::Sense::hover());
             let p = ui.painter();
@@ -2026,7 +2035,8 @@ fn modeles(ui: &mut egui::Ui, atelier: &mut Atelier) {
             ui.add_space(14.0);
             plaque(ui, 28, |ui| {
                 ui.set_width(ui.available_width());
-                ui.horizontal_wrapped(|ui| {
+                // L'adresse et ses commandes se centrent sur une même ligne.
+                ui.horizontal(|ui| {
                     ui.label(
                         RichText::new(&atelier.endpoint)
                             .monospace()
