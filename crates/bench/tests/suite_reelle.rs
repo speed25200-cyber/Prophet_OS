@@ -357,8 +357,12 @@ impl OutilsNus {
         }
     }
 
+    /// Les définitions offertes au modèle, dans l'ordre où le registre de Prophet les offre
+    /// (par nom) : un petit modèle est sensible à l'ordre de la liste, qui ne doit pas séparer
+    /// les deux côtés du banc.
     fn definitions(&self) -> Vec<LocalTool> {
-        self.outils
+        let mut definitions: Vec<LocalTool> = self
+            .outils
             .iter()
             .map(|o| {
                 let spec = o.spec();
@@ -368,7 +372,9 @@ impl OutilsNus {
                     parameters: spec.input_schema,
                 }
             })
-            .collect()
+            .collect();
+        definitions.sort_by(|a, b| a.name.cmp(&b.name));
+        definitions
     }
 }
 
@@ -886,6 +892,36 @@ async fn faux_moteur() -> String {
         }
     });
     endpoint
+}
+
+/// Les deux côtés offrent au modèle les mêmes outils, décrits de même, dans le même ordre.
+#[test]
+fn les_deux_cotes_offrent_les_memes_outils_dans_le_meme_ordre() {
+    let dir = tempfile::tempdir().unwrap();
+    let nus = OutilsNus::new(dir.path(), "ordre").definitions();
+    let mut registre = mcp_system::registry::Registry::new(
+        Arc::new(Mutex::new(
+            capd::Broker::new(
+                ed25519_dalek::SigningKey::from_bytes(&[7; 32]),
+                "capd@banc",
+                dir.path().display().to_string(),
+            )
+            .unwrap(),
+        )),
+        Arc::new(mcp_system::registry::MemoryJournal::new()),
+    );
+    registre.register(Arc::new(mcp_system::tools::Read));
+    registre.register(Arc::new(mcp_system::tools::Write));
+    registre.register(Arc::new(mcp_system::tools::List));
+    registre.register(Arc::new(mcp_system::tools::Stat));
+    registre.register(Arc::new(mcp_system::tools::Search));
+    let prophet: Vec<(String, String)> = registre
+        .all()
+        .into_iter()
+        .map(|s| (s.name, s.description))
+        .collect();
+    let nue: Vec<(String, String)> = nus.into_iter().map(|d| (d.name, d.description)).collect();
+    assert_eq!(prophet, nue);
 }
 
 /// Le banc lui-même, éprouvé sans modèle : les deux chemins jouent une tâche jusqu'au
