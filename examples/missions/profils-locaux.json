@@ -48,6 +48,7 @@
             "fs.search",
             "fs.write",
             "fs.edit",
+            "fs.copy",
             "calc.eval"
           ]
         }
@@ -119,6 +120,7 @@
             "fs.search",
             "fs.write",
             "fs.edit",
+            "fs.copy",
             "calc.eval",
             "http.fetch",
             "web.open",
@@ -200,6 +202,7 @@
             "fs.search",
             "fs.write",
             "fs.edit",
+            "fs.copy",
             "calc.eval",
             "ui.apps",
             "ui.tree",

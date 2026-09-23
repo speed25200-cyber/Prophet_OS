@@ -22,6 +22,7 @@
 | `fs.list` | fs.list chemin et descendants | non | non | fusion travail/origine ; ≤ 2000 résultats |
 | `fs.edit` | fs.write chemin (lecture sous fs.read) | non | non | `old` exact remplacé par `new`, une seule occurrence sauf `all: true` ; écrit dans l'espace de travail comme `fs.write` ; texte UTF-8, 1 Mio au plus ; rend `replaced` (ADR 0051) |
 | `calc.eval` | tool.call | non | non | `expression` (nombres, + - * /, parenthèses, virgule décimale) ou `numbers` (somme, compte, moyenne, min, max) ; ne lit ni n'écrit rien (ADR 0053) |
+| `fs.copy` | fs.read source, fs.write destination | non | non | `from` copié octet pour octet vers `path` dans l'espace de travail, dossiers créés ; 64 Mio au plus (ADR 0051) |
 | `fs.stat` | fs.read chemin | non | non | |
 | `fs.search` | fs.read racine et descendants | non | non | nom et contenu ; une racine qui est un fichier est fouillée seule ; un `name_contains` seul qu'aucun nom ne porte est cherché dans le contenu (`note`) ; ≤ 200 résultats ; par contenu, le nombre exact de lignes trouvées de chaque fichier (`matching_lines`) et les cinq premières (`matches` : numéro et extrait de 200 caractères au plus, `more_matches`) |
 | `fs.diff_task` | task courante | non | non | |

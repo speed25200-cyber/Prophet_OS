@@ -41,6 +41,14 @@ d'exemple (`examples/missions/profils-locaux.json`) et le banc les accordent.
   relève aussi, pour la boucle nue, les arguments abrégés de chaque appel (le journal de
   Prophet n'en garde que l'empreinte, et c'est voulu).
 
+- **Complément (neuvième passage du banc) : `fs.copy {from, path}`.** « ranger-par-annee »
+  n'a jamais réussi : ranger des factures dans des sous-dossiers exige de les copier, et aucun
+  outil ne le permettait sans les relire et les réécrire en texte — ce qui corromprait un vrai
+  PDF. `fs.copy` copie un fichier octet pour octet dans l'espace de travail : la source se lit
+  sous `fs.read`, la destination s'écrit sous `fs.write` (les deux sont vérifiés), les dossiers
+  sont créés, 64 Mio au plus ; rien ne quitte l'espace de travail avant la publication. Les
+  contextes de l'image, le catalogue d'exemple et le banc l'offrent.
+
 ## Alternatives écartées
 
 - **Un diff unifié à appliquer** : exact, mais un petit modèle produit rarement un diff valide ;

@@ -17,6 +17,7 @@ macro_rules! file_tool {
                 let required = match Operation::$operation {
                     Operation::Write => vec!["path", "content"],
                     Operation::Edit => vec!["path", "old", "new"],
+                    Operation::Copy => vec!["from", "path"],
                     _ => vec![$key],
                 };
                 ToolSpec {
@@ -73,6 +74,18 @@ file_tool!(
         "old":{"type":"string","description":"Passage exact à remplacer, tel qu'il figure dans le fichier."},
         "new":{"type":"string","description":"Texte qui le remplace."},
         "all":{"type":"boolean","description":"Remplacer chaque occurrence au lieu d'exiger qu'il n'y en ait qu'une."}
+    })
+);
+file_tool!(
+    CopyFile,
+    "fs.copy",
+    "Copie un fichier, octet pour octet, de `from` vers `path` dans l'espace de travail de la tâche, sans modifier le fichier de l'utilisateur : pour ranger ou dupliquer des fichiers sans les relire ni les réécrire. La source se lit sous fs.read, la destination s'écrit sous fs.write ; les dossiers de la destination sont créés. Limite : 64 Mio. La validation des changements reste explicite.",
+    "fs.write",
+    Copy,
+    "path",
+    json!({
+        "from":{"type":"string","description":"Fichier à copier."},
+        "path":{"type":"string","description":"Chemin de la copie."}
     })
 );
 file_tool!(

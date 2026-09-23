@@ -598,6 +598,7 @@ impl Mission {
         registry.register(Arc::new(mcp_system::tools::Read));
         registry.register(Arc::new(mcp_system::tools::Write));
         registry.register(Arc::new(mcp_system::tools::Edit));
+        registry.register(Arc::new(mcp_system::tools::CopyFile));
         registry.register(Arc::new(mcp_system::tools::List));
         registry.register(Arc::new(mcp_system::tools::Stat));
         registry.register(Arc::new(mcp_system::tools::Search));

@@ -446,6 +446,7 @@ impl Profile {
                         "fs.read"
                             | "fs.write"
                             | "fs.edit"
+                            | "fs.copy"
                             | "fs.list"
                             | "fs.search"
                             | "fs.stat"

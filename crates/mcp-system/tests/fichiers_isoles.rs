@@ -440,6 +440,59 @@ fn une_edition_hors_du_droit_d_ecrire_est_refusee() {
 }
 
 #[test]
+fn une_copie_range_un_fichier_octet_pour_octet_dans_l_espace_de_travail() {
+    let m = monde(&["~/docs/**"]);
+    let octets: Vec<u8> = (0..=255u8).chain([0, 159, 146, 150]).collect();
+    std::fs::write(m.home.join("docs/facture-2025-03.pdf"), &octets).unwrap();
+    let r = m.call(
+        "fs.copy",
+        json!({"from":"~/docs/facture-2025-03.pdf","path":"~/docs/out/2025/facture-2025-03.pdf"}),
+    );
+    assert!(!r.is_error, "{r:?}");
+    assert_eq!(r.structured.unwrap()["bytes"], octets.len());
+    assert_eq!(
+        std::fs::read(m.work.join("docs/out/2025/facture-2025-03.pdf")).unwrap(),
+        octets,
+        "les octets, pas du texte"
+    );
+    assert!(
+        !m.home.join("docs/out").exists(),
+        "rien hors de l'espace de travail"
+    );
+    // Une source absente, un répertoire, une destination hors du droit d'écrire.
+    let absente = m.call(
+        "fs.copy",
+        json!({"from":"~/docs/absente.pdf","path":"~/docs/out/x.pdf"}),
+    );
+    assert_eq!(absente.structured.unwrap()["code"], "NotFound");
+    let dossier = m.call(
+        "fs.copy",
+        json!({"from":"~/docs","path":"~/docs/out/copie"}),
+    );
+    assert_eq!(dossier.structured.unwrap()["code"], "Invalid");
+    let hors = m.call(
+        "fs.copy",
+        json!({"from":"~/docs/facture-2025-03.pdf","path":"~/ailleurs/x.pdf"}),
+    );
+    assert_eq!(hors.structured.unwrap()["code"], "PolicyDenied");
+    assert!(!m.work.join("ailleurs").exists());
+}
+
+#[test]
+fn copier_depuis_hors_du_droit_de_lire_est_refuse() {
+    let m = monde(&["~/docs/**"]);
+    std::fs::create_dir_all(m.home.join("prive")).unwrap();
+    std::fs::write(m.home.join("prive/secret.txt"), "NE-PAS-COPIER").unwrap();
+    let r = m.call(
+        "fs.copy",
+        json!({"from":"~/prive/secret.txt","path":"~/docs/fuite.txt"}),
+    );
+    assert!(r.is_error, "{r:?}");
+    assert_eq!(r.structured.unwrap()["code"], "PolicyDenied");
+    assert!(!m.work.join("docs/fuite.txt").exists());
+}
+
+#[test]
 fn la_lecture_compte_les_lignes_du_contenu_rendu() {
     // Compter les lignes d'un texte relu est une erreur courante d'un petit modèle : le
     // service les compte, avec ou sans fin de ligne finale, fichier vide compris.

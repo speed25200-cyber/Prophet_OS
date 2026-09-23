@@ -33,10 +33,11 @@ use providers::native::{ModelClient, ModelTurn, NativeDriver, ToolExecutor, Usag
 use serde_json::{Value, json};
 
 /// Les outils que les deux côtés offrent au modèle.
-const OUTILS: [&str; 7] = [
+const OUTILS: [&str; 8] = [
     "fs.read",
     "fs.write",
     "fs.edit",
+    "fs.copy",
     "fs.list",
     "fs.stat",
     "fs.search",
@@ -375,6 +376,7 @@ impl OutilsNus {
                 Box::new(mcp_system::tools::Read),
                 Box::new(mcp_system::tools::Write),
                 Box::new(mcp_system::tools::Edit),
+                Box::new(mcp_system::tools::CopyFile),
                 Box::new(mcp_system::tools::List),
                 Box::new(mcp_system::tools::Stat),
                 Box::new(mcp_system::tools::Search),
@@ -958,6 +960,7 @@ fn les_deux_cotes_offrent_les_memes_outils_dans_le_meme_ordre() {
     registre.register(Arc::new(mcp_system::tools::Read));
     registre.register(Arc::new(mcp_system::tools::Write));
     registre.register(Arc::new(mcp_system::tools::Edit));
+    registre.register(Arc::new(mcp_system::tools::CopyFile));
     registre.register(Arc::new(mcp_system::tools::List));
     registre.register(Arc::new(mcp_system::tools::Stat));
     registre.register(Arc::new(mcp_system::tools::Search));

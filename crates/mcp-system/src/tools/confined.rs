@@ -19,6 +19,9 @@ use crate::registry::{ResourceAccess, ToolContext};
 
 pub(super) const MAX_READ: usize = 256 * 1024;
 pub(super) const MAX_WRITE: usize = 1024 * 1024;
+/// Taille maximale d'un fichier copié : ses octets ne viennent pas du modèle, la borne est
+/// celle d'un document ordinaire.
+const MAX_COPY: u64 = 64 * 1024 * 1024;
 const MAX_VISITED: usize = 10_000;
 const MAX_SCAN: usize = 8 * 1024 * 1024;
 const MAX_RESULTS_BYTES: usize = 512 * 1024;
@@ -327,6 +330,10 @@ impl<'a> View<'a> {
     }
 
     fn write(&self, relative: &Path, content: &str) -> Result<()> {
+        self.write_bytes(relative, content.as_bytes())
+    }
+
+    fn write_bytes(&self, relative: &Path, content: &[u8]) -> Result<()> {
         if !self.permits(Act::Write, relative) {
             return Err(denied());
         }
@@ -361,7 +368,7 @@ impl<'a> View<'a> {
         )?;
         let mut file = File::from(fd);
         let result = (|| {
-            file.write_all(content.as_bytes())?;
+            file.write_all(content)?;
             file.sync_all()?;
             if !self.permits(Act::Write, relative) {
                 return Err(denied());
@@ -421,6 +428,7 @@ pub(super) enum Operation {
     Read,
     Write,
     Edit,
+    Copy,
     List,
     Stat,
     Search,
@@ -567,6 +575,7 @@ fn run(
             )
         }
         Operation::Edit => edit(&view, &relative, &logical, args),
+        Operation::Copy => copy(&view, context, &relative, &logical, args),
         Operation::Stat => {
             if !view.permits(Act::Read, &relative) {
                 return Err(denied());
@@ -602,6 +611,67 @@ fn run(
         }
         Operation::Search => search(&view, &relative, args),
     }
+}
+
+/// Copie un fichier du périmètre vers un autre chemin de l'espace de travail, octet pour octet :
+/// ranger des factures par année ne demande pas de les relire ni de les réécrire. La source se
+/// lit sous le droit de `fs.read`, la destination s'écrit sous celui de `fs.write` ; rien ne
+/// quitte l'espace de travail avant la publication.
+fn copy(
+    view: &View<'_>,
+    context: &ToolContext,
+    destination: &Path,
+    logical: &Path,
+    args: &Value,
+) -> Result<Value> {
+    let brut = args
+        .get("from")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("chemin source (from) requis"))?;
+    let source = relative(brut, context).ok_or_else(denied)?;
+    if !view.permits(Act::Read, &source) || !view.permits(Act::Write, destination) {
+        return Err(denied());
+    }
+    let file = match view.selected(&source, OFlags::RDONLY) {
+        Err(Failure(ErrorCode::NotFound, _)) => {
+            return Err(Failure(
+                ErrorCode::NotFound,
+                "fichier source introuvable : vérifiez le chemin avec fs.list".into(),
+            ));
+        }
+        other => other?,
+    };
+    let metadata = file.metadata()?;
+    if metadata.is_dir() {
+        return Err(invalid(
+            "la source est un répertoire : copiez ses fichiers un par un",
+        ));
+    }
+    if !metadata.is_file() || metadata.nlink() != 1 {
+        return Err(denied());
+    }
+    if metadata.len() > MAX_COPY {
+        return Err(Failure(
+            ErrorCode::BudgetExceeded,
+            "copie limitée à 64 Mio".into(),
+        ));
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(MAX_COPY + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_COPY {
+        return Err(Failure(
+            ErrorCode::BudgetExceeded,
+            "copie limitée à 64 Mio".into(),
+        ));
+    }
+    view.write_bytes(destination, &bytes)?;
+    Ok(json!({
+        "from": view.logical.join(&source),
+        "path": logical,
+        "bytes": bytes.len(),
+        "staged": true,
+        "note": "copié dans l'espace de travail ; la validation reste explicite",
+    }))
 }
 
 /// Remplace un passage exact d'un fichier texte et écrit le résultat dans l'espace de travail,
