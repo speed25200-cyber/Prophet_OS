@@ -20,6 +20,14 @@ pkgs.runCommand "prophet-llama-tool-grammar" {
     echo "--- routeur : dossier de modèles ---"
     grep -rn -- '--models-dir' ${engine.src}/common/arg.cpp || echo "absent : --models-dir"
     grep -rn -A12 'models_dir' ${engine.src}/tools/server/server-models.cpp | head -80 || true
+    # Quels réglages reçoit un poids venu du dossier : la section globale du fichier de
+    # préréglages (son nom), et ce que le routeur transmet de ses propres arguments.
+    echo "--- préréglages : dossier et section globale ---"
+    grep -rn -B2 -A30 'load_from_models_dir' ${engine.src}/common/preset.cpp | head -90 || true
+    grep -rn -B3 -A12 'load_from_ini' ${engine.src}/common/preset.cpp | grep -n 'global\|"\*"\|section' | head -30 || true
+    grep -n -B2 -A6 '\[\*\]\|models-dir\|global' ${engine.src}/tools/server/README.md | head -80 || true
+    echo "--- routeur : arguments transmis aux instances ---"
+    grep -rn -B2 -A8 'router.*arg\|forward.*arg\|base_args\|child.*args' ${engine.src}/tools/server/server-models.cpp | head -60 || true
   } >> "$out/result.txt"
   cat "$out/result.txt"
 ''
