@@ -142,7 +142,7 @@ pub(crate) fn draw(
     let mut relaunch = None;
     if let Some(info) = missions.snapshot() {
         let (label, color) = status(info.task.state, &accent);
-        ui.horizontal_wrapped(|ui| {
+        hud::rangee(ui, |ui| {
             ui.label(RichText::new(label).color(color).size(13.0));
             // Qui mène la mission, lisible : « Codex (ChatGPT) », « qwen3-1.7b » (ADR 0035).
             small(
@@ -237,7 +237,7 @@ pub(crate) fn draw(
             // Où l'agent navigue, tel que ses outils l'ont déposé : titre et adresse, sans
             // l'arbre. L'humain peut y aller avec son propre navigateur.
             ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
+            hud::rangee(ui, |ui| {
                 small(ui, "Sur le web :");
                 ui.label(
                     RichText::new(limited(
@@ -697,7 +697,7 @@ fn result(
             Frame::new()
                 .inner_margin(egui::Margin::symmetric(0, 9))
                 .show(ui, |ui| {
-                    ui.horizontal_wrapped(|ui| {
+                    hud::rangee(ui, |ui| {
                         ui.label(RichText::new(symbol).color(color).size(18.0));
                         ui.label(
                             RichText::new(limited(

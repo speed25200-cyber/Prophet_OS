@@ -353,6 +353,26 @@ pub(crate) fn releve(
     value_rect.union(label_rect)
 }
 
+/// Hauteur d'un [`bouton`].
+pub(crate) const HAUTEUR_BOUTON: f32 = 32.0;
+
+/// Une rangée qui passe à la ligne, où textes et boutons partagent une même ligne médiane.
+///
+/// `horizontal_wrapped` part d'une rangée haute de la taille d'interaction (20 points) : les
+/// libellés s'y centrent, mais un bouton de [`HAUTEUR_BOUTON`] part du haut de la rangée et
+/// descend sous eux. Ici la rangée part de la hauteur du bouton.
+pub(crate) fn rangee<R>(
+    ui: &mut egui::Ui,
+    contenu: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let taille = vec2(ui.available_size_before_wrap().x, HAUTEUR_BOUTON);
+    ui.allocate_ui_with_layout(
+        taille,
+        egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
+        contenu,
+    )
+}
+
 /// Un bouton du tableau de bord : capitales espacées, fil d'accent quand il attend, plein
 /// d'accent et lueur quand il commande.
 pub(crate) fn bouton(
@@ -378,7 +398,7 @@ pub(crate) fn bouton(
         );
         fonts.layout_job(job).size().x
     }) + 30.0;
-    let (_, rect) = ui.allocate_space(vec2(width, 32.0));
+    let (_, rect) = ui.allocate_space(vec2(width, HAUTEUR_BOUTON));
     let response = ui.interact(rect, egui::Id::new(id), egui::Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, actif, texte)
