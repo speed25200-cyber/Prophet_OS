@@ -444,14 +444,68 @@ fn http_local(port: u16, methode: &str, chemin: &str, corps: &Value) -> Value {
         corps.len()
     )
     .unwrap();
-    let mut reponse = String::new();
-    flux.read_to_string(&mut reponse).unwrap();
-    let (tete, corps) = reponse.split_once("\r\n\r\n").unwrap_or((&reponse, ""));
+    let mut reponse = Vec::new();
+    flux.read_to_end(&mut reponse).unwrap();
+    let fin_tete = reponse
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .expect("réponse sans en-tête");
+    let tete = String::from_utf8_lossy(&reponse[..fin_tete]).into_owned();
+    let mut corps = reponse[fin_tete + 4..].to_vec();
     assert!(
         tete.starts_with("HTTP/1.1 200"),
-        "{methode} {chemin} : {tete}\n{corps}"
+        "{methode} {chemin} : {tete}\n{}",
+        String::from_utf8_lossy(&corps)
     );
-    serde_json::from_str(corps).unwrap_or_else(|e| panic!("{chemin} : {e} : {corps}"))
+    // Le moteur répond en morceaux (`Transfer-Encoding: chunked`) : on les recolle, en octets.
+    if tete
+        .to_ascii_lowercase()
+        .contains("transfer-encoding: chunked")
+    {
+        let mut entier = Vec::new();
+        let mut reste = corps.as_slice();
+        while let Some(fin) = reste.windows(2).position(|w| w == b"\r\n") {
+            let taille = String::from_utf8_lossy(&reste[..fin]);
+            let n = usize::from_str_radix(taille.trim(), 16).unwrap_or(0);
+            if n == 0 {
+                break;
+            }
+            entier.extend_from_slice(&reste[fin + 2..fin + 2 + n]);
+            reste = &reste[(fin + 4 + n).min(reste.len())..];
+        }
+        corps = entier;
+    }
+    serde_json::from_slice(&corps)
+        .unwrap_or_else(|e| panic!("{chemin} : {e} : {}", String::from_utf8_lossy(&corps)))
+}
+
+#[test]
+fn une_reponse_en_morceaux_se_recolle() {
+    // La forme exacte que le routeur épinglé a rendue en CI, un caractère accentué en plus.
+    let ecoute = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = ecoute.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        use std::io::{Read as _, Write as _};
+        let (mut flux, _) = ecoute.accept().unwrap();
+        let mut tampon = [0u8; 4096];
+        let _ = flux.read(&mut tampon);
+        let a = "{\"choices\":[{\"message\":{\"content\":\"bonjour é".as_bytes();
+        let b = "\"}}],\"usage\":{\"completion_tokens\":7}}".as_bytes();
+        let mut r = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
+        // Le premier morceau coupe le « é » en deux.
+        let coupe = a.len() - 1;
+        r.extend(format!("{coupe:x}\r\n").as_bytes());
+        r.extend(&a[..coupe]);
+        r.extend(b"\r\n");
+        let second = [&a[coupe..], b].concat();
+        r.extend(format!("{:x}\r\n", second.len()).as_bytes());
+        r.extend(&second);
+        r.extend(b"\r\n0\r\n\r\n");
+        flux.write_all(&r).unwrap();
+    });
+    let lu = http_local(port, "POST", "/v1/chat/completions", &json!({}));
+    assert_eq!(lu["choices"][0]["message"]["content"], "bonjour é");
+    assert_eq!(lu["usage"]["completion_tokens"], 7);
 }
 
 /// Le critère de M8-T7, par les vrais binaires : `prophet model pull qwen3-8b-q4` (agentd, capd,
