@@ -59,10 +59,21 @@ aligne les plaques au pixel, reçoit l'objectif dès l'écran vide, se pilote en
 ralentit son champ quand personne n'agit.
 
 Côté agents, une mission lit son propre état et son budget restant (`task.status`) et ses
-changements (`task.diff`) ; le catalogue des poids dit l'architecture, la quantification et la
-fenêtre de contexte de chaque modèle installé (`prophet model ls`) ; et un processus de la
-session humaine n'obtient plus de droit qu'à travers une mission qu'agentd planifie et
-journalise, ni n'écrit au journal ([ADR 0044](docs/adr/0044-les-methodes-reservees-par-classe-de-pair.md)).
+changements (`task.diff`) ; elle lit un gros fichier par morceaux (`fs.read` avec `offset`) et
+cherche des lignes plutôt que des fichiers (`fs.search`) ; un historique plus long que la
+fenêtre du modèle local est resserré à sa mesure au lieu de faire échouer la mission, en
+ménageant le cache du moteur ; le catalogue des poids dit l'architecture, la quantification et
+la fenêtre de chaque modèle, et celle que le moteur sert vraiment (`prophet model ls`) ; une
+mission échouée se relance par son contexte (« Relancer », `prophet task retry`).
+
+Le code d'un agent tourne dans une microVM Firecracker **rendue en une dizaine de
+millisecondes** : sandboxd en tient deux prêtes, restaurées d'un instantané, et chaque exécution
+reçoit une machine neuve, sans réseau ([ADR 0045](docs/adr/0045-la-reserve-de-microvm-par-instantane.md),
+médiane de 8,9 à 10,9 ms mesurée sur le coureur KVM de la CI, pour un objectif de 150 ms). Au
+niveau 0, Landlock borne désormais ce qu'un outil confiné peut écrire et exécuter. Un processus
+de la session humaine n'obtient de droit qu'à travers une mission qu'agentd planifie et
+journalise, n'écrit pas au journal, et ne peut pas se faire passer pour un daemon
+([ADR 0044](docs/adr/0044-les-methodes-reservees-par-classe-de-pair.md)).
 
 Une [session humaine avec plusieurs applications](docs/reports/bureau-humain-2026-09-13.md) est
 intégrée dans la configuration d'image : connexion PAM, supervision, ChatGPT, Claude Code et Codex,
@@ -81,11 +92,12 @@ Captures, essais Wayland et limites : [rapport de l'espace natif](docs/reports/e
 prophet status          # ce que la machine sait faire, et ce qu'elle ne sait pas
 prophet provider ls     # pilotes disponibles et sessions d'abonnement
 prophet provider models # modèles du moteur local (port 8080 par défaut)
-prophet model ls        # poids installés : architecture, quantification, contexte
+prophet model ls        # poids installés, et la fenêtre que le moteur sert
 prophet provider chat --model qwen3-0.6b "Bonjour /no_think"
 prophet task ls         # missions connues du service, y compris terminées
 prophet task show <id>  # plan, état et résultat conservés par agentd
 prophet task diff <id>  # changements proposés, non appliqués
+prophet task retry <id> # prépare à nouveau une mission échouée, par son contexte
 prophet task apply <id> # publie les versions examinées dans vos documents
 prophet task undo <id>  # annule cette publication si rien n'a changé depuis
 prophet log verify      # vérifier l'intégrité du journal

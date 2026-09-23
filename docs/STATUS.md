@@ -1519,7 +1519,9 @@ donne le détail.
   neuve à chaque fois, réserve régénérée. Le script d'isolation fait désormais remonter les
   lignes « mesure : » des essais réussis (`41def9e`). Sur `4aaeb50` : réserve pleine en 5,0 s,
   restauration d'une machine en 6 ms, prise médiane de 10,9 ms, et cinq clones tirent cinq
-  aléas distincts de `/dev/urandom`.
+  aléas distincts de `/dev/urandom`. Sur `41df4f5`, deux microVM tournent ensemble (deux
+  programmes d'une seconde en 1,49 s), sans autre interface que la boucle locale et sans
+  connexion sortante possible.
 - **Correction** : M5-T1 cochait « bwrap + Landlock + seccomp », mais l'amorçage n'appliquait
   jamais Landlock (`apply_landlock` sondait l'ABI puis rendait faux) ; le niveau 0 reposait sur
   la racine minimale et seccomp seuls, et une sandbox pouvait créer des fichiers à sa propre
