@@ -810,7 +810,7 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 - [x] M8-T4 — Pilote `claude-code` (2026-09-12, 24b8338) — ligne de commande, environnement, détection de session
 - [x] M8-T5 — Pilote `codex` (2026-09-12, 24b8338) — pilote Codex CLI
 - [x] M8-T6 — Pilote `gemini` (2026-09-12, 24b8338) — pilote Gemini CLI
-- [ ] M8-T7 — Moteurs locaux — client HTTP, flux annulable, interface de conversation et essai Qwen3/CPU réalisés ; le 13 septembre, budgets de tokens par modèle, condensation du contexte et deux modèles servis par un llama-server en mode routeur, prouvés en relais réel (ADR 0034) ; le même jour, l'image sert deux modèles en mode routeur (Qwen3-1.7B en réflexion, Qwen3-0.6B en exécution, téléchargés à l'installation), préréglages vérifiés sur le vrai moteur et configuration évaluée ; le 22 septembre, le catalogue des poids se lit dans l'en-tête GGUF de chaque fichier (`prophet model ls`, page Modèles : architecture, quantification, fenêtre de contexte), et un historique plus long que la fenêtre du moteur est resserré à sa mesure au lieu de faire échouer la mission ou la conversation ; le 23 septembre, les poids du catalogue du système se téléchargent par egress sous un jeton de capd borné au dépôt, vérifiés (SHA-256, taille, en-tête GGUF) avant d'être posés, reprennent après une coupure et se retirent (`prophet model pull`, page Modèles, ADR 0046, `114ef7b`, `1752d7a`, `78b7791`, `32a20ea`) ; restent servir un poids téléchargé (`prophet model serve`), les budgets VRAM et la matrice GPU/modèles
+- [ ] M8-T7 — Moteurs locaux — client HTTP, flux annulable, interface de conversation et essai Qwen3/CPU réalisés ; le 13 septembre, budgets de tokens par modèle, condensation du contexte et deux modèles servis par un llama-server en mode routeur, prouvés en relais réel (ADR 0034) ; le même jour, l'image sert deux modèles en mode routeur (Qwen3-1.7B en réflexion, Qwen3-0.6B en exécution, téléchargés à l'installation), préréglages vérifiés sur le vrai moteur et configuration évaluée ; le 22 septembre, le catalogue des poids se lit dans l'en-tête GGUF de chaque fichier (`prophet model ls`, page Modèles : architecture, quantification, fenêtre de contexte), et un historique plus long que la fenêtre du moteur est resserré à sa mesure au lieu de faire échouer la mission ou la conversation ; le 23 septembre, les poids du catalogue du système se téléchargent par egress sous un jeton de capd borné au dépôt, vérifiés (SHA-256, taille, en-tête GGUF) avant d'être posés, reprennent après une coupure et se retirent (`prophet model pull`, page Modèles, ADR 0046, `114ef7b`, `1752d7a`, `78b7791`, `32a20ea`) ; le même jour, un poids téléchargé se sert par le routeur du moteur (`prophet model serve`, page Modèles, `0df78e7`) ; restent les budgets VRAM et la matrice GPU/modèles
 - [x] M8-T8 — Pilote `prophet-agent` (2026-09-12, 24b8338) — boucle native : points de reprise, fork, rejeu
 - [x] M8-T9 — Sélection de pilote (2026-09-12, 24b8338) — sélection expliquée, confidentialité locale respectée
 - [x] M8-T10 — CLI (2026-09-12, 24b8338) — `prophet provider ls|login`
@@ -1545,8 +1545,11 @@ donne le détail.
   n'a pas été relevée (Hugging Face est injoignable d'ici). Servir : `prophet model serve <id>`
   fait charger un poids par le routeur du moteur (`GET /models`, `POST /models/load`), reconnu
   par le chemin de son fichier (`bc001d2`), et la page Modèles dit « Servi » ou propose
-  « Servir » (`93bd678`) ; reste à faire lire au routeur de l'image le dossier des
-  téléchargements. `model.list` dit aux agents les poids locaux et leur fenêtre (`d49724d`),
+  « Servir » (`93bd678`). En mode relais, le routeur de l'image lit le dossier des
+  téléchargements à son démarrage, avec une section `[*]` qui borne fenêtre, threads et couches
+  (`0df78e7`) : relevé d'abord dans la source du moteur épinglé, et prouvé par le contrôle
+  `llama-router`, qui démarre le vrai routeur avec ces options ; un poids tout juste téléchargé
+  se sert après un redémarrage du moteur. `model.list` dit aux agents les poids locaux et leur fenêtre (`d49724d`),
   `prophet status` les modèles locaux et le catalogue (`6118608`). Un essai `needs_network`
   tire Qwen3 0.6B de Hugging Face par le vrai egress sur une machine qui le joint (`dd4ff44`) :
   vert sur le coureur de la CI (`468324a`), 639 446 688 octets en 23 s, empreinte publiée
@@ -1624,9 +1627,8 @@ abonnement.
 
 **Pour la session suivante.** Lire la CI de la branche (l'instantané de la réserve repris au
 redémarrage sur le coureur KVM ; le téléchargement de poids sous systemd dans l'essai des
-services) ; servir un poids téléchargé (mode routeur de llama-server sur
-`/var/lib/prophet/models/catalogue`, `prophet model serve`) ; relever l'empreinte de
-`qwen3-8b-q4` pour l'inscrire au catalogue ; trancher avec l'utilisateur le sort de
+services, le contrôle `llama-router`) ; relever l'empreinte de `qwen3-8b-q4` pour l'inscrire
+au catalogue ; décider avec l'utilisateur du confinement des clients officiels ; trancher avec l'utilisateur le sort de
 `task.spawn` pour le compte de l'humain, et le chemin de confiance qui distinguerait la surface
 d'un autre programme du compte pour `approval.resolve` (ADR 0044) ; mesurer la surface sur une
 carte graphique ; faire le premier appel réel de Jev avec une clé déposée.
