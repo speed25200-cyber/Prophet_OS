@@ -78,9 +78,10 @@ l'objectif nomme, le service le lui rappelle (ADR 0049 à 0051).
 
 Le [banc M13](docs/reports/banc-m13-2026-09-23.md) joue la suite de tâches avec le modèle de
 l'image, par Prophet et par une boucle nue qui appelle les mêmes outils sans capd ni journal :
-au septième passage, **15 réussites sur 45 par Prophet contre 9** avec Qwen3 1.7B, et **11 sur
-15 contre 9** avec Qwen3 4B, pour moins de tokens et 0,3 à 0,6 s de processeur et 47 Mo de
-services par mission. Il le rejoue à chaque poussée et publie chaque exécution : les
+au huitième passage, **21 réussites sur 45 par Prophet contre 12** avec Qwen3 1.7B, et **10 sur
+15 contre 8** avec Qwen3 4B ; ses services coûtent 0,3 à 0,5 s de processeur et 47 Mo par
+mission, et ses missions, qui continuent là où la boucle nue conclut, dépensent davantage de
+calcul du modèle. Il le rejoue à chaque poussée et publie chaque exécution : les
 outils appelés, la réponse du modèle, ce qui a été rappelé.
 
 Le code d'un agent tourne dans une microVM Firecracker **rendue en une dizaine de

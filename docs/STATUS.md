@@ -1648,7 +1648,9 @@ donne le détail.
   passage) : **Prophet 11/15, boucle nue 9/15**, avec moins de tokens (7 578 contre 9 332).
   `calc.eval` comprend désormais `sum(…)` et les deux paramètres ensemble ; `fs.search` sur un
   fichier ignore le filtre de nom et rend ses lignes sans texte à chercher (la règle du filtre
-  vide avait fait retomber « extraire-les-adresses »).
+  vide avait fait retomber « extraire-les-adresses »). Huitième passage (`aab9476`) :
+  **Prophet 21/45, boucle nue 12/45** (Qwen3 1.7B) et **10/15 contre 8/15** (Qwen3 4B) ; au prix
+  de 1,6 fois les tokens et 1,9 fois le processeur moteur de la boucle nue, qui conclut plus tôt.
 - Concurrence et annulation sur le vrai moteur (FRONTIER, moteurs locaux ; essai
   `deux_requetes_se_partagent_le_moteur_et_un_abandon_le_libere`, vert sur `dd5ce52`) : sur une
   instance à une place comme celle de l'image, deux requêtes simultanées aboutissent toutes

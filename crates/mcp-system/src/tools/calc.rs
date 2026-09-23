@@ -11,6 +11,11 @@ use serde_json::{Value, json};
 use crate::protocol::{CallResult, ErrorCode, ToolMeta, ToolSpec};
 use crate::registry::{Tool, ToolContext};
 
+/// Ce que l'outil répond à une liste vide : au banc, le modèle l'appelle avant d'avoir lu le
+/// fichier, comme si l'outil connaissait la colonne ; il faut lui dire où sont les nombres.
+const VIDE: &str = "numbers est vide : calc.eval ne lit aucun fichier. Lisez d'abord le fichier \
+    avec fs.read, puis passez ses nombres, par exemple numbers: [100, 125, 200]";
+
 /// Longueur maximale d'une expression.
 const MAX_EXPRESSION: usize = 4096;
 /// Profondeur maximale des parenthèses.
@@ -123,9 +128,7 @@ fn calculer(args: &Value) -> Result<Value, String> {
             Ok(resultat)
         }
         None if !liste.is_empty() => Ok(agregats(&liste)),
-        None if args.get("numbers").is_some() => {
-            Err("numbers est vide : mettez-y les nombres, par exemple [100, 125, 200]".into())
-        }
+        None if args.get("numbers").is_some() => Err(VIDE.into()),
         None => Err("donnez expression ou numbers".into()),
     }
 }
@@ -325,10 +328,7 @@ impl Lecteur<'_> {
                 )
             {
                 if self.liste.is_empty() {
-                    return Err(
-                        "numbers est vide : mettez-y les nombres, par exemple [100, 125, 200]"
-                            .into(),
-                    );
+                    return Err(VIDE.into());
                 }
                 self.position += 1;
                 valeurs.extend_from_slice(self.liste);
@@ -478,7 +478,7 @@ mod tests {
         assert_eq!(expression("(120 + 80,5) * 2").unwrap()["value"], 401);
         // Une liste vide à côté d'une expression qui la porte : l'erreur dit quoi faire.
         let vide = calculer(&json!({"expression": "sum(numbers)", "numbers": []})).unwrap_err();
-        assert!(vide.contains("mettez-y les nombres"), "{vide}");
+        assert!(vide.contains("fs.read"), "{vide}");
         assert!(
             expression("numbers + 1")
                 .unwrap_err()
