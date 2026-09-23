@@ -67,6 +67,23 @@ pub fn debit(budget: &Budget) -> f32 {
     f32::from(u16::try_from(budget.spent.steps).unwrap_or(u16::MAX)) * 60.0 / secondes as f32
 }
 
+/// La demande que la surface montre et à laquelle l'humain répond : la plus ancienne dont la
+/// mission peut encore reprendre l'appel. Une demande dont la mission est finie — arrêtée,
+/// échouée, conclue pendant l'attente — ne sera jamais reprise ; la montrer ferait trancher
+/// l'humain pour rien, et capd l'expirera à son heure. La scène et la réponse passent toutes
+/// deux par ici : la décision tranchée est toujours celle qui était montrée.
+#[must_use]
+pub fn demande_montree<'a>(taches: &[Task], approbations: &'a [Approval]) -> Option<&'a Approval> {
+    approbations
+        .iter()
+        .filter(|a| {
+            !taches
+                .iter()
+                .any(|t| t.id == a.task && t.state.is_terminal())
+        })
+        .min_by_key(|a| a.created)
+}
+
 /// Construit la scène à montrer.
 ///
 /// Les tâches terminées restent accessibles pour examiner les résultats et les erreurs.
@@ -97,20 +114,17 @@ pub fn scene(
 
     // La plus ancienne, comme annoncé en tête de module : celle qui attend depuis le plus
     // longtemps passe avant celle qui vient d'arriver.
-    let decision = approbations
-        .iter()
-        .min_by_key(|a| a.created)
-        .map(|a| Decision {
-            question: a.summary.clone(),
-            consequence: consequence(a),
-            motif: a.reason.clone(),
-            tache: a.task.clone(),
-            depuis_secondes: (maintenant - a.created)
-                .whole_seconds()
-                .max(0)
-                .unsigned_abs(),
-            irreversible: a.irreversible,
-        });
+    let decision = demande_montree(taches, approbations).map(|a| Decision {
+        question: a.summary.clone(),
+        consequence: consequence(a),
+        motif: a.reason.clone(),
+        tache: a.task.clone(),
+        depuis_secondes: (maintenant - a.created)
+            .whole_seconds()
+            .max(0)
+            .unsigned_abs(),
+        irreversible: a.irreversible,
+    });
 
     let mut scene = Scene {
         heure,
@@ -193,6 +207,53 @@ mod tests {
             expires: creee + time::Duration::minutes(10),
             state: capd::ApprovalState::Pending,
         }
+    }
+
+    /// Une mission arrêtée pendant qu'elle attendait laisse sa demande dans capd jusqu'à son
+    /// expiration : la surface ne la montre pas, et la réponse de l'humain va à celle qu'il voit.
+    #[test]
+    fn une_demande_dont_la_mission_est_finie_n_est_ni_montree_ni_tranchee() {
+        let now = OffsetDateTime::now_utc();
+        let mission = |id: &str, state| {
+            let mut task = Task::new(id, "Réserver", "codex", "user", Budget::new(limites()), now);
+            task.state = state;
+            task
+        };
+        let taches = vec![
+            mission("t1", State::Cancelled),
+            mission("t2", State::Running),
+        ];
+        let mut ancienne = approbation("apr-vieille", "Payer", true, 120);
+        ancienne.task = "t1".into();
+        let mut vive = approbation("apr-vive", "Envoyer", false, 5);
+        vive.task = "t2".into();
+        let demandes = vec![ancienne, vive];
+        let scene = scene(
+            &taches,
+            &demandes,
+            0,
+            None,
+            String::new(),
+            String::new(),
+            now,
+        );
+        let decision = scene.decision.expect("la demande vive est montrée");
+        assert_eq!(decision.tache, "t2");
+        assert_eq!(
+            demande_montree(&taches, &demandes).map(|a| a.id.as_str()),
+            Some("apr-vive"),
+            "la réponse va à la demande montrée"
+        );
+        // Seule la demande d'une mission finie : rien n'est montré.
+        let scene = scene_seule(&taches, &demandes[..1], now);
+        assert!(scene.decision.is_none());
+        // Une demande d'une mission que la liste ne connaît pas reste montrée : on ne sait pas
+        // qu'elle est finie.
+        assert!(demande_montree(&[], &demandes[..1]).is_some());
+    }
+
+    fn scene_seule(taches: &[Task], demandes: &[Approval], now: OffsetDateTime) -> Scene {
+        scene(taches, demandes, 0, None, String::new(), String::new(), now)
     }
 
     fn budget(limites: Limits, depense: Spent) -> Budget {

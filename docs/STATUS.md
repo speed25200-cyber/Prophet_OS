@@ -1744,7 +1744,11 @@ donne le détail.
   dit la réponse du service. Éprouvé avec les vrais services : une mission en pleine inférence
   finit annulée sans rien écrire, un plan en attente est annulé, un second arrêt ne trouve
   rien. Une mission arrêtée en vol dit désormais « annulée par l'utilisateur » au lieu de
-  « erreur d'entrée-sortie : annulation demandée ».
+  « erreur d'entrée-sortie : annulation demandée ». Une mission arrêtée pendant qu'elle
+  attendait une décision laissait sa demande dans capd jusqu'à expiration, et la bande « Décision
+  en attente » la montrait encore : la surface ne montre plus une demande dont la mission est
+  finie, et la réponse de l'humain va toujours à la demande montrée (une seule sélection pour les
+  deux, `depuis::demande_montree`).
 - `just check` : **941 réussis, 0 échec, 67 ignorés** (`73f2031`), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,

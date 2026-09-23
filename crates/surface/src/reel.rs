@@ -25,7 +25,7 @@ use capd::Approval;
 use time::OffsetDateTime;
 
 use crate::fenetre::{Reponse, Source};
-use crate::scene::{Decision, Isolation, Scene};
+use crate::scene::{Isolation, Scene};
 
 /// À quel rythme l'état du système est relu.
 ///
@@ -147,7 +147,7 @@ impl Source for Reel {
         self.montree = scene
             .decision
             .as_ref()
-            .map(|d| identifiant(d, &approbations));
+            .map(|_| identifiant(&taches, &approbations));
         scene.ordonner();
         scene
     }
@@ -197,10 +197,8 @@ impl Source for Reel {
 /// [`Decision`] ne le porte pas : la surface n'a pas à connaître les identifiants du système pour
 /// dessiner. On le retrouve donc par la demande la plus ancienne, qui est celle que
 /// `depuis::scene` a choisi de montrer — la même règle des deux côtés.
-fn identifiant(_montree: &Decision, approbations: &[Approval]) -> String {
-    approbations
-        .iter()
-        .min_by_key(|a| a.created)
+fn identifiant(taches: &[Task], approbations: &[Approval]) -> String {
+    crate::depuis::demande_montree(taches, approbations)
         .map(|a| a.id.clone())
         .unwrap_or_default()
 }
