@@ -151,6 +151,23 @@ dernier résultat réduit de 45 à 26 ko ce qu'une mission de huit lectures fait
 mission échouée par le même contexte du catalogue ; un moteur injoignable se dit en français.
 La fenêtre servie se lit dans `prophet model ls` et sur la page Modèles.
 
+## 5 quater. Le 23 septembre, suite : l'instantané repris, les poids gérés
+
+**L'instantané de la réserve survit au redémarrage.** Sous `/var/lib/prophet/sandboxd/reserve`,
+sandboxd garde l'instantané de son invité en attente, avec l'empreinte de ce dont il dépend
+(moniteur, noyau et racine d'invité, noyau et processeur de l'hôte) ; même empreinte, la
+première machine est restaurée aussitôt. Sur le coureur KVM : **réserve reprise pleine en
+7,4 ms**, contre 4,6 s pour un premier démarrage. `sandbox.run` et `proc.exec` disent à l'agent
+ce que son exécution a coûté (`elapsed_ms`) et si la réserve a servi (`warm_start`).
+
+**Les poids gérés (ADR 0046).** Un catalogue du système, compilé dans les binaires : adresse
+épinglée, empreinte SHA-256 publiée, hôtes permis. `prophet model pull` et la page Modèles
+demandent à agentd, qui télécharge par egress sous un jeton que capd émet pour les seuls hôtes
+de l'entrée, refuse toute redirection hors d'eux, et ne pose le fichier qu'une fois taille,
+empreinte et en-tête GGUF vérifiés ; une coupure reprend par `Range`, une empreinte fausse
+efface. Le modèle que la configuration fournit déjà n'est pas retéléchargé. `model.list` dit
+aux agents les poids locaux et leur fenêtre.
+
 ## 6. Vérifications
 
 | Contrôle | Résultat local |
@@ -169,7 +186,10 @@ La fenêtre servie se lit dans `prophet model ls` et sur la page Modèles.
 | Réserve de microVM, coureur KVM de la CI | médiane de cinq prises 8,9 ms (`41def9e`), 10,9 ms (`4aaeb50`) ; restauration 6 ms ; cinq aléas distincts sur cinq clones |
 | Landlock au niveau 0 | l'essai **échouait** avant (fichiers créés à la racine de la sandbox) ; réussit ici (ABI 7) et sur le coureur d'isolation |
 | Condensation et cache du moteur | 26 ko à réévaluer au lieu de 45 ko sur une mission simulée de huit lectures de 3 ko |
-| `just check` | **865 réussis, 0 échec, 51 ignorés** ; format, clippy, contrôles du dépôt, secrets |
+| Instantané de la réserve repris, coureur KVM de la CI (`094a443`) | réserve pleine en 7,4 ms au second démarrage, 4,6 s au premier ; instantané refait après une empreinte altérée |
+| Téléchargement vérifié des poids : sept essais unitaires (redirection, reprise, empreinte, en-tête, taille, refus du proxy, arrêt) et le parcours avec les vrais capd, ledger et egress | réussis ; le jeton ne sort jamais, une empreinte fausse ne pose rien |
+| Page Modèles : catalogue, progression, clic vers un faux agentd | deux parcours de rendu réussis |
+| `just check` | **883 réussis, 0 échec, 54 ignorés** ; format, clippy, contrôles du dépôt, secrets |
 
 Mesures en rendu logiciel, 1920 × 1080, scène de démonstration (5 missions, 3 actives) :
 
