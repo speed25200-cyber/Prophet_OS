@@ -690,7 +690,7 @@ impl Tool for ListModels {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "model.list".into(),
-            description: "Liste les pilotes et modèles utilisables, avec leur mode d'authentification et l'état de leur session.".into(),
+            description: "Liste les pilotes et modèles utilisables : les clients officiels, avec leur mode d'authentification et l'état de leur session, et les poids locaux de la machine, avec leur architecture, leur quantification et leur fenêtre de contexte d'entraînement.".into(),
             input_schema: json!({"type": "object", "properties": {}, "additionalProperties": false}),
             meta: Some(ToolMeta {
                 requires: "tool.call".into(),
@@ -722,13 +722,66 @@ impl Tool for ListModels {
                 })
             })
             .collect();
-        CallResult::structured(json!({"drivers": pilotes}))
+        CallResult::structured(json!({
+            "drivers": pilotes,
+            "local_weights": poids_locaux(
+                &providers::weights::dir(),
+                &providers::weights::configured(),
+            ),
+        }))
     }
+}
+
+/// Les poids locaux, tels que leurs en-têtes les décrivent : ce qu'un agent peut attendre d'un
+/// modèle local avant de lui confier une étape. Un fichier illisible est omis, pas inventé.
+fn poids_locaux(dir: &std::path::Path, files: &[std::path::PathBuf]) -> Vec<Value> {
+    providers::weights::installed(dir, files)
+        .into_iter()
+        .flatten()
+        .map(|w| {
+            json!({
+                "file": w.path.file_name().map(|n| n.to_string_lossy().into_owned()),
+                "name": w.name,
+                "architecture": w.architecture,
+                "size": w.size_label,
+                "quantization": w.quantization,
+                "context_length": w.context_length,
+                "gigabytes": w.gigabytes(),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn les_poids_locaux_se_disent_par_leur_en_tete() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut gguf = b"GGUF".to_vec();
+        gguf.extend(3u32.to_le_bytes());
+        gguf.extend(0u64.to_le_bytes());
+        gguf.extend(2u64.to_le_bytes());
+        let cle = "general.architecture";
+        gguf.extend((cle.len() as u64).to_le_bytes());
+        gguf.extend(cle.as_bytes());
+        gguf.extend(8u32.to_le_bytes());
+        gguf.extend(5u64.to_le_bytes());
+        gguf.extend(b"qwen3");
+        let cle = "qwen3.context_length";
+        gguf.extend((cle.len() as u64).to_le_bytes());
+        gguf.extend(cle.as_bytes());
+        gguf.extend(4u32.to_le_bytes());
+        gguf.extend(40_960u32.to_le_bytes());
+        std::fs::write(dir.path().join("qwen3.gguf"), &gguf).unwrap();
+        std::fs::write(dir.path().join("casse.gguf"), b"pas un poids").unwrap();
+        let poids = poids_locaux(dir.path(), &[]);
+        assert_eq!(poids.len(), 1, "{poids:?}");
+        assert_eq!(poids[0]["file"], "qwen3.gguf");
+        assert_eq!(poids[0]["architecture"], "qwen3");
+        assert_eq!(poids[0]["context_length"], 40_960);
+    }
 
     #[test]
     fn une_commande_inconnue_impose_la_microvm() {

@@ -47,7 +47,7 @@
 | `ui.tree` | ui.read app | non | non | SUP, provenance accessibilité |
 | `ui.act` | ui.act app + `requires` de l'action | selon action | selon action | SUP |
 | `ui.screenshot` | ui.vision | non | non | confiance basse, hors défaut |
-| `model.list` | aucune | non | non | |
+| `model.list` | aucune | non | non | clients officiels et poids locaux (architecture, quantification, fenêtre d'entraînement) |
 | `model.status` | aucune | non | non | |
 
 Un outil sans `requires` explicite (autre que `aucune`) est refusé par le test `mcp_system::registry::all_tools_declare_requires`.
