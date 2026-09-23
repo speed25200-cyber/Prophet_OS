@@ -1548,8 +1548,11 @@ donne le détail.
   « Servir » (`93bd678`). En mode relais, le routeur de l'image lit le dossier des
   téléchargements à son démarrage, avec une section `[*]` qui borne fenêtre, threads et couches
   (`0df78e7`) : relevé d'abord dans la source du moteur épinglé, et prouvé par le contrôle
-  `llama-router`, qui démarre le vrai routeur avec ces options ; un poids tout juste téléchargé
-  se sert après un redémarrage du moteur. `model.list` dit aux agents les poids locaux et leur fenêtre (`d49724d`),
+  `llama-router`, qui démarre le vrai routeur avec ces options. Son premier passage a échoué, à
+  raison : `GET /models` ne rend pas le chemin du poids, que le client supposait ; il est dans
+  les arguments de l'instance, et c'est là qu'il est lu désormais (`12daf73`, vert en CI : poids
+  du dossier connu par son chemin, fenêtre 4 096 et threads de la section `[*]`). Un poids tout
+  juste téléchargé se sert après un redémarrage du moteur. `model.list` dit aux agents les poids locaux et leur fenêtre (`d49724d`),
   `prophet status` les modèles locaux et le catalogue (`6118608`). Un essai `needs_network`
   tire Qwen3 0.6B de Hugging Face par le vrai egress sur une machine qui le joint (`dd4ff44`) :
   vert sur le coureur de la CI (`468324a`), 639 446 688 octets en 23 s, empreinte publiée
