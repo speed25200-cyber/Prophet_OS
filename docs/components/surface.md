@@ -97,7 +97,9 @@ conversation s'arrête, et le fil affiché reste entier. La page Modèles lit l'
 moteur a chargé, avec la fenêtre qu'il accorde par requête (`/props`) ; elle montre aussi le
 catalogue du système qu'agentd rend (`model.catalog`, ADR 0046) — fourni, téléchargé et
 vérifié, en cours avec sa barre de progression, échoué avec son motif — et demande à agentd de
-télécharger, reprendre, arrêter ou retirer un poids. Le démarrage des modèles, la persistance
+télécharger, reprendre, arrêter ou retirer un poids ; elle demande aussi au routeur du moteur
+local ce qu'il sert (`GET /models`), marque « Servi » le poids chargé, reconnu par le chemin
+de son fichier, et propose « Servir » pour celui qu'il connaît sans le servir. Le démarrage des modèles, la persistance
 des conversations et le parcours agentique complet restent à raccorder. Voir l'ADR 0008 et les exigences FRONTIER.
 
 Une seule décision est montrée à la fois, la plus ancienne. Faire patienter quelqu'un est déjà

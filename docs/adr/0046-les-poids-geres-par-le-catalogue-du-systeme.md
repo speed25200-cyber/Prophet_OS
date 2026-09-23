@@ -78,9 +78,12 @@ hostile.
   `un_vrai_poids_du_catalogue_arrive_de_hugging_face_par_egress` le tranche : Qwen3 0.6B tiré de
   Hugging Face par le vrai egress, TLS et redirections compris, empreinte publiée vérifiée ; le
   travail d'isolation de la CI le lance quand le dépôt répond.
-- `prophet model serve` n'est pas encore là : un poids téléchargé est au catalogue installé, il
-  n'est pas servi tant que la configuration du moteur ne le nomme pas. Le mode routeur de
-  llama-server sait lire un dossier de modèles ; le brancher sur `models/catalogue` est la suite.
+- Servir : `prophet model serve <id>` et le geste « Servir » de la page Modèles demandent au
+  routeur de llama-server de charger le poids (`POST /models/load`), reconnu dans `GET /models`
+  par le chemin de son fichier, sinon par son nom. Le routeur de l'image ne connaît encore que
+  ses préréglages : lui faire lire `models/catalogue` (`--models-dir`) attend d'être relevé dans
+  la source même du moteur épinglé — une option qu'il ne connaîtrait pas l'empêcherait de
+  démarrer.
 - Le catalogue grandit par le dépôt, avec une empreinte relevée par entrée.
 - Vérifié : essais unitaires du téléchargement (redirection, reprise, empreinte, en-tête, taille,
   refus du proxy, arrêt), parcours `agentd` avec les vrais capd, ledger et egress
