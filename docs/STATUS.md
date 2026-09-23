@@ -807,7 +807,7 @@ Une tâche marquée ⛔ est écrite et relue, mais **non exerçable dans l'envir
 - [x] M8-T1 — Cycle de vie de tâche (2026-09-12, 24b8338) — machine à états, table de transitions testée en entier
 - [x] M8-T2 — Budgets et quotas (2026-09-12, 24b8338) — budgets multidimensionnels, quotas d'abonnement
 - [x] M8-T3 — Hiérarchie (2026-09-12, 24b8338) — hiérarchie bornée, budget prélevé sur le parent
-- [x] M8-T4 — Pilote `claude-code` (2026-09-12, 24b8338) — ligne de commande, environnement, détection de session
+- [x] M8-T4 — Pilote `claude-code` (2026-09-12, 24b8338) — ligne de commande, environnement, détection de session ; le 23 septembre, le client lancé en mission tourne en cage (ADR 0056, phase 1 : fichiers, services et session confinés ; le réseau par egress reste la phase 2)
 - [x] M8-T5 — Pilote `codex` (2026-09-12, 24b8338) — pilote Codex CLI
 - [x] M8-T6 — Pilote `gemini` (2026-09-12, 24b8338) — pilote Gemini CLI
 - [x] M8-T7 — Moteurs locaux (2026-09-23, f688d49) — critère tenu en CI par les vrais binaires : `prophet model pull qwen3-8b-q4` (5 Go par egress, empreinte vérifiée, 168 s), `prophet model serve qwen3-8b-q4` (3 s), une complétion qui aboutit (« bonjour », 2,9 s), cgroup GPU documenté (ADR 0037) ; écarts dits : catalogue compilé dans les binaires plutôt que signé sous /var/lib (ADR 0046), moteur sous une unité systemd durcie plutôt que sous sandboxd ; historique : client HTTP, flux annulable, interface de conversation et essai Qwen3/CPU réalisés ; le 13 septembre, budgets de tokens par modèle, condensation du contexte et deux modèles servis par un llama-server en mode routeur, prouvés en relais réel (ADR 0034) ; le même jour, l'image sert deux modèles en mode routeur (Qwen3-1.7B en réflexion, Qwen3-0.6B en exécution, téléchargés à l'installation), préréglages vérifiés sur le vrai moteur et configuration évaluée ; le 22 septembre, le catalogue des poids se lit dans l'en-tête GGUF de chaque fichier (`prophet model ls`, page Modèles : architecture, quantification, fenêtre de contexte), et un historique plus long que la fenêtre du moteur est resserré à sa mesure au lieu de faire échouer la mission ou la conversation ; le 23 septembre, les poids du catalogue du système se téléchargent par egress sous un jeton de capd borné au dépôt, vérifiés (SHA-256, taille, en-tête GGUF) avant d'être posés, reprennent après une coupure et se retirent (`prophet model pull`, page Modèles, ADR 0046, `114ef7b`, `1752d7a`, `78b7791`, `32a20ea`) ; le même jour, un poids téléchargé se sert par le routeur du moteur (`prophet model serve`, page Modèles, `0df78e7`) ; restent la détection de la VRAM, les budgets VRAM et la matrice GPU/modèles, à mesurer sur une carte (`needs_gpu`)
@@ -1749,12 +1749,24 @@ donne le détail.
   en attente » la montrait encore : la surface ne montre plus une demande dont la mission est
   finie, et la réponse de l'humain va toujours à la demande montrée (une seule sélection pour les
   deux, `depuis::demande_montree`).
+- Clients officiels en cage (M8-T4 à M8-T6, ADR 0056, phase 1) : `prophet-pilotd` lançait
+  Claude Code, Codex et Gemini sans confinement, avec toute la maison de l'humain, `capd.sock`,
+  toutes les méthodes d'agentd, le bus de session et sway à portée, et le répertoire de travail
+  dans `~/Documents/Prophet`. Chaque client passe désormais par `prophet-pilot-cage` : espaces
+  de noms utilisateur, montage, processus, IPC et nom d'hôte sous l'identité de l'humain ;
+  système en lecture seule, profil privé et lieux de la mission (retirés après elle) seuls en
+  écriture ; Landlock ; un socket relayé par le lanceur qui ne laisse passer que la séance de sa
+  mission ; environnement vidé. Sans cage, aucun client n'est lancé. Éprouvé ici avec les vrais
+  binaires : un client de remplacement ne voit ni la maison, ni capd, ni les processus de
+  l'hôte, ne peut ni lister les missions ni en annuler une autre, et mène pourtant sa mission
+  (délégation et annulation comprises). Les essais se taisent sur « check », faute d'espaces de
+  noms, et sont exigés par le coureur d'isolation. Reste la phase 2 : le réseau par egress.
 - CI de `3c4bea7` (audit visuel, veille du champ, arrêt d'urgence, demandes des missions
   finies) : **verte des deux côtés** — `check`, surface, isolation sur matériel réel, mission
   réelle Qwen3 sous NixOS, sept services, système installé (UEFI et BIOS), ISO et installeur.
   Onzième passage du banc, sans changement du chemin des outils : **Prophet 18/45, boucle nue
   11/45** (Qwen3 1.7B), 11/15 contre 12/15 (Qwen3 4B) — le bruit de l'échantillonnage.
-- `just check` : **946 réussis, 0 échec, 69 ignorés** (`3c4bea7`), format, clippy, contrôles
+- `just check` : **952 réussis, 0 échec, 69 ignorés** (cage des clients, ADR 0056), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
@@ -1768,19 +1780,16 @@ l'utilisateur : `task.spawn` d'agentd accepte un manifeste brut du compte de l'h
 que fait `prophet task new`) ; le réserver aux profils du catalogue fermerait la dernière voie
 par laquelle un processus de la session fait planifier une mission sous un manifeste de sa main.
 
-**Écart relevé.** M8-T4 à M8-T6 sont cochés pour la ligne de commande, l'environnement et la
-détection de session ; le plan demandait aussi de lancer chaque client officiel **dans une
-sandbox** (niveau 1, niveau 2 s'il exécute du code). `prophet-pilotd` les lance sous l'identité
-de l'humain, sans confinement (ADR 0026, pilotd « Limites ») : un client peut donc joindre
-`capd.sock` et trancher une approbation (ADR 0044). Masquer `/run/prophet` dans un espace de
-montage propre ne suffirait pas, et le dire serait promettre une isolation qui n'a pas lieu :
-le même compte atteint aussi l'IPC de sway et le bus de session (`swaymsg exec`, `systemd-run
---user` lancent un programme hors de tout espace), et son home entier, où un fichier de
-démarrage s'exécute à la session suivante. Un confinement réel borne donc les fichiers au
-travail de la mission et au profil privé du client, masque `/run/prophet` et
-`$XDG_RUNTIME_DIR` sauf le pont, et fait passer la sortie réseau par egress — une décision de
-conception à prendre avec l'utilisateur, les clients parlant à leur éditeur sous son
-abonnement.
+**Écart relevé, en partie résorbé.** M8-T4 à M8-T6 étaient cochés pour la ligne de commande,
+l'environnement et la détection de session, alors que `prophet-pilotd` lançait les clients sans
+confinement. Depuis l'ADR 0056 (phase 1), chaque client lancé en mission tourne dans une cage
+(`prophet-pilot-cage`) : espaces de noms utilisateur, montage, processus, IPC et nom d'hôte ;
+système en lecture seule, profil privé et lieux de la mission seuls en écriture ; Landlock ; un
+socket qui ne mène qu'à la séance de sa mission. Il ne voit plus ni la maison de l'humain, ni
+`capd.sock` (ADR 0044), ni les autres méthodes d'agentd, ni le bus de session, ni sway, et ses
+outils natifs n'écrivent plus dans les documents sans examen. Reste la phase 2 : le réseau du
+client passe encore directement vers son éditeur, pas par egress — un relais dans la cage et
+une politique des hôtes de chaque éditeur, à arrêter avec un client connecté.
 
 **Pour la session suivante.** La CI de `3c4bea7` est verte des deux côtés. Sur une machine à
 carte graphique : mesurer la surface avec les mêmes commandes que l'audit du 23 septembre

@@ -287,3 +287,12 @@ L'[audit visuel et de fluidité](reports/audit-visuel-2026-09-23.md) corrige les
 fenêtre étroite, et mesure en release sur un rastériseur logiciel : moins de 0,75 ms de
 processeur par image pour l'interface à toutes les tailles, et 0,2 % d'un cœur au repos une fois
 le champ en veille (ADR 0055). La même mesure sur une carte graphique reste à faire.
+
+Le critère des clients officiels avance aussi (ADR 0056, phase 1) : chaque client lancé en
+mission tourne dans une cage — espaces de noms utilisateur, montage, processus, IPC ; système en
+lecture seule ; son profil privé et les lieux de la mission seuls en écriture ; Landlock ; un
+socket qui ne mène qu'à la séance de sa mission. Il ne voit plus la maison de l'humain, ni capd,
+ni les autres méthodes d'agentd, ni la session ; éprouvé par des clients de remplacement qui
+sondent la cage et mènent pourtant leur mission. Le critère n'est pas coché : le réseau du
+client ne passe pas encore par egress (phase 2), et aucune session réelle de Claude Code ou de
+Codex n'a été exercée en cage.
