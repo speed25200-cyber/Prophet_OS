@@ -44,6 +44,10 @@ les charge désormais sans projection (`--load-mode none`) : la mémoire réside
 demande environ 6,1 Go, que 8 Gio tiennent en laissant 1,5 Gio au système. La VRAM n'est pas
 mesurée.
 
+Concurrence et annulation (`dd5ce52`, SmolLM2, une place par instance comme l'image) : deux
+requêtes simultanées aboutissent (1,3 s et 1,9 s) ; une génération abandonnée par son client
+libère l'instance, et la requête suivante répond en 0,5 s.
+
 ## Affichage
 
 | Carte | Pilote | Ce que ça donne | Vu |

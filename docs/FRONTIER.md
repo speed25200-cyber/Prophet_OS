@@ -262,7 +262,9 @@ avant de charger (ADR 0047) : estimée depuis l'en-tête GGUF (fichier, cache KV
 calcul), confrontée à la machine, montrée par la page Modèles, rendue aux agents par
 `model.list`, et un modèle qui ne tiendrait pas n'est ni servi ni confié à une mission ; en CI,
 l'estimation couvre la mémoire anonyme du vrai moteur, qui garde en plus son fichier projeté.
-La découverte des capacités lit le gabarit de conversation (outils, réflexion), et un essai
-prouve que la surface compose ses images pendant une génération en flux (médiane 6,0 ms en
-release). Restent la VRAM, ses budgets et la matrice GPU, à mesurer sur une carte ; aucun
+La découverte des capacités lit le gabarit de conversation (outils, réflexion) ; sur le vrai
+moteur, deux requêtes simultanées aboutissent et une génération abandonnée par son client
+libère l'instance en moins d'une seconde ; et un essai prouve que la surface compose ses
+images pendant une génération en flux (médiane 6,0 ms en release). Le moteur charge désormais
+ses poids sans projection, ce qui a réduit sa mémoire résidente d'un tiers. Restent la VRAM, ses budgets et la matrice GPU, à mesurer sur une carte ; aucun
 critère complet de la version complète n'est coché.

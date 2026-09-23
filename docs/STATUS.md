@@ -1600,6 +1600,12 @@ donne le détail.
   **verte des deux côtés** : la mission locale sous NixOS (vrais préréglages du relais avec
   `load-mode = none`, Qwen3 1.7B), le contrôle `llama-router`, le système installé en UEFI et
   sans UEFI, les sept services, l'ISO et l'installeur.
+- Concurrence et annulation sur le vrai moteur (FRONTIER, moteurs locaux ; essai
+  `deux_requetes_se_partagent_le_moteur_et_un_abandon_le_libere`, vert sur `dd5ce52`) : sur une
+  instance à une place comme celle de l'image, deux requêtes simultanées aboutissent toutes
+  deux (1,3 s et 1,9 s) ; une génération de 3 000 tokens sans fin naturelle, abandonnée par son
+  client après son premier fragment, libère l'instance aussitôt — la question suivante répond
+  en 0,5 s, quand l'attente aurait duré plus d'une minute.
 - Découverte des capacités (FRONTIER, moteurs locaux) : l'en-tête GGUF dit ce que le gabarit de
   conversation déclare — appels d'outils, réflexion. Relevé sur les huit fichiers du catalogue :
   Qwen3, Granite 3.3 et Llama 3.2 déclarent les outils, Phi-3 mini et SmolLM2 non. Les agents le
