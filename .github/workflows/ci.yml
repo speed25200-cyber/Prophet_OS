@@ -126,6 +126,53 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+  # Le même banc, joué une fois avec un modèle plus grand du catalogue : les couches de Prophet
+  # se mesurent aussi quand le modèle sait davantage (ADR 0048).
+  banc-4b:
+    name: Banc M13 — Qwen3 4B (un passage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+            max-jobs = 1
+            cores = 2
+      - name: Construire le moteur épinglé
+        run: nix build .#llama-cpp --out-link moteur --print-build-logs
+      - name: Chaîne d'outils du dépôt
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Construire les services
+        run: cargo build -p capd -p ledger -p egress -p agentd --bins
+      - name: Banc M13 — Qwen3 4B, par Prophet et par une boucle nue
+        env:
+          PROPHET_TEST_LLAMA_SERVER: ${{ github.workspace }}/moteur/bin/llama-server
+          PROPHET_BENCH_MODEL: qwen3-4b-q4
+          PROPHET_BENCH_REPETITIONS: "1"
+          PROPHET_BENCH_RESULTS: ${{ github.workspace }}/banc-4b.json
+        run: |
+          cargo test -p bench --test suite_reelle -- --ignored --nocapture la_suite_se_joue 2>&1 | tee banc-4b.log
+          {
+            echo "## Banc M13 — Qwen3 4B, Prophet et boucle nue"
+            echo '```'
+            grep '^mesure : banc' banc-4b.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Conserver les résultats du banc
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: banc-m13-4b
+          path: |
+            banc-4b.json
+            banc-4b.log
+          if-no-files-found: warn
+          retention-days: 30
+
   chatgpt:
     name: ChatGPT sous NixOS (compatibilité)
     runs-on: ubuntu-latest

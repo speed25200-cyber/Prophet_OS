@@ -499,7 +499,9 @@ fn par_la_boucle_nue(tache: &Task, endpoint: &str, modele: &str, moteur: Option<
         endpoint,
         modele,
         outils.definitions(),
-        Duration::from_secs(300),
+        // Le délai d'un tour est celui qu'agentd accorde au moteur local : un tour long ne doit
+        // pas échouer d'un seul côté.
+        Duration::from_secs(120),
         2048,
     )
     .unwrap();
