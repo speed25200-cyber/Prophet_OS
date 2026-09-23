@@ -882,18 +882,29 @@ impl Supervision {
                         *reponse = Some(Reponse::Accepte);
                         self.examen = None;
                     }
-                    if bouton(
-                        ui,
-                        "decision-autoriser-mission",
-                        "Autoriser pour toute la mission",
-                        false,
-                    )
-                    .clicked()
+                    // Une action irréversible ne s'autorise qu'une fois : capd n'en fait jamais
+                    // une règle de mission (ADR 0054), la surface ne le propose donc pas.
+                    if !d.irreversible
+                        && bouton(
+                            ui,
+                            "decision-autoriser-mission",
+                            "Autoriser pour toute la mission",
+                            false,
+                        )
+                        .clicked()
                     {
                         *reponse = Some(Reponse::AccepteMission);
                         self.examen = None;
                     }
                 });
+                if d.irreversible {
+                    ui.add_space(10.0);
+                    petit(
+                        ui,
+                        "Une action irréversible s'autorise une fois : si l'agent veut la refaire, \
+                         il vous la redemandera.",
+                    );
+                }
                 // Les crochets sur ce que le panneau occupe réellement, une fois composé.
                 hud::crochets(ui.painter(), ui.min_rect().expand(33.0), ATTENTE, 16.0);
             });

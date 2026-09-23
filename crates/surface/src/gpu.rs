@@ -145,7 +145,11 @@ impl Contexte {
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("prophet-surface"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_defaults(),
+                // Les limites basses conviennent à tout adaptateur, sauf la résolution : elles
+                // plafonnent les textures à 2048 points, et un écran 1440p ou 4K ne se dessinerait
+                // pas. La résolution est celle que l'adaptateur supporte.
+                required_limits: wgpu::Limits::downlevel_defaults()
+                    .using_resolution(adapter.limits()),
                 experimental_features: wgpu::ExperimentalFeatures::default(),
                 memory_hints: wgpu::MemoryHints::Performance,
                 trace: wgpu::Trace::Off,
@@ -194,10 +198,26 @@ impl std::fmt::Debug for Cible {
     }
 }
 
+impl Contexte {
+    /// La plus grande dimension de texture que le périphérique accepte.
+    #[must_use]
+    pub fn dimension_max(&self) -> u32 {
+        self.device.limits().max_texture_dimension_2d
+    }
+
+    /// Une taille bornée à ce que le périphérique accepte, et jamais nulle.
+    #[must_use]
+    pub fn borner(&self, largeur: u32, hauteur: u32) -> (u32, u32) {
+        let max = self.dimension_max();
+        (largeur.clamp(1, max), hauteur.clamp(1, max))
+    }
+}
+
 impl Cible {
-    /// Crée une cible de la taille demandée.
+    /// Crée une cible de la taille demandée, bornée à ce que le périphérique accepte.
     #[must_use]
     pub fn nouvelle(contexte: &Contexte, largeur: u32, hauteur: u32) -> Self {
+        let (largeur, hauteur) = contexte.borner(largeur, hauteur);
         let texture = contexte.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("cible hors écran"),
             size: wgpu::Extent3d {

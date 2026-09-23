@@ -153,6 +153,77 @@ fn click_widget(bureau: &Bureau, id: &str) -> Vec<Event> {
 
 #[test]
 #[ignore = "needs_gpu"]
+fn une_action_irreversible_ne_s_autorise_pas_pour_toute_la_mission() {
+    // capd n'en fait jamais une règle de mission (ADR 0054) : la surface ne le propose pas.
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1280, 800);
+    for irreversible in [false, true] {
+        let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+        bureau.figer_transitions();
+        let mut scene = scene();
+        scene.decision = Some(surface::scene::Decision {
+            question: "Envoyer le paiement ?".into(),
+            consequence: "L'argent part.".into(),
+            motif: None,
+            tache: "test".into(),
+            depuis_secondes: 3,
+            irreversible,
+        });
+        for _ in 0..3 {
+            avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+        }
+        let events = click_widget(&bureau, "examiner-decision");
+        avec_scene(&mut bureau, &context, &target, &scene, events);
+        for _ in 0..3 {
+            avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+        }
+        assert!(
+            bureau
+                .ctx
+                .read_response(egui::Id::new("decision-autoriser"))
+                .is_some()
+        );
+        assert_eq!(
+            bureau
+                .ctx
+                .read_response(egui::Id::new("decision-autoriser-mission"))
+                .is_some(),
+            !irreversible,
+            "irréversible : {irreversible}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "needs_gpu"]
+fn les_grands_ecrans_se_dessinent_en_1440p_et_en_4k() {
+    // Les limites basses de wgpu plafonnaient les textures à 2048 points : une capture ou une
+    // fenêtre en 2560 × 1440 faisait tomber la surface.
+    let context = Contexte::hors_ecran().unwrap();
+    assert!(
+        context.dimension_max() >= 3840,
+        "{}",
+        context.dimension_max()
+    );
+    for (largeur, hauteur) in [(2560, 1440), (3840, 2160)] {
+        let target = Cible::nouvelle(&context, largeur, hauteur);
+        assert_eq!((target.largeur, target.hauteur), (largeur, hauteur));
+        let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+        for _ in 0..3 {
+            frame(&mut bureau, &context, &target, vec![]);
+        }
+        capture(&context, &target, "grand-ecran");
+        let pixels = target.pixels(&context).unwrap();
+        assert_eq!(pixels.len(), (largeur * hauteur * 4) as usize);
+    }
+    // Au-delà de ce que le périphérique accepte, la cible est bornée au lieu de tomber.
+    let max = context.dimension_max();
+    let (l, h) = context.borner(max + 1000, 0);
+    assert_eq!((l, h), (max, 1));
+}
+
+#[test]
+#[ignore = "needs_gpu"]
 fn un_dialogue_vide_propose_des_departs_qui_remplissent_le_brouillon_sans_rien_envoyer() {
     let context = Contexte::hors_ecran().unwrap();
     let target = Cible::nouvelle(&context, 1440, 1000);

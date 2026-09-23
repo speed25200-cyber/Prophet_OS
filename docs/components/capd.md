@@ -56,3 +56,7 @@ journalctl -u prophet-capd -n 50
 Une clé de signature qui change au redémarrage invaliderait tous les jetons déjà émis. Si le
 service redémarre en boucle, vérifiez que `/var/lib/prophet/capd/signing.key` fait 32 octets : le
 daemon refuse de deviner une clé abîmée plutôt que de la compléter.
+
+Une action irréversible ne s'autorise qu'une fois : capd tient pour ponctuelle toute autorisation
+d'une demande irréversible, quelle que soit la portée demandée, et aucune autorisation permanente
+ne couvre une action irréversible ; un refus peut valoir pour la tâche ou l'agent (ADR 0054).

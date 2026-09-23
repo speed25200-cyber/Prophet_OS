@@ -192,7 +192,12 @@ impl Approvals {
             expires: now + time::Duration::hours(DEFAULT_TTL_HOURS),
             state: ApprovalState::Pending,
         };
-        if let Some(rule) = self.rules.iter().find(|r| r.covers(&approval, now)) {
+        // Une autorisation permanente ne couvre jamais une action irréversible, même de même
+        // nom et de même cible qu'une action réversible autorisée ; un refus permanent, si
+        // (ADR 0054).
+        if let Some(rule) = self.rules.iter().find(|r| {
+            r.covers(&approval, now) && !(r.decision == Decision::Allow && approval.irreversible)
+        }) {
             approval.state = ApprovalState::Resolved {
                 decision: rule.decision,
             };
@@ -258,6 +263,14 @@ impl Approvals {
         let mut approval = self.pending.remove(id)?;
         approval.state = ApprovalState::Resolved { decision };
         self.resolved.insert(id.to_owned(), approval.clone());
+        // Une action irréversible autorisée ne vaut qu'une fois : une règle de tâche ou d'agent
+        // la laisserait se refaire — un second paiement — sans nouvel accord. Un refus, lui,
+        // peut valoir pour la tâche (ADR 0054).
+        let scope = if decision == Decision::Allow && approval.irreversible {
+            ApprovalScope::Once
+        } else {
+            scope
+        };
         match scope {
             ApprovalScope::Once => {
                 self.once.insert(id.to_owned(), approval.clone());
@@ -338,6 +351,14 @@ mod tests {
 
     fn now() -> OffsetDateTime {
         OffsetDateTime::from_unix_timestamp(1_789_000_000).unwrap()
+    }
+
+    /// Une action réversible : ses décisions peuvent devenir des règles permanentes.
+    fn reversible() -> Request {
+        Request {
+            irreversible: false,
+            ..requete()
+        }
     }
 
     fn requete() -> Request {
@@ -435,13 +456,45 @@ mod tests {
     }
 
     #[test]
-    fn portee_tache_couvre_les_demandes_suivantes_de_la_meme_tache() {
+    fn une_action_irreversible_autorisee_ne_vaut_qu_une_fois_quelle_que_soit_la_portee() {
+        for portee in [ApprovalScope::Task, ApprovalScope::Agent { days: 30 }] {
+            let mut file = Approvals::new();
+            let premiere = file.request(requete(), now());
+            assert!(premiere.irreversible);
+            file.resolve(&premiere.id, Decision::Allow, portee, now())
+                .unwrap();
+            assert!(
+                file.rules().is_empty(),
+                "aucune règle permanente : {portee:?}"
+            );
+            // La reprise de l'appel autorisé passe, une fois.
+            let reprise = file.request(requete(), now());
+            assert_eq!(
+                reprise.state,
+                ApprovalState::Resolved {
+                    decision: Decision::Allow
+                }
+            );
+            // Refaire la même action irréversible redemande.
+            let encore = file.request(requete(), now());
+            assert_eq!(encore.state, ApprovalState::Pending, "{portee:?}");
+        }
+        // Un refus d'action irréversible, lui, vaut pour la tâche.
         let mut file = Approvals::new();
         let premiere = file.request(requete(), now());
+        file.resolve(&premiere.id, Decision::Deny, ApprovalScope::Task, now())
+            .unwrap();
+        assert_eq!(file.rules().len(), 1);
+    }
+
+    #[test]
+    fn portee_tache_couvre_les_demandes_suivantes_de_la_meme_tache() {
+        let mut file = Approvals::new();
+        let premiere = file.request(reversible(), now());
         file.resolve(&premiere.id, Decision::Allow, ApprovalScope::Task, now())
             .unwrap();
 
-        let seconde = file.request(requete(), now());
+        let seconde = file.request(reversible(), now());
         assert_eq!(
             seconde.state,
             ApprovalState::Resolved {
@@ -450,10 +503,12 @@ mod tests {
             "la règle de tâche doit trancher sans redemander"
         );
         assert!(file.pending().is_empty());
+        // La même action devenue irréversible redemande, malgré la règle.
+        assert_eq!(file.request(requete(), now()).state, ApprovalState::Pending);
 
         let autre_tache = Request {
             task: "task:02".into(),
-            ..requete()
+            ..reversible()
         };
         assert_eq!(
             file.request(autre_tache, now()).state,
@@ -464,7 +519,7 @@ mod tests {
     #[test]
     fn portee_agent_expire() {
         let mut file = Approvals::new();
-        let premiere = file.request(requete(), now());
+        let premiere = file.request(reversible(), now());
         file.resolve(
             &premiere.id,
             Decision::Allow,
@@ -476,7 +531,7 @@ mod tests {
         let plus_tard = now() + time::Duration::days(10);
         let autre_tache = Request {
             task: "task:99".into(),
-            ..requete()
+            ..reversible()
         };
         assert!(matches!(
             file.request(autre_tache.clone(), plus_tard).state,
@@ -519,13 +574,16 @@ mod tests {
     #[test]
     fn revocation_de_regle() {
         let mut file = Approvals::new();
-        let premiere = file.request(requete(), now());
+        let premiere = file.request(reversible(), now());
         file.resolve(&premiere.id, Decision::Allow, ApprovalScope::Task, now())
             .unwrap();
         let id = file.rules()[0].id.clone();
         assert!(file.revoke_rule(&id));
         assert!(!file.revoke_rule(&id));
-        assert_eq!(file.request(requete(), now()).state, ApprovalState::Pending);
+        assert_eq!(
+            file.request(reversible(), now()).state,
+            ApprovalState::Pending
+        );
     }
 
     #[test]

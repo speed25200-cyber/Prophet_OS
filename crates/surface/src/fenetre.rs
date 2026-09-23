@@ -312,6 +312,9 @@ fn reconfigurer(etat: &Etat, largeur: u32, hauteur: u32) {
         .configuration_surface
         .clone()
         .expect("avec_surface fournit une configuration compatible");
+    // Un écran plus grand que ce que le périphérique accepte ne doit pas faire tomber la
+    // surface : elle se dessine à la taille maximale, que le compositeur étire.
+    let (largeur, hauteur) = etat.contexte.borner(largeur, hauteur);
     configuration.width = largeur;
     configuration.height = hauteur;
     etat.surface
