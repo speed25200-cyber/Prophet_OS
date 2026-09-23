@@ -17,7 +17,7 @@ mod web_relay;
 
 pub use clock::Now;
 pub use doc::Read as DocRead;
-pub use fs::{List, Read, Search, Stat, Write};
+pub use fs::{Edit, List, Read, Search, Stat, Write};
 pub use http::Fetch;
 pub use system::{
     Exec, Kill, LedgerQuery, ListModels, ListSecrets, Notify, Recall, Remember, RequestApproval,
@@ -37,6 +37,7 @@ pub fn register_all(registry: &mut Registry) {
         Arc::new(doc::Read),
         Arc::new(Read),
         Arc::new(Write),
+        Arc::new(Edit),
         Arc::new(List),
         Arc::new(Stat),
         Arc::new(Search),

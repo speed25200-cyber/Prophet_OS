@@ -420,6 +420,7 @@ impl Budget {
 pub(super) enum Operation {
     Read,
     Write,
+    Edit,
     List,
     Stat,
     Search,
@@ -565,6 +566,7 @@ fn run(
                 json!({"path":logical,"bytes":content.len(),"staged":true,"note":"écrit dans l'espace de travail ; la validation reste explicite"}),
             )
         }
+        Operation::Edit => edit(&view, &relative, &logical, args),
         Operation::Stat => {
             if !view.permits(Act::Read, &relative) {
                 return Err(denied());
@@ -600,6 +602,79 @@ fn run(
         }
         Operation::Search => search(&view, &relative, args),
     }
+}
+
+/// Remplace un passage exact d'un fichier texte et écrit le résultat dans l'espace de travail,
+/// comme `fs.write` : un petit modèle corrige une faute ou change une valeur sans recopier tout
+/// le fichier, et sans le tronquer. Le passage doit apparaître une fois, ou `all` le dit.
+fn edit(view: &View<'_>, relative: &Path, logical: &Path, args: &Value) -> Result<Value> {
+    let text_arg = |key: &str, what: &str| -> Result<&str> {
+        args.get(key)
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid(&format!("{what} ({key}) requis")))
+    };
+    let old = text_arg("old", "texte à remplacer")?;
+    let new = text_arg("new", "texte de remplacement")?;
+    if old.is_empty() {
+        return Err(invalid("le texte à remplacer (old) ne peut pas être vide"));
+    }
+    let all = match args.get("all") {
+        None => false,
+        Some(value) => value
+            .as_bool()
+            .ok_or_else(|| invalid("all doit être vrai ou faux"))?,
+    };
+    // Le droit d'écrire est vérifié avant de lire : un refus ne révèle rien du contenu.
+    if !view.permits(Act::Write, relative) {
+        return Err(denied());
+    }
+    let chunk = view.read_from(relative, 0, MAX_WRITE)?;
+    if chunk.next.is_some() {
+        return Err(Failure(
+            ErrorCode::BudgetExceeded,
+            "fichier de plus de 1 Mio : fs.edit ne l'édite pas".into(),
+        ));
+    }
+    // Un fichier qui n'est pas du texte UTF-8 serait réécrit avec des caractères de
+    // remplacement : il n'est pas édité.
+    if chunk.text.len() as u64 != chunk.total {
+        return Err(invalid(
+            "fichier qui n'est pas du texte UTF-8 : fs.edit ne l'édite pas",
+        ));
+    }
+    let found = chunk.text.matches(old).count();
+    if found == 0 {
+        return Err(invalid(
+            "texte à remplacer introuvable dans le fichier : relisez-le avec fs.read et \
+             recopiez le passage exact",
+        ));
+    }
+    if found > 1 && !all {
+        return Err(invalid(&format!(
+            "le texte à remplacer apparaît {found} fois : allongez-le pour qu'il n'apparaisse \
+             qu'une fois, ou passez all: true pour tout remplacer"
+        )));
+    }
+    let edited = if all {
+        chunk.text.replace(old, new)
+    } else {
+        chunk.text.replacen(old, new, 1)
+    };
+    if edited.len() > MAX_WRITE {
+        return Err(Failure(
+            ErrorCode::BudgetExceeded,
+            "écriture limitée à 1 Mio".into(),
+        ));
+    }
+    view.write(relative, &edited)?;
+    Ok(json!({
+        "path": logical,
+        "replaced": if all { found } else { 1 },
+        "bytes": edited.len(),
+        "lines": edited.lines().count(),
+        "staged": true,
+        "note": "écrit dans l'espace de travail ; la validation reste explicite",
+    }))
 }
 
 /// Lignes trouvées rendues par fichier, et longueur d'un extrait en caractères.

@@ -443,7 +443,13 @@ impl Profile {
                 (Res::Tool, Act::Call)
                     if matches!(
                         grant.pattern.as_str(),
-                        "fs.read" | "fs.write" | "fs.list" | "fs.search" | "fs.stat" | "doc.read"
+                        "fs.read"
+                            | "fs.write"
+                            | "fs.edit"
+                            | "fs.list"
+                            | "fs.search"
+                            | "fs.stat"
+                            | "doc.read"
                     ) => {}
                 // L'introspection ne lit que la mission elle-même : son état, son budget et
                 // ses propres changements.

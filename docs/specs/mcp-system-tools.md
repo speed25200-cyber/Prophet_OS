@@ -20,6 +20,7 @@
 | `fs.read` | fs.read chemin | non | non | `max_bytes` défaut et plafond 256 Kio ; `offset` et `next_offset` pour lire par morceaux, sans couper de caractère ; `lines`, nombre de lignes du contenu rendu |
 | `fs.write` | fs.write chemin | non (réversible via sfs) | non | remplacement atomique dans le travail, contenu ≤ 1 Mio |
 | `fs.list` | fs.list chemin et descendants | non | non | fusion travail/origine ; ≤ 2000 résultats |
+| `fs.edit` | fs.write chemin (lecture sous fs.read) | non | non | `old` exact remplacé par `new`, une seule occurrence sauf `all: true` ; écrit dans l'espace de travail comme `fs.write` ; texte UTF-8, 1 Mio au plus ; rend `replaced` (ADR 0051) |
 | `fs.stat` | fs.read chemin | non | non | |
 | `fs.search` | fs.read racine et descendants | non | non | nom et contenu ; une racine qui est un fichier est fouillée seule ; ≤ 200 résultats ; par contenu, les cinq premières lignes trouvées de chaque fichier (`matches` : numéro et extrait de 200 caractères au plus, `more_matches`) |
 | `fs.diff_task` | task courante | non | non | |

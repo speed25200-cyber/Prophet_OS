@@ -258,6 +258,89 @@ fn un_refus_dit_ou_la_mission_peut_agir() {
 }
 
 #[test]
+fn une_edition_remplace_un_passage_exact_dans_l_espace_de_travail() {
+    let m = monde(&["~/docs/**"]);
+    let lettre = m.home.join("docs/lettre.txt");
+    std::fs::write(
+        &lettre,
+        "Bonjour,\nJe vous prie, sincèrment, d'agréer.\nport = 8080\n",
+    )
+    .unwrap();
+    let r = m.call(
+        "fs.edit",
+        json!({"path":"~/docs/lettre.txt","old":"sincèrment","new":"sincèrement"}),
+    );
+    assert!(!r.is_error, "{r:?}");
+    let d = r.structured.unwrap();
+    assert_eq!(d["replaced"], 1, "{d}");
+    assert_eq!(d["staged"], true);
+    // Une seconde édition part de la copie de travail, pas de l'original.
+    let r = m.call(
+        "fs.edit",
+        json!({"path":"~/docs/lettre.txt","old":"port = 8080","new":"port = 9090"}),
+    );
+    assert!(!r.is_error, "{r:?}");
+    assert_eq!(
+        std::fs::read_to_string(m.work.join("docs/lettre.txt")).unwrap(),
+        "Bonjour,\nJe vous prie, sincèrement, d'agréer.\nport = 9090\n"
+    );
+    // L'original n'est pas touché : la publication reste explicite.
+    assert!(
+        std::fs::read_to_string(&lettre)
+            .unwrap()
+            .contains("sincèrment")
+    );
+}
+
+#[test]
+fn une_edition_ambigue_ou_introuvable_est_refusee_sans_rien_ecrire() {
+    let m = monde(&["~/docs/**"]);
+    std::fs::write(m.home.join("docs/liste.txt"), "pain\nlait\npain\n").unwrap();
+    let ambigue = m.call(
+        "fs.edit",
+        json!({"path":"~/docs/liste.txt","old":"pain","new":"brioche"}),
+    );
+    let d = ambigue.structured.unwrap();
+    assert_eq!(d["code"], "Invalid", "{d}");
+    assert!(d["detail"].as_str().unwrap().contains("2 fois"), "{d}");
+    let absente = m.call(
+        "fs.edit",
+        json!({"path":"~/docs/liste.txt","old":"beurre","new":"x"}),
+    );
+    assert_eq!(absente.structured.unwrap()["code"], "Invalid");
+    assert!(!m.work.join("docs/liste.txt").exists());
+    let toutes = m.call(
+        "fs.edit",
+        json!({"path":"~/docs/liste.txt","old":"pain","new":"brioche","all":true}),
+    );
+    assert!(!toutes.is_error, "{toutes:?}");
+    assert_eq!(toutes.structured.unwrap()["replaced"], 2);
+    assert_eq!(
+        std::fs::read_to_string(m.work.join("docs/liste.txt")).unwrap(),
+        "brioche\nlait\nbrioche\n"
+    );
+}
+
+#[test]
+fn une_edition_hors_du_droit_d_ecrire_est_refusee() {
+    // Lire partout ne permet pas d'éditer : fs.edit exige le droit d'écrire sur le chemin.
+    let m = monde(&["~/**"]);
+    std::fs::create_dir_all(m.home.join("notes")).unwrap();
+    std::fs::write(m.home.join("notes/a.txt"), "un\n").unwrap();
+    let r = m.call(
+        "fs.edit",
+        json!({"path":"~/notes/a.txt","old":"un","new":"deux"}),
+    );
+    assert!(r.is_error, "{r:?}");
+    assert_eq!(r.structured.unwrap()["code"], "PolicyDenied");
+    assert!(!m.work.join("notes/a.txt").exists());
+    assert_eq!(
+        std::fs::read_to_string(m.home.join("notes/a.txt")).unwrap(),
+        "un\n"
+    );
+}
+
+#[test]
 fn la_lecture_compte_les_lignes_du_contenu_rendu() {
     // Compter les lignes d'un texte relu est une erreur courante d'un petit modèle : le
     // service les compte, avec ou sans fin de ligne finale, fichier vide compris.

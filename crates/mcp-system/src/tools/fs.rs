@@ -16,6 +16,7 @@ macro_rules! file_tool {
             fn spec(&self) -> ToolSpec {
                 let required = match Operation::$operation {
                     Operation::Write => vec!["path", "content"],
+                    Operation::Edit => vec!["path", "old", "new"],
                     _ => vec![$key],
                 };
                 ToolSpec {
@@ -58,6 +59,20 @@ file_tool!(
     "path",
     json!({
         "path":{"type":"string"}, "content":{"type":"string"}
+    })
+);
+file_tool!(
+    Edit,
+    "fs.edit",
+    "Remplace un passage exact d'un fichier texte et écrit le résultat dans l'espace de travail de la tâche, comme fs.write, sans recopier le reste du fichier. `old` doit apparaître une seule fois (sinon allongez-le, ou passez `all: true` pour remplacer chaque occurrence). Rend le nombre de remplacements. La validation des changements reste explicite.",
+    "fs.write",
+    Edit,
+    "path",
+    json!({
+        "path":{"type":"string"},
+        "old":{"type":"string","description":"Passage exact à remplacer, tel qu'il figure dans le fichier."},
+        "new":{"type":"string","description":"Texte qui le remplace."},
+        "all":{"type":"boolean","description":"Remplacer chaque occurrence au lieu d'exiger qu'il n'y en ait qu'une."}
     })
 );
 file_tool!(
