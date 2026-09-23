@@ -428,6 +428,60 @@ pub fn grants(entry: &Entry) -> Vec<Grant> {
 mod tests {
     use super::*;
 
+    fn poids(chemin: &str, octets: u64, kv: Option<u64>) -> providers::weights::Weights {
+        providers::weights::Weights {
+            path: chemin.into(),
+            bytes: octets,
+            version: 3,
+            architecture: Some("qwen3".into()),
+            name: None,
+            size_label: None,
+            quantization: None,
+            context_length: None,
+            layers: None,
+            tensors: 0,
+            kv_bytes_per_token: kv,
+            vocabulary: Some(151_936),
+            template: None,
+        }
+    }
+
+    #[test]
+    fn un_modele_trop_grand_se_retrouve_par_le_nom_que_le_routeur_lui_donne() {
+        let machine = providers::memory::System {
+            total: 8 << 30,
+            available: 6 << 30,
+        };
+        let installes = vec![
+            Ok(poids(
+                "/m/catalogue/Qwen3-8B-Q4_K_M.gguf",
+                5_027_783_488,
+                Some(147_456),
+            )),
+            Ok(poids(
+                "/m/catalogue/Enorme.gguf",
+                40_000_000_000,
+                Some(147_456),
+            )),
+            Ok(poids("/m/catalogue/Muet.gguf", 40_000_000_000, None)),
+            Err("casse.gguf : illisible".into()),
+        ];
+        // Qwen3 8B tient dans 8 Gio ; l'énorme non, et le refus dit ce qu'il demande.
+        assert!(too_large("Qwen3-8B-Q4_K_M", &installes, 4096, Some(&machine)).is_none());
+        let refus = too_large("Enorme", &installes, 4096, Some(&machine)).unwrap();
+        assert!(refus.need.total > 40_000_000_000);
+        let raison = too_large_reason("Enorme", &refus, Some(&machine));
+        assert!(
+            raison.contains("paginer") && raison.contains("8,6 Go"),
+            "{raison}"
+        );
+        // Ni un en-tête sans de quoi estimer, ni un nom inconnu (un préréglage), ni une machine
+        // dont la mémoire est inconnue ne font refuser : on ne devine pas.
+        assert!(too_large("Muet", &installes, 4096, Some(&machine)).is_none());
+        assert!(too_large("reflect", &installes, 4096, Some(&machine)).is_none());
+        assert!(too_large("Enorme", &installes, 4096, None).is_none());
+    }
+
     #[test]
     fn le_manifeste_d_un_telechargement_ne_permet_que_ses_hotes() {
         let entry = Catalogue::builtin().entries[0].clone();
