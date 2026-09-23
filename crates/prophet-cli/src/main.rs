@@ -215,6 +215,15 @@ enum TaskAction {
         /// Objectif de la mission.
         intent: String,
     },
+    /// Prépare à nouveau une mission échouée ou arrêtée, dans le même contexte et avec le même
+    /// modèle, sans la lancer.
+    Retry {
+        /// Identifiant de la mission à reprendre.
+        mission: String,
+        /// Référence de la nouvelle mission ; générée sinon.
+        #[arg(long)]
+        id: Option<String>,
+    },
     /// Rend la configuration MCP qui donne à un client (Claude Code, Codex) les outils d'une
     /// mission préparée, par le pont `prophet-mcp`.
     McpConfig {
@@ -1738,6 +1747,50 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                 "{}\nDémarrer : prophet task start {id}\nClient MCP : prophet task mcp-config {id}\n",
                 plan.render()
             ))
+        }
+        TaskAction::Retry { mission, id } => {
+            // La relance repasse par le catalogue du service : même contexte, même modèle, même
+            // intention ; jamais un manifeste recopié, que `task.prepare` refuserait d'ailleurs.
+            let info: agentd::Inspection = serde_json::from_value(task_rpc(
+                &socket_agentd(),
+                "task.inspect",
+                serde_json::json!({"id":mission}),
+            )?)?;
+            if !matches!(
+                info.task.state,
+                agentd::State::Failed | agentd::State::Cancelled
+            ) {
+                anyhow::bail!(
+                    "la mission {mission} n'est ni échouée ni arrêtée ; seule une mission échouée ou arrêtée se relance"
+                );
+            }
+            if info.task.parent.is_some() {
+                anyhow::bail!(
+                    "la mission {mission} a été confiée par une autre : relancez celle-ci"
+                );
+            }
+            let plan = info.plan.as_ref();
+            let Some(profile) = plan.and_then(|p| p.profile.clone()) else {
+                anyhow::bail!(
+                    "la mission {mission} n'a pas été préparée depuis un contexte du service ; préparez-la avec `prophet task prepare`"
+                );
+            };
+            let reference = plan.map_or("", |p| p.choice.reference.as_str());
+            let model = reference
+                .strip_prefix("local:")
+                .or_else(|| reference.strip_prefix("driver:"))
+                .unwrap_or(reference)
+                .to_owned();
+            task(
+                &TaskAction::Prepare {
+                    profile,
+                    model: Some(model),
+                    client: false,
+                    id: id.clone(),
+                    intent: info.task.intent.clone(),
+                },
+                as_json,
+            )
         }
         TaskAction::McpConfig { id } => {
             // La mission doit exister pour ce créateur ; le pont ne fait que la servir.

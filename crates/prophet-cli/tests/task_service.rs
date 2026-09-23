@@ -798,3 +798,47 @@ fn les_decisions_humaines_se_prennent_depuis_le_terminal() {
         "{rendu}"
     );
 }
+
+#[test]
+fn une_mission_echouee_se_prepare_a_nouveau_par_son_contexte() {
+    // `prophet task retry` relit la mission, puis repasse par la préparation du catalogue :
+    // même intention, même contexte, même modèle, une nouvelle référence, et rien de lancé.
+    let mut echouee = inspection();
+    echouee["task"]["state"] = json!("failed");
+    echouee["plan"] = json!({"task":"task:service","intent":"Préparer un document",
+        "choice":{"reference":"local:qwen3-1.7b","reason":"préféré"},"sandbox_level":0,
+        "grants":[],"limits":{"tokens":1000,"steps":10,"wall_time_s":60,"approvals":1,"cost_eur":0.0},
+        "scopes":["~/Documents/Prophet"],"profile":"documents"});
+    let plan = json!({"task":"relance","intent":"Préparer un document",
+        "choice":{"reference":"local:qwen3-1.7b","reason":"préféré"},"sandbox_level":0,
+        "grants":[],"limits":{"tokens":1000,"steps":10,"wall_time_s":60,"approvals":1,"cost_eur":0.0},
+        "scopes":["~/Documents/Prophet"],"profile":"documents"});
+    let (output, requetes) = invoke_seq(
+        &["task", "retry", "task:service", "--id", "relance"],
+        &[],
+        &[("task.inspect", echouee), ("task.prepare", plan)],
+    );
+    let sortie = success(output);
+    assert_eq!(requetes[0]["params"], json!({"id":"task:service"}));
+    assert_eq!(
+        requetes[1]["params"],
+        json!({"id":"relance","intent":"Préparer un document","profile":"documents","model":"qwen3-1.7b"})
+    );
+    assert!(sortie.contains("prophet task start relance"), "{sortie}");
+
+    // Une mission réussie, ou préparée hors du catalogue, ne se relance pas ainsi.
+    let (output, _) = invoke_seq(
+        &["task", "retry", "task:service"],
+        &[],
+        &[("task.inspect", inspection())],
+    );
+    assert!(failure(output).contains("échouée ou arrêtée"));
+    let mut sans_profil = inspection();
+    sans_profil["task"]["state"] = json!("cancelled");
+    let (output, _) = invoke_seq(
+        &["task", "retry", "task:service"],
+        &[],
+        &[("task.inspect", sans_profil)],
+    );
+    assert!(failure(output).contains("prophet task prepare"));
+}

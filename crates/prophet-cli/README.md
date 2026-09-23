@@ -35,7 +35,10 @@ et services sont exercés par `nix build .#checks.x86_64-linux.services`.
 navigateur piloté ; `prophet task prepare --profile <contexte> --model <modèle> "<objectif>"`
 prépare une mission sans manifeste ni droits fournis par la CLI, comme « Nouvel objectif » ;
 `--client` la destine à un client MCP, sans exiger le moteur local (le modèle du contexte
-suffit, `--model` devient facultatif).
+suffit, `--model` devient facultatif). `prophet task retry <mission> [--id <référence>]`
+prépare à nouveau une mission échouée ou arrêtée, par le même contexte, avec le même modèle et
+la même intention, sans la lancer — comme « Relancer » dans l'inspecteur ; une mission
+préparée hors du catalogue se prépare avec `prophet task prepare`.
 `prophet task attach <mission>` ouvre une séance d'outils depuis le terminal, `prophet task
 call <mission> <outil> '<json>'` y appelle un outil (`ui.tree`, `ui.act`, `fs.write`…) et
 `prophet task detach <mission>` la ferme, la mission passant à l'examen : c'est ainsi que le
