@@ -1721,6 +1721,20 @@ donne le détail.
   egress, téléchargement sous systemd, mission réelle Qwen3, système installé (UEFI et BIOS),
   ISO. CI de `12daf73` (le routeur lit le dossier des téléchargements) : **verte des deux
   côtés**, contrôle `llama-router` compris.
+- Audit visuel et fluidité de la surface (23 septembre,
+  `docs/reports/audit-visuel-2026-09-23.md`) : quatre pages, décision et espace de mission
+  branché, de 640 à 3840 × 2160, cinq accents et mouvement réduit. Corrigés : la surface tombait
+  en 2560 × 1440 et plus (limites de wgpu, `9e03dc9`) ; « Autoriser pour toute la mission » sur
+  un paiement irréversible — une action irréversible s'autorise désormais une fois, dans capd
+  comme dans la surface (ADR 0054, `9e03dc9`) ; cartes des clients qui se chevauchaient en
+  640 (`2c5e98c`) ; libellés décalés de six à huit points par rapport à leurs boutons dans huit
+  rangées (`hud::rangee`, `7894c9f`, `f4cc89f`) ; gouttière de la décision en 640 (`f4cc89f`).
+  Mesuré en release sur llvmpipe : l'interface coûte 0,45 à 0,75 ms de processeur par image à
+  toutes les tailles, le tracé logiciel du champ 23 à 26 ms (13 ms allégé). Au repos, le champ
+  gardait 37 % d'un cœur indéfiniment, pris au moteur local : sur un rastériseur logiciel, il se
+  fige après deux minutes sans geste et repart d'où il était (ADR 0055, `da9fd65`) — 0,2 % d'un
+  cœur en veille. `--mesure` sépare le processeur de l'attente du GPU, `--repos` détaille les
+  phases du repos.
 - `just check` : **883 réussis, 0 échec, 54 ignorés** (`32a20ea`), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,

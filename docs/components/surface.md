@@ -27,10 +27,16 @@ le fige. La barre du système ne relève que des comptes reçus ; le rail porte 
 missions actives ; le cadran d'une mission grave une graduation par étape franchie.
 
 La fenêtre relit les services quatre fois par seconde mais ne redessine que si l'empreinte de
-la scène a changé ou si l'interface l'a demandé ; au repos, aucune image n'est soumise.
+la scène a changé ou si l'interface l'a demandé ; au repos, aucune image n'est soumise. Tant
+qu'une mission avance, le champ suit la cadence de l'écran ; après trente secondes sans geste,
+il ralentit (ADR 0043) ; après deux minutes, sur un rastériseur logiciel seulement, il se fige
+là où il est et l'écran ne se redessine plus qu'aux changements d'état des missions, pour
+laisser le processeur au moteur local (ADR 0055).
 `prophet-surface --mesure N` rend N images hors écran, GPU attendu, et imprime les temps par
-image et la mémoire résidente : c'est l'instrument des mesures attendues par FRONTIER, à
-exécuter sur la machine à qualifier.
+image, le travail du processeur avant l'attente du GPU et la mémoire résidente ;
+`--repos N` détaille images et temps processeur par phase du repos. Ce sont les instruments
+des mesures attendues par FRONTIER, à exécuter sur la machine à qualifier
+([audit du 23 septembre](../reports/audit-visuel-2026-09-23.md)).
 
 L'atelier présente plusieurs missions dans une galerie horizontale et permet de les rechercher
 par titre, référence ou pilote avec Ctrl+K. Les objets hors de la vue ne sont pas composés.
