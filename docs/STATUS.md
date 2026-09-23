@@ -1612,7 +1612,16 @@ donne le détail.
   nomme quand il conclut sans lui (deux fois au plus, chaque interrogation comptée, événement
   `task.reminded`), et le banc relève outils appelés et réponse finale, rejoue chaque tâche
   trois fois en CI et compte seize tâches (quinze sans navigateur), chaque vérificateur éprouvé
-  sur une solution juste et une fausse (`docs/reports/banc-m13-2026-09-23.md`).
+  sur une solution juste et une fausse (`docs/reports/banc-m13-2026-09-23.md`). Deuxième
+  passage (`6d01c38`, quinze tâches, trois exécutions) : 4/45 de chaque côté. Le rappel fait
+  écrire (quinze exécutions rappelées, toutes écrites ; « ne-pas-toucher-au-reste » 0 → 3/3),
+  sans rendre le contenu juste. 19 exécutions par Prophet s'arrêtaient sur un refus ou une
+  « panne » que la boucle nue encaissait : manifeste du banc sans `fs.list`, `fs.search` sur un
+  fichier en `Internal`, chemin hors portée qui arrêtait tout. ADR 0050 : un refus de chemin
+  revient au modèle en disant où agir, la révocation (revérifiée auprès de capd) et le troisième
+  refus arrêtent ; erreurs de nature de chemin en `Invalid` avec l'outil qui convient ;
+  `fs.search` fouille un fichier ; `fs.read` compte les lignes ; le banc mesure aussi le temps
+  processeur du moteur et des services et leur pic de mémoire.
 - Concurrence et annulation sur le vrai moteur (FRONTIER, moteurs locaux ; essai
   `deux_requetes_se_partagent_le_moteur_et_un_abandon_le_libere`, vert sur `dd5ce52`) : sur une
   instance à une place comme celle de l'image, deux requêtes simultanées aboutissent toutes

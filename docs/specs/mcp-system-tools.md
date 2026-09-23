@@ -10,7 +10,7 @@
 - Chaque outil déclare dans ses métadonnées : `requires` (res, act, cible dérivée des arguments), `irreversible` (bool), `external` (bool), `sandbox_level_min` (0, 1, 2 ou null).
 - Descriptions destinées aux modèles : une phrase, précise, avec les contraintes ; exemples d'arguments dans le schéma.
 - Résultats : toujours structurés (`content` de type `text` contenant du JSON, plus `structuredContent`), avec `truncated: true` et `total_bytes` quand un résultat a été coupé.
-- Erreurs : `isError: true` avec `{ "code": "<PolicyDenied|ApprovalRequired|NotFound|SandboxError|BudgetExceeded|Invalid>", "detail": "…" }`.
+- Erreurs : `isError: true` avec `{ "code": "<PolicyDenied|ApprovalRequired|NotFound|SandboxError|BudgetExceeded|Invalid>", "detail": "…" }`. Un refus d'accès fichiers dit dans `detail` où la mission peut agir (motifs `fs` de son jeton) ; lire un répertoire ou lister un fichier rend `Invalid` avec l'outil qui convient (ADR 0050).
 - Transport : stdio et socket Unix. Le registre déclare la commande stdio pour les clients d'éditeurs.
 
 ## Liste normative v0
@@ -21,7 +21,7 @@
 | `fs.write` | fs.write chemin | non (réversible via sfs) | non | remplacement atomique dans le travail, contenu ≤ 1 Mio |
 | `fs.list` | fs.list chemin et descendants | non | non | fusion travail/origine ; ≤ 2000 résultats |
 | `fs.stat` | fs.read chemin | non | non | |
-| `fs.search` | fs.read racine et descendants | non | non | nom et contenu ; ≤ 200 résultats ; par contenu, les cinq premières lignes trouvées de chaque fichier (`matches` : numéro et extrait de 200 caractères au plus, `more_matches`) |
+| `fs.search` | fs.read racine et descendants | non | non | nom et contenu ; une racine qui est un fichier est fouillée seule ; ≤ 200 résultats ; par contenu, les cinq premières lignes trouvées de chaque fichier (`matches` : numéro et extrait de 200 caractères au plus, `more_matches`) |
 | `fs.diff_task` | task courante | non | non | |
 | `proc.exec` | proc.exec binaire | selon commande | non | niveau de sandbox forcé à 2 hors liste blanche |
 | `proc.kill` | task courante | non | non | |

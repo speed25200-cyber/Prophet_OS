@@ -502,8 +502,10 @@ async fn les_droits_du_jeton_ne_permettent_pas_de_deborder_du_perimetre_du_plan(
         .unwrap();
     model.received.await.unwrap();
     model.release.send(()).unwrap();
+    // L'écriture hors du périmètre du plan est refusée et n'a pas lieu ; le refus revient au
+    // modèle, qui conclut (ADR 0050).
     let status = chain.wait_terminal().await;
-    assert_eq!(status["state"], "failed", "{status}");
+    assert_eq!(status["state"], "done", "{status}");
     assert!(
         !chain
             .dir
@@ -511,7 +513,84 @@ async fn les_droits_du_jeton_ne_permettent_pas_de_deborder_du_perimetre_du_plan(
             .join("home/.prophet/tasks/local-test/work/docs/note.txt")
             .exists()
     );
+    let events = chain
+        .journal
+        .call("ledger.query", json!({"task":"local-test"}))
+        .await
+        .unwrap();
+    assert!(
+        events
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "tool.result" && e["payload"]["error_code"] == "PolicyDenied"),
+        "{events}"
+    );
     model.worker.abort();
+}
+
+#[tokio::test]
+async fn trois_refus_arretent_la_mission_sans_rien_ecrire() {
+    let hors = |n| {
+        appel_d_outil(
+            n,
+            "fs.write",
+            json!({"path":format!("~/ailleurs/{n}.txt"),"content":"x"}),
+        )
+    };
+    let (endpoint, corps) = modele_scripte(vec![
+        hors(1),
+        hors(2),
+        hors(3),
+        json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"Jamais atteint."}}],"usage":{"prompt_tokens":10,"completion_tokens":2}}),
+    ])
+    .await;
+    let chain = Chain::new(&endpoint).await;
+    chain
+        .plan_scopes("m", "Écris une note", 20000, &["~/docs"])
+        .await;
+    chain
+        .agents
+        .call("task.start", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    let status = chain.wait_terminal().await;
+    assert_eq!(status["state"], "failed", "{status}");
+    assert!(
+        status["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("3 refus")),
+        "{status}"
+    );
+    let corps = corps.lock().unwrap().clone();
+    assert_eq!(
+        corps.len(),
+        3,
+        "le modèle n'est pas interrogé après le troisième refus"
+    );
+    // Le refus dit au modèle où la mission peut agir.
+    let refus = corps[1]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|m| m["role"] == "tool")
+        .unwrap()["content"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        refus.contains("PolicyDenied") && refus.contains("~/docs"),
+        "{refus}"
+    );
+    assert!(!chain.dir.path().join("home/ailleurs").exists());
+    assert!(
+        !chain
+            .dir
+            .path()
+            .join("home/.prophet/tasks/local-test/work/ailleurs")
+            .exists()
+    );
 }
 
 #[tokio::test]

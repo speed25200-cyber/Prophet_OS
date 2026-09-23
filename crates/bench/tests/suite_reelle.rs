@@ -188,13 +188,15 @@ impl Chaine {
     }
 }
 
-/// Le manifeste d'une tâche : lire et écrire dans son dossier, avec les outils fichiers.
+/// Le manifeste d'une tâche : lire, lister et écrire dans son dossier, avec les outils
+/// fichiers — ce que les profils locaux du système accordent (`examples/missions`).
 fn mission(tache: &Task, modele: &str) -> Value {
     let racine = format!("~/{}", tache.root);
     let motifs = json!([racine.clone(), format!("{racine}/**")]);
     let mut demandes: Vec<Value> = Vec::new();
     for motif in [racine.clone(), format!("{racine}/**")] {
         demandes.push(json!({"res":"fs","act":"read","match":motif}));
+        demandes.push(json!({"res":"fs","act":"list","match":motif}));
         demandes.push(json!({"res":"fs","act":"write","match":motif}));
     }
     for outil in OUTILS {
@@ -208,7 +210,7 @@ fn mission(tache: &Task, modele: &str) -> Value {
             "agent": {"id":"org.prophet.banc","version":"1.0.0","name":"Banc M13","publisher_key":"ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
             "model": {"preferred": [format!("local:{modele}")]},
             "sandbox": {"min_level": 0},
-            "capabilities": {"max": {"fs.read": motifs, "fs.write": motifs, "tool.call": OUTILS}},
+            "capabilities": {"max": {"fs.read": motifs, "fs.list": motifs, "fs.write": motifs, "tool.call": OUTILS}},
             "budget": {"default": {"tokens": 80_000, "wall_time": "600s", "approvals": 3}}
         },
         "requested": demandes,
@@ -937,15 +939,10 @@ async fn le_banc_joue_une_tache_des_deux_cotes_avec_un_faux_moteur() {
         .into_iter()
         .find(|t| t.id == "total-des-ventes")
         .unwrap();
-    // Son écriture sort de la portée de la mission : capd la refuse, la mission s'arrête.
+    // Son écriture sort de la portée de la mission : capd la refuse, le refus revient au
+    // modèle (ADR 0050), qui conclut ; Prophet lui rappelle le fichier demandé, en vain.
     let echec = par_prophet(&autre, &endpoint, "faux", None).await;
     assert!(!echec.reussie, "{echec:?}");
     assert_eq!(echec.outils, ["fs.write ✗"], "{echec:?}");
-    assert!(
-        echec
-            .motif
-            .as_deref()
-            .is_some_and(|m| m.contains("PolicyDenied")),
-        "{echec:?}"
-    );
+    assert_eq!(echec.rappels, ["~/ventes/out/total.txt"], "{echec:?}");
 }

@@ -131,6 +131,11 @@ est journalisé (`task.reminded`, `missing`, `nth`) et le résultat porte `remin
 aucun droit : l'écriture passe par le même outil, le même jeton et la même politique
 (ADR 0049).
 
+Un appel refusé sur sa cible (un chemin hors de la portée) revient au modèle avec son code
+`PolicyDenied` et les motifs où la mission peut agir ; après chaque refus, agentd redemande à capd
+le droit d'appeler l'outil : refusé (jeton révoqué ou expiré), la mission s'arrête aussitôt. Au
+troisième refus, ou à la première panne (`Internal`), elle s'arrête aussi (ADR 0050).
+
 Le statut d'annulation final confirme la sortie du travailleur. Les fichiers déjà préparés
 restent dans le travail SFS. `result` expose le diff à une fin normale, sans appliquer les
 changements. Une fin normale n'est pas une vérification sémantique de l'objectif.

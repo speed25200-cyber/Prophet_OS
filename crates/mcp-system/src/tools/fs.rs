@@ -81,7 +81,7 @@ file_tool!(
 file_tool!(
     Search,
     "fs.search",
-    "Cherche par nom ou contenu dans les descendants autorisés. Par contenu, rend pour chaque fichier ses cinq premières lignes trouvées (numéro et extrait), à lire ensuite avec fs.read offset si besoin. Sans liens ; 200 résultats, 256 Kio par fichier, 8 Mio de contenu au total. Une recherche incomplète est signalée.",
+    "Cherche par nom ou contenu dans les descendants autorisés d'un répertoire, ou dans un seul fichier si `root` en nomme un. Par contenu, rend pour chaque fichier ses cinq premières lignes trouvées (numéro et extrait), à lire ensuite avec fs.read offset si besoin. Sans liens ; 200 résultats, 256 Kio par fichier, 8 Mio de contenu au total. Une recherche incomplète est signalée.",
     "fs.read",
     Search,
     "root",

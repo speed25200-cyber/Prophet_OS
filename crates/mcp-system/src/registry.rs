@@ -166,6 +166,29 @@ impl ResourceAccess for FileAccess<'_> {
     }
 }
 
+/// Un refus d'accès fichiers dit où la mission peut agir : un modèle qui s'est trompé de chemin
+/// se corrige au lieu de deviner. Ce sont les motifs de son propre jeton, que `task.status` lui
+/// rend déjà.
+pub(crate) fn with_scopes(detail: String, context: &ToolContext) -> String {
+    let home = context.home.trim_end_matches('/');
+    let mut scopes: Vec<String> = Vec::new();
+    for grant in context.token.grants.iter().filter(|g| g.res == Res::Fs) {
+        let pattern = grant.pattern.trim_end_matches("/**").trim_end_matches("/*");
+        let pattern = match pattern.strip_prefix(home) {
+            Some(rest) if !home.is_empty() => format!("~{rest}"),
+            _ => pattern.to_owned(),
+        };
+        if !scopes.contains(&pattern) {
+            scopes.push(pattern);
+        }
+    }
+    if scopes.is_empty() {
+        detail
+    } else {
+        format!("{detail} ; la mission peut agir sous {}", scopes.join(", "))
+    }
+}
+
 /// Journalisation des appels.
 pub trait Journal: Send + Sync {
     /// Enregistre un événement ; une erreur interdit de poursuivre les outils de la tâche.
@@ -355,6 +378,7 @@ impl Registry {
         }
 
         let (decision, demande) = self.authorize(name, &meta, args, context, now);
+        let on_files = demande.as_ref().is_some_and(|d| d.res == Res::Fs);
         // Une action refusée faute de décision humaine est soumise à l'humain (ADR 0041) : le
         // registre crée la demande, et la rend au modèle avec son identifiant ; une décision
         // déjà rendue — règle de tâche ou d'agent, ou « une fois » pour cette même action —
@@ -394,13 +418,15 @@ impl Registry {
             } else {
                 ErrorCode::PolicyDenied
             };
-            let result = CallResult::error(
-                code,
-                format!(
-                    "{name} refusé : {reason:?}{}",
-                    rule.as_ref().map(|r| format!(" ({r})")).unwrap_or_default()
-                ),
+            let mut detail = format!(
+                "{name} refusé : {reason:?}{}",
+                rule.as_ref().map(|r| format!(" ({r})")).unwrap_or_default()
             );
+            // Un chemin hors de la portée se corrige si le modèle sait où il peut agir.
+            if on_files && code == ErrorCode::PolicyDenied {
+                detail = with_scopes(detail, context);
+            }
+            let result = CallResult::error(code, detail);
             self.record_result(name, &result, context, now)?;
             return Ok(result);
         }

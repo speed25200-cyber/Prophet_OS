@@ -204,6 +204,60 @@ fn la_recherche_verifie_chaque_descendant_et_rend_des_chemins_logiques() {
 }
 
 #[test]
+fn une_recherche_dans_un_fichier_nomme_porte_sur_lui_seul() {
+    // Un petit modèle passe souvent le fichier à fouiller comme racine : la recherche porte
+    // sur lui, au lieu d'échouer.
+    let m = monde(&["~/docs/**"]);
+    std::fs::write(
+        m.home.join("docs/app.log"),
+        "INFO a\nERROR b\nINFO c\nERROR d\n",
+    )
+    .unwrap();
+    std::fs::write(m.home.join("docs/autre.log"), "ERROR ailleurs\n").unwrap();
+    let r = m.call(
+        "fs.search",
+        json!({"root":"~/docs/app.log","content_contains":"ERROR"}),
+    );
+    assert!(!r.is_error, "{r:?}");
+    let d = r.structured.unwrap();
+    let results = d["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1, "{d}");
+    assert_eq!(results[0]["path"], json!(m.home.join("docs/app.log")));
+    assert_eq!(results[0]["matches"].as_array().unwrap().len(), 2, "{d}");
+}
+
+#[test]
+fn se_tromper_de_nature_de_chemin_dit_l_outil_qui_convient() {
+    let m = monde(&["~/docs/**"]);
+    std::fs::write(m.home.join("docs/a.txt"), "un\n").unwrap();
+    let liste = m.call("fs.list", json!({"path":"~/docs/a.txt"}));
+    assert!(liste.is_error, "{liste:?}");
+    let d = liste.structured.unwrap();
+    assert_eq!(d["code"], "Invalid", "{d}");
+    assert!(d["detail"].as_str().unwrap().contains("fs.read"), "{d}");
+    let lecture = m.call("fs.read", json!({"path":"~/docs"}));
+    assert!(lecture.is_error, "{lecture:?}");
+    let d = lecture.structured.unwrap();
+    assert_eq!(d["code"], "Invalid", "{d}");
+    assert!(d["detail"].as_str().unwrap().contains("fs.list"), "{d}");
+}
+
+#[test]
+fn un_refus_dit_ou_la_mission_peut_agir() {
+    let m = monde(&["~/docs/**"]);
+    let r = m.call(
+        "fs.write",
+        json!({"path":"~/ailleurs/note.txt","content":"x"}),
+    );
+    assert!(r.is_error, "{r:?}");
+    let d = r.structured.unwrap();
+    assert_eq!(d["code"], "PolicyDenied", "{d}");
+    let detail = d["detail"].as_str().unwrap();
+    assert!(detail.contains("sous ~/docs"), "{detail}");
+    assert!(!m.home.join("ailleurs/note.txt").exists());
+}
+
+#[test]
 fn la_lecture_compte_les_lignes_du_contenu_rendu() {
     // Compter les lignes d'un texte relu est une erreur courante d'un petit modèle : le
     // service les compte, avec ou sans fin de ligne finale, fichier vide compris.

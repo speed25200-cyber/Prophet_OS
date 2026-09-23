@@ -23,6 +23,10 @@ use time::OffsetDateTime;
 
 use crate::{State, Task, TaskPlan};
 
+/// Refus d'accès qu'une mission encaisse avant de s'arrêter (ADR 0050) : un modèle qui s'est
+/// trompé de chemin se corrige, un modèle qui sonde le système ne sonde pas longtemps.
+pub const REFUS_MAX: u32 = 3;
+
 /// Publie l'état et le résultat sous le verrou de persistance du service.
 pub type Publish = Arc<dyn Fn(Task, Option<Value>) -> Result<(), String> + Send + Sync>;
 
@@ -778,6 +782,7 @@ impl Mission {
         let run = driver.start(&request).map_err(|e| e.to_string())?.run;
         let mut text = String::new();
         let mut calls = 0;
+        let mut refus = 0;
         loop {
             control.check_live()?;
             for event in driver.poll(&run).map_err(|e| e.to_string())? {
@@ -787,9 +792,34 @@ impl Mission {
                         tool,
                         ok: false,
                         error: Some(code),
-                    } if matches!(code.as_str(), "PolicyDenied" | "Internal") => {
-                        // Une décision humaine demandée (ApprovalRequired) n'interrompt pas :
-                        // le modèle l'attend et réessaie (ADR 0041).
+                    } if code == "PolicyDenied" => {
+                        // Le refus d'un chemin hors de la portée revient au modèle, qui sait où
+                        // il peut agir (le refus le lui dit) ; le refus du droit d'appeler
+                        // l'outil lui-même — jeton révoqué ou expiré — arrête la mission, qui
+                        // n'a plus ce droit ; le troisième refus aussi (ADR 0050). Une
+                        // décision humaine demandée (ApprovalRequired) n'interrompt pas : le
+                        // modèle l'attend et réessaie (ADR 0041).
+                        refus += 1;
+                        let encore = control
+                            .check(
+                                &self.token,
+                                &CheckRequest::new(Res::Tool, Act::Call, tool.clone())
+                                    .sandbox_level(0),
+                                OffsetDateTime::now_utc(),
+                            )
+                            .is_allow();
+                        if !encore {
+                            return Err(format!("{tool} interrompu : {code}, droits retirés"));
+                        }
+                        if refus >= REFUS_MAX {
+                            return Err(format!("{tool} interrompu : {code}, {refus} refus"));
+                        }
+                    }
+                    DriverEvent::ToolResult {
+                        tool,
+                        ok: false,
+                        error: Some(code),
+                    } if code == "Internal" => {
                         return Err(format!("{tool} interrompu : {code}"));
                     }
                     DriverEvent::Text { text: fragment, .. } => text = fragment,

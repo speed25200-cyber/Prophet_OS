@@ -312,17 +312,15 @@ async fn un_contexte_non_confie_est_refuse_par_capd_sans_creer_de_sous_mission()
     ])
     .await;
     let parent = chain.run("seul", "Tenter une délégation interdite").await;
-    // Un refus de capd interrompt la boucle native, comme tout refus d'outil : la mission le
-    // dit, et aucune sous-mission n'a existé.
-    assert_eq!(parent["task"]["state"], "failed", "{parent}");
-    assert!(
-        parent["task"]["reason"]
-            .as_str()
-            .unwrap_or("")
-            .contains("PolicyDenied"),
-        "{parent}"
+    // Le refus de capd revient au modèle, qui conclut (ADR 0050) ; aucune sous-mission n'a
+    // existé.
+    assert_eq!(parent["task"]["state"], "done", "{parent}");
+    assert_eq!(parent["result"]["text"], "Refusé, je m'arrête.", "{parent}");
+    // Seul le modèle du parent a été interrogé : avant et après le refus.
+    assert_eq!(
+        *chain.asked.lock().unwrap(),
+        vec!["modele-controle", "modele-controle"]
     );
-    assert_eq!(*chain.asked.lock().unwrap(), vec!["modele-controle"]);
     let list = chain.client.call("task.list", json!({})).await.unwrap();
     assert!(
         !list.to_string().contains("seul.1"),

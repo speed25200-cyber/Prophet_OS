@@ -33,11 +33,29 @@ struct Failure(ErrorCode, String);
 
 impl From<std::io::Error> for Failure {
     fn from(error: std::io::Error) -> Self {
-        let code = match error
+        let errno = error
             .raw_os_error()
-            .map(rustix::io::Errno::from_raw_os_error)
-        {
+            .map(rustix::io::Errno::from_raw_os_error);
+        // Une erreur du modèle sur la nature d'un chemin se dit comme telle, avec l'outil qui
+        // convient : ce n'est ni une panne ni un refus, et il peut la corriger.
+        match errno {
+            Some(rustix::io::Errno::NOTDIR) => {
+                return Self(
+                    ErrorCode::Invalid,
+                    "ce chemin est un fichier, pas un répertoire : lisez-le avec fs.read".into(),
+                );
+            }
+            Some(rustix::io::Errno::ISDIR) => {
+                return Self(
+                    ErrorCode::Invalid,
+                    "ce chemin est un répertoire, pas un fichier : listez-le avec fs.list".into(),
+                );
+            }
+            _ => {}
+        }
+        let code = match errno {
             Some(rustix::io::Errno::NOENT) => ErrorCode::NotFound,
+            Some(rustix::io::Errno::NAMETOOLONG | rustix::io::Errno::INVAL) => ErrorCode::Invalid,
             Some(
                 rustix::io::Errno::LOOP
                 | rustix::io::Errno::XDEV
@@ -216,6 +234,9 @@ impl<'a> View<'a> {
         }
         let mut file = self.selected(relative, OFlags::RDONLY)?;
         let metadata = file.metadata()?;
+        if metadata.is_dir() {
+            return Err(std::io::Error::from(rustix::io::Errno::ISDIR).into());
+        }
         if !metadata.is_file() || metadata.nlink() != 1 {
             return Err(denied());
         }
@@ -474,6 +495,10 @@ pub(super) fn execute(
 ) -> CallResult {
     match run(op, args, context, access) {
         Ok(data) => CallResult::structured(data),
+        Err(Failure(ErrorCode::PolicyDenied, detail)) => CallResult::error(
+            ErrorCode::PolicyDenied,
+            crate::registry::with_scopes(detail, context),
+        ),
         Err(Failure(code, detail)) => CallResult::error(code, detail),
     }
 }
@@ -627,6 +652,9 @@ fn search(view: &View<'_>, root: &Path, args: &Value) -> Result<Value> {
     if !view.permits(Act::Read, root) {
         return Err(denied());
     }
+    // Un petit modèle nomme souvent le fichier qu'il veut fouiller : la recherche porte alors
+    // sur lui seul, sous les mêmes règles.
+    let root_is_file = view.metadata(root).is_ok_and(|m| !m.is_dir());
     let mut budget = Budget::new();
     let mut results = vec![];
     let mut stack = vec![(root.to_owned(), 0)];
@@ -637,7 +665,12 @@ fn search(view: &View<'_>, root: &Path, args: &Value) -> Result<Value> {
         if !view.permits(Act::Read, &directory) {
             continue;
         }
-        let children = match view.names(&directory, &mut budget) {
+        let listed = if root_is_file && directory == root {
+            Ok(vec![root.to_owned()])
+        } else {
+            view.names(&directory, &mut budget)
+        };
+        let children = match listed {
             Ok(children) => children,
             Err(error) if directory == root => return Err(error),
             Err(_) => {

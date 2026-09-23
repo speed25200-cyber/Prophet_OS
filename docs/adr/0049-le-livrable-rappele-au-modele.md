@@ -1,6 +1,6 @@
 # ADR-0049 — Rappeler au modèle le fichier que l'objectif demande, quand il conclut sans lui
 
-- **Statut** : accepté ; à juger sur le banc M13 (ADR 0048)
+- **Statut** : accepté ; mesuré sur le banc M13 (ADR 0048, `6d01c38`)
 - **Date** : 2026-09-23
 - **Tâche liée** : M13-T1, M13-T4 ; M4 (boucle native d'agentd)
 
@@ -61,7 +61,10 @@ message. Le service sait, sans interpréter l'objectif, ce qu'il nomme et ce qui
 - Un objectif qui nomme un chemin à ne pas créer (« sans créer ~/x ») ou une entrée absente
   reçoit, au pire, un rappel que le modèle peut décliner ; le banc n'en contient pas.
 - Premier passage du banc avec le rappel (`6d01c38`) : message impératif (« Vous n'avez pas
-  encore écrit … »), deux rappels sans condition. Le message factuel et la condition de
-  progrès viennent ensuite, pour ne pas pousser le modèle à créer une entrée absente.
+  encore écrit … »), deux rappels sans condition. Les quinze exécutions rappelées (sur 45) ont
+  toutes écrit le fichier demandé, et « ne-pas-toucher-au-reste » passe de 0 à 3 sur 3 ; le
+  contenu, lui, reste celui du modèle (« 0 € » quand il n'a rien lu). Le message factuel et la
+  condition de progrès viennent ensuite, pour ne pas pousser le modèle à créer une entrée
+  absente.
 - Un livrable produit hors de la portée n'est pas vu ; c'est voulu : la mission ne peut pas y
   écrire.
