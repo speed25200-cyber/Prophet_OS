@@ -1439,6 +1439,7 @@ fn la_page_modeles_montre_le_catalogue_du_systeme_et_ce_qui_se_telecharge() {
     for id in [
         "catalogue-retirer-qwen3-1.7b-q8",
         "catalogue-arreter-qwen3-0.6b-q8",
+        "catalogue-telecharger-qwen3-8b-q4",
     ] {
         assert!(
             bureau.ctx.read_response(egui::Id::new(id)).is_some(),

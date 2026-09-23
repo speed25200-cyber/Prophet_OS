@@ -31,7 +31,7 @@
 | `task.call` | Exécute un outil de la séance, compté comme une étape (`{id, name, arguments}`) |
 | `task.detach` | Retire le client, scelle les versions et conclut la mission en `done` (`{id, text?}`) |
 | `task.route` | Dit quel modèle Jev choisirait pour une intention, sans planifier ; sélection statique sans Jev |
-| `model.catalog` | Rend le catalogue des poids du système, entrée par entrée : téléchargé ou non, début d'un téléchargement interrompu, dernier suivi (ADR 0046) |
+| `model.catalog` | Rend le catalogue des poids du système, entrée par entrée : téléchargé ou non, début d'un téléchargement interrompu, dernier suivi (ADR 0046), mémoire que l'entrée demandera à la fenêtre du moteur et verdict sur cette machine (`memory`, ADR 0047) |
 | `model.pull` | Télécharge une entrée (`{id}`) par le proxy de sortie, sous un jeton de capd borné à ses hôtes, dans un fil ; rend le suivi, ou celui du téléchargement déjà en cours |
 | `model.pulls` | Rend les suivis : `running`, `done`, `failed` (motif), `cancelled` ; octets reçus et total |
 | `model.cancel` | Arrête un téléchargement en cours ; le début reçu reste, pour reprendre |

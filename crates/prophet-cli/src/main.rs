@@ -1554,6 +1554,20 @@ fn catalogue_lisible(catalogue: &serde_json::Value) -> String {
         if let Some(note) = e["note"].as_str() {
             out.push_str(&format!("  {:<16} {note}\n", ""));
         }
+        if let Some(total) = e["memory"]["total"].as_u64() {
+            let verdict = match e["memory"]["fit"].as_str() {
+                Some("fits") => " — tient en mémoire",
+                Some("tight") => " — ! la mémoire libre manque en ce moment",
+                Some("too_large") => " — ✗ ne tient pas en mémoire sur cette machine",
+                _ => "",
+            };
+            out.push_str(&format!(
+                "  {:<16} ≈ {} en mémoire à {} tokens{verdict}\n",
+                "",
+                providers::memory::gigabytes(total),
+                e["memory"]["context"].as_u64().unwrap_or(0)
+            ));
+        }
     }
     out.push_str("Télécharger : prophet model pull <id>\n");
     out
@@ -3362,9 +3376,15 @@ mod tests {
             {"id": "qwen3-0.6b-q8", "name": "Qwen3 0.6B", "installed": false, "pull": {"state": "running", "received": 320_000_000u64, "total": 640_000_000u64}},
             {"id": "autre", "name": "Autre", "installed": false, "partial_bytes": 12_000_000u64},
             {"id": "faux", "name": "Faux", "installed": false, "pull": {"state": "failed", "error": "fichier refusé : empreinte"}},
-            {"id": "defaut", "name": "Défaut", "installed": false, "provided": "/nix/store/x-defaut.gguf"}
+            {"id": "defaut", "name": "Défaut", "installed": false, "provided": "/nix/store/x-defaut.gguf"},
+            {"id": "gros", "name": "Gros", "installed": false,
+             "memory": {"context": 4096, "weights": 1, "kv_cache": 1, "compute": 1, "total": 70_000_000_000u64, "fit": "too_large"}}
         ]});
         let dit = catalogue_lisible(&catalogue);
+        assert!(
+            dit.contains("≈ 70,0 Go en mémoire à 4096 tokens — ✗ ne tient pas"),
+            "{dit}"
+        );
         assert!(
             dit.contains("qwen3-1.7b-q8") && dit.contains("✓ téléchargé"),
             "{dit}"

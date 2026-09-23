@@ -1448,6 +1448,23 @@ fn catalogue_du_systeme(ui: &mut egui::Ui, atelier: &Atelier) -> Option<(Command
                         if let Some(n) = e.bytes.or_else(|| e.pull.as_ref().and_then(|p| p.total)) {
                             ui.label(RichText::new(octets(n)).size(12.0).color(DISCRET));
                         }
+                        if let Some(m) = &e.memory {
+                            let couleur = match m.fit {
+                                Some(
+                                    providers::memory::Fit::TooLarge
+                                    | providers::memory::Fit::Tight,
+                                ) => ATTENTE,
+                                _ => accent.sourd,
+                            };
+                            ui.label(
+                                RichText::new(format!(
+                                    "≈ {} en mémoire",
+                                    providers::memory::gigabytes(m.need.total)
+                                ))
+                                .size(12.0)
+                                .color(couleur),
+                            );
+                        }
                     });
                     if let Some(note) = &e.note {
                         petit(ui, note);
@@ -1567,8 +1584,12 @@ fn etat_du_poids(ui: &mut egui::Ui, e: &EntreeCatalogue, accent: &Accent) {
         ui.label(RichText::new(erreur).size(12.0).color(ATTENTE));
         return;
     }
+    let trop_grand = e
+        .memory
+        .is_some_and(|m| m.fit == Some(providers::memory::Fit::TooLarge));
     match e.partial_bytes {
         Some(n) => pastille(ui, &format!("Interrompu à {}", octets(n)), DISCRET),
+        None if trop_grand => pastille(ui, "Trop grand pour cette machine", ATTENTE),
         None => pastille(ui, "Disponible", DISCRET),
     }
 }
@@ -1584,7 +1605,16 @@ fn description_du_poids(e: &EntreeCatalogue) -> String {
     } else {
         "disponible".to_owned()
     };
-    format!("{} — {etat}", e.name)
+    let memoire = e.memory.map_or_else(String::new, |m| {
+        format!(
+            " — demande environ {} de mémoire à {} tokens{}",
+            providers::memory::gigabytes(m.need.total),
+            m.need.context,
+            m.fit
+                .map_or_else(String::new, |f| format!(", {}", f.describe()))
+        )
+    });
+    format!("{} — {etat}{memoire}", e.name)
 }
 
 /// Les poids installés, tels que leurs fichiers les décrivent : l'agent qui confie une étape et

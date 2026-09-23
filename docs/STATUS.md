@@ -1579,7 +1579,10 @@ donne le détail.
   `prophet model ls` (colonne mémoire), `model.list` pour les agents (`memory`, `fit`) et la
   page Modèles (une jauge par poids) le disent ; `prophet model serve` refuse un poids qui ne
   tiendrait pas sans paginer la machine, sauf `--force`, et agentd ne prépare ni ne lance de
-  mission locale sur un tel modèle (le routeur le chargerait à la demande) ; `prophet model pull` refuse, avant
+  mission locale sur un tel modèle (le routeur le chargerait à la demande). Le catalogue porte
+  l'en-tête relevé de chaque fichier (cache KV par token, vocabulaire), revérifié à la source
+  par l'essai `needs_network` : la mémoire se dit avant de télécharger (`prophet model catalog`,
+  page Modèles). `prophet model pull` refuse, avant
   toute requête, ce qui ne tient pas sur le disque. L'essai des familles en CI relève la
   mémoire résidente de chaque instance du vrai llama-server et la confronte à l'estimation.
 - Conversation longue (M8-T7, `f93e591`) : au-delà de 32 Kio ou de 32 tours, la page

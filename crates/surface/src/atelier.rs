@@ -95,6 +95,10 @@ pub struct EntreeCatalogue {
     /// Le dernier téléchargement depuis le démarrage d'agentd.
     #[serde(default)]
     pub pull: Option<SuiviDePoids>,
+    /// La mémoire que le moteur réservera pour le servir, et où elle tombe sur cette machine
+    /// (ADR 0047) : dite avant de télécharger.
+    #[serde(default)]
+    pub memory: Option<providers::memory::Assessment>,
     /// Ce que le routeur du moteur local en dit, s'il connaît ce fichier.
     #[serde(skip)]
     pub au_moteur: Option<AuMoteur>,
@@ -719,14 +723,25 @@ impl Atelier {
     }
 }
 
-/// Un catalogue d'exemple pour les scènes de démonstration : rien n'y est lu.
+/// Un catalogue d'exemple pour les scènes de démonstration : rien n'y est lu. La mémoire y est
+/// celle d'une machine de 8 Gio dont 5 sont libres.
 fn catalogue_d_exemple() -> Vec<EntreeCatalogue> {
+    let machine = providers::memory::System {
+        total: 8 << 30,
+        available: 5 << 30,
+    };
+    let memoire = |octets, kv, vocabulaire| {
+        providers::memory::need_from(octets, Some(kv), Some(vocabulaire), 4096)
+            .map(|n| providers::memory::assess_need(n, Some(&machine)))
+    };
     vec![
         EntreeCatalogue {
             id: "qwen3-1.7b-q8".into(),
             name: "Qwen3 1.7B".into(),
             quantization: Some("Q8_0".into()),
             note: Some("Le modèle de réflexion par défaut.".into()),
+            bytes: Some(1_834_426_016),
+            memory: memoire(1_834_426_016, 114_688, 151_936),
             installed: true,
             au_moteur: Some(AuMoteur {
                 nom: "qwen3-1.7b".into(),
@@ -745,6 +760,16 @@ fn catalogue_d_exemple() -> Vec<EntreeCatalogue> {
                 total: Some(640_000_000),
                 error: None,
             }),
+            memory: memoire(639_446_688, 114_688, 151_936),
+            ..EntreeCatalogue::default()
+        },
+        EntreeCatalogue {
+            id: "qwen3-8b-q4".into(),
+            name: "Qwen3 8B".into(),
+            quantization: Some("Q4_K_M".into()),
+            note: Some("Plus de raisonnement ; demande presque toute la mémoire libre.".into()),
+            bytes: Some(5_027_783_488),
+            memory: memoire(5_027_783_488, 147_456, 151_936),
             ..EntreeCatalogue::default()
         },
     ]

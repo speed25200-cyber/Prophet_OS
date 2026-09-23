@@ -41,6 +41,15 @@ mémoire vive non.
   installés par le nom que le routeur lui donne (son fichier sans `.gguf`), est `too_large`.
   La mission reste planifiée ; le refus dit ce que le modèle demande. Aucune requête au moteur
   n'est faite pour cela.
+- **Le dire avant de télécharger** : chaque entrée du catalogue porte le cache KV par token
+  et le vocabulaire relevés dans l'en-tête de son fichier (`kv_bytes_per_token`,
+  `vocabulary`) ; `model.catalog` rend pour chacune ce qu'elle demandera (`memory`), que
+  `prophet model catalog` et la page Modèles disent (« ≈ 6,1 Go en mémoire », « Trop grand
+  pour cette machine »). L'essai `needs_network` des empreintes lit, par le vrai egress,
+  les 16 premiers Mio de chaque fichier à sa révision épinglée (`providers::pull::get_prefix`,
+  une plage d'octets, redirections bornées aux hôtes de l'entrée) et exige que le catalogue
+  porte ce que l'en-tête dit. Relevé le 23 septembre sur les huit entrées : de 80 Kio par token
+  (Granite 3.3 2B) à 384 Kio (Phi-3 mini, sans GQA).
 - **Refuser de télécharger ce qui ne tient pas sur le disque** : `providers::pull` compare ce
   qui reste à recevoir à la place libre du dossier (`statvfs`) avant toute requête.
 
