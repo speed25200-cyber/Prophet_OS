@@ -430,3 +430,141 @@ async fn le_catalogue_porte_les_empreintes_que_le_depot_publie() {
         }
     }
 }
+
+/// Une requête HTTP sur la boucle locale ; rend le corps de la réponse.
+fn http_local(port: u16, methode: &str, chemin: &str, corps: &Value) -> Value {
+    use std::io::{Read as _, Write as _};
+    let corps = corps.to_string();
+    let mut flux = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    flux.set_read_timeout(Some(std::time::Duration::from_secs(600)))
+        .unwrap();
+    write!(
+        flux,
+        "{methode} {chemin} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corps}",
+        corps.len()
+    )
+    .unwrap();
+    let mut reponse = String::new();
+    flux.read_to_string(&mut reponse).unwrap();
+    let (tete, corps) = reponse.split_once("\r\n\r\n").unwrap_or((&reponse, ""));
+    assert!(
+        tete.starts_with("HTTP/1.1 200"),
+        "{methode} {chemin} : {tete}\n{corps}"
+    );
+    serde_json::from_str(corps).unwrap_or_else(|e| panic!("{chemin} : {e} : {corps}"))
+}
+
+/// Le critère de M8-T7, par les vrais binaires : `prophet model pull qwen3-8b-q4` (agentd, capd,
+/// egress, Hugging Face), le vrai routeur épinglé lancé comme l'image le lance (préréglages avec
+/// section `[*]`, dossier des téléchargements), `prophet model serve qwen3-8b-q4`, puis une
+/// complétion qui aboutit. 5 Go téléchargés : un travail de la CI qui a le moteur et le réseau.
+#[tokio::test]
+#[ignore = "needs_llama_server: PROPHET_TEST_LLAMA_SERVER (llama-server épinglé), Hugging Face joignable, 5 Go"]
+async fn le_critere_pull_serve_puis_une_completion() {
+    let moteur = std::env::var("PROPHET_TEST_LLAMA_SERVER")
+        .expect("PROPHET_TEST_LLAMA_SERVER : le llama-server épinglé (nix build .#llama-cpp)");
+    let chaine = Chaine::new(None).await;
+    let cli = binaire_voisin("prophet");
+    let agents = chaine.dir.path().join("agents.sock");
+    let id = "qwen3-8b-q4";
+
+    let debut = std::time::Instant::now();
+    let tire = tokio::process::Command::new(&cli)
+        .args(["model", "pull", id])
+        .env("PROPHET_AGENTD_SOCKET", &agents)
+        .output()
+        .await
+        .unwrap();
+    let dit = String::from_utf8_lossy(&tire.stdout).into_owned();
+    assert!(
+        tire.status.success(),
+        "{dit}\n{}",
+        String::from_utf8_lossy(&tire.stderr)
+    );
+    assert!(dit.contains("téléchargé et vérifié"), "{dit}");
+    eprintln!(
+        "mesure : prophet model pull {id} en {:?} ; {}",
+        debut.elapsed(),
+        dit.trim()
+    );
+
+    // Le routeur, comme l'image le lance en mode relais, lit le dossier à son démarrage.
+    let prereglages = chaine.dir.path().join("prereglages.ini");
+    std::fs::write(
+        &prereglages,
+        "[*]\njinja = 1\nctx-size = 2048\nthreads = 4\nparallel = 1\nn-gpu-layers = 0\n",
+    )
+    .unwrap();
+    let port = 18_099;
+    let mut routeur = tokio::process::Command::new(&moteur)
+        .args(["--host", "127.0.0.1", "--port", &port.to_string()])
+        .arg("--models-preset")
+        .arg(&prereglages)
+        .args(["--models-max", "1", "--models-dir"])
+        .arg(chaine.poids())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let limite = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+        assert!(
+            std::time::Instant::now() < limite,
+            "le routeur ne répond pas"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+
+    let debut = std::time::Instant::now();
+    let sert = tokio::process::Command::new(&cli)
+        .args(["--json", "model", "serve", id, "--endpoint"])
+        .arg(format!("http://127.0.0.1:{port}/v1"))
+        .env("PROPHET_AGENTD_SOCKET", &agents)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        sert.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&sert.stdout),
+        String::from_utf8_lossy(&sert.stderr)
+    );
+    let servi: Value = serde_json::from_slice(&sert.stdout).unwrap();
+    let nom = servi["model"].as_str().unwrap().to_owned();
+    eprintln!(
+        "mesure : prophet model serve {id} en {:?} ; servi sous {nom:?}",
+        debut.elapsed()
+    );
+
+    let debut = std::time::Instant::now();
+    let reponse = tokio::task::spawn_blocking(move || {
+        http_local(
+            port,
+            "POST",
+            "/v1/chat/completions",
+            &json!({
+                "model": nom,
+                "messages": [{"role": "user", "content": "Réponds par un seul mot : bonjour. /no_think"}],
+                "max_tokens": 16,
+                "temperature": 0,
+            }),
+        )
+    })
+    .await
+    .unwrap();
+    let texte = reponse["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    eprintln!(
+        "mesure : complétion de {id} en {:?} : {texte:?} ({})",
+        debut.elapsed(),
+        reponse["usage"]
+    );
+    assert!(
+        reponse["usage"]["completion_tokens"].as_u64().unwrap_or(0) > 0,
+        "{reponse}"
+    );
+    let _ = routeur.kill().await;
+}

@@ -62,6 +62,35 @@ jobs:
       - name: Construire le moteur avec le backend Vulkan
         run: nix build .#llama-cpp-vulkan --print-build-logs
 
+  # Le critère de M8-T7 (ADR 0046), par les vrais binaires : `prophet model pull qwen3-8b-q4`
+  # par agentd, capd et egress depuis Hugging Face, le routeur épinglé lancé comme l'image le
+  # lance, `prophet model serve`, puis une complétion. Aucune autre machine du dépôt n'a à la
+  # fois le moteur, le réseau et la place pour 5 Go.
+  poids:
+    name: Poids du catalogue servis (réels)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+            max-jobs = 1
+            cores = 2
+      - name: Construire le moteur épinglé
+        run: nix build .#llama-cpp --out-link moteur --print-build-logs
+      - name: Chaîne d'outils du dépôt
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Construire les services et la CLI
+        run: cargo build -p capd -p ledger -p egress -p agentd -p prophet-cli --bins
+      - name: Télécharger, servir et interroger qwen3-8b-q4
+        env:
+          PROPHET_TEST_LLAMA_SERVER: ${{ github.workspace }}/moteur/bin/llama-server
+        run: cargo test -p agentd --test poids -- --ignored --nocapture le_critere_pull_serve_puis_une_completion
+
   chatgpt:
     name: ChatGPT sous NixOS (compatibilité)
     runs-on: ubuntu-latest

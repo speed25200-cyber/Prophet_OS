@@ -66,9 +66,11 @@ hostile.
   forme absolue, terminée par le proxy, lui laisse voir l'adresse et appliquer sa détection.
 - **Suivre les redirections sans borne d'hôte** : le jeton limite déjà la sortie aux hôtes de
   l'entrée ; refuser avant d'envoyer dit mieux pourquoi, et n'envoie rien.
-- **Inscrire `qwen3-8b-q4`, l'exemple du plan** : son empreinte publiée n'a pas été relevée (le
-  dépôt de poids n'est pas joignable d'ici) ; une entrée sans empreinte serait un téléchargement
-  que rien ne vérifie.
+- **Inscrire une entrée sur une empreinte recopiée d'ailleurs** : l'essai `needs_network`
+  `le_catalogue_porte_les_empreintes_que_le_depot_publie` relève, par le vrai egress, ce que
+  l'API du dépôt publie de chaque fichier à sa révision épinglée, et exige que le catalogue le
+  porte. C'est ainsi que Qwen3 4B et 8B en Q4_K_M (`qwen3-4b-q4`, `qwen3-8b-q4`, l'exemple du
+  plan) y sont entrés, avec leur taille exacte, le 23 septembre (`e49bad3`).
 
 ## Conséquences
 
@@ -96,6 +98,10 @@ hostile.
   dans les arguments de l'instance (`status.args`, après `--model`), et c'est là que le client
   le lit désormais.
 - Le catalogue grandit par le dépôt, avec une empreinte relevée par entrée.
+- Le critère du plan se joue dans le travail « Poids du catalogue servis (réels) » de la CI :
+  `prophet model pull qwen3-8b-q4` par agentd, capd et egress, le routeur épinglé lancé comme
+  l'image le lance, `prophet model serve qwen3-8b-q4`, puis une complétion
+  (`le_critere_pull_serve_puis_une_completion`).
 - Vérifié : essais unitaires du téléchargement (redirection, reprise, empreinte, en-tête, taille,
   refus du proxy, arrêt), parcours `agentd` avec les vrais capd, ledger et egress
   (`crates/agentd/tests/poids.rs`), et, sous systemd, l'essai des services télécharge d'un dépôt

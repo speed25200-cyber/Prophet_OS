@@ -1541,8 +1541,10 @@ donne le détail.
   vert sur `468324a` — capd émet le jeton de `model-pull:essai-vm` (un grant), egress autorise
   le `GET`, agentd pose le fichier vérifié (`agentd 644`), le journal le dit, le retrait
   l'efface.
-  Le catalogue ne porte que Qwen3 1.7B et 0.6B : l'empreinte de `qwen3-8b-q4`, exemple du plan,
-  n'a pas été relevée (Hugging Face est injoignable d'ici). Servir : `prophet model serve <id>`
+  Les empreintes du catalogue sont vérifiées à la source : un essai `needs_network` demande à
+  l'API de Hugging Face, par le vrai egress, ce qu'elle publie de chaque entrée à sa révision
+  épinglée (`e49bad3`, vert en CI) ; il a relevé Qwen3 4B et 8B en Q4_K_M, désormais au
+  catalogue avec leur taille exacte (`qwen3-4b-q4`, `qwen3-8b-q4`, l'exemple du plan). Servir : `prophet model serve <id>`
   fait charger un poids par le routeur du moteur (`GET /models`, `POST /models/load`), reconnu
   par le chemin de son fichier (`bc001d2`), et la page Modèles dit « Servi » ou propose
   « Servir » (`93bd678`). En mode relais, le routeur de l'image lit le dossier des
@@ -1631,8 +1633,8 @@ abonnement.
 
 **Pour la session suivante.** Lire la CI de la branche (l'instantané de la réserve repris au
 redémarrage sur le coureur KVM ; le téléchargement de poids sous systemd dans l'essai des
-services, le contrôle `llama-router`) ; relever l'empreinte de `qwen3-8b-q4` pour l'inscrire
-au catalogue ; décider avec l'utilisateur du confinement des clients officiels ; trancher avec l'utilisateur le sort de
+services, le contrôle `llama-router`, le travail « Poids du catalogue servis (réels) » qui joue
+le critère de M8-T7 avec `qwen3-8b-q4`) ; décider avec l'utilisateur du confinement des clients officiels ; trancher avec l'utilisateur le sort de
 `task.spawn` pour le compte de l'humain, et le chemin de confiance qui distinguerait la surface
 d'un autre programme du compte pour `approval.resolve` (ADR 0044) ; mesurer la surface sur une
 carte graphique ; faire le premier appel réel de Jev avec une clé déposée.
