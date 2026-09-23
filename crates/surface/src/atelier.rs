@@ -172,7 +172,7 @@ const RELECTURE_AU_REPOS: Duration = Duration::from_secs(5);
 
 enum Evenement {
     Modeles(Result<Vec<String>, String>),
-    Poids(Vec<Poids>, Option<Servi>),
+    Poids(Vec<Poids>, Option<Servi>, Option<providers::memory::System>),
     Catalogue(Result<Vec<EntreeCatalogue>, String>),
     ErreurDePoids(String),
     Clients(Vec<ClientCard>),
@@ -218,6 +218,10 @@ pub struct Atelier {
     pub poids_lus: bool,
     /// Ce que le moteur sert, s'il a répondu à la lecture du catalogue.
     pub servi: Option<Servi>,
+    /// La mémoire de la machine, relue avec les poids : ce que chaque poids demande s'y mesure.
+    pub memoire: Option<providers::memory::System>,
+    /// La fenêtre avec laquelle le moteur de cette machine charge un poids.
+    pub contexte_local: u64,
     /// Le catalogue du système, tel qu'agentd le rend ; `None` tant qu'il n'a pas répondu.
     pub catalogue: Option<Result<Vec<EntreeCatalogue>, String>>,
     /// Le dernier refus d'une commande sur un poids (téléchargement refusé par capd…).
@@ -259,6 +263,8 @@ impl Atelier {
             poids: Vec::new(),
             poids_lus: false,
             servi: None,
+            memoire: None,
+            contexte_local: providers::memory::context(),
             catalogue: None,
             erreur_de_poids: None,
             socket_agentd: std::env::var_os("PROPHET_AGENTD_SOCKET").map_or_else(
@@ -376,7 +382,7 @@ impl Atelier {
                             fenetre: servi.n_ctx,
                         }
                     });
-            let _ = tx.send(Evenement::Poids(poids, servi));
+            let _ = tx.send(Evenement::Poids(poids, servi, providers::memory::system()));
             ctx.request_repaint();
         });
     }
@@ -523,9 +529,10 @@ impl Atelier {
                 Evenement::Clients(cards) => {
                     self.clients = cards;
                 }
-                Evenement::Poids(poids, servi) => {
+                Evenement::Poids(poids, servi, memoire) => {
                     self.poids = poids;
                     self.servi = servi;
+                    self.memoire = memoire;
                     self.poids_lus = true;
                 }
                 Evenement::Catalogue(lu) => {

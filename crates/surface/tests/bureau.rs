@@ -1110,6 +1110,11 @@ fn le_clavier_ouvre_les_pages_et_la_preparation_sans_souris() {
 
 /// Un en-tête GGUF v3 minimal : architecture, quantification Q8_0 et fenêtre de contexte.
 fn gguf(architecture: &str, contexte: u32) -> Vec<u8> {
+    gguf_avec(architecture, contexte, &[])
+}
+
+/// Le même, avec des nombres de plus sous l'architecture (couches, têtes…).
+fn gguf_avec(architecture: &str, contexte: u32, en_plus: &[(&str, u32)]) -> Vec<u8> {
     let mut kv = Vec::new();
     let texte = |kv: &mut Vec<u8>, k: &str, v: &str| {
         kv.extend((k.len() as u64).to_le_bytes());
@@ -1127,10 +1132,13 @@ fn gguf(architecture: &str, contexte: u32) -> Vec<u8> {
     texte(&mut kv, "general.architecture", architecture);
     nombre(&mut kv, "general.file_type", 7);
     nombre(&mut kv, &format!("{architecture}.context_length"), contexte);
+    for (k, v) in en_plus {
+        nombre(&mut kv, &format!("{architecture}.{k}"), *v);
+    }
     let mut out = b"GGUF".to_vec();
     out.extend(3u32.to_le_bytes());
     out.extend(0u64.to_le_bytes());
-    out.extend(3u64.to_le_bytes());
+    out.extend((3 + en_plus.len() as u64).to_le_bytes());
     out.extend(kv);
     out
 }
@@ -1170,6 +1178,77 @@ fn les_poids_installes_se_lisent_sur_la_page_modeles() {
         bureau.atelier.poids[0].as_ref().is_err(),
         "le fichier abîmé est dit refusé"
     );
+}
+
+#[test]
+#[ignore = "needs_gpu"]
+fn la_page_modeles_dit_la_memoire_que_chaque_poids_demande() {
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1440, 1000);
+    let dir = tempfile::tempdir().unwrap();
+    let tetes = |couches| {
+        [
+            ("block_count", couches),
+            ("attention.head_count", 16),
+            ("attention.head_count_kv", 8),
+            ("attention.key_length", 128),
+            ("attention.value_length", 128),
+        ]
+    };
+    std::fs::write(
+        dir.path().join("qwen3-1.7b.gguf"),
+        gguf_avec("qwen3", 40_960, &tetes(28)),
+    )
+    .unwrap();
+    // Des couches par centaines de milliers : un cache KV qu'aucune machine ne tient.
+    std::fs::write(
+        dir.path().join("demesure.gguf"),
+        gguf_avec("qwen3", 40_960, &tetes(400_000)),
+    )
+    .unwrap();
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.figer_transitions();
+    bureau.atelier.dossier_des_poids = dir.path().to_owned();
+    bureau.atelier.fichiers_de_poids.clear();
+    bureau.atelier.contexte_local = 4096;
+    bureau.atelier.page = Page::Modeles;
+    let limite = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !bureau.atelier.poids_lus {
+        frame(&mut bureau, &context, &target, vec![]);
+        assert!(std::time::Instant::now() < limite, "catalogue jamais lu");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    for _ in 0..3 {
+        frame(&mut bureau, &context, &target, vec![]);
+    }
+    capture(&context, &target, "poids-memoire");
+    let machine = bureau
+        .atelier
+        .memoire
+        .expect("la mémoire de la machine est lue");
+    assert!(machine.total > 0 && machine.available <= machine.total);
+    for fichier in ["qwen3-1.7b.gguf", "demesure.gguf"] {
+        assert!(
+            bureau
+                .ctx
+                .read_response(egui::Id::new(format!("poids-memoire-{fichier}")))
+                .is_some(),
+            "la jauge de {fichier} doit être affichée"
+        );
+    }
+    let estimations: Vec<_> = bureau
+        .atelier
+        .poids
+        .iter()
+        .flatten()
+        .map(|w| providers::memory::assess(w, 4096, Some(&machine)).unwrap())
+        .collect();
+    assert_eq!(
+        estimations[0].fit,
+        Some(providers::memory::Fit::TooLarge),
+        "{estimations:?}"
+    );
+    assert_eq!(estimations[1].need.kv_cache, 28 * 8 * 256 * 2 * 4096);
 }
 
 /// Un moteur simulé : `/props` comme llama-server, un 404 pour le reste, le temps de l'essai.

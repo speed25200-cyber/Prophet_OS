@@ -1685,6 +1685,11 @@ fn poids_installes(ui: &mut egui::Ui, atelier: &Atelier) {
                     egui::Sense::hover(),
                 )
                 .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &decrit));
+                if let Some(estimation) =
+                    providers::memory::assess(w, atelier.contexte_local, atelier.memoire.as_ref())
+                {
+                    jauge_de_memoire(ui, &fichier, &estimation, atelier.memoire.as_ref(), &accent);
+                }
             }
             Err(raison) => {
                 ui.label(RichText::new(raison).size(12.0).color(ATTENTE));
@@ -1692,6 +1697,81 @@ fn poids_installes(ui: &mut egui::Ui, atelier: &Atelier) {
         }
         ui.add_space(8.0);
     }
+}
+
+/// Ce qu'un poids demande à la mémoire de la machine : la barre est la machine entière ; la
+/// part sombre, ce que d'autres occupent déjà ; le segment, ce que le moteur réservera pour ce
+/// poids à la fenêtre du système. Il déborde en orange quand il ne tient pas.
+fn jauge_de_memoire(
+    ui: &mut egui::Ui,
+    fichier: &str,
+    estimation: &providers::memory::Assessment,
+    machine: Option<&providers::memory::System>,
+    accent: &Accent,
+) {
+    use providers::memory::{Fit, gigabytes};
+    let besoin = estimation.need;
+    let couleur = match estimation.fit {
+        Some(Fit::TooLarge | Fit::Tight) => ATTENTE,
+        Some(Fit::Fits) => accent.vif,
+        None => DISCRET,
+    };
+    ui.add_space(4.0);
+    if let Some(machine) = machine.filter(|m| m.total > 0) {
+        let largeur = ui.available_width().min(420.0);
+        let (rect, _) = ui.allocate_exact_size(vec2(largeur, 6.0), egui::Sense::hover());
+        let peintre = ui.painter();
+        peintre.rect_filled(rect, 3.0, CREUX);
+        let part = |octets: u64| (octets as f64 / machine.total as f64).clamp(0.0, 1.0) as f32;
+        let occupe = part(machine.total.saturating_sub(machine.available));
+        let debut = rect.left() + rect.width() * occupe;
+        peintre.rect_filled(
+            egui::Rect::from_min_max(rect.min, pos2(debut, rect.bottom())),
+            3.0,
+            EFFACE.gamma_multiply(0.45),
+        );
+        let fin = (debut + rect.width() * part(besoin.total)).min(rect.right());
+        peintre.rect_filled(
+            egui::Rect::from_min_max(pos2(debut, rect.top()), pos2(fin, rect.bottom())),
+            3.0,
+            couleur,
+        );
+        if estimation.fit != Some(Fit::Fits) {
+            // Le bord de la machine : ce qui dépasse n'a pas de place.
+            peintre.circle_filled(
+                pos2(rect.right(), rect.center().y),
+                5.0,
+                ATTENTE.gamma_multiply(0.45),
+            );
+        }
+    }
+    let verdict = estimation
+        .fit
+        .map_or("mémoire de la machine inconnue", Fit::describe);
+    let texte = format!(
+        "≈ {} à {} tokens — {verdict}{}",
+        gigabytes(besoin.total),
+        groupes(besoin.context),
+        machine.map_or_else(String::new, |m| format!(
+            " · {} libres sur {}",
+            gigabytes(m.available),
+            gigabytes(m.total)
+        ))
+    );
+    let etiquette = ui.label(RichText::new(&texte).size(11.0).color(couleur));
+    let detail = format!(
+        "{fichier} : mémoire estimée {} (poids {}, cache KV {}, calcul {}) — {verdict}",
+        gigabytes(besoin.total),
+        gigabytes(besoin.weights),
+        gigabytes(besoin.kv_cache),
+        gigabytes(besoin.compute)
+    );
+    ui.interact(
+        etiquette.rect,
+        egui::Id::new(format!("poids-memoire-{fichier}")),
+        egui::Sense::hover(),
+    )
+    .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &detail));
 }
 
 /// La réserve de microVM, dite en une ligne.
