@@ -1600,6 +1600,16 @@ l'utilisateur : `task.spawn` d'agentd accepte un manifeste brut du compte de l'h
 que fait `prophet task new`) ; le réserver aux profils du catalogue fermerait la dernière voie
 par laquelle un processus de la session fait planifier une mission sous un manifeste de sa main.
 
+**Écart relevé.** M8-T4 à M8-T6 sont cochés pour la ligne de commande, l'environnement et la
+détection de session ; le plan demandait aussi de lancer chaque client officiel **dans une
+sandbox** (niveau 1, niveau 2 s'il exécute du code). `prophet-pilotd` les lance sous l'identité
+de l'humain, sans confinement (ADR 0026, pilotd « Limites ») : un client peut donc joindre
+`capd.sock` et trancher une approbation (ADR 0044). Un premier pas sans toucher aux clients :
+les lancer dans un espace de montage et de processus propre, où `/run/prophet` ne montre que le
+socket d'agentd que le pont emploie. Le reste — leur sortie réseau par egress, le niveau 1 —
+est une décision de conception à prendre avec l'utilisateur, les clients parlant à leur
+éditeur sous son abonnement.
+
 **Pour la session suivante.** Lire la CI de la branche (l'instantané de la réserve repris au
 redémarrage sur le coureur KVM ; le téléchargement de poids sous systemd dans l'essai des
 services) ; servir un poids téléchargé (mode routeur de llama-server sur
