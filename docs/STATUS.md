@@ -1638,7 +1638,11 @@ donne le détail.
   créer et recommence jusqu'à 24 fois (p95 170 s). ADR 0052 : `fs.edit` sur un fichier absent
   renvoie vers `fs.write`, note au deuxième échec identique, arrêt au cinquième échec de suite.
   La surface montre le parcours en frise (refus et rappels à leur place) et propose trois
-  départs à un dialogue vide.
+  départs à un dialogue vide. Sixième passage (`6a858f7`, la garde) : **Prophet 12/45, boucle
+  nue 7/45**, et Prophet consomme désormais moins de tokens (9 613 contre 10 012) — la boucle
+  nue s'enferre à son tour dans des `fs.edit` répétés. Suivent `fs.search` qui compte ses
+  lignes (`matching_lines`) et tient un filtre vide pour absent, `calc.eval` (ADR 0053) et la
+  note d'une écriture faite sans lecture des entrées nommées.
 - Concurrence et annulation sur le vrai moteur (FRONTIER, moteurs locaux ; essai
   `deux_requetes_se_partagent_le_moteur_et_un_abandon_le_libere`, vert sur `dd5ce52`) : sur une
   instance à une place comme celle de l'image, deux requêtes simultanées aboutissent toutes
