@@ -226,7 +226,10 @@ prophet model rm qwen3-8b-q4        # retire un poids téléchargé (jamais un p
 ```
 
 La page Modèles de la surface fait de même, barre de progression comprise, et dit « Servi »
-pour le poids que le moteur a chargé. Qwen3 8B demande environ 6 Go de mémoire libre.
+pour le poids que le moteur a chargé. `prophet model ls` et la page Modèles disent la mémoire
+que chaque poids demande à la fenêtre du moteur (Qwen3 8B : environ 6 Go à 4 096 tokens) ;
+`prophet model serve` refuse un poids qui ne tiendrait pas sans paginer toute la machine, sauf
+avec `--force` (ADR 0047).
 
 ```sh
 prophet status                        # les services, l'isolation, les limites de la machine

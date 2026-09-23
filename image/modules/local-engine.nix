@@ -244,8 +244,12 @@ in {
     # Les poids que le moteur sert : le modèle par défaut vit dans /nix/store (ADR 0033), hors
     # de /var/lib/prophet/models ; `prophet model ls` et la page Modèles les lisent par ici.
     environment.sessionVariables.PROPHET_WEIGHTS = lib.mkIf (cfg.weights != null) poidsServis;
+    # La fenêtre avec laquelle le moteur charge un poids : la CLI, la page Modèles et
+    # `model.list` y estiment la mémoire que chaque poids demande (cache KV compris).
+    environment.sessionVariables.PROPHET_LOCAL_CONTEXT = toString cfg.contextSize;
     systemd.services.prophet-agentd.environment = {
       PROPHET_LOCAL_ENDPOINT = endpoint;
+      PROPHET_LOCAL_CONTEXT = toString cfg.contextSize;
       PROPHET_MISSION_PROFILES = "/etc/prophet/mission-profiles.json";
       # Le catalogue du système reconnaît ces poids comme déjà fournis : il ne propose pas de
       # retélécharger le modèle par défaut (ADR 0046).

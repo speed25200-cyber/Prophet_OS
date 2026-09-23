@@ -122,6 +122,16 @@ poids qu'il sert. `prophet model ls` et la page Modèles de l'atelier le lisent 
 que `prophet model ls` place en face du fichier (un routeur de modèles n'est pas interrogé
 modèle par modèle : cela en chargerait un).
 
+## Mémoire d'un poids
+
+`providers::memory` estime ce que le moteur réservera pour servir un poids à la fenêtre de la
+machine (`PROPHET_LOCAL_CONTEXT`) : le fichier, le cache KV de toute la fenêtre (calculé depuis
+les couches, têtes KV et dimensions que l'en-tête donne), les logits d'un micro-lot et le
+moteur ; puis confronte ce total à `/proc/meminfo` (`fits`, `tight`, `too_large`, en gardant
+1,5 Gio au système). `prophet model ls`, `model.list` et la page Modèles le disent ;
+`prophet model serve` refuse un poids `too_large` sans `--force` (ADR 0047). L'estimation est
+vérifiée en CI contre la mémoire résidente du vrai llama-server.
+
 ## Poids téléchargés
 
 `providers::catalogue` est le catalogue du système (`catalogue.json`, compilé dans les
@@ -129,7 +139,8 @@ binaires) : adresse épinglée sur une révision, empreinte SHA-256 publiée, h�
 redirections comprises. `providers::pull` télécharge une entrée par le socket d'egress, en
 forme absolue, jeton dans `Proxy-Authorization` ; refuse toute redirection hors des hôtes de
 l'entrée ; écrit sous `.<fichier>.part` et ne pose le fichier qu'après la taille, l'empreinte et
-l'en-tête GGUF vérifiés ; reprend un téléchargement interrompu par `Range`. Les fichiers posés
+l'en-tête GGUF vérifiés ; reprend un téléchargement interrompu par `Range` ; refuse, avant
+toute requête, ce qui ne tient pas dans la place libre du dossier. Les fichiers posés
 vont sous le sous-dossier `catalogue` du dossier des poids, que le catalogue installé lit avec
 le reste. C'est agentd qui l'emploie (`model.pull`), sous un jeton que capd émet (ADR 0046).
 

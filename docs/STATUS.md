@@ -1573,6 +1573,14 @@ donne le détail.
   tire Qwen3 0.6B de Hugging Face par le vrai egress sur une machine qui le joint (`dd4ff44`) :
   vert sur le coureur de la CI (`468324a`), 639 446 688 octets en 23 s, empreinte publiée
   vérifiée ; les adresses signées du CDN passent la détection d'egress.
+- Mémoire des poids (ADR 0047, FRONTIER : moteurs locaux) : l'en-tête GGUF donne de quoi
+  estimer ce que llama.cpp réservera — fichier, cache KV de toute la fenêtre (couches × têtes
+  KV × dimensions), logits d'un micro-lot, moteur — et `/proc/meminfo` ce que la machine a.
+  `prophet model ls` (colonne mémoire), `model.list` pour les agents (`memory`, `fit`) et la
+  page Modèles (une jauge par poids) le disent ; `prophet model serve` refuse un poids qui ne
+  tiendrait pas sans paginer la machine, sauf `--force` ; `prophet model pull` refuse, avant
+  toute requête, ce qui ne tient pas sur le disque. L'essai des familles en CI relève la
+  mémoire résidente de chaque instance du vrai llama-server et la confronte à l'estimation.
 - Conversation longue (M8-T7, `f93e591`) : au-delà de 32 Kio ou de 32 tours, la page
   Conversation refusait d'envoyer ; elle envoie les tours récents qui tiennent, dit combien
   elle en laisse de côté, et garde le fil affiché entier.

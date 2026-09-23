@@ -608,6 +608,7 @@ async fn le_critere_pull_serve_puis_une_completion() {
     let sert = tokio::process::Command::new(&cli)
         .args(["--json", "model", "serve", id, "--endpoint"])
         .arg(format!("http://127.0.0.1:{port}/v1"))
+        .env("PROPHET_LOCAL_CONTEXT", "2048")
         .env("PROPHET_AGENTD_SOCKET", &agents)
         .output()
         .await
@@ -621,9 +622,11 @@ async fn le_critere_pull_serve_puis_une_completion() {
     let servi: Value = serde_json::from_slice(&sert.stdout).unwrap();
     let nom = servi["model"].as_str().unwrap().to_owned();
     eprintln!(
-        "mesure : prophet model serve {id} en {:?} ; servi sous {nom:?}",
-        debut.elapsed()
+        "mesure : prophet model serve {id} en {:?} ; servi sous {nom:?} ; mémoire estimée {}",
+        debut.elapsed(),
+        servi["memory"]
     );
+    let fichier = servi["path"].as_str().unwrap_or_default().to_owned();
 
     let debut = std::time::Instant::now();
     let reponse = tokio::task::spawn_blocking(move || {
@@ -654,6 +657,15 @@ async fn le_critere_pull_serve_puis_une_completion() {
         reponse["usage"]["completion_tokens"].as_u64().unwrap_or(0) > 0,
         "{reponse}"
     );
+    if let Some(r) = routeur
+        .id()
+        .and_then(|pid| memoire_de_l_instance(pid, &fichier))
+    {
+        eprintln!(
+            "mesure : mémoire de {id} : estimée {} ; résidente {} (anonyme {}, fichier {}), pic {}",
+            servi["memory"]["total"], r.rss, r.anonyme, r.fichier, r.pic
+        );
+    }
     let _ = routeur.kill().await;
 }
 
@@ -687,10 +699,80 @@ async fn routeur(moteur: &str, chaine: &Chaine, port: u16) -> tokio::process::Ch
     enfant
 }
 
-/// La CLI réelle sur la chaîne ; rend sa sortie, ou échoue en la disant.
+/// La mémoire que le noyau compte à un processus (`/proc/<pid>/status`), en octets.
+#[derive(Debug, Clone, Copy)]
+struct Residente {
+    rss: u64,
+    anonyme: u64,
+    fichier: u64,
+    pic: u64,
+}
+
+/// L'instance que le routeur a lancée pour servir `fichier` : un descendant du routeur dont la
+/// ligne de commande nomme le fichier. Sa mémoire résidente, une fois qu'elle a répondu, est ce
+/// que l'estimation de `providers::memory` prétend prévoir.
+fn memoire_de_l_instance(routeur: u32, fichier: &str) -> Option<Residente> {
+    let nom = std::path::Path::new(fichier)
+        .file_name()?
+        .to_str()?
+        .to_owned();
+    // Le parent de chaque processus : le deuxième champ après le nom, qui peut contenir des
+    // espaces.
+    let parents: std::collections::HashMap<u32, u32> = std::fs::read_dir("/proc")
+        .ok()?
+        .flatten()
+        .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
+        .filter_map(|pid| {
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+            let (_, reste) = stat.rsplit_once(')')?;
+            Some((pid, reste.split_whitespace().nth(1)?.parse().ok()?))
+        })
+        .collect();
+    let descend_du_routeur = |mut pid: u32| {
+        for _ in 0..8 {
+            match parents.get(&pid) {
+                Some(&parent) if parent == routeur => return true,
+                Some(&parent) if parent > 1 => pid = parent,
+                _ => return false,
+            }
+        }
+        false
+    };
+    let pid = parents.keys().copied().find(|&pid| {
+        descend_du_routeur(pid)
+            && String::from_utf8_lossy(
+                &std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default(),
+            )
+            .contains(&nom)
+    })?;
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    let champ = |cle: &str| {
+        status.lines().find_map(|l| {
+            let kib: u64 = l
+                .strip_prefix(cle)?
+                .strip_prefix(':')?
+                .trim()
+                .trim_end_matches("kB")
+                .trim()
+                .parse()
+                .ok()?;
+            Some(kib * 1024)
+        })
+    };
+    Some(Residente {
+        rss: champ("VmRSS")?,
+        anonyme: champ("RssAnon")?,
+        fichier: champ("RssFile")?,
+        pic: champ("VmHWM")?,
+    })
+}
+
+/// La CLI réelle sur la chaîne ; rend sa sortie, ou échoue en la disant. La fenêtre des
+/// estimations de mémoire est celle des routeurs de ces essais.
 async fn prophet(chaine: &Chaine, args: &[&str]) -> String {
     let sortie = tokio::process::Command::new(binaire_voisin("prophet"))
         .args(args)
+        .env("PROPHET_LOCAL_CONTEXT", "2048")
         .env(
             "PROPHET_AGENTD_SOCKET",
             chaine.dir.path().join("agents.sock"),
@@ -748,6 +830,10 @@ async fn plusieurs_familles_se_servent_et_repondent() {
         )
         .unwrap();
         let nom = servi["model"].as_str().unwrap().to_owned();
+        let fichier = servi["path"].as_str().unwrap_or_default().to_owned();
+        let estimee = servi["memory"]["total"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("{id} : l'en-tête doit permettre l'estimation : {servi}"));
         let debut = std::time::Instant::now();
         let reponse = tokio::task::spawn_blocking(move || {
             http_local(
@@ -781,6 +867,31 @@ async fn plusieurs_familles_se_servent_et_repondent() {
         if texte.to_ascii_lowercase().contains("paris") {
             reussies.push(id);
         }
+        // L'estimation de mémoire face à ce que le noyau compte à l'instance qui a répondu :
+        // elle ne doit pas manquer ce qui ne se récupère pas (la mémoire anonyme : cache KV,
+        // calcul, poids recopiés), ni prédire bien plus que ce que le moteur tient.
+        let r = routeur
+            .id()
+            .and_then(|pid| memoire_de_l_instance(pid, &fichier))
+            .unwrap_or_else(|| panic!("{id} : l'instance du routeur est introuvable"));
+        eprintln!(
+            "mesure : mémoire de {id} : estimée {estimee} ; résidente {} (anonyme {}, fichier {}), pic {} ; rapport {:.2}",
+            r.rss,
+            r.anonyme,
+            r.fichier,
+            r.pic,
+            estimee as f64 / r.rss.max(1) as f64
+        );
+        assert!(
+            estimee >= r.anonyme,
+            "{id} : estimée {estimee}, mais {} de mémoire anonyme",
+            r.anonyme
+        );
+        assert!(
+            (estimee as f64) <= 1.5 * r.rss.max(r.anonyme) as f64,
+            "{id} : estimée {estimee}, bien au-delà des {} résidents",
+            r.rss
+        );
         let _ = routeur.kill().await;
         // Retirer avant le suivant : la place du coureur est comptée.
         prophet(&chaine, &["model", "rm", id]).await;

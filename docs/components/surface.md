@@ -99,7 +99,9 @@ catalogue du système qu'agentd rend (`model.catalog`, ADR 0046) — fourni, té
 vérifié, en cours avec sa barre de progression, échoué avec son motif — et demande à agentd de
 télécharger, reprendre, arrêter ou retirer un poids ; elle demande aussi au routeur du moteur
 local ce qu'il sert (`GET /models`), marque « Servi » le poids chargé, reconnu par le chemin
-de son fichier, et propose « Servir » pour celui qu'il connaît sans le servir. Le démarrage des modèles, la persistance
+de son fichier, et propose « Servir » pour celui qu'il connaît sans le servir. Sous chaque
+poids installé, une jauge dit la mémoire qu'il demande à la fenêtre du moteur, sur la mémoire
+de la machine et ce que d'autres en occupent, en orange quand il ne tient pas (ADR 0047). Le démarrage des modèles, la persistance
 des conversations et le parcours agentique complet restent à raccorder. Voir l'ADR 0008 et les exigences FRONTIER.
 
 Une seule décision est montrée à la fois, la plus ancienne. Faire patienter quelqu'un est déjà
