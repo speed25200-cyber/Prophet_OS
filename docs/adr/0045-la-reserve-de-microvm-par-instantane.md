@@ -54,8 +54,9 @@ Un seul profil, celui de l'invité du dépôt (busybox et Python) : les profils 
 
 Toutes les machines de la réserve partent de la même mémoire : même état du générateur
 aléatoire du noyau au réveil, sauf si l'hyperviseur signale le clonage (VMGenID) et que le
-noyau d'invité le prend en compte — à vérifier sur le noyau épinglé avant d'y confier quoi que
-ce soit qui en dépende. L'invité en attente ne détient rien de la tâche ni aucun secret.
+noyau d'invité le prend en compte. Sur le coureur de la CI (`4aaeb50`), cinq clones tirent cinq
+suites de 16 octets distinctes de `/dev/urandom` : la propriété observable tient ; le mécanisme
+qui la donne n'est pas établi par l'essai, qui la vérifie à chaque passage. L'invité en attente ne détient rien de la tâche ni aucun secret.
 L'instantané écrit la mémoire de l'invité (1 Gio) une fois par démarrage de sandboxd, sous
 `PROPHET_MICROVM_RESERVE` ou le répertoire temporaire du service ; chaque machine restaurée ne
 garde en propre que les pages qu'elle modifie. Le mode réserve suppose que Firecracker accepte
@@ -65,4 +66,6 @@ réserve chaude) est l'essai `la_reserve_rend_une_microvm_de_niveau_deux_en_moin
 qui n'a de sens que sur une machine où KVM s'ouvre ; sur le coureur de la CI, Firecracker a
 accepté le remplacement du disque sur une machine restaurée — l'essai ne dit pas lequel des
 deux ordres a servi —, et une prise coûte 8,9 ms, dont l'essentiel pour construire le disque
-de la tâche (6,5 ms mesurées sur l'hôte de développement).
+de la tâche (6,5 ms mesurées sur l'hôte de développement). Un autre passage (`4aaeb50`) : réserve
+pleine en 5,0 s après le démarrage (amorçage du modèle et instantané de 1 Gio), restauration
+d'une machine en 6 ms, prise médiane de 10,9 ms (de 8,8 à 12,1 ms).

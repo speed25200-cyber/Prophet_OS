@@ -1517,14 +1517,19 @@ donne le détail.
   coureur KVM de la CI, l'essai du critère est vert du premier coup : **une microVM rendue en
   8,9 ms** (médiane de cinq prises, de 8,4 à 10,0 ms) pour un objectif de 150 ms, machine
   neuve à chaque fois, réserve régénérée. Le script d'isolation fait désormais remonter les
-  lignes « mesure : » des essais réussis (`41def9e`).
+  lignes « mesure : » des essais réussis (`41def9e`). Sur `4aaeb50` : réserve pleine en 5,0 s,
+  restauration d'une machine en 6 ms, prise médiane de 10,9 ms, et cinq clones tirent cinq
+  aléas distincts de `/dev/urandom`.
 - **Correction** : M5-T1 cochait « bwrap + Landlock + seccomp », mais l'amorçage n'appliquait
   jamais Landlock (`apply_landlock` sondait l'ABI puis rendait faux) ; le niveau 0 reposait sur
   la racine minimale et seccomp seuls, et une sandbox pouvait créer des fichiers à sa propre
   racine. Landlock est désormais appliqué (`9b3ae7e`) : rien ne se crée à la racine, rien ne
   s'écrit hors des chemins accordés, rien ne s'exécute hors des montages en lecture seule ;
-  prouvé ici, sous Landlock ABI 7, par un essai qui échouait avant. La page Système dit la
-  réserve de microVM (`471364e`).
+  prouvé ici, sous Landlock ABI 7, par un essai qui échouait avant. Les essais du niveau 0
+  se taisaient en CI faute d'espaces de noms dans « check », et le travail d'isolation ne
+  lançait que les essais marqués : il les exige désormais, Landlock compris, et reconnaît
+  `needs_userns` (`4aaeb50`, vert sur le coureur). La page Système et `prophet status` disent
+  la réserve de microVM (`471364e`, `1059502`).
 - Erreurs et reprise (FRONTIER) : une mission échouée ou arrêtée se relance depuis
   l'inspecteur (« Relancer », `93db17c`) ou par `prophet task retry` (`6bc1b56`) : la
   préparation repasse par le même contexte du catalogue, que le plan retient désormais
