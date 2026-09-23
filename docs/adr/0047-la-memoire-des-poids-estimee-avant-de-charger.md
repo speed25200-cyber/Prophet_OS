@@ -49,7 +49,8 @@ mémoire vive non.
   les 16 premiers Mio de chaque fichier à sa révision épinglée (`providers::pull::get_prefix`,
   une plage d'octets, redirections bornées aux hôtes de l'entrée) et exige que le catalogue
   porte ce que l'en-tête dit. Relevé le 23 septembre sur les huit entrées : de 80 Kio par token
-  (Granite 3.3 2B) à 384 Kio (Phi-3 mini, sans GQA).
+  (Granite 3.3 2B) à 384 Kio (Phi-3 mini, sans GQA) ; revérifié par la CI (`b2f97f9`, travail
+  d'isolation, vert).
 - **Montrer ce que le moteur tient vraiment** : `providers::memory::engine_instances` lit dans
   `/proc` les instances de llama-server, le poids que chacune a chargé (`--model`) et leur
   mémoire résidente et anonyme ; la page Modèles en fait un repère sur la jauge du poids servi

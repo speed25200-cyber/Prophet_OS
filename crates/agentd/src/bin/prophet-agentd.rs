@@ -2498,7 +2498,6 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// L'entrée du catalogue que nomme `id`.
 /// Refuse une mission sur un modèle local qui ne tiendrait pas en mémoire (ADR 0047) : retrouvé
 /// parmi les poids installés par le nom que le routeur lui donne, estimé depuis son en-tête à la
 /// fenêtre du moteur, confronté à la mémoire de la machine.
@@ -2525,6 +2524,7 @@ async fn refuser_un_modele_trop_grand(model: &str) -> Result<(), Error> {
     })
 }
 
+/// L'entrée du catalogue que nomme `id`.
 fn entree_du_catalogue(params: &Value) -> Result<providers::catalogue::Entry, Error> {
     let id = commun::texte(params, "id")?;
     let catalogue = providers::catalogue::Catalogue::load()

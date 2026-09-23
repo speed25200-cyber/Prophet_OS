@@ -1581,7 +1581,8 @@ donne le détail.
   tiendrait pas sans paginer la machine, sauf `--force`, et agentd ne prépare ni ne lance de
   mission locale sur un tel modèle (le routeur le chargerait à la demande). Le catalogue porte
   l'en-tête relevé de chaque fichier (cache KV par token, vocabulaire), revérifié à la source
-  par l'essai `needs_network` : la mémoire se dit avant de télécharger (`prophet model catalog`,
+  par l'essai `needs_network` (vert sur `b2f97f9` : les huit en-têtes lus par une plage d'octets
+  à travers le vrai egress, conformes) : la mémoire se dit avant de télécharger (`prophet model catalog`,
   page Modèles). Ce que le moteur tient vraiment se lit aussi, dans `/proc` : la jauge du poids
   servi porte un repère de sa mémoire résidente, `model.list` la rend (`resident`).
   `prophet model pull` refuse, avant
@@ -1602,7 +1603,9 @@ donne le détail.
   affichée au fil des fragments ; la génération tourne dans son fil, jamais dans celui des
   images. En débogage, la première image d'une taille de police nouvelle coûte jusqu'à 150 ms
   (préparation de la police par egui) ; l'essai borne donc par rapport au flux. La CI relève
-  ces temps en release dans le résumé du travail « Surface d'observation ».
+  ces temps en release dans le résumé du travail « Surface d'observation » : sur `b2f97f9`,
+  130 images pendant 1,8 s de flux, médiane 6,0 ms, p95 6,7 ms, maximum 11,9 ms (llvmpipe,
+  quatre cœurs).
 - Conversation longue (M8-T7, `f93e591`) : au-delà de 32 Kio ou de 32 tours, la page
   Conversation refusait d'envoyer ; elle envoie les tours récents qui tiennent, dit combien
   elle en laisse de côté, et garde le fil affiché entier.
