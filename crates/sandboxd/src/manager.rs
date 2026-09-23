@@ -111,6 +111,8 @@ pub struct Manager {
     caps: Capabilities,
     helper: String,
     running: Arc<Mutex<HashMap<String, i32>>>,
+    /// MicroVM prêtes, restaurées d'un instantané (ADR 0045) ; absente sans niveau 2.
+    reserve: Option<Arc<crate::reserve::Reserve>>,
 }
 
 /// Compteur global au processus : deux gestionnaires vivant côte à côte ne peuvent pas produire
@@ -127,7 +129,45 @@ impl Manager {
             caps: Capabilities::probe(),
             helper: helper.into(),
             running: Arc::new(Mutex::new(HashMap::new())),
+            reserve: None,
         }
+    }
+
+    /// Garde `taille` microVM prêtes pour le niveau 2, restaurées d'un instantané et
+    /// régénérées en arrière-plan (ADR 0045). Sans niveau 2, ou pour une taille nulle, rien ne
+    /// change : chaque exécution démarre sa machine à froid. L'instantané et les dossiers des
+    /// machines vont sous `PROPHET_MICROVM_RESERVE`, sinon le répertoire temporaire.
+    #[must_use]
+    pub fn avec_reserve(mut self, taille: usize) -> Self {
+        if taille == 0 || !self.caps.supports(2) {
+            return self;
+        }
+        let (Some(firecracker), Some(images)) = (
+            self.caps.firecracker.clone(),
+            self.caps.microvm_images.clone(),
+        ) else {
+            return self;
+        };
+        let racine = std::env::var_os("PROPHET_MICROVM_RESERVE")
+            .map_or_else(std::env::temp_dir, std::path::PathBuf::from)
+            .join(format!(
+                "prophet-reserve-{}-{}",
+                std::process::id(),
+                NEXT_SANDBOX.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ));
+        self.reserve = Some(Arc::new(crate::reserve::Reserve::demarrer(
+            &firecracker,
+            &images,
+            taille,
+            racine,
+        )));
+        self
+    }
+
+    /// La réserve de microVM, si elle existe.
+    #[must_use]
+    pub fn reserve(&self) -> Option<&crate::reserve::Reserve> {
+        self.reserve.as_deref()
     }
 
     /// Capacités de la machine.
@@ -173,19 +213,37 @@ impl Manager {
 
         // Chaque niveau a son propre chemin de lancement. Le gestionnaire ne retombe jamais sur un
         // niveau inférieur : il refuse, en nommant ce qui manque.
-        let launched =
-            crate::launch::launch(&self.caps, &self.helper, spec, &sync_dir).map_err(|error| {
-                match error {
-                    crate::launch::LaunchError::Unreachable { level, missing } => {
-                        SandboxError::LevelUnavailable {
-                            requested: level,
-                            available: self.caps.max_level(),
-                            report: format!("il manque {missing}\n{}", self.caps.report()),
-                        }
-                    }
-                    autre => SandboxError::Confine(autre.to_string()),
+        // Au niveau 2, une machine de la réserve si elle en a une ; sinon, ou si elle refuse
+        // la tâche, une machine démarrée à froid. Dans les deux cas, une microVM : la réserve
+        // accélère le niveau 2, elle ne le remplace jamais par un autre.
+        let depuis_la_reserve = if spec.level == 2 {
+            self.reserve
+                .as_ref()
+                .and_then(|reserve| reserve.prendre())
+                .and_then(|membre| {
+                    crate::launch::depuis_la_reserve(membre, spec)
+                        .map_err(|erreur| {
+                            tracing::warn!(%erreur, "machine de réserve refusée ; démarrage à froid");
+                        })
+                        .ok()
+                })
+        } else {
+            None
+        };
+        let launched = match depuis_la_reserve {
+            Some(launched) => Ok(launched),
+            None => crate::launch::launch(&self.caps, &self.helper, spec, &sync_dir),
+        }
+        .map_err(|error| match error {
+            crate::launch::LaunchError::Unreachable { level, missing } => {
+                SandboxError::LevelUnavailable {
+                    requested: level,
+                    available: self.caps.max_level(),
+                    report: format!("il manque {missing}\n{}", self.caps.report()),
                 }
-            })?;
+            }
+            autre => SandboxError::Confine(autre.to_string()),
+        })?;
         let microvm = launched.microvm.clone();
         let mut child = launched.child;
         let pid = i32::try_from(child.id()).unwrap_or(0);

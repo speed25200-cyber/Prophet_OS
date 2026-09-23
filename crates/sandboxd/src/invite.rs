@@ -24,6 +24,11 @@ pub const MARQUE_ERREUR: &str = "PROPHET_INVITE_ERREUR";
 pub const DOSSIER: &str = ".prophet";
 /// Le script que l'invité exécute, sous ce dossier.
 pub const SCRIPT: &str = "exec.sh";
+/// Le chemin du répertoire de travail sur l'hôte, sous ce dossier : un invité tiré de la
+/// réserve (ADR 0045) a démarré avant qu'on sache où monter le disque de sa tâche.
+pub const CHEMIN: &str = "workdir";
+/// L'invité en réserve attend le disque de sa tâche.
+pub const MARQUE_ATTENTE: &str = "PROPHET_INVITE_ATTENTE";
 /// Ce que le disque de travail reçoit en plus du contenu du répertoire.
 const MARGE_OCTETS: u64 = 64 * 1024 * 1024;
 /// Au-delà, le répertoire de travail n'est pas un espace de travail : on refuse de l'imager.
@@ -202,19 +207,53 @@ pub fn disque_de_travail(workdir: &Path, script: &str, destination: &Path) -> Re
         ],
     )?;
     let script_hote = destination.with_extension("exec.sh");
+    let chemin_hote = destination.with_extension("workdir");
     std::fs::write(&script_hote, script).map_err(|e| e.to_string())?;
-    let _ = commande(&debugfs, &["-w", &dest, "-R", &format!("mkdir {DOSSIER}")]);
-    commande(
+    std::fs::write(&chemin_hote, &src).map_err(|e| e.to_string())?;
+    // Un seul passage de debugfs pour le dossier, le script et le chemin : chaque lancement
+    // compte, surtout depuis la réserve, où le reste ne prend que quelques millisecondes.
+    let commandes = destination.with_extension("debugfs");
+    std::fs::write(
+        &commandes,
+        format!(
+            "mkdir {DOSSIER}\nwrite {} {DOSSIER}/{SCRIPT}\nwrite {} {DOSSIER}/{CHEMIN}\n",
+            script_hote.display(),
+            chemin_hote.display()
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+    let ecrit = commande(
         &debugfs,
-        &[
-            "-w",
-            &dest,
-            "-R",
-            &format!("write {} {DOSSIER}/{SCRIPT}", script_hote.display()),
-        ],
-    )?;
+        &["-w", "-f", &commandes.display().to_string(), &dest],
+    );
     let _ = std::fs::remove_file(&script_hote);
-    Ok(())
+    let _ = std::fs::remove_file(&chemin_hote);
+    let _ = std::fs::remove_file(&commandes);
+    ecrit
+}
+
+/// Relit un fichier du contrat sur le disque de travail, pour vérifier ce que l'invité
+/// trouvera.
+///
+/// # Errors
+/// e2fsprogs absent, ou fichier absent du disque.
+pub fn lire_sur_le_disque(disque: &Path, nom: &str) -> Result<String, String> {
+    let debugfs = which("debugfs").ok_or("il manque debugfs (e2fsprogs)")?;
+    let sortie = Command::new(&debugfs)
+        .args([
+            &disque.display().to_string(),
+            "-R",
+            &format!("cat {DOSSIER}/{nom}"),
+        ])
+        .output()
+        .map_err(|e| format!("debugfs : {e}"))?;
+    if !sortie.status.success() || sortie.stdout.is_empty() {
+        return Err(format!(
+            "{DOSSIER}/{nom} absent : {}",
+            String::from_utf8_lossy(&sortie.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&sortie.stdout).into_owned())
 }
 
 fn copier_arbre(source: &Path, cible: &Path) -> std::io::Result<()> {
@@ -315,6 +354,40 @@ mod tests {
         .unwrap_err();
         assert!(absent.contains("répertoire de travail"), "{absent}");
         let _ = std::fs::remove_file(&dest);
+    }
+
+    #[test]
+    fn le_disque_porte_le_script_et_le_chemin_de_travail() {
+        // Un invité tiré de la réserve ne connaît pas encore son répertoire de travail : il le
+        // lit sur le disque, à côté du script (ADR 0045).
+        if which("mkfs.ext4").is_none() || which("debugfs").is_none() {
+            eprintln!("e2fsprogs absent : test sans effet");
+            return;
+        }
+        let travail = tempfile::tempdir().unwrap();
+        std::fs::write(travail.path().join("entree.txt"), "3 et 4").unwrap();
+        let disque = tempfile::tempdir().unwrap();
+        let image = disque.path().join("travail.ext4");
+        let spec = SandboxSpec::new(2, "/bin/true", travail.path().display().to_string());
+        let script = script_exec(&spec);
+        disque_de_travail(travail.path(), &script, &image).unwrap();
+        assert_eq!(lire_sur_le_disque(&image, SCRIPT).unwrap(), script);
+        assert_eq!(
+            lire_sur_le_disque(&image, CHEMIN).unwrap(),
+            travail.path().display().to_string()
+        );
+        // La part hôte d'une prise dans la réserve : quelques dizaines de millisecondes.
+        let debut = std::time::Instant::now();
+        for _ in 0..5 {
+            disque_de_travail(travail.path(), &script, &image).unwrap();
+        }
+        eprintln!("disque de travail : {:?} en moyenne", debut.elapsed() / 5);
+        // Aucun fichier de travail ne reste à côté de l'image.
+        let restes: Vec<_> = std::fs::read_dir(disque.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(restes, vec![std::ffi::OsString::from("travail.ext4")]);
     }
 
     #[test]

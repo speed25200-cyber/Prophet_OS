@@ -104,6 +104,42 @@ pub fn launch(
     }
 }
 
+/// Niveau 2 depuis la réserve (ADR 0045) : une machine restaurée d'un instantané, en pause,
+/// reçoit le disque de la tâche et reprend. Même invité, même contrat qu'à froid.
+///
+/// # Errors
+/// Disque de travail impossible, ou moniteur qui refuse le disque ou la reprise ; la machine
+/// est alors abandonnée.
+pub fn depuis_la_reserve(
+    membre: crate::reserve::Membre,
+    spec: &SandboxSpec,
+) -> Result<Launched, LaunchError> {
+    let disque = membre.dossier.join("travail.ext4");
+    let prepare = crate::invite::disque_de_travail(
+        Path::new(&spec.workdir),
+        &crate::invite::script_exec(spec),
+        &disque,
+    )
+    .map_err(|raison| format!("disque de travail : {raison}"))
+    .and_then(|()| crate::reserve::confier(&membre, &disque));
+    match prepare {
+        Ok(()) => Ok(Launched {
+            child: membre.child,
+            needs_handshake: false,
+            microvm: Some(MicrovmRun {
+                base: membre.dossier,
+                disque,
+            }),
+        }),
+        Err(raison) => {
+            membre.abandonner();
+            Err(LaunchError::MicrovmMortNe {
+                raison: format!("machine de réserve : {raison}"),
+            })
+        }
+    }
+}
+
 /// Niveau 0 : espaces de noms, racine minimale, seccomp, par le programme d'amorçage.
 fn launch_confined(
     helper: &str,

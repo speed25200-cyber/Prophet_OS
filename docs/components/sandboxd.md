@@ -15,6 +15,18 @@ Tout processus non fiable tourne sous ce daemon, au niveau requis. Il est le seu
 | 1 | gVisor (`runsc`) | `runsc` installé |
 | 2 | microVM Firecracker | `/dev/kvm` **ouvrable**, `firecracker`, e2fsprogs (`mkfs.ext4`, `debugfs`), et des images d'invité — sur la machine installée, l'invité du dépôt (`invite-microvm` : noyau publié par Firecracker, racine busybox + Python, ADR 0038), nommé à sandboxd par `PROPHET_MICROVM_KERNEL` et `PROPHET_MICROVM_ROOTFS`. Le répertoire de travail part dans un disque ext4 avec `.prophet/exec.sh`, l'invité le monte au même chemin que sur l'hôte (surcouche overlay en mémoire sur sa racine en lecture seule), l'exécute, la console porte la sortie entre « PROPHET_INVITE_PRET » et « PROPHET_INVITE_FIN code=N », et le disque revient |
 
+### La réserve du niveau 2
+
+Au démarrage, sandboxd démarre un invité **sans tâche**, qui attend son disque de travail, en
+fait un instantané, et garde `PROPHET_MICROVM_POOL` machines (2 par défaut, 0 pour aucune)
+restaurées depuis cet instantané, en pause (ADR 0045). Une exécution de niveau 2 prend l'une
+d'elles : le disque de la tâche remplace le disque d'attente, la machine reprend, l'invité lit
+son chemin de travail sur le disque et exécute sous les mêmes marques qu'à froid. Une machine
+ne sert qu'une fois, la réserve en restaure une autre ; vide, ou refusée, l'exécution démarre à
+froid, toujours en microVM. `sandbox.capabilities` rend `reserve` : cible, machines prêtes,
+dernière durée de restauration, erreur. L'instantané (1 Gio de mémoire) va sous
+`PROPHET_MICROVM_RESERVE`, sinon le répertoire temporaire du service.
+
 ## Méthodes
 
 | Méthode | Ce qu'elle fait |

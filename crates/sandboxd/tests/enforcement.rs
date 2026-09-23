@@ -483,6 +483,98 @@ fn le_niveau_deux_execute_un_programme_et_rapatrie_ses_fichiers() {
     );
 }
 
+/// M5-T4, critère d'acceptation : réserve chaude, une microVM de niveau 2 est rendue en moins
+/// de 150 ms (médiane), chaque exécution a une machine neuve, le programme s'exécute comme à
+/// froid, et la réserve se remplit à nouveau d'elle-même (ADR 0045).
+#[test]
+#[ignore = "needs_kvm"]
+fn la_reserve_rend_une_microvm_de_niveau_deux_en_moins_de_150_ms() {
+    let caps = Capabilities::probe();
+    assert!(
+        caps.supports(2),
+        "niveau 2 inatteignable : il manque {}",
+        caps.missing_for(2).join(", ")
+    );
+    let manager = Manager::new(helper().display().to_string()).avec_reserve(2);
+    let reserve = manager.reserve().expect("une réserve au niveau 2");
+    let debut = std::time::Instant::now();
+    assert!(
+        reserve.attendre_pleine(std::time::Duration::from_secs(60)),
+        "la réserve ne s'est pas remplie : {:?}",
+        reserve.statut()
+    );
+    eprintln!(
+        "réserve pleine en {:?} : {:?}",
+        debut.elapsed(),
+        reserve.statut()
+    );
+    let mut durees = Vec::new();
+    for tour in 0..5 {
+        assert!(
+            reserve.attendre_pleine(std::time::Duration::from_secs(30)),
+            "tour {tour} : la réserve ne se régénère pas : {:?}",
+            reserve.statut()
+        );
+        let travail = tempfile::tempdir().unwrap();
+        std::fs::write(travail.path().join("entree.txt"), format!("{tour} et 4")).unwrap();
+        // Une trace dans le /tmp de l'invité : une machine réutilisée la retrouverait.
+        let spec = SandboxSpec::new(2, "/usr/bin/python3", travail.path().display().to_string())
+            .args([
+                "-c",
+                "import os, sys\na, b = open('entree.txt').read().split(' et ')\nprint('neuve' if not os.path.exists('/tmp/deja') else 'reprise')\nopen('/tmp/deja', 'w').write('1')\nprint('somme', int(a) + int(b))\nopen('resultat.txt', 'w').write('fait')\nsys.exit(7)",
+            ])
+            .env("PATH", "/usr/bin:/bin");
+        let lance = std::time::Instant::now();
+        let mut handle = manager.run("task:reserve", &spec).unwrap();
+        durees.push(lance.elapsed());
+        assert_eq!(handle.level, 2);
+        let vm = handle.microvm.clone().expect("un disque de travail");
+        let mut console = String::new();
+        if let Some(child) = handle_child(&mut handle)
+            && let Some(out) = child.stdout.as_mut()
+        {
+            let _ = out.read_to_string(&mut console);
+        }
+        let code_moniteur = handle.wait().unwrap();
+        let lu = sandboxd::invite::lire_console(&console);
+        assert!(
+            lu.fin_vue,
+            "tour {tour} : l'invité n'a pas dit sa fin :\n{console}"
+        );
+        assert_eq!(lu.erreur, None, "{console}");
+        assert_eq!(lu.code, Some(7), "{console}");
+        assert!(
+            lu.sortie.contains("neuve"),
+            "tour {tour} : machine réutilisée ?\n{console}"
+        );
+        assert!(
+            lu.sortie.contains(&format!("somme {}", tour + 4)),
+            "tour {tour} : {:?}",
+            lu.sortie
+        );
+        assert_eq!(code_moniteur, Some(0), "{console}");
+        sandboxd::invite::rapatrier(&vm.disque, travail.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(travail.path().join("resultat.txt")).unwrap(),
+            "fait"
+        );
+        let _ = std::fs::remove_dir_all(&vm.base);
+    }
+    durees.sort();
+    let mediane = durees[durees.len() / 2];
+    eprintln!("microVM depuis la réserve : médiane {mediane:?}, toutes {durees:?}");
+    assert!(
+        mediane < std::time::Duration::from_millis(150),
+        "médiane {mediane:?} au-delà de 150 ms : {durees:?} ; réserve {:?}",
+        reserve.statut()
+    );
+    assert!(
+        reserve.attendre_pleine(std::time::Duration::from_secs(30)),
+        "la réserve ne s'est pas remplie à nouveau : {:?}",
+        reserve.statut()
+    );
+}
+
 #[test]
 #[ignore = "needs_kvm"]
 fn le_niveau_deux_ne_retombe_jamais_sur_le_niveau_zero() {

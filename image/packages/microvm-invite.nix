@@ -19,7 +19,8 @@ let
 
   # Ce que l'invité fait au démarrage. Tout est dit sur la console série, que sandboxd lit :
   # « PROPHET_INVITE_PRET » quand la racine est montée, « PROPHET_INVITE_FIN code=N » quand le
-  # programme a rendu la main, puis l'invité s'éteint, et le moniteur avec lui.
+  # programme a rendu la main, puis l'invité s'éteint, et le moniteur avec lui. En réserve,
+  # « PROPHET_INVITE_ATTENTE » précède : l'invité attend le disque de sa tâche.
   init = writeScript "prophet-invite-init" ''
     #!/bin/sh
     export PATH=/bin
@@ -41,15 +42,40 @@ let
       mount -t devtmpfs dev "$racine/dev" 2>/dev/null || true
       mount -t tmpfs tmp "$racine/tmp"
     fi
-    echo "PROPHET_INVITE_PRET"
     programme=""
     travail=""
+    reserve=0
     for mot in $(cat /proc/cmdline); do
       case "$mot" in
         prophet.program=*) programme="''${mot#prophet.program=}" ;;
         prophet.workdir=*) travail="''${mot#prophet.workdir=}" ;;
+        prophet.pool=1) reserve=1 ;;
       esac
     done
+    # En réserve (M5-T4, ADR 0045), l'invité démarre sans tâche : son second disque n'est qu'un
+    # disque d'attente de 1 Mio. Il le dit, sandboxd le met en pause et en fait un instantané,
+    # puis, quand une tâche arrive, remplace ce disque par celui de la tâche et le reprend. La
+    # taille du disque change : c'est le signal. Le chemin de travail est écrit sur le disque,
+    # la ligne de commande ayant été fixée avant qu'on sache pour qui l'invité travaillerait.
+    if [ "$reserve" = 1 ]; then
+      attente=$(cat /sys/block/vdb/size 2>/dev/null)
+      echo "PROPHET_INVITE_ATTENTE"
+      while [ "$(cat /sys/block/vdb/size 2>/dev/null)" = "$attente" ]; do
+        sleep 0.005 2>/dev/null || true
+      done
+      # Le noyau a lu le début du disque d'attente en le découvrant : on oublie ce qu'il en
+      # garde avant de monter celui de la tâche.
+      sync
+      blockdev --flushbufs /dev/vdb 2>/dev/null || true
+      echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+      mkdir -p /tmp/arrivee
+      if mount -t ext4 /dev/vdb /tmp/arrivee 2>/dev/null; then
+        travail=$(cat /tmp/arrivee/.prophet/workdir 2>/dev/null)
+        umount /tmp/arrivee
+      fi
+      [ -n "$travail" ] || echo "PROPHET_INVITE_ERREUR disque de travail sans chemin"
+    fi
+    echo "PROPHET_INVITE_PRET"
     code=0
     if [ -n "$travail" ] && [ -b /dev/vdb ]; then
       if ! mkdir -p "$racine$travail" || ! mount -t ext4 /dev/vdb "$racine$travail"; then
@@ -91,7 +117,7 @@ runCommand "prophet-invite-microvm" {
 } ''
   mkdir -p racine/bin racine/sbin racine/proc racine/sys racine/dev racine/tmp racine/etc racine/nix/store
   cp ${pkgsStatic.busybox}/bin/busybox racine/bin/busybox
-  for applet in sh mount umount cat echo ls mkdir rm cp mv sleep env grep sed reboot poweroff sync test chroot; do
+  for applet in sh mount umount cat echo ls mkdir rm cp mv sleep env grep sed reboot poweroff sync test chroot blockdev; do
     ln -s busybox "racine/bin/$applet"
   done
   # Le noyau lance /sbin/init avant /init : que ce soit le même script, et non l'init de busybox,

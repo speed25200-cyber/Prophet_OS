@@ -76,6 +76,8 @@ impl Handler for Isolation {
                     "runsc": caps.runsc,
                     "firecracker": caps.firecracker,
                     "microvm_images": caps.microvm_images.is_some(),
+                    // Les microVM prêtes pour le niveau 2 (ADR 0045) ; absente sans niveau 2.
+                    "reserve": self.manager.reserve().map(sandboxd::reserve::Reserve::statut),
                     "report": caps.report(),
                 }))
             }
@@ -420,7 +422,14 @@ async fn main() -> anyhow::Result<()> {
             )
     });
 
-    let manager = Manager::new(&aide);
+    // Des microVM prêtes, restaurées d'un instantané, pour que le niveau 2 parte en quelques
+    // dizaines de millisecondes plutôt qu'en une seconde (ADR 0045). `PROPHET_MICROVM_POOL=0`
+    // les retire ; sans niveau 2, il n'y en a pas.
+    let reserve = std::env::var("PROPHET_MICROVM_POOL")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(2);
+    let manager = Manager::new(&aide).avec_reserve(reserve);
     let caps = manager.capabilities();
     tracing::info!(
         aide = %aide,
