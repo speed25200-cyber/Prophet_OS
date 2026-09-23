@@ -35,7 +35,11 @@ mesurant réussite, latences médiane et p95, tokens et interventions humaines.
   (boucle nue), outils appelés et réponse finale du modèle ; par côté, taux de réussite, durée
   médiane et p95, tokens moyens. Le modèle échantillonne comme l'image le règle (température
   0,7) : chaque tâche se rejoue `PROPHET_BENCH_REPETITIONS` fois (trois en CI) et le bilan
-  compte les réussites par tâche sur ces passages. `just bench`
+  compte les réussites par tâche sur ces passages. Le prix des couches se mesure aussi en
+  ressources : temps processeur du moteur pendant chaque exécution (des deux côtés), temps
+  processeur et pic de mémoire résidente de capd, du journal et d'agentd (`/proc/<pid>/stat`,
+  `VmHWM`). L'énergie n'est pas lisible sur le coureur de la CI (machine virtuelle, sans
+  compteurs RAPL) : le temps processeur en tient lieu, à mesurer en joules sur un vrai PC. `just bench`
   les écrit dans `bench/results/<date>.json` ; le travail « Poids du catalogue servis (réels) »
   de la CI les joue à chaque poussée et les publie (résumé et artefact `banc-m13`).
 - **Le banc mesure, il ne juge pas** : il n'échoue que si rien n'a pu être joué. Un essai sans

@@ -71,6 +71,12 @@ impl Daemon {
         }
     }
 
+    /// Identifiant du processus, pour lire ce qu'il consomme dans `/proc`.
+    #[must_use]
+    pub fn pid(&self) -> u32 {
+        self.enfant.id()
+    }
+
     /// Attend que le daemon *réponde*, et non qu'il paraisse prêt.
     ///
     /// # Panics

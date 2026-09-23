@@ -12,7 +12,8 @@ une boucle nue qui appelle les mêmes outils fichiers sans registre — même mo
 mêmes vérificateurs ([ADR 0048](../../docs/adr/0048-le-banc-prophet-contre-une-boucle-nue.md)).
 Il mesure réussite, durée médiane et p95, tokens et étapes, relève pour chaque exécution les
 outils appelés, la réponse finale du modèle et les livrables que Prophet a rappelés
-([ADR 0049](../../docs/adr/0049-le-livrable-rappele-au-modele.md)), rejoue chaque tâche
+([ADR 0049](../../docs/adr/0049-le-livrable-rappele-au-modele.md)), le temps processeur du
+moteur et, côté Prophet, le temps processeur et le pic de mémoire de ses services, rejoue chaque tâche
 `PROPHET_BENCH_REPETITIONS` fois (trois en CI), et écrit `bench/results/<date>.json`.
 
 ```sh

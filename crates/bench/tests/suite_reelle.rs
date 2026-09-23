@@ -49,6 +49,47 @@ struct Issue {
     reponse: String,
     /// Livrables rappelés par Prophet (ADR 0049) ; toujours vide pour la boucle nue.
     rappels: Vec<String>,
+    /// Temps processeur du moteur pendant l'exécution, en secondes.
+    moteur_cpu_s: f64,
+    /// Temps processeur de capd, du journal et d'agentd pendant l'exécution (Prophet seul).
+    services_cpu_s: Option<f64>,
+    /// Somme des pics de mémoire résidente de capd, du journal et d'agentd (Prophet seul).
+    services_pic_octets: Option<u64>,
+}
+
+/// Temps processeur (utilisateur et système) d'un processus, en secondes ; zéro s'il n'est pas
+/// lisible. `/proc/<pid>/stat` compte en `USER_HZ`, 100 par seconde sous Linux.
+fn cpu_secondes(pid: u32) -> f64 {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return 0.0;
+    };
+    // Le nom du programme, entre parenthèses, peut contenir des espaces : on lit après lui.
+    let Some((_, reste)) = stat.rsplit_once(')') else {
+        return 0.0;
+    };
+    let champs: Vec<&str> = reste.split_whitespace().collect();
+    let tics = |i: usize| {
+        champs
+            .get(i)
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+    // Après le nom : état (0), …, utime (11), stime (12).
+    (tics(11) + tics(12)) as f64 / 100.0
+}
+
+/// Pic de mémoire résidente d'un processus (`VmHWM`), en octets.
+fn pic_memoire(pid: u32) -> u64 {
+    std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .ok()
+        .and_then(|status| {
+            status.lines().find_map(|ligne| {
+                ligne
+                    .strip_prefix("VmHWM:")
+                    .and_then(|v| v.trim().trim_end_matches("kB").trim().parse::<u64>().ok())
+            })
+        })
+        .map_or(0, |ko| ko * 1024)
 }
 
 /// La réponse finale, bornée pour le rapport.
@@ -88,6 +129,13 @@ struct Chaine {
     _agentd: Daemon,
     agents: Client,
     journal: Client,
+}
+
+impl Chaine {
+    /// Les processus des services de Prophet.
+    fn services(&self) -> [u32; 3] {
+        [self._capd.pid(), self._ledger.pid(), self._agentd.pid()]
+    }
 }
 
 impl Chaine {
@@ -170,10 +218,12 @@ fn mission(tache: &Task, modele: &str) -> Value {
 }
 
 /// La tâche à travers Prophet : planifiée, lancée, attendue, publiée, vérifiée.
-async fn par_prophet(tache: &Task, endpoint: &str, modele: &str) -> Issue {
+async fn par_prophet(tache: &Task, endpoint: &str, modele: &str, moteur: Option<u32>) -> Issue {
     let chaine = Chaine::new(endpoint, &[]).await;
     (tache.setup)(&chaine.home).unwrap();
     let id = format!("banc-{}", tache.id);
+    let services_avant: f64 = chaine.services().iter().map(|p| cpu_secondes(*p)).sum();
+    let moteur_avant = moteur.map_or(0.0, cpu_secondes);
     let debut = Instant::now();
     chaine
         .agents
@@ -208,6 +258,7 @@ async fn par_prophet(tache: &Task, endpoint: &str, modele: &str) -> Issue {
         secondes: debut.elapsed().as_secs_f64(),
         tokens: depense["tokens"].as_u64().unwrap_or(0),
         etapes: depense["steps"].as_u64().unwrap_or(0),
+        moteur_cpu_s: moteur.map_or(0.0, cpu_secondes) - moteur_avant,
         ..Issue::default()
     };
     if let Ok(evenements) = chaine
@@ -233,17 +284,20 @@ async fn par_prophet(tache: &Task, endpoint: &str, modele: &str) -> Issue {
             statut["state"].as_str().unwrap_or("?"),
             statut["reason"].as_str().unwrap_or("sans motif")
         ));
-        return issue;
-    }
-    // L'humain publie ce que la mission a préparé ; le vérificateur lit le répertoire personnel.
-    if let Err(e) = chaine.agents.call("task.apply", json!({"id": id})).await {
+    } else if let Err(e) = chaine.agents.call("task.apply", json!({"id": id})).await {
+        // L'humain publie ce que la mission a préparé ; le vérificateur lit le répertoire
+        // personnel.
         issue.motif = Some(format!("publication : {}", e.message));
-        return issue;
+    } else {
+        match (tache.verify)(&chaine.home) {
+            Ok(()) => issue.reussie = true,
+            Err(motif) => issue.motif = Some(motif),
+        }
     }
-    match (tache.verify)(&chaine.home) {
-        Ok(()) => issue.reussie = true,
-        Err(motif) => issue.motif = Some(motif),
-    }
+    let services = chaine.services();
+    issue.services_cpu_s =
+        Some(services.iter().map(|p| cpu_secondes(*p)).sum::<f64>() - services_avant);
+    issue.services_pic_octets = Some(services.iter().map(|p| pic_memoire(*p)).sum());
     issue
 }
 
@@ -383,7 +437,7 @@ fn recopier(depuis: &Path, vers: &Path) {
 }
 
 /// La tâche à travers la boucle nue, dans un fil à elle.
-fn par_la_boucle_nue(tache: &Task, endpoint: &str, modele: &str) -> Issue {
+fn par_la_boucle_nue(tache: &Task, endpoint: &str, modele: &str, moteur: Option<u32>) -> Issue {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join("home");
     std::fs::create_dir_all(&home).unwrap();
@@ -414,6 +468,7 @@ fn par_la_boucle_nue(tache: &Task, endpoint: &str, modele: &str) -> Issue {
     let workdir = outils.contexte.workdir.clone();
     let appels = outils.appels.clone();
     let mut boucle = NativeDriver::new(Box::new(modele_nu), Box::new(outils));
+    let moteur_avant = moteur.map_or(0.0, cpu_secondes);
     let debut = Instant::now();
     let run = boucle
         .start(&StartRequest {
@@ -459,6 +514,7 @@ fn par_la_boucle_nue(tache: &Task, endpoint: &str, modele: &str) -> Issue {
         etapes: tours.load(Ordering::Relaxed),
         outils: appels.lock().unwrap().clone(),
         reponse: tronquer(&reponse),
+        moteur_cpu_s: moteur.map_or(0.0, cpu_secondes) - moteur_avant,
         ..Issue::default()
     };
     if fin.0 != RunStatus::Ok {
@@ -610,6 +666,9 @@ fn resumer(issues: &[&Issue]) -> Value {
         "p95_seconds": centile(&durees, 0.95),
         "mean_tokens": issues.iter().map(|i| i.tokens).sum::<u64>() / issues.len().max(1) as u64,
         "reminded_runs": issues.iter().filter(|i| !i.rappels.is_empty()).count(),
+        "mean_engine_cpu_seconds": issues.iter().map(|i| i.moteur_cpu_s).sum::<f64>() / issues.len().max(1) as f64,
+        "mean_services_cpu_seconds": issues.iter().filter_map(|i| i.services_cpu_s).sum::<f64>() / issues.len().max(1) as f64,
+        "max_services_peak_bytes": issues.iter().filter_map(|i| i.services_pic_octets).max(),
     })
 }
 
@@ -636,7 +695,8 @@ async fn la_suite_se_joue_par_prophet_et_par_une_boucle_nue() {
         .trim_end_matches("-q4")
         .to_owned();
     let port = 18_140;
-    let _moteur = moteur(&serveur, &fichier, &alias, port).await;
+    let moteur_servi = moteur(&serveur, &fichier, &alias, port).await;
+    let pid_moteur = moteur_servi.id();
     let endpoint = format!("http://127.0.0.1:{port}/v1");
 
     let taches: Vec<Task> = suite()
@@ -651,21 +711,29 @@ async fn la_suite_se_joue_par_prophet_et_par_une_boucle_nue() {
     let mut executions: Vec<(&Task, u32, Issue, Issue)> = Vec::new();
     for passage in 1..=repetitions {
         for tache in &taches {
-            let prophet = par_prophet(tache, &endpoint, &alias).await;
+            let prophet = par_prophet(tache, &endpoint, &alias, pid_moteur).await;
             let (endpoint_nu, alias_nu, id_tache) = (endpoint.clone(), alias.clone(), tache.id);
             let nue = std::thread::spawn(move || {
                 let tache = suite().into_iter().find(|t| t.id == id_tache).unwrap();
-                par_la_boucle_nue(&tache, &endpoint_nu, &alias_nu)
+                par_la_boucle_nue(&tache, &endpoint_nu, &alias_nu, pid_moteur)
             })
             .join()
             .unwrap();
             let decrire = |issue: &Issue, tours: &str| {
                 format!(
-                    "{} {:.1} s, {} tokens, {} {tours}{}{} [{}] « {} »",
+                    "{} {:.1} s, {} tokens, {} {tours}, moteur {:.1} s CPU{}{}{} [{}] « {} »",
                     if issue.reussie { "✓" } else { "✗" },
                     issue.secondes,
                     issue.tokens,
                     issue.etapes,
+                    issue.moteur_cpu_s,
+                    match (issue.services_cpu_s, issue.services_pic_octets) {
+                        (Some(cpu), Some(pic)) => format!(
+                            ", services {cpu:.2} s CPU et {} Mo au plus",
+                            pic / 1_000_000
+                        ),
+                        _ => String::new(),
+                    },
                     issue
                         .motif
                         .as_deref()
@@ -730,18 +798,31 @@ async fn la_suite_se_joue_par_prophet_et_par_une_boucle_nue() {
         );
     }
     eprintln!(
-        "mesure : banc {id} — Prophet {}/{} réussies ({} rappelées), médiane {:.1} s, p95 {:.1} s, {} tokens en moyenne ; nue {}/{}, médiane {:.1} s, p95 {:.1} s, {} tokens",
+        "mesure : banc {id} — Prophet {}/{} réussies ({} rappelées), médiane {:.1} s, p95 {:.1} s, {} tokens et {:.1} s CPU de moteur en moyenne, services {:.2} s CPU en moyenne et {} Mo au plus ; nue {}/{}, médiane {:.1} s, p95 {:.1} s, {} tokens et {:.1} s CPU de moteur",
         bilan["prophet"]["success"],
         bilan["prophet"]["runs"],
         bilan["prophet"]["reminded_runs"],
         bilan["prophet"]["median_seconds"].as_f64().unwrap_or(0.0),
         bilan["prophet"]["p95_seconds"].as_f64().unwrap_or(0.0),
         bilan["prophet"]["mean_tokens"],
+        bilan["prophet"]["mean_engine_cpu_seconds"]
+            .as_f64()
+            .unwrap_or(0.0),
+        bilan["prophet"]["mean_services_cpu_seconds"]
+            .as_f64()
+            .unwrap_or(0.0),
+        bilan["prophet"]["max_services_peak_bytes"]
+            .as_u64()
+            .unwrap_or(0)
+            / 1_000_000,
         bilan["bare"]["success"],
         bilan["bare"]["runs"],
         bilan["bare"]["median_seconds"].as_f64().unwrap_or(0.0),
         bilan["bare"]["p95_seconds"].as_f64().unwrap_or(0.0),
         bilan["bare"]["mean_tokens"],
+        bilan["bare"]["mean_engine_cpu_seconds"]
+            .as_f64()
+            .unwrap_or(0.0),
     );
     if let Ok(chemin) = std::env::var("PROPHET_BENCH_RESULTS") {
         std::fs::write(&chemin, serde_json::to_string_pretty(&bilan).unwrap()).unwrap();
@@ -815,19 +896,33 @@ async fn le_banc_joue_une_tache_des_deux_cotes_avec_un_faux_moteur() {
         .into_iter()
         .find(|t| t.id == "compter-lignes")
         .unwrap();
-    let prophet = par_prophet(&tache, &endpoint, "faux").await;
+    // Le test lui-même tient lieu de moteur : son temps processeur se lit comme celui d'un autre.
+    let soi = Some(std::process::id());
+    let prophet = par_prophet(&tache, &endpoint, "faux", soi).await;
     assert!(prophet.reussie, "{prophet:?}");
     assert!(prophet.tokens > 0 && prophet.etapes > 0, "{prophet:?}");
     assert_eq!(prophet.outils, ["fs.write"], "{prophet:?}");
     assert_eq!(prophet.reponse, "Le total est écrit.");
     assert!(prophet.rappels.is_empty(), "{prophet:?}");
+    // Ce que coûtent les services : du temps processeur et une mémoire résidente mesurés.
+    assert!(prophet.moteur_cpu_s >= 0.0, "{prophet:?}");
+    assert!(
+        prophet.services_cpu_s.is_some_and(|s| s > 0.0),
+        "{prophet:?}"
+    );
+    assert!(
+        prophet
+            .services_pic_octets
+            .is_some_and(|o| o > 3 * 1024 * 1024),
+        "{prophet:?}"
+    );
     let e = endpoint.clone();
     let nue = std::thread::spawn(move || {
         let tache = suite()
             .into_iter()
             .find(|t| t.id == "compter-lignes")
             .unwrap();
-        par_la_boucle_nue(&tache, &e, "faux")
+        par_la_boucle_nue(&tache, &e, "faux", None)
     })
     .join()
     .unwrap();
@@ -836,13 +931,14 @@ async fn le_banc_joue_une_tache_des_deux_cotes_avec_un_faux_moteur() {
     assert_eq!(nue.etapes, 2);
     assert_eq!(nue.outils, ["fs.write"], "{nue:?}");
     assert_eq!(nue.reponse, "Le total est écrit.");
+    assert!(nue.services_cpu_s.is_none() && nue.services_pic_octets.is_none());
     // Une tâche que le faux moteur ne sait pas faire échoue au vérificateur, des deux côtés.
     let autre = suite()
         .into_iter()
         .find(|t| t.id == "total-des-ventes")
         .unwrap();
     // Son écriture sort de la portée de la mission : capd la refuse, la mission s'arrête.
-    let echec = par_prophet(&autre, &endpoint, "faux").await;
+    let echec = par_prophet(&autre, &endpoint, "faux", None).await;
     assert!(!echec.reussie, "{echec:?}");
     assert_eq!(echec.outils, ["fs.write ✗"], "{echec:?}");
     assert!(
