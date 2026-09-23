@@ -93,4 +93,7 @@ reprendre un instantané périmé. Le critère est l'essai
 `la_reserve_reprend_son_instantane_au_redemarrage` (`needs_kvm`) : après un premier
 démarrage, l'instantané et son empreinte restent, sans machine ; le second démarrage le reprend
 et remplit la réserve en moins d'une seconde, et la machine reprise exécute ; une empreinte
-altérée le fait refaire, et la machine refaite exécute aussi.
+altérée le fait refaire, et la machine refaite exécute aussi. Sur le coureur KVM de la CI
+(`094a443`), il est vert : la réserve reprise est pleine en **7,4 ms**, là où le premier
+démarrage du même passage la remplit en 4,6 s (amorçage de l'invité et écriture de
+l'instantané) ; prise médiane de 9,6 ms, cinq aléas distincts.

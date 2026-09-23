@@ -1526,7 +1526,8 @@ donne le détail.
   `/var/lib/prophet/sandboxd/reserve` sur l'image, avec une empreinte du moniteur, de l'invité
   et de l'hôte ; même empreinte, la première machine est restaurée aussitôt, sans invité à
   démarrer ni gigaoctet à réécrire. L'essai `needs_kvm` exige une réserve reprise pleine en
-  moins d'une seconde. `sandbox.run` et `proc.exec` rendent `elapsed_ms` et `warm_start` :
+  moins d'une seconde ; sur le coureur KVM (`094a443`), elle l'est en **7,4 ms**, contre 4,6 s
+  pour un premier démarrage. `sandbox.run` et `proc.exec` rendent `elapsed_ms` et `warm_start` :
   l'agent sait ce que son exécution a coûté et si la réserve a servi (`637d706`).
 - Poids gérés (M8-T7, ADR 0046) : un catalogue du système compilé dans les binaires (adresse
   épinglée, empreinte SHA-256 publiée, hôtes permis) ; agentd télécharge une entrée par egress
