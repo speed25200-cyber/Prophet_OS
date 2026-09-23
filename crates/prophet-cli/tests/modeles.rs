@@ -285,6 +285,8 @@ fn servir_un_poids_telecharge_le_fait_charger_par_le_routeur() {
     assert!(sortie.status.success(), "{sortie:?}");
     let dit = String::from_utf8(sortie.stdout).unwrap();
     assert!(dit.contains("« Qwen3-4B-Q4_K_M »"), "{dit}");
+    // Le poids était déchargé : on dit ce que son chargement a pris.
+    assert!(dit.contains(", chargé en "), "{dit}");
     let recues = recues.lock().unwrap().clone();
     assert!(
         recues

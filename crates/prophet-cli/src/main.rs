@@ -1425,7 +1425,8 @@ fn model_serve(id: &str, endpoint: &str, force: bool, as_json: bool) -> anyhow::
     {
         anyhow::bail!("{}", refus_memoire(id, &m));
     }
-    let limite = std::time::Instant::now() + CHARGEMENT_MAX;
+    let depart = std::time::Instant::now();
+    let limite = depart + CHARGEMENT_MAX;
     let mut demande = false;
     let etat = loop {
         let etat = moteur
@@ -1456,11 +1457,16 @@ fn model_serve(id: &str, endpoint: &str, force: bool, as_json: bool) -> anyhow::
     if as_json {
         return Ok(format!(
             "{}\n",
-            serde_json::json!({"id": id, "model": modele.id, "path": chemin, "status": etat, "memory": memoire})
+            serde_json::json!({"id": id, "model": modele.id, "path": chemin, "status": etat, "memory": memoire, "load_seconds": depart.elapsed().as_secs_f64()})
         ));
     }
+    let duree = if demande {
+        format!(", chargé en {:.1} s", depart.elapsed().as_secs_f64()).replace('.', ",")
+    } else {
+        String::new()
+    };
     let mut out = format!(
-        "✓ {id} servi par le moteur sous le nom « {} » : prophet provider chat --model {} \"Bonjour\"\n",
+        "✓ {id} servi par le moteur sous le nom « {} »{duree} : prophet provider chat --model {} \"Bonjour\"\n",
         modele.id, modele.id
     );
     if let Some(m) = memoire {
