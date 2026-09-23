@@ -124,6 +124,10 @@ enum ModelAction {
         /// et les fichiers que `PROPHET_WEIGHTS` nomme.
         #[arg(long)]
         dir: Option<std::path::PathBuf>,
+        /// Base d'API du moteur local, interrogé pour savoir quel poids il sert et avec quelle
+        /// fenêtre. Sans elle : `PROPHET_MODEL_ENDPOINT`, sinon `http://127.0.0.1:8080/v1`.
+        #[arg(long)]
+        endpoint: Option<String>,
     },
 }
 
@@ -1919,7 +1923,26 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
 }
 
 fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
-    let ModelAction::Ls { dir } = action;
+    let ModelAction::Ls { dir, endpoint } = action;
+    // Le moteur dit ce qu'il sert ; injoignable, le catalogue se lit quand même.
+    let endpoint = endpoint
+        .clone()
+        .or_else(|| std::env::var("PROPHET_MODEL_ENDPOINT").ok())
+        .unwrap_or_else(|| "http://127.0.0.1:8080/v1".to_owned());
+    let served = providers::local::LocalModel::new(
+        &endpoint,
+        "catalogue",
+        std::time::Duration::from_secs(2),
+    )
+    .and_then(|engine| engine.served());
+    let served_path = served
+        .as_ref()
+        .ok()
+        .and_then(|s| s.path.as_ref())
+        .and_then(|p| std::fs::canonicalize(p).ok());
+    let is_served = |path: &std::path::Path| {
+        served_path.is_some() && std::fs::canonicalize(path).ok() == served_path
+    };
     // Un dossier nommé se lit seul ; sinon, le dossier des poids et les fichiers que la
     // configuration du système nomme, comme le modèle par défaut dans /nix/store (ADR 0033).
     let (dir, catalog) = match dir {
@@ -1938,6 +1961,9 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
                 "dir": dir,
                 "weights": weights.into_iter().flatten().collect::<Vec<_>>(),
                 "refused": refused.into_iter().filter_map(Result::err).collect::<Vec<_>>(),
+                "endpoint": endpoint,
+                "served": served.as_ref().ok(),
+                "engine_error": served.as_ref().err().map(ToString::to_string),
             })
         ));
     }
@@ -1953,8 +1979,16 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
         match entry {
             Ok(w) => {
                 let go = w.gigabytes();
+                let marque = if is_served(&w.path) {
+                    match served.as_ref().ok().and_then(|s| s.n_ctx) {
+                        Some(n_ctx) => format!("  ← servi, fenêtre {n_ctx}"),
+                        None => "  ← servi".to_owned(),
+                    }
+                } else {
+                    String::new()
+                };
                 out.push_str(&format!(
-                    "{:<28} {:<10} {:<8} {:<8} {:>9} {:>8.1}\n",
+                    "{:<28} {:<10} {:<8} {:<8} {:>9} {:>8.1}{marque}\n",
                     w.path
                         .file_name()
                         .map_or_else(tiret, |n| n.to_string_lossy().into_owned()),
@@ -1967,6 +2001,20 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
             }
             Err(raison) => out.push_str(&format!("refusé : {raison}\n")),
         }
+    }
+    match &served {
+        Ok(providers::local::Served {
+            path: Some(path),
+            n_ctx,
+        }) if !is_served(path) => {
+            out.push_str(&format!(
+                "Le moteur sert {}{}, hors de ce catalogue.\n",
+                path.display(),
+                n_ctx.map_or_else(String::new, |n| format!(" avec une fenêtre de {n} tokens"))
+            ));
+        }
+        Ok(_) => {}
+        Err(error) => out.push_str(&format!("{error} : rien n'est servi.\n")),
     }
     Ok(out)
 }

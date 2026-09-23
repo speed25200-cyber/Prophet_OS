@@ -84,3 +84,89 @@ fn le_catalogue_des_poids_se_lit_en_clair_et_en_json() {
     let vide = prophet(&["model", "ls", "--dir", &format!("{chemin}/absent")]);
     assert!(vide.contains("Aucun poids"), "{vide}");
 }
+
+/// Un moteur simulé qui répond à `/props` comme llama-server, pour une seule requête.
+fn moteur(props: Value) -> (String, std::thread::JoinHandle<String>) {
+    use std::io::{BufRead as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
+    let fil = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut lecture = std::io::BufReader::new(stream);
+        let mut premiere = String::new();
+        lecture.read_line(&mut premiere).unwrap();
+        loop {
+            let mut ligne = String::new();
+            lecture.read_line(&mut ligne).unwrap();
+            if ligne == "\r\n" || ligne.is_empty() {
+                break;
+            }
+        }
+        let corps = props.to_string();
+        write!(
+            lecture.get_mut(),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corps}",
+            corps.len()
+        )
+        .unwrap();
+        premiere
+    });
+    (endpoint, fil)
+}
+
+#[test]
+fn le_catalogue_dit_quel_poids_le_moteur_sert_et_avec_quelle_fenetre() {
+    // Un agent qui dose ses lectures doit connaître la fenêtre servie (4 096), pas seulement
+    // celle que le fichier annonce (40 960).
+    let dir = tempfile::tempdir().unwrap();
+    let servi = dir.path().join("qwen3-1.7b.gguf");
+    std::fs::write(&servi, gguf("qwen3", "1.7B", 7, 40_960)).unwrap();
+    std::fs::write(
+        dir.path().join("gemma.gguf"),
+        gguf("gemma3", "4B", 15, 131_072),
+    )
+    .unwrap();
+    let chemin = dir.path().to_str().unwrap();
+    let props = serde_json::json!({"model_path": servi, "total_slots": 1,
+        "default_generation_settings": {"n_ctx": 4096}});
+
+    let (endpoint, fil) = moteur(props.clone());
+    let clair = prophet(&["model", "ls", "--dir", chemin, "--endpoint", &endpoint]);
+    assert!(fil.join().unwrap().starts_with("GET /props "));
+    let ligne = clair
+        .lines()
+        .find(|l| l.starts_with("qwen3-1.7b.gguf"))
+        .unwrap();
+    assert!(ligne.contains("servi") && ligne.contains("4096"), "{clair}");
+    let autre = clair.lines().find(|l| l.starts_with("gemma.gguf")).unwrap();
+    assert!(!autre.contains("servi"), "{clair}");
+
+    let (endpoint, fil) = moteur(props);
+    let json: Value = serde_json::from_str(&prophet(&[
+        "--json",
+        "model",
+        "ls",
+        "--dir",
+        chemin,
+        "--endpoint",
+        &endpoint,
+    ]))
+    .unwrap();
+    fil.join().unwrap();
+    assert_eq!(json["served"]["n_ctx"], 4096, "{json}");
+    assert_eq!(json["served"]["path"], servi.to_str().unwrap());
+
+    // Sans moteur, le catalogue se lit quand même, et le dit.
+    let seul = prophet(&[
+        "model",
+        "ls",
+        "--dir",
+        chemin,
+        "--endpoint",
+        "http://127.0.0.1:1/v1",
+    ]);
+    assert!(
+        seul.contains("qwen3") && seul.contains("injoignable"),
+        "{seul}"
+    );
+}

@@ -131,11 +131,39 @@ impl LocalModel {
             .collect()
     }
 
+    /// Ce que le moteur dit servir : le fichier de poids et la fenêtre de contexte d'une
+    /// requête, lus dans `/props` de llama-server. Un routeur de modèles n'y nomme aucun fichier
+    /// sans qu'on lui en désigne un, et on ne le lui demande pas : cela chargerait un modèle.
+    ///
+    /// # Errors
+    /// Serveur indisponible ou réponse non conforme.
+    pub fn served(&self) -> Result<Served, DriverError> {
+        let response = self
+            .client
+            .get(self.url("/props")?)
+            .send()
+            .map_err(request)?;
+        let body = read_response(response)?;
+        Ok(Served {
+            path: body["model_path"].as_str().map(std::path::PathBuf::from),
+            n_ctx: body["default_generation_settings"]["n_ctx"].as_u64(),
+        })
+    }
+
     fn url(&self, path: &str) -> Result<Url, DriverError> {
         self.endpoint
             .join(path)
             .map_err(|_| invalid("chemin d'API invalide"))
     }
+}
+
+/// Le poids qu'un moteur sert et la fenêtre qu'il accorde à chaque requête.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Served {
+    /// Fichier de poids chargé, si le moteur le dit.
+    pub path: Option<std::path::PathBuf>,
+    /// Fenêtre de contexte par requête, en tokens.
+    pub n_ctx: Option<u64>,
 }
 
 impl ModelClient for LocalModel {

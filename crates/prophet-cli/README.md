@@ -23,7 +23,11 @@ compte. L'ancien `task undo` agit sur ces espaces de bibliothèque ; il n'est pa
 nomme, comme le modèle par défaut de l'image dans `/nix/store`. Pour chacun, ce que son en-tête
 GGUF dit de lui : architecture, taille annoncée, quantification, fenêtre de contexte et poids
 du fichier, sans charger les poids ; un fichier illisible est dit refusé avec sa raison.
-`--dir` lit un dossier seul, `--json` rend `weights` et `refused`.
+`--dir` lit un dossier seul, `--json` rend `weights` et `refused`. Le moteur local
+(`--endpoint`, sinon `PROPHET_MODEL_ENDPOINT`) est interrogé sur ce qu'il sert (`/props`) :
+le fichier chargé est marqué avec la fenêtre accordée à chaque requête — 4 096 tokens sur
+l'image, là où le fichier en annonce souvent dix fois plus —, `served` en JSON ; injoignable,
+le catalogue se lit quand même et le dit.
 
 Validation : `nix develop --command cargo test -p prophet-cli`. Les tests de processus
 `task_service` reproduisent une consultation avec captures inaccessibles. Les vrais comptes

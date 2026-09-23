@@ -117,7 +117,10 @@ sans charger les poids : les tableaux du tokeniseur sont sautés, chaque compte 
 longueur est borné, un fichier corrompu ou fabriqué est refusé avec sa raison plutôt que de
 faire allouer ou boucler. Le catalogue d'une machine réunit le dossier des poids et les
 fichiers que `PROPHET_WEIGHTS` nomme ; le module du moteur local pose cette variable pour les
-poids qu'il sert. `prophet model ls` et la page Modèles de l'atelier le lisent.
+poids qu'il sert. `prophet model ls` et la page Modèles de l'atelier le lisent ;
+`LocalModel::served` lit dans `/props` de llama-server le fichier chargé et la fenêtre servie,
+que `prophet model ls` place en face du fichier (un routeur de modèles n'est pas interrogé
+modèle par modèle : cela en chargerait un).
 
 ## Fenêtre de contexte du moteur
 
