@@ -140,12 +140,16 @@ async fn une_intention_devient_un_plan_sans_execution_et_sans_droits_fournis_par
     assert_eq!(plan["task"], "depuis-interface");
     assert_eq!(plan["scopes"], json!(["~/docs"]));
     assert_eq!(plan["choice"]["reference"], "local:modele-controle");
+    // Le profil du catalogue reste dans le plan : une mission échouée se relance par la même
+    // préparation, jamais par un manifeste recopié.
+    assert_eq!(plan["profile"], "documents");
     let info = chain
         .client
         .call("task.inspect", json!({"id":"depuis-interface"}))
         .await
         .unwrap();
     assert_eq!(info["task"]["state"], "planned");
+    assert_eq!(info["plan"]["profile"], "documents");
     assert_eq!(
         info["task"]["user"],
         format!("uid:{}", prophet_daemon::uid_propre().unwrap())

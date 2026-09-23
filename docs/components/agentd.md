@@ -61,7 +61,7 @@ sous l'identité du service ; voir les limites de l'[ADR 0023](../adr/0023-appro
 Unix. `PROPHET_MISSION_PROFILES` fixe les manifestes et périmètres au démarrage ; les modèles sont
 redécouverts au moment de préparer. Un client officiel demandé comme modèle doit être admis par
 le profil et dit connecté par le lanceur de pilotes ; sinon la préparation le refuse en disant
-comment se connecter (`prophet provider login <client>`). Le modèle du dialogue ne fournit aucune autorité à ce chemin.
+comment se connecter (`prophet provider login <client>`). Le modèle du dialogue ne fournit aucune autorité à ce chemin. Le plan garde le profil dont il a été préparé (`profile`, absent pour un manifeste fourni par `task.spawn`) : une mission échouée ou arrêtée se relance par ce même profil, jamais par un manifeste recopié.
 Une référence déjà connue est refusée et se relit par `task.inspect`. Le plan devient exécutable
 par une commande distincte après examen. Le catalogue est une configuration locale de confiance,
 pas une validation des signatures d'éditeurs. Voir l'[ADR 0015](../adr/0015-intention-et-profils-de-mission.md).

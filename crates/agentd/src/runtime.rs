@@ -139,6 +139,10 @@ pub struct TaskPlan {
     /// Comment le pilote a été choisi, quand un routeur a été consulté.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route: Option<Route>,
+    /// Profil du catalogue dont la mission a été préparée ; absent pour un manifeste fourni.
+    /// Relancer une mission repasse par ce profil, jamais par un manifeste recopié.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
 }
 
 /// Vue atomique destinée à la supervision, sans jeton ni état interne du broker.
@@ -498,6 +502,13 @@ impl Runtime {
             .get(id)
             .map(|m| m.model.roles.clone())
             .unwrap_or_default()
+    }
+
+    /// Retient le profil du catalogue dont un plan vient d'être préparé.
+    pub fn set_profile(&mut self, id: &str, profile: &str) {
+        if let Some(plan) = self.plans.get_mut(id) {
+            plan.profile = Some(profile.to_owned());
+        }
     }
 
     /// Fixe le rôle qu'une mission joue dans un relais, s'il est connu.
@@ -1051,6 +1062,7 @@ impl Runtime {
             limits,
             scopes: scopes.iter().map(|s| (*s).to_owned()).collect(),
             route: route.cloned(),
+            profile: None,
         };
         self.plans.insert(id.to_owned(), plan.clone());
         self.manifests.insert(id.to_owned(), manifest.clone());

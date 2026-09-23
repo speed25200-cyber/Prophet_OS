@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use agentd::local::JevSetup;
 use agentd::runtime::PlanRequest;
-use agentd::{EtatPersistant, Publication, Runtime};
+use agentd::{EtatPersistant, Publication, Runtime, TaskPlan};
 use prophet_daemon as commun;
 use prophet_ipc::{Client, Error, ErrorCode, Handler, PeerIdentity, Server};
 use prophet_types::cap::{Grant, Token};
@@ -296,13 +296,17 @@ impl Handler for Agents {
                         .role_of(&plan.choice.reference)
                         .map(str::to_owned);
                     runtime.set_role(&request.id, role);
+                    runtime.set_profile(&request.id, &profile.id);
                     ecrire(&self.etat, &runtime.etat()).map_err(|e| {
                         Error::new(
                             ErrorCode::InternalError,
                             format!("Plan non confirmé sur disque : {e}"),
                         )
                     })?;
-                    plan
+                    TaskPlan {
+                        profile: Some(profile.id.clone()),
+                        ..plan
+                    }
                 };
                 self.vider_le_journal().await;
                 commun::repondre(&plan)
