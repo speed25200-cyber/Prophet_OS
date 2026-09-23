@@ -24,10 +24,49 @@ pub struct Bureau {
     voix: Option<voice::Tools>,
     /// Instant du dernier geste de l'humain (pointeur, clavier, défilement, toucher).
     dernier_geste: Option<f64>,
+    /// L'horloge du champ, arrêtée pendant la veille.
+    horloge: HorlogeDuChamp,
 }
 
 /// Délai sans geste au-delà duquel le champ ralentit sa cadence.
 pub const ATTENTION: f64 = 30.0;
+
+/// Délai sans geste au-delà duquel, sur un rastériseur logiciel, le champ se fige (ADR 0055).
+pub const VEILLE: f64 = 120.0;
+
+/// Vrai si le champ doit se figer : sur un rastériseur logiciel, chaque image coûte au
+/// processeur qui fait aussi tourner le modèle local ; après [`VEILLE`] secondes sans geste,
+/// l'écran ne se redessine plus que lorsque l'état des missions change. Sur une carte
+/// graphique, le champ ne se fige jamais.
+#[must_use]
+pub fn en_veille(logiciel: bool, sans_geste: f64) -> bool {
+    logiciel && sans_geste > VEILLE
+}
+
+/// L'horloge du champ : celle de l'interface, moins le temps passé en veille. Le champ se fige
+/// là où il était et repart de là au premier geste, sans saut.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct HorlogeDuChamp {
+    /// Instant de l'interface où la veille a commencé.
+    depuis: Option<f64>,
+    /// Temps déjà passé en veille.
+    decalage: f64,
+}
+
+impl HorlogeDuChamp {
+    /// L'instant du champ pour l'instant `temps` de l'interface.
+    pub fn instant(&mut self, temps: f64, veille: bool) -> f64 {
+        match (veille, self.depuis) {
+            (true, None) => self.depuis = Some(temps),
+            (false, Some(depuis)) => {
+                self.decalage += temps - depuis;
+                self.depuis = None;
+            }
+            _ => {}
+        }
+        self.depuis.unwrap_or(temps) - self.decalage
+    }
+}
 
 /// La cadence du champ vivant : celle de l'écran tant que l'humain agit, la moitié sur un
 /// rastériseur logiciel ; au-delà de [`ATTENTION`] secondes sans geste, 20 images par seconde
@@ -66,6 +105,7 @@ impl Bureau {
                 .ok()
                 .filter(voice::Tools::can_speak),
             dernier_geste: None,
+            horloge: HorlogeDuChamp::default(),
             champ: Champ::nouveau(&contexte.device, format, contexte.logiciel),
             logiciel: contexte.logiciel,
             rendu: egui_wgpu::Renderer::new(&contexte.device, format, Default::default()),
@@ -81,6 +121,12 @@ impl Bureau {
     pub fn choisir_accent(&self, accent: Accent) {
         accent.installer(&self.ctx);
         crate::supervision::installer_style(&self.ctx);
+    }
+
+    /// Vrai si l'interface se dessine sur un rastériseur logiciel.
+    #[must_use]
+    pub fn logiciel(&self) -> bool {
+        self.logiciel
     }
 
     /// L'accent en vigueur.
@@ -191,6 +237,8 @@ impl Bureau {
             self.dernier_geste = Some(temps);
         }
         let sans_geste = temps - self.dernier_geste.unwrap_or(temps);
+        let veille = en_veille(self.logiciel, sans_geste);
+        let temps_du_champ = self.horloge.instant(temps, veille);
         let mut decision = None;
         let atelier = &mut self.atelier;
         let supervision = &mut self.supervision;
@@ -200,16 +248,17 @@ impl Bureau {
         self.champ.preparer(
             &scene,
             supervision.selection(),
-            temps,
+            temps_du_champ,
             atelier.mouvement_reduit,
             Accent::de(&self.ctx),
         );
-        if self.champ.vivant(atelier.mouvement_reduit) {
+        if self.champ.vivant(atelier.mouvement_reduit || veille) {
             // Le champ avance à la cadence de l'écran tant qu'une mission progresse ; au repos,
             // la surveillance des services garde son propre rythme et rien ne se redessine.
             // Un rastériseur logiciel reçoit la moitié de cette cadence : le processeur
             // dessine, et il a d'autres choses à faire pour les missions. Sans geste de
-            // l'humain depuis un moment, la cadence baisse encore (`cadence_du_champ`).
+            // l'humain depuis un moment, la cadence baisse encore (`cadence_du_champ`), puis,
+            // en logiciel, le champ se fige (`en_veille`).
             self.ctx
                 .request_repaint_after(cadence_du_champ(self.logiciel, sans_geste));
         }
@@ -327,5 +376,30 @@ mod tests {
             cadence_du_champ(true, ATTENTION + 1.0),
             Duration::from_millis(100)
         );
+    }
+
+    #[test]
+    fn seul_un_rasteriseur_logiciel_fige_le_champ_et_seulement_apres_la_veille() {
+        assert!(!en_veille(true, VEILLE));
+        assert!(en_veille(true, VEILLE + 1.0));
+        assert!(
+            !en_veille(false, VEILLE * 10.0),
+            "une carte graphique ne fige jamais"
+        );
+    }
+
+    #[test]
+    fn le_champ_se_fige_ou_il_est_et_repart_de_la_sans_saut() {
+        let mut horloge = HorlogeDuChamp::default();
+        assert_eq!(horloge.instant(10.0, false), 10.0);
+        // La veille commence à 130 : le champ reste à 130 tant qu'elle dure.
+        assert_eq!(horloge.instant(130.0, true), 130.0);
+        assert_eq!(horloge.instant(500.0, true), 130.0);
+        // Au premier geste, à 600, le champ repart de 130 et avance de nouveau.
+        assert_eq!(horloge.instant(600.0, false), 130.0);
+        assert_eq!(horloge.instant(601.0, false), 131.0);
+        // Une deuxième veille s'ajoute à la première.
+        assert_eq!(horloge.instant(700.0, true), 230.0);
+        assert_eq!(horloge.instant(710.0, false), 230.0);
     }
 }

@@ -303,6 +303,9 @@ fn mesurer(
     bureau.atelier.page = options.page;
     let avant = memoire_residente_kio();
     let mut durees = Vec::with_capacity(images as usize);
+    // Le travail du processeur seul (composition, tessellation, encodage et soumission), avant
+    // d'attendre le GPU : ce que coûte l'interface quelle que soit la carte graphique.
+    let mut compositions = Vec::with_capacity(images as usize);
     // Cinq images de mise en route : chargement des glyphes, premières allocations.
     for i in 0..images + 5 {
         let mut scene = source.scene();
@@ -318,6 +321,7 @@ fn mesurer(
         let depart = Instant::now();
         let (mut output, _) = bureau.composer(input, &scene);
         bureau.rendre(&context, &target, &mut output);
+        let composee = depart.elapsed();
         context
             .device
             .poll(wgpu::PollType::Wait {
@@ -327,11 +331,14 @@ fn mesurer(
             .map_err(|e| format!("attente du GPU : {e}"))?;
         if i >= 5 {
             durees.push(depart.elapsed().as_secs_f64() * 1000.0);
+            compositions.push(composee.as_secs_f64() * 1000.0);
         }
     }
     let apres = memoire_residente_kio();
     durees.sort_by(f64::total_cmp);
-    let centile = |p: f64| durees[((durees.len() - 1) as f64 * p).round() as usize];
+    compositions.sort_by(f64::total_cmp);
+    let rang = |p: f64| ((durees.len() - 1) as f64 * p).round() as usize;
+    let centile = |p: f64| durees[rang(p)];
     let scene = source.scene();
     println!(
         "adaptateur : {}{}",
@@ -365,6 +372,11 @@ fn mesurer(
         centile(0.5),
         centile(0.95),
         durees[durees.len() - 1]
+    );
+    println!(
+        "dont processeur avant l'attente du GPU (composition, tessellation, soumission) : médiane {:.2} ms, p95 {:.2} ms",
+        compositions[rang(0.5)],
+        compositions[rang(0.95)]
     );
     match (avant, apres) {
         (Some(a), Some(b)) => println!(
@@ -412,7 +424,14 @@ fn reposer(
     let mut prochaine_lecture = Instant::now();
     let mut prochain_redessin: Option<Instant> = None;
     let mut images = 0u32;
+    // Les phases du repos, faute de geste : pleine cadence, cadence ralentie, puis veille du
+    // champ sur un rastériseur logiciel. Chacune compte ses images et son temps processeur.
+    let bornes = [0.0, surface::bureau::ATTENTION, surface::bureau::VEILLE];
+    let mut phases: Vec<(u32, Option<f64>)> = vec![(0, cpu_debut)];
     while debut.elapsed() < Duration::from_secs(u64::from(secondes)) {
+        while phases.len() < bornes.len() && debut.elapsed().as_secs_f64() >= bornes[phases.len()] {
+            phases.push((0, temps_processeur_secondes()));
+        }
         while let Ok(delai) = rx.try_recv() {
             let quand = Instant::now() + delai;
             prochain_redessin = Some(prochain_redessin.map_or(quand, |p| p.min(quand)));
@@ -453,6 +472,9 @@ fn reposer(
                 })
                 .map_err(|e| format!("attente du GPU : {e}"))?;
             images += 1;
+            if let Some(phase) = phases.last_mut() {
+                phase.0 += 1;
+            }
         } else {
             let attente = [Some(prochaine_lecture), prochain_redessin]
                 .into_iter()
@@ -498,6 +520,32 @@ fn reposer(
             cpu / ecoule * 100.0
         ),
         None => println!("temps processeur : indisponible sur ce système"),
+    }
+    let fin_cpu = temps_processeur_secondes();
+    for (rang, (images, cpu_depart)) in phases.iter().enumerate() {
+        let depart = bornes[rang];
+        let fin = bornes.get(rang + 1).copied().unwrap_or(ecoule).min(ecoule);
+        let duree = fin - depart;
+        if duree <= 0.0 {
+            continue;
+        }
+        let fin_phase = phases.get(rang + 1).map_or(fin_cpu, |p| p.1);
+        let nom = match rang {
+            0 => "pleine cadence",
+            1 => "sans geste, cadence ralentie",
+            _ if bureau.logiciel() => "veille du champ",
+            _ => "sans geste, cadence ralentie",
+        };
+        let part = fin_phase
+            .zip(*cpu_depart)
+            .map_or_else(String::new, |(f, d)| {
+                format!(", {:.1} % d'un cœur", (f - d) / duree * 100.0)
+            });
+        println!(
+            "  {depart:.0}–{fin:.0} s ({nom}) : {images} image{}, {:.1} par seconde{part}",
+            if *images == 1 { "" } else { "s" },
+            f64::from(*images) / duree
+        );
     }
     match memoire_residente_kio() {
         Some(kio) => println!("mémoire résidente : {:.1} Mio", kio as f64 / 1024.0),
