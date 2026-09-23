@@ -842,3 +842,29 @@ fn une_mission_echouee_se_prepare_a_nouveau_par_son_contexte() {
     );
     assert!(failure(output).contains("prophet task prepare"));
 }
+
+/// L'arrêt d'urgence depuis le terminal : `prophet task halt` appelle `task.halt` sans
+/// paramètre et dit ce qui s'arrête, ce qui est annulé et ce qui a résisté.
+#[test]
+fn l_arret_d_urgence_se_demande_depuis_le_terminal() {
+    // Un arrêt partiel sort en erreur, et dit quand même ce qui s'est arrêté.
+    let rendu = failure(invoke(
+        &["task", "halt"],
+        "task.halt",
+        json!({}),
+        json!({"cancel_requested":["a","b"],"cancelled":["plan"],"unattended":[],"errors":[{"id":"c","error":"transition impossible"}]}),
+    ));
+    assert!(
+        rendu.contains("Arrêt demandé pour 2 mission(s) : a, b."),
+        "{rendu}"
+    );
+    assert!(rendu.contains("1 plan(s) annulé(s) : plan."), "{rendu}");
+    assert!(rendu.contains("Non arrêtée(s) : c"), "{rendu}");
+    let rendu = success(invoke(
+        &["task", "halt"],
+        "task.halt",
+        json!({}),
+        json!({"cancel_requested":[],"cancelled":[],"unattended":[],"errors":[]}),
+    ));
+    assert!(rendu.contains("rien à arrêter"), "{rendu}");
+}

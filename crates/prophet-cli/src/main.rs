@@ -301,6 +301,9 @@ enum TaskAction {
         /// Identifiant.
         id: String,
     },
+    /// Arrêt d'urgence : arrête toutes les missions en cours et annule les plans en attente.
+    /// Rien n'est publié ni défait.
+    Halt,
     /// Publie dans vos documents les versions examinées d'une mission terminée.
     Apply {
         /// Identifiant.
@@ -1130,6 +1133,63 @@ fn reply_aloud(
         Some(path) => Ok(tools.speak(texte, path)?),
         None => Ok(tools.say(texte)?),
     }
+}
+
+/// La réponse de `task.halt`, en mots : ce qui s'arrête, ce qui est annulé, ce qui a résisté.
+fn arret_en_mots(result: &serde_json::Value) -> String {
+    let liste = |cle: &str| -> Vec<String> {
+        result[cle]
+            .as_array()
+            .map(|v| {
+                v.iter()
+                    .map(|x| {
+                        x.as_str().map_or_else(
+                            || x["id"].as_str().unwrap_or("?").to_owned(),
+                            str::to_owned,
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let (arret, annulees, seules, erreurs) = (
+        liste("cancel_requested"),
+        liste("cancelled"),
+        liste("unattended"),
+        liste("errors"),
+    );
+    if arret.is_empty() && annulees.is_empty() && erreurs.is_empty() {
+        return "Aucune mission en cours : rien à arrêter.\n".to_owned();
+    }
+    let mut texte = String::new();
+    if !arret.is_empty() {
+        texte.push_str(&format!(
+            "Arrêt demandé pour {} mission(s) : {}. L'état final confirmera chaque arrêt.\n",
+            arret.len(),
+            arret.join(", ")
+        ));
+    }
+    if !annulees.is_empty() {
+        texte.push_str(&format!(
+            "{} plan(s) annulé(s) : {}.\n",
+            annulees.len(),
+            annulees.join(", ")
+        ));
+    }
+    if !seules.is_empty() {
+        texte.push_str(&format!(
+            "{} mission(s) sans travailleur, laissée(s) telle(s) : {}.\n",
+            seules.len(),
+            seules.join(", ")
+        ));
+    }
+    if !erreurs.is_empty() {
+        texte.push_str(&format!(
+            "Non arrêtée(s) : {} ; relancez `prophet task cancel` pour chacune.\n",
+            erreurs.join(", ")
+        ));
+    }
+    texte
 }
 
 fn freeze(socket: &std::path::Path, as_json: bool) -> anyhow::Result<String> {
@@ -2216,6 +2276,19 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                 "Séance fermée : la mission {id} est {}.\n",
                 result["state"].as_str().unwrap_or("à l'examen")
             ))
+        }
+        TaskAction::Halt => {
+            let result = task_rpc(&socket_agentd(), "task.halt", serde_json::json!({}))?;
+            // Un arrêt partiel n'est pas un succès : le code de sortie le dit aux scripts.
+            let partiel = result["errors"].as_array().is_some_and(|e| !e.is_empty());
+            if partiel {
+                anyhow::bail!("{}", arret_en_mots(&result).trim_end());
+            }
+            if as_json {
+                Ok(format!("{}\n", serde_json::to_string_pretty(&result)?))
+            } else {
+                Ok(arret_en_mots(&result))
+            }
         }
         TaskAction::Cancel { id } => {
             let result = task_rpc(
