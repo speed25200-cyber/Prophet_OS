@@ -1272,6 +1272,19 @@ fn la_page_modeles_dit_la_memoire_que_chaque_poids_demande() {
         Some((true, true))
     );
     assert_eq!(bureau.atelier.poids[0].as_ref().unwrap().template, None);
+    // Le seul qui tient et déclare les outils est celui qu'on recommande aux agents.
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("poids-recommande-qwen3-1.7b.gguf"))
+            .is_some()
+    );
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("poids-recommande-demesure.gguf"))
+            .is_none()
+    );
     // Servi : le repère de ce que l'instance du moteur tient vraiment.
     let chemin = qwen.path.clone();
     bureau.atelier.instances = vec![(

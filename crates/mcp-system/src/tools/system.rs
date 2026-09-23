@@ -723,34 +723,24 @@ impl Tool for ListModels {
             })
             .collect();
         let machine = providers::memory::system();
-        let poids = poids_locaux(
+        let installes: Vec<providers::weights::Weights> = providers::weights::installed(
             &providers::weights::dir(),
             &providers::weights::configured(),
-            providers::memory::context(),
-            machine.as_ref(),
-        );
+        )
+        .into_iter()
+        .flatten()
+        .collect();
+        let contexte = providers::memory::context();
         CallResult::structured(json!({
             "drivers": pilotes,
-            "local_context": providers::memory::context(),
+            "local_context": contexte,
             "system_memory": machine,
-            "recommended_local_weight": recommande(&poids),
-            "local_weights": poids,
+            "recommended_local_weight": providers::memory::recommended(&installes, contexte, machine.as_ref())
+                .and_then(|w| w.path.file_name())
+                .map(|n| n.to_string_lossy().into_owned()),
+            "local_weights": poids_locaux(&installes, contexte, machine.as_ref()),
         }))
     }
-}
-
-/// Le poids local qu'un agent choisirait sans autre critère : le plus gros qui déclare les appels
-/// d'outils et tient dans la mémoire disponible. Aucun : `null`, plutôt qu'un choix qui ferait
-/// paginer la machine ou ne saurait pas agir.
-fn recommande(poids: &[Value]) -> Value {
-    poids
-        .iter()
-        .filter(|p| p["template"]["tool_calls"] == true && p["memory"]["fit"] == "fits")
-        .max_by(|a, b| {
-            let taille = |p: &Value| p["memory"]["weights"].as_u64().unwrap_or(0);
-            taille(a).cmp(&taille(b))
-        })
-        .map_or(Value::Null, |p| p["file"].clone())
 }
 
 /// Les poids locaux, tels que leurs en-têtes les décrivent : ce qu'un agent peut attendre d'un
@@ -760,15 +750,13 @@ fn recommande(poids: &[Value]) -> Value {
 /// KV, calcul) et, si la mémoire de la machine est connue, où cela tombe (`fits`, `tight`,
 /// `too_large`) : un agent choisit un modèle qui tient avant de le demander.
 fn poids_locaux(
-    dir: &std::path::Path,
-    files: &[std::path::PathBuf],
+    installes: &[providers::weights::Weights],
     context: u64,
     machine: Option<&providers::memory::System>,
 ) -> Vec<Value> {
     let instances = providers::memory::engine_instances();
-    providers::weights::installed(dir, files)
-        .into_iter()
-        .flatten()
+    installes
+        .iter()
         .map(|w| {
             json!({
                 "file": w.path.file_name().map(|n| n.to_string_lossy().into_owned()),
@@ -778,7 +766,7 @@ fn poids_locaux(
                 "quantization": w.quantization,
                 "context_length": w.context_length,
                 "gigabytes": w.gigabytes(),
-                "memory": providers::memory::assess(&w, context, machine),
+                "memory": providers::memory::assess(w, context, machine),
                 "template": w.template,
                 "resident": providers::memory::resident_for(&w.path, &instances),
             })
@@ -836,7 +824,12 @@ mod tests {
             total: 16 << 30,
             available: 8 << 30,
         };
-        let poids = poids_locaux(dir.path(), &[], 4096, Some(&machine));
+        let installes: Vec<providers::weights::Weights> =
+            providers::weights::installed(dir.path(), &[])
+                .into_iter()
+                .flatten()
+                .collect();
+        let poids = poids_locaux(&installes, 4096, Some(&machine));
         assert_eq!(poids.len(), 2, "{poids:?}");
         assert_eq!(poids[0]["file"], "a-qwen3.gguf");
         assert_eq!(poids[0]["architecture"], "qwen3");
@@ -851,18 +844,7 @@ mod tests {
         // Sans gabarit de conversation, rien n'est déclaré.
         assert!(poids[1]["template"].is_null());
         // Rien ne déclare les outils : pas de recommandation plutôt qu'un modèle muet.
-        assert!(recommande(&poids).is_null());
-        let avec_outils = |fichier: &str, octets: u64, fit: &str| {
-            json!({"file": fichier, "template": {"tool_calls": true, "reasoning": false},
-                   "memory": {"weights": octets, "fit": fit}})
-        };
-        let choix = [
-            avec_outils("petit.gguf", 1_000, "fits"),
-            avec_outils("moyen.gguf", 5_000, "fits"),
-            avec_outils("enorme.gguf", 90_000, "too_large"),
-            json!({"file": "muet.gguf", "template": {"tool_calls": false}, "memory": {"weights": 9_000, "fit": "fits"}}),
-        ];
-        assert_eq!(recommande(&choix), "moyen.gguf");
+        assert!(providers::memory::recommended(&installes, 4096, Some(&machine)).is_none());
     }
 
     #[test]

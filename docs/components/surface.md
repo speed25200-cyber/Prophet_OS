@@ -105,7 +105,8 @@ de son fichier, et propose « Servir » pour celui qu'il connaît sans le servir
 poids installé, une jauge dit la mémoire qu'il demande à la fenêtre du moteur, sur la mémoire
 de la machine et ce que d'autres en occupent, en orange quand il ne tient pas, et, pour le
 poids servi, un repère de ce que l'instance du moteur tient vraiment (lu dans `/proc`,
-ADR 0047). Le démarrage des modèles, la persistance
+ADR 0047). Le poids qu'un agent choisirait — le plus gros qui tient et déclare les outils — y
+porte « RECOMMANDÉ AUX AGENTS », la même règle que `model.list` (`providers::memory::recommended`). Le démarrage des modèles, la persistance
 des conversations et le parcours agentique complet restent à raccorder. Voir l'ADR 0008 et les exigences FRONTIER.
 
 Une seule décision est montrée à la fois, la plus ancienne. Faire patienter quelqu'un est déjà

@@ -1663,6 +1663,13 @@ fn poids_installes(ui: &mut egui::Ui, atelier: &Atelier) {
         );
         return;
     }
+    // Celui qu'un agent choisirait : le plus gros qui tient et déclare les outils.
+    let recommande = providers::memory::recommended(
+        atelier.poids.iter().flatten(),
+        atelier.contexte_local,
+        atelier.memoire.as_ref(),
+    )
+    .map(|w| w.path.clone());
     for (rang, entree) in atelier.poids.iter().enumerate() {
         let servi = atelier.servi.as_ref().filter(|s| s.rang == Some(rang));
         match entree {
@@ -1709,6 +1716,19 @@ fn poids_installes(ui: &mut egui::Ui, atelier: &Atelier) {
                                         .color(accent.sourd),
                                 );
                             }
+                        }
+                        if recommande.as_ref() == Some(&w.path) {
+                            let marque = ui.label(
+                                RichText::new("RECOMMANDÉ AUX AGENTS")
+                                    .size(11.0)
+                                    .strong()
+                                    .color(ACCOMPLI),
+                            );
+                            ui.interact(
+                                marque.rect,
+                                egui::Id::new(format!("poids-recommande-{fichier}")),
+                                egui::Sense::hover(),
+                            );
                         }
                         // Le fichier que le moteur a chargé, et la fenêtre qu'il accorde
                         // vraiment : souvent dix fois moins que ce que le fichier annonce.

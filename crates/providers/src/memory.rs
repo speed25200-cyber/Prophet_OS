@@ -275,6 +275,22 @@ pub fn resident_for(
         .map(|(_, r)| *r)
 }
 
+/// Le poids qu'un agent choisirait sans autre critère : le plus gros qui déclare les appels
+/// d'outils dans son gabarit et tient dans la mémoire disponible. Aucun : `None`, plutôt qu'un
+/// modèle qui ferait paginer la machine ou ne saurait pas agir.
+#[must_use]
+pub fn recommended<'a>(
+    weights: impl IntoIterator<Item = &'a Weights>,
+    context: u64,
+    system: Option<&System>,
+) -> Option<&'a Weights> {
+    weights
+        .into_iter()
+        .filter(|w| w.template.is_some_and(|t| t.tool_calls))
+        .filter(|w| assess(w, context, system).and_then(|a| a.fit) == Some(Fit::Fits))
+        .max_by_key(|w| w.bytes)
+}
+
 /// Des octets en gigaoctets au dixième, pour l'humain : `5,9 Go` ; en téraoctets au-delà.
 #[must_use]
 pub fn gigabytes(bytes: u64) -> String {
@@ -359,6 +375,34 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Fit::TooLarge).unwrap(),
             serde_json::json!("too_large")
+        );
+    }
+
+    #[test]
+    fn le_poids_recommande_tient_et_sait_agir() {
+        let machine = System {
+            total: 16 << 30,
+            available: 8 << 30,
+        };
+        let outils = crate::weights::Template {
+            tool_calls: true,
+            reasoning: false,
+        };
+        let avec = |octets, template| Weights {
+            template,
+            ..poids(octets, Some(1000), Some(1000))
+        };
+        let petit = avec(1_000_000_000, Some(outils));
+        let moyen = avec(5_000_000_000, Some(outils));
+        let enorme = avec(20_000_000_000, Some(outils));
+        let muet = avec(6_000_000_000, None);
+        let tous = [petit.clone(), moyen.clone(), enorme, muet];
+        assert_eq!(recommended(&tous, 4096, Some(&machine)), Some(&moyen));
+        // Sans mémoire connue, rien ne se recommande : on ne devine pas.
+        assert_eq!(recommended(&tous, 4096, None), None);
+        assert_eq!(
+            recommended(std::slice::from_ref(&petit), 4096, Some(&machine)),
+            Some(&petit)
         );
     }
 
