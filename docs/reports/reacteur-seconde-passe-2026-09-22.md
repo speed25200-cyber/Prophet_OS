@@ -127,6 +127,30 @@ oubliés dans une conversation, qui le dit. Pour que l'agent n'ait pas à tout r
 `fs.read` lit par morceaux (`offset`, `next_offset`, sans couper de caractère) et
 `fs.search` rend les lignes trouvées, numéro et extrait. Complément de l'ADR 0034.
 
+## 5 ter. Le 23 septembre : la réserve de microVM, Landlock, le cache du moteur
+
+**M5-T4, la réserve de microVM (ADR 0045).** L'invité gagne un mode réserve : il démarre sans
+tâche sur un disque d'attente et le dit ; sandboxd le met en pause, en fait un instantané, et
+garde deux machines restaurées en pause. Une exécution de niveau 2 en prend une, lui confie le
+disque de sa tâche et la reprend. Sur le coureur KVM de la CI : **une microVM rendue en 8,9 à
+10,9 ms** (médiane de cinq prises, selon le passage) pour un objectif de 150 ms, une machine
+restaurée en 6 ms, chaque prise sur une machine neuve, et cinq clones qui tirent cinq aléas
+distincts. La page Système et `prophet status` disent l'état de la réserve.
+
+**Landlock au niveau 0.** STATUS cochait « Landlock » depuis le 12 septembre ; l'amorçage ne
+l'appliquait pas, et une sandbox pouvait créer des fichiers à sa propre racine. Il est appliqué :
+rien ne se crée à la racine, rien ne s'écrit hors des chemins accordés, rien ne s'exécute hors
+des montages en lecture seule. Les essais du niveau 0 se taisaient en CI faute d'espaces de
+noms dans « check » ; le travail d'isolation les exige désormais, Landlock compris.
+
+**Le cache du moteur local.** llama-server réévalue tout ce qui suit le premier message changé ;
+condenser à chaque tour un résultat déjà envoyé le faisait réévaluer. Ne garder intact que le
+dernier résultat réduit de 45 à 26 ko ce qu'une mission de huit lectures fait réévaluer.
+
+**Erreurs et reprise.** « Relancer » dans l'inspecteur et `prophet task retry` repréparent une
+mission échouée par le même contexte du catalogue ; un moteur injoignable se dit en français.
+La fenêtre servie se lit dans `prophet model ls` et sur la page Modèles.
+
 ## 6. Vérifications
 
 | Contrôle | Résultat local |
@@ -142,6 +166,9 @@ oubliés dans une conversation, qui le dit. Pour que l'agent n'ait pas à tout r
 | Refus de fenêtre : mission resserrée puis renvoyée, fenêtre apprise au tour suivant, intention démesurée rendue en erreur chiffrée, longue mission (quarante résultats), conversation qui oublie ses débuts | tests contre des serveurs qui rendent le refus exact de llama-server, **échouaient** avant (« HTTP 400 ») ; réussissent |
 | `fs.read` par morceaux, `fs.search` par lignes | échouaient avant ; réussissent (morceaux recollés = texte exact, aucun caractère coupé) |
 | Guet du nom de socket pendant 200 démarrages | vu libre **125 371 fois** avant ; jamais après |
+| Réserve de microVM, coureur KVM de la CI | médiane de cinq prises 8,9 ms (`41def9e`), 10,9 ms (`4aaeb50`) ; restauration 6 ms ; cinq aléas distincts sur cinq clones |
+| Landlock au niveau 0 | l'essai **échouait** avant (fichiers créés à la racine de la sandbox) ; réussit ici (ABI 7) et sur le coureur d'isolation |
+| Condensation et cache du moteur | 26 ko à réévaluer au lieu de 45 ko sur une mission simulée de huit lectures de 3 ko |
 | `just check` | **863 réussis, 0 échec, 50 ignorés** ; format, clippy, contrôles du dépôt, secrets |
 
 Mesures en rendu logiciel, 1920 × 1080, scène de démonstration (5 missions, 3 actives) :
