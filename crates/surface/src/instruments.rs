@@ -172,7 +172,7 @@ pub(crate) fn echelle_isolation(ui: &mut egui::Ui, niveau_max: u8, manque: Optio
         (
             "NIVEAU 0",
             "Confiné",
-            "Espaces de noms et seccomp. Landlock reste à implémenter.",
+            "Espaces de noms, Landlock et seccomp. Outils système de confiance.",
         ),
         (
             "NIVEAU 1",

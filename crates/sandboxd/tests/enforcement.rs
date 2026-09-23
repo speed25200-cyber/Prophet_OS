@@ -247,6 +247,75 @@ fn l_ecriture_dans_un_chemin_accorde_fonctionne() {
     );
 }
 
+/// Landlock, au-delà de la racine minimale : même sur ce qui est monté, le noyau ne laisse
+/// écrire que dans les chemins accordés en écriture, et n'exécute que ce qui vient des montages
+/// en lecture seule. Un binaire déposé dans l'espace de travail ne s'exécute pas.
+#[test]
+fn landlock_borne_l_ecriture_et_l_execution_au_niveau_zero() {
+    if !namespaces_disponibles() {
+        eprintln!("espaces de noms indisponibles : test ignoré");
+        return;
+    }
+    if Capabilities::probe().landlock_abi.is_none() {
+        eprintln!("Landlock absent de ce noyau : test sans effet");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let travail = dir.path().join("travail");
+    std::fs::create_dir_all(&travail).unwrap();
+    let rules = Ruleset {
+        paths: vec![PathRule {
+            path: travail.display().to_string(),
+            read: true,
+            write: true,
+        }],
+        ..Ruleset::default()
+    };
+    // La racine de la sandbox est un tmpfs : sans Landlock, on pouvait y créer ce qu'on voulait.
+    let (code, stdout, stderr) = executer(
+        rules.clone(),
+        "mkdir /intrus 2>/dev/null && echo RACINE_ECRITE; (: > /fichier) 2>/dev/null && echo FICHIER_ECRIT; echo FIN",
+    );
+    assert!(
+        stdout.contains("FIN"),
+        "le script a tourné{}",
+        contexte(code, &stdout, &stderr)
+    );
+    assert!(
+        !stdout.contains("RACINE_ECRITE") && !stdout.contains("FICHIER_ECRIT"),
+        "la racine de la sandbox ne doit pas être inscriptible{}",
+        contexte(code, &stdout, &stderr)
+    );
+    // L'écriture accordée reste possible, et la lecture de ce qu'on a écrit aussi.
+    let script = format!(
+        "cp /bin/true {t}/outil && cat {t}/outil > /dev/null && echo COPIE; {t}/outil && echo EXECUTE; echo FIN",
+        t = travail.display()
+    );
+    let (code, stdout, stderr) = executer(rules, &script);
+    assert!(
+        stdout.contains("COPIE"),
+        "la copie dans l'espace accordé{}",
+        contexte(code, &stdout, &stderr)
+    );
+    assert!(
+        !stdout.contains("EXECUTE"),
+        "un binaire déposé dans l'espace de travail ne doit pas s'exécuter{}",
+        contexte(code, &stdout, &stderr)
+    );
+    assert!(
+        stdout.contains("FIN"),
+        "{}",
+        contexte(code, &stdout, &stderr)
+    );
+    // Et le programme lancé depuis un montage en lecture seule, lui, s'exécute : c'est /bin/sh.
+    assert!(travail.join("outil").exists());
+    assert!(
+        !stderr.contains("Landlock indisponible"),
+        "l'amorçage doit appliquer Landlock ici{}",
+        contexte(code, &stdout, &stderr)
+    );
+}
+
 #[test]
 fn gel_global_rapide() {
     if !namespaces_disponibles() {

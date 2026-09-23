@@ -15,6 +15,15 @@ Tout processus non fiable tourne sous ce daemon, au niveau requis. Il est le seu
 | 1 | gVisor (`runsc`) | `runsc` installé |
 | 2 | microVM Firecracker | `/dev/kvm` **ouvrable**, `firecracker`, e2fsprogs (`mkfs.ext4`, `debugfs`), et des images d'invité — sur la machine installée, l'invité du dépôt (`invite-microvm` : noyau publié par Firecracker, racine busybox + Python, ADR 0038), nommé à sandboxd par `PROPHET_MICROVM_KERNEL` et `PROPHET_MICROVM_ROOTFS`. Le répertoire de travail part dans un disque ext4 avec `.prophet/exec.sh`, l'invité le monte au même chemin que sur l'hôte (surcouche overlay en mémoire sur sa racine en lecture seule), l'exécute, la console porte la sortie entre « PROPHET_INVITE_PRET » et « PROPHET_INVITE_FIN code=N », et le disque revient |
 
+### Landlock au niveau 0
+
+Dans la racine minimale, l'amorçage pose un jeu de règles Landlock avant seccomp, à l'ABI que
+le noyau offre : les montages en lecture seule se lisent et s'exécutent ; les chemins du jeton
+se lisent et, accordés en écriture, s'écrivent, sans s'exécuter — un binaire déposé dans
+l'espace de travail ne se lance pas ; `/proc` se lit ; `/dev/null`, `/dev/zero` et
+`/dev/urandom` servent. La racine elle-même n'a aucune règle : rien ne s'y crée. Sans Landlock
+dans le noyau, l'amorçage le dit sur sa sortie d'erreur et la racine minimale reste seule.
+
 ### La réserve du niveau 2
 
 Au démarrage, sandboxd démarre un invité **sans tâche**, qui attend son disque de travail, en

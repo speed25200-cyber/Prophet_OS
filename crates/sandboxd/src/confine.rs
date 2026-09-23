@@ -279,25 +279,221 @@ fn etat_de_la_projection(pid: i32) -> String {
     diagnostic
 }
 
-/// Applique les restrictions de chemins par Landlock, si le noyau le permet.
+/// Droits Landlock sur les fichiers (`include/uapi/linux/landlock.h`).
+mod droits {
+    pub const EXECUTE: u64 = 1 << 0;
+    pub const WRITE_FILE: u64 = 1 << 1;
+    pub const READ_FILE: u64 = 1 << 2;
+    pub const READ_DIR: u64 = 1 << 3;
+    pub const REMOVE_DIR: u64 = 1 << 4;
+    pub const REMOVE_FILE: u64 = 1 << 5;
+    pub const MAKE_CHAR: u64 = 1 << 6;
+    pub const MAKE_DIR: u64 = 1 << 7;
+    pub const MAKE_REG: u64 = 1 << 8;
+    pub const MAKE_SOCK: u64 = 1 << 9;
+    pub const MAKE_FIFO: u64 = 1 << 10;
+    pub const MAKE_BLOCK: u64 = 1 << 11;
+    pub const MAKE_SYM: u64 = 1 << 12;
+    pub const REFER: u64 = 1 << 13;
+    pub const TRUNCATE: u64 = 1 << 14;
+    pub const IOCTL_DEV: u64 = 1 << 15;
+    /// Ce qui s'applique à un fichier ; le reste ne vaut que pour un répertoire.
+    pub const FICHIER: u64 = EXECUTE | WRITE_FILE | READ_FILE | TRUNCATE | IOCTL_DEV;
+}
+
+/// Les droits qu'une ABI de Landlock sait restreindre : tout ce qu'elle connaît est refusé par
+/// défaut, sauf ce que les règles rendent.
+const fn droits_geres(abi: i32) -> u64 {
+    use droits::*;
+    let mut geres = EXECUTE
+        | WRITE_FILE
+        | READ_FILE
+        | READ_DIR
+        | REMOVE_DIR
+        | REMOVE_FILE
+        | MAKE_CHAR
+        | MAKE_DIR
+        | MAKE_REG
+        | MAKE_SOCK
+        | MAKE_FIFO
+        | MAKE_BLOCK
+        | MAKE_SYM;
+    if abi >= 2 {
+        geres |= REFER;
+    }
+    if abi >= 3 {
+        geres |= TRUNCATE;
+    }
+    if abi >= 5 {
+        geres |= IOCTL_DEV;
+    }
+    geres
+}
+
+/// Les règles de chemins d'une sandbox, telles que Landlock les reçoit : les montages en
+/// lecture seule se lisent et s'exécutent, les chemins du jeton se lisent et, s'ils sont
+/// accordés en écriture, s'écrivent — sans s'exécuter : un binaire déposé là ne se lance pas —,
+/// `/proc` se lit, `/dev/null`, `/dev/zero` et `/dev/urandom` servent comme d'habitude. La
+/// racine elle-même n'a aucune règle : on n'y crée rien.
+#[must_use]
+pub fn regles_landlock(spec: &SandboxSpec) -> Vec<(String, u64)> {
+    use droits::*;
+    let lecture = READ_FILE | READ_DIR;
+    let ecriture = WRITE_FILE
+        | REMOVE_DIR
+        | REMOVE_FILE
+        | MAKE_DIR
+        | MAKE_REG
+        | MAKE_SYM
+        | MAKE_SOCK
+        | MAKE_FIFO
+        | REFER
+        | TRUNCATE;
+    let mut regles: Vec<(String, u64)> = spec
+        .read_only_mounts
+        .iter()
+        .map(|chemin| (chemin.clone(), lecture | EXECUTE))
+        .collect();
+    for regle in &spec.rules.paths {
+        let mut acces = 0;
+        if regle.read || regle.write {
+            acces |= lecture;
+        }
+        if regle.write {
+            acces |= ecriture;
+        }
+        regles.push((regle.path.clone(), acces));
+    }
+    regles.push(("/proc".to_owned(), lecture));
+    regles.push(("/dev/null".to_owned(), READ_FILE | WRITE_FILE));
+    regles.push(("/dev/zero".to_owned(), READ_FILE | WRITE_FILE));
+    regles.push(("/dev/urandom".to_owned(), READ_FILE));
+    regles
+}
+
+/// Applique les restrictions de chemins par Landlock, si le noyau le permet, dans la racine
+/// minimale déjà posée.
+///
+/// La racine minimale ne montre que ce que la tâche a le droit de voir ; Landlock borne en plus
+/// ce qu'elle peut en faire, du dedans : rien ne se crée sur la racine, rien ne s'écrit hors
+/// des chemins accordés en écriture, rien ne s'exécute hors des montages en lecture seule. La
+/// restriction est irréversible et héritée par tous les descendants.
 ///
 /// Retourne `false` quand Landlock est absent : l'appelant doit alors compter sur la racine
 /// minimale, et le dire.
 ///
 /// # Erreurs
-/// Si Landlock est présent mais refuse la règle.
+/// Si Landlock est présent mais refuse le jeu de règles.
 pub fn apply_landlock(spec: &SandboxSpec) -> Result<bool, ConfineError> {
-    // La sonde complète essaie de créer un espace de noms ; ici, dans l'enfant déjà confiné,
-    // seule l'ABI de Landlock nous intéresse.
+    use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd};
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    const SYS_LANDLOCK_CREATE_RULESET: libc::c_long = 444;
+    const SYS_LANDLOCK_ADD_RULE: libc::c_long = 445;
+    const SYS_LANDLOCK_RESTRICT_SELF: libc::c_long = 446;
+    const LANDLOCK_RULE_PATH_BENEATH: libc::c_int = 1;
+
+    #[repr(C)]
+    struct RulesetAttr {
+        handled_access_fs: u64,
+    }
+    #[repr(C, packed)]
+    struct PathBeneathAttr {
+        allowed_access: u64,
+        parent_fd: i32,
+    }
+
     let Some(abi) = crate::caps::probe_landlock() else {
         return Ok(false);
     };
-    let _ = abi;
-    // L'implémentation complète s'appuie sur la crate `landlock` quand le noyau expose l'ABI.
-    // Ce chemin n'est pas exerçable sur un noyau sans Landlock ; il est couvert par les tests
-    // marqués `needs_landlock`.
-    let _ = spec;
-    Ok(false)
+    let geres = droits_geres(abi);
+    let attr = RulesetAttr {
+        handled_access_fs: geres,
+    };
+    // SAFETY: `attr` est une structure `landlock_ruleset_attr` réduite à son premier champ, dont
+    // la taille est passée ; le noyau accepte une structure plus courte que la sienne et ne lit
+    // que ces octets. Le résultat est un descripteur neuf ou une erreur.
+    let fd = unsafe {
+        libc::syscall(
+            SYS_LANDLOCK_CREATE_RULESET,
+            std::ptr::from_ref(&attr),
+            std::mem::size_of::<RulesetAttr>(),
+            0_u32,
+        )
+    };
+    if fd < 0 {
+        return Err(ConfineError::Step(
+            "landlock_create_ruleset",
+            std::io::Error::last_os_error(),
+        ));
+    }
+    let fd = i32::try_from(fd).map_err(|_| {
+        ConfineError::Step(
+            "landlock_create_ruleset",
+            std::io::Error::other("descripteur"),
+        )
+    })?;
+    // SAFETY: `fd` vient d'être rendu par le noyau et n'appartient à personne d'autre.
+    let jeu = unsafe { OwnedFd::from_raw_fd(fd) };
+
+    for (chemin, acces) in regles_landlock(spec) {
+        // Un chemin absent de la sandbox n'a rien à borner.
+        let Ok(parent) = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_PATH | libc::O_CLOEXEC)
+            .open(&chemin)
+        else {
+            continue;
+        };
+        let est_repertoire = parent.metadata().is_ok_and(|m| m.is_dir());
+        let mut permis = acces & geres;
+        if !est_repertoire {
+            permis &= droits::FICHIER;
+        }
+        if permis == 0 {
+            continue;
+        }
+        let regle = PathBeneathAttr {
+            allowed_access: permis,
+            parent_fd: parent.as_raw_fd(),
+        };
+        // SAFETY: `regle` est une `landlock_path_beneath_attr` (structure empaquetée de 12
+        // octets), `parent` reste ouvert pendant l'appel, et `jeu` est le descripteur du jeu de
+        // règles créé plus haut.
+        let fait = unsafe {
+            libc::syscall(
+                SYS_LANDLOCK_ADD_RULE,
+                jeu.as_raw_fd(),
+                LANDLOCK_RULE_PATH_BENEATH,
+                std::ptr::from_ref(&regle),
+                0_u32,
+            )
+        };
+        if fait < 0 {
+            return Err(ConfineError::Step(
+                "landlock_add_rule",
+                std::io::Error::last_os_error(),
+            ));
+        }
+    }
+
+    // Sans privilège supplémentaire possible, la restriction ne peut plus être levée.
+    // SAFETY: `prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)` ne touche qu'à ce processus.
+    if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
+        return Err(ConfineError::Step(
+            "prctl(PR_SET_NO_NEW_PRIVS)",
+            std::io::Error::last_os_error(),
+        ));
+    }
+    // SAFETY: `jeu` est un jeu de règles Landlock valide ; l'appel restreint ce processus et
+    // ses descendants, sans autre effet.
+    if unsafe { libc::syscall(SYS_LANDLOCK_RESTRICT_SELF, jeu.as_raw_fd(), 0_u32) } < 0 {
+        return Err(ConfineError::Step(
+            "landlock_restrict_self",
+            std::io::Error::last_os_error(),
+        ));
+    }
+    Ok(true)
 }
 
 /// Construit une racine minimale ne contenant que ce que la tâche a le droit de voir.
