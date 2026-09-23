@@ -1651,6 +1651,8 @@ donne le détail.
   vide avait fait retomber « extraire-les-adresses »). Huitième passage (`aab9476`) :
   **Prophet 21/45, boucle nue 12/45** (Qwen3 1.7B) et **10/15 contre 8/15** (Qwen3 4B) ; au prix
   de 1,6 fois les tokens et 1,9 fois le processeur moteur de la boucle nue, qui conclut plus tôt.
+  Neuvième passage (`13b3205`) : **Prophet 21/45, boucle nue 14/45** et **10/15 contre 9/15**
+  (4B) ; « total-des-ventes » 3/3 des deux côtés dès que `calc.eval` renvoie vers `fs.read`.
 - Concurrence et annulation sur le vrai moteur (FRONTIER, moteurs locaux ; essai
   `deux_requetes_se_partagent_le_moteur_et_un_abandon_le_libere`, vert sur `dd5ce52`) : sur une
   instance à une place comme celle de l'image, deux requêtes simultanées aboutissent toutes

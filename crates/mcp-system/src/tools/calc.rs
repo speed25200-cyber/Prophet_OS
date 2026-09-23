@@ -204,6 +204,9 @@ fn jetons(texte: &str) -> Result<Vec<Jeton>, String> {
                 sortie.push(Jeton::Separateur);
                 i += 1;
             }
+            // Une liste entre crochets dans les arguments d'une fonction (`sum([100, 250])`) :
+            // les crochets ne changent rien au calcul.
+            '[' | ']' if dans_fonction => i += 1,
             c if c.is_ascii_alphabetic() || c == '_' => {
                 let debut = i;
                 while i < caracteres.len()
@@ -475,6 +478,11 @@ mod tests {
         assert_eq!(r["value"], 141.666666667);
         assert_eq!(expression("max(3, 9,5 - 1)").unwrap()["value"], 9);
         assert_eq!(expression("mean(2; 4)").unwrap()["value"], 3);
+        assert_eq!(expression("sum([100, 250, 75])").unwrap()["value"], 425);
+        assert!(
+            expression("[1, 2]").is_err(),
+            "des crochets hors d'une fonction"
+        );
         assert_eq!(expression("(120 + 80,5) * 2").unwrap()["value"], 401);
         // Une liste vide à côté d'une expression qui la porte : l'erreur dit quoi faire.
         let vide = calculer(&json!({"expression": "sum(numbers)", "numbers": []})).unwrap_err();
