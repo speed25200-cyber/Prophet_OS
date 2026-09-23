@@ -601,6 +601,8 @@ impl Mission {
         registry.register(Arc::new(mcp_system::tools::List));
         registry.register(Arc::new(mcp_system::tools::Stat));
         registry.register(Arc::new(mcp_system::tools::Search));
+        // Le calcul exact : un modèle recopie bien les nombres et les additionne mal (ADR 0053).
+        registry.register(Arc::new(mcp_system::tools::Calc));
         // Tout format se lit sous le droit `fs.read` : PDF, bureautique, images, médias.
         registry.register(Arc::new(mcp_system::tools::DocRead));
         // Une commande tourne sous sandboxd, dans l'espace de travail, le home en lecture seule

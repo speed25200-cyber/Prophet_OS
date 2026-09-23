@@ -33,13 +33,14 @@ use providers::native::{ModelClient, ModelTurn, NativeDriver, ToolExecutor, Usag
 use serde_json::{Value, json};
 
 /// Les outils que les deux côtés offrent au modèle.
-const OUTILS: [&str; 6] = [
+const OUTILS: [&str; 7] = [
     "fs.read",
     "fs.write",
     "fs.edit",
     "fs.list",
     "fs.stat",
     "fs.search",
+    "calc.eval",
 ];
 
 /// Ce qu'une exécution a donné.
@@ -377,6 +378,7 @@ impl OutilsNus {
                 Box::new(mcp_system::tools::List),
                 Box::new(mcp_system::tools::Stat),
                 Box::new(mcp_system::tools::Search),
+                Box::new(mcp_system::tools::Calc),
             ],
             contexte: ToolContext {
                 token: jeton,
@@ -957,6 +959,7 @@ fn les_deux_cotes_offrent_les_memes_outils_dans_le_meme_ordre() {
     registre.register(Arc::new(mcp_system::tools::List));
     registre.register(Arc::new(mcp_system::tools::Stat));
     registre.register(Arc::new(mcp_system::tools::Search));
+    registre.register(Arc::new(mcp_system::tools::Calc));
     let prophet: Vec<(String, String)> = registre
         .all()
         .into_iter()

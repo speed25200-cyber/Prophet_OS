@@ -4,6 +4,7 @@
 //! résultat structuré, erreurs nommées. Le registre applique la politique ; les outils
 //! fichiers utilisent aussi son contrôleur pour chaque descendant du parcours.
 
+mod calc;
 mod clock;
 mod confined;
 mod doc;
@@ -15,6 +16,7 @@ mod ui;
 mod web;
 mod web_relay;
 
+pub use calc::Calc;
 pub use clock::Now;
 pub use doc::Read as DocRead;
 pub use fs::{Edit, List, Read, Search, Stat, Write};
@@ -45,6 +47,7 @@ pub fn register_all(registry: &mut Registry) {
         Arc::new(TaskStatus),
         Arc::new(TaskDiff),
         Arc::new(Now),
+        Arc::new(Calc),
         Arc::new(Exec::default()),
         Arc::new(Kill),
         Arc::new(RequestApproval),
