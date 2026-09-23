@@ -226,6 +226,8 @@ pub struct Atelier {
     pub socket_agentd: std::path::PathBuf,
     lecture_du_catalogue: bool,
     catalogue_lu_a: Option<std::time::Instant>,
+    /// Un poids vient d'être servi : la liste des modèles est à relire.
+    redecouvrir: bool,
     lecture_des_poids: bool,
     tx: Sender<Evenement>,
     rx: Receiver<Evenement>,
@@ -265,6 +267,7 @@ impl Atelier {
             ),
             lecture_du_catalogue: false,
             catalogue_lu_a: None,
+            redecouvrir: false,
             lecture_des_poids: false,
             tx,
             rx,
@@ -384,6 +387,9 @@ impl Atelier {
     /// téléchargement lancé d'ailleurs (`prophet model pull`) finit par s'y voir. Une scène de
     /// démonstration reçoit un catalogue d'exemple : un poids posé, un autre en cours.
     pub fn lire_le_catalogue(&mut self, ctx: &egui::Context) {
+        if std::mem::take(&mut self.redecouvrir) {
+            self.decouvrir(ctx);
+        }
         let en_cours =
             matches!(&self.catalogue, Some(Ok(e)) if e.iter().any(EntreeCatalogue::en_cours));
         if en_cours {
@@ -524,6 +530,7 @@ impl Atelier {
                 }
                 Evenement::Catalogue(lu) => {
                     let avant = self.poids_poses();
+                    let servis_avant = self.poids_servis();
                     self.catalogue = Some(lu);
                     self.lecture_du_catalogue = false;
                     self.catalogue_lu_a = Some(std::time::Instant::now());
@@ -531,6 +538,15 @@ impl Atelier {
                     if self.poids_poses() != avant && self.poids_lus {
                         self.lecture_des_poids = false;
                         self.poids_lus = false;
+                    }
+                    // Un poids que le moteur vient de charger est un modèle de plus pour le
+                    // dialogue : la liste des modèles est relue à l'image suivante.
+                    if self
+                        .poids_servis()
+                        .iter()
+                        .any(|p| !servis_avant.contains(p))
+                    {
+                        self.redecouvrir = true;
                     }
                 }
                 Evenement::ErreurDePoids(erreur) => self.erreur_de_poids = Some(erreur),
@@ -671,6 +687,18 @@ impl Atelier {
 }
 
 impl Atelier {
+    /// Les entrées du catalogue que le moteur sert en ce moment.
+    fn poids_servis(&self) -> Vec<String> {
+        match &self.catalogue {
+            Some(Ok(entrees)) => entrees
+                .iter()
+                .filter(|e| e.au_moteur.as_ref().is_some_and(AuMoteur::charge))
+                .map(|e| e.id.clone())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
     /// Les entrées du catalogue posées sur la machine.
     fn poids_poses(&self) -> Vec<String> {
         match &self.catalogue {

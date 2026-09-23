@@ -1530,11 +1530,26 @@ fn servir_depuis_la_page_modeles_fait_charger_le_poids_par_le_routeur() {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     capture(&context, &target, "catalogue-servi");
-    let recues = recues.lock().unwrap().clone();
-    assert!(
-        recues
-            .iter()
-            .any(|(r, corps)| r.starts_with("POST /models/load ") && corps["model"] == "essai"),
-        "{recues:?}"
-    );
+    let limite = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let recues = loop {
+        frame(&mut bureau, &context, &target, vec![]);
+        let recues = recues.lock().unwrap().clone();
+        let charge = recues.iter().position(|(r, corps)| {
+            r.starts_with("POST /models/load ") && corps["model"] == "essai"
+        });
+        // Servi, le poids est un modèle de plus : la liste des modèles est relue.
+        if charge.is_some_and(|i| {
+            recues[i..]
+                .iter()
+                .any(|(r, _)| r.starts_with("GET /v1/models "))
+        }) {
+            break recues;
+        }
+        assert!(
+            std::time::Instant::now() < limite,
+            "chargement ou relecture des modèles absents : {recues:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    assert!(!recues.is_empty());
 }
