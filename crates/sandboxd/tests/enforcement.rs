@@ -690,6 +690,90 @@ fn la_reserve_rend_une_microvm_de_niveau_deux_en_moins_de_150_ms() {
     );
 }
 
+/// FRONTIER, isolation : deux microVM de niveau 2 tournent en même temps, chacune sur son
+/// disque, et aucune n'a de réseau — pas d'interface hors de la boucle locale, et une connexion
+/// vers l'extérieur échoue.
+#[test]
+#[ignore = "needs_kvm"]
+fn deux_microvm_tournent_ensemble_sans_reseau() {
+    let caps = Capabilities::probe();
+    assert!(
+        caps.supports(2),
+        "niveau 2 inatteignable : il manque {}",
+        caps.missing_for(2).join(", ")
+    );
+    let manager = Manager::new(helper().display().to_string()).avec_reserve(2);
+    let reserve = manager.reserve().expect("une réserve au niveau 2");
+    assert!(
+        reserve.attendre_pleine(std::time::Duration::from_secs(60)),
+        "{:?}",
+        reserve.statut()
+    );
+    let programme = "import os, socket, sys, time\nprint('interfaces', ' '.join(sorted(os.listdir('/sys/class/net'))) if os.path.isdir('/sys/class/net') else 'interfaces aucune')\ntry:\n    socket.create_connection(('1.1.1.1', 80), timeout=2)\n    print('reseau ouvert')\nexcept OSError as e:\n    print('reseau ferme', e.errno)\ntime.sleep(1)\nopen('marque.txt', 'w').write(open('nom.txt').read())\nprint('fin', open('nom.txt').read())";
+    let mut en_cours = Vec::new();
+    let debut = std::time::Instant::now();
+    for nom in ["premiere", "seconde"] {
+        let travail = tempfile::tempdir().unwrap();
+        std::fs::write(travail.path().join("nom.txt"), nom).unwrap();
+        let spec = SandboxSpec::new(2, "/usr/bin/python3", travail.path().display().to_string())
+            .args(["-c", programme])
+            .env("PATH", "/usr/bin:/bin");
+        let mut handle = manager.run("task:ensemble", &spec).unwrap();
+        assert_eq!(handle.level, 2);
+        let sortie = handle_child(&mut handle)
+            .and_then(|child| child.stdout.take())
+            .expect("console");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut sortie = sortie;
+            let mut console = String::new();
+            let _ = sortie.read_to_string(&mut console);
+            let _ = tx.send(console);
+        });
+        en_cours.push((nom, travail, handle, rx));
+    }
+    for (nom, travail, mut handle, rx) in en_cours {
+        let Ok(console) = rx.recv_timeout(std::time::Duration::from_secs(60)) else {
+            let _ = manager.kill(&mut handle);
+            panic!("{nom} : l'invité n'a pas fini en 60 s");
+        };
+        let _ = handle.wait();
+        let lu = sandboxd::invite::lire_console(&console);
+        assert!(lu.fin_vue, "{nom} :\n{console}");
+        assert!(
+            lu.sortie.contains(&format!("fin {nom}")),
+            "{nom} : {:?}",
+            lu.sortie
+        );
+        assert!(
+            lu.sortie.contains("reseau ferme"),
+            "{nom} : réseau ouvert ?\n{console}"
+        );
+        let interfaces = lu
+            .sortie
+            .lines()
+            .find_map(|l| l.strip_prefix("interfaces "))
+            .unwrap_or_default()
+            .to_owned();
+        assert!(
+            interfaces.split_whitespace().all(|i| i == "lo"),
+            "{nom} : interfaces {interfaces:?}"
+        );
+        let vm = handle.microvm.clone().expect("disque");
+        sandboxd::invite::rapatrier(&vm.disque, travail.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(travail.path().join("marque.txt")).unwrap(),
+            nom
+        );
+        let _ = std::fs::remove_dir_all(&vm.base);
+    }
+    // Deux programmes d'une seconde chacun, ensemble : bien moins que deux secondes bout à bout
+    // plus deux démarrages.
+    let duree = debut.elapsed();
+    eprintln!("mesure : deux microVM ensemble en {duree:?}");
+    assert!(duree < std::time::Duration::from_secs(10), "{duree:?}");
+}
+
 #[test]
 #[ignore = "needs_kvm"]
 fn le_niveau_deux_ne_retombe_jamais_sur_le_niveau_zero() {
