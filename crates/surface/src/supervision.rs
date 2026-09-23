@@ -791,15 +791,28 @@ impl Supervision {
                 },
             );
             if wide {
-                let (r, _) = ui.allocate_exact_size(vec2(cadran * 2.0 + 24.0, cadran * 2.0 + 44.0), egui::Sense::hover());
-                hud::cadran(ui.painter(), pos2(r.center().x + 12.0, r.top() + cadran + 8.0), cadran, c.etapes, c.budget_consomme, color, &accent);
+                let (r, _) = ui.allocate_exact_size(vec2(cadran * 2.0 + 24.0, cadran * 2.0 + 84.0), egui::Sense::hover());
+                let centre = pos2(r.center().x + 12.0, r.top() + cadran + 8.0);
+                hud::cadran(ui.painter(), centre, cadran, c.etapes, c.budget_consomme, color, &accent);
+                // Le cadran dit déjà étapes et budget : la cadence, seule, se relève dessous.
+                hud::releve(
+                    ui.painter(),
+                    pos2(centre.x, r.bottom() - 18.0),
+                    Align2::CENTER_CENTER,
+                    "ÉTAPES PAR MINUTE",
+                    &format!("{:.0}", c.debit),
+                    ENCRE,
+                );
             }
         });
         ui.add_space(24.0);
         ui.separator();
         ui.add_space(18.0);
-        crate::instruments::tableau(ui, c.etapes, c.debit, c.budget_consomme, color, false);
-        ui.add_space(24.0);
+        // Sans cadran, faute de largeur, la rangée d'instruments porte les trois mesures.
+        if !wide {
+            crate::instruments::tableau(ui, c.etapes, c.debit, c.budget_consomme, color, false);
+            ui.add_space(24.0);
+        }
         etiquette(ui, "RÉSULTATS ET CHANGEMENTS");
         ui.label(
             RichText::new("Aucun livrable ni diff reçu.")
