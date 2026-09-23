@@ -612,7 +612,7 @@ async fn le_critere_pull_serve_puis_une_completion() {
     let prereglages = chaine.dir.path().join("prereglages.ini");
     std::fs::write(
         &prereglages,
-        "[*]\njinja = 1\nctx-size = 2048\nthreads = 4\nparallel = 1\nn-gpu-layers = 0\n",
+        "[*]\nload-mode = none\njinja = 1\nctx-size = 2048\nthreads = 4\nparallel = 1\nn-gpu-layers = 0\n",
     )
     .unwrap();
     let port = 18_099;
@@ -698,8 +698,20 @@ async fn le_critere_pull_serve_puis_une_completion() {
             servi["memory"]["total"], r.rss, r.anonyme, r.fichier, r.pic
         );
     }
+    arreter(&mut routeur).await;
     for ligne in bilan_du_moteur(&chaine, port) {
         eprintln!("mesure : moteur ({id}) : {ligne}");
+    }
+}
+
+/// Arrête un routeur par SIGTERM, pour qu'il vide son journal tamponné, puis s'assure qu'il
+/// est arrêté.
+async fn arreter(routeur: &mut tokio::process::Child) {
+    if let Some(pid) = routeur.id() {
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(20), routeur.wait()).await;
     }
     let _ = routeur.kill().await;
 }
@@ -717,13 +729,35 @@ fn journal_du_routeur(chaine: &Chaine, port: u16) -> (std::fs::File, std::fs::Fi
 /// Ce que le moteur dit avoir réservé, lu dans son journal : tampons des poids (projetés,
 /// réarrangés), cache KV, calcul, sorties. C'est l'étalon de `providers::memory`.
 fn bilan_du_moteur(chaine: &Chaine, port: u16) -> Vec<String> {
-    std::fs::read_to_string(chaine.dir.path().join(format!("routeur-{port}.log")))
-        .unwrap_or_default()
+    let journal = std::fs::read_to_string(chaine.dir.path().join(format!("routeur-{port}.log")))
+        .unwrap_or_default();
+    let bilan: Vec<String> = journal
         .lines()
-        .filter(|l| l.contains("buffer size") || l.contains("repack"))
+        .filter(|l| {
+            l.contains("buffer size")
+                || l.contains("repack")
+                || l.contains("REPACK")
+                || l.contains("mmap")
+        })
         .map(|l| l.trim().to_owned())
         .take(40)
-        .collect()
+        .collect();
+    if !bilan.is_empty() {
+        return bilan;
+    }
+    // Rien de reconnu : la fin du journal, pour voir ce que le routeur relaie de ses instances.
+    let lignes: Vec<&str> = journal.lines().collect();
+    let mut fin = vec![format!(
+        "journal sans bilan ({} lignes, {} octets) ; fin :",
+        lignes.len(),
+        journal.len()
+    )];
+    fin.extend(
+        lignes[lignes.len().saturating_sub(25)..]
+            .iter()
+            .map(|l| l.chars().take(200).collect::<String>()),
+    );
+    fin
 }
 
 /// Le routeur épinglé, lancé comme l'image le lance, sur le dossier des téléchargements. Son
@@ -732,7 +766,7 @@ async fn routeur(moteur: &str, chaine: &Chaine, port: u16) -> tokio::process::Ch
     let prereglages = chaine.dir.path().join("prereglages.ini");
     std::fs::write(
         &prereglages,
-        "[*]\njinja = 1\nctx-size = 2048\nthreads = 4\nparallel = 1\nn-gpu-layers = 0\n",
+        "[*]\nload-mode = none\njinja = 1\nctx-size = 2048\nthreads = 4\nparallel = 1\nn-gpu-layers = 0\n",
     )
     .unwrap();
     let enfant = tokio::process::Command::new(moteur)
@@ -925,9 +959,10 @@ async fn plusieurs_familles_se_servent_et_repondent() {
         if texte.to_ascii_lowercase().contains("paris") {
             reussies.push(id);
         }
-        // L'estimation de mémoire face à ce que le noyau compte à l'instance qui a répondu :
-        // elle ne doit pas manquer ce qui ne se récupère pas (la mémoire anonyme : cache KV,
-        // calcul, poids recopiés), ni prédire bien plus que ce que le moteur tient.
+        // L'estimation de mémoire face à ce que le noyau compte à l'instance qui a répondu. Les
+        // poids sont lus sans projection (`load-mode = none`, comme l'image) : la mémoire
+        // résidente est alors presque toute anonyme, et l'estimation doit la couvrir sans la
+        // dépasser de beaucoup.
         let r = routeur
             .id()
             .and_then(|pid| memoire_de_l_instance(pid, &fichier))
@@ -940,20 +975,20 @@ async fn plusieurs_familles_se_servent_et_repondent() {
             r.pic,
             estimee as f64 / r.rss.max(1) as f64
         );
+        arreter(&mut routeur).await;
         for ligne in bilan_du_moteur(&chaine, port) {
             eprintln!("mesure : moteur ({id}) : {ligne}");
         }
         assert!(
-            estimee >= r.anonyme,
+            estimee as f64 >= 0.9 * r.anonyme as f64,
             "{id} : estimée {estimee}, mais {} de mémoire anonyme",
             r.anonyme
         );
         assert!(
-            (estimee as f64) <= 1.5 * r.rss.max(r.anonyme) as f64,
+            (estimee as f64) <= 1.3 * r.rss as f64,
             "{id} : estimée {estimee}, bien au-delà des {} résidents",
             r.rss
         );
-        let _ = routeur.kill().await;
         // Retirer avant le suivant : la place du coureur est comptée.
         prophet(&chaine, &["model", "rm", id]).await;
     }

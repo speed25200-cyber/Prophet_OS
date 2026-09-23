@@ -35,12 +35,11 @@ mémoire résidente de l'instance du moteur une fois la réponse rendue, dont sa
 | `qwen3-1.7b-q8`, `qwen3-0.6b-q8` (modèles du relais) | 1,8 et 0,6 Go | missions réelles | — | — | — | VM (mission locale sous NixOS) |
 | Tout modèle, sur carte (Vulkan) | — | — | — | — | — | non |
 
-La mémoire résidente dépasse l'estimation de 30 à 50 % : la part anonyme dépasse le cache KV et
-le calcul d'environ les deux tiers du fichier, tandis que le fichier entier reste projeté.
-L'hypothèse — llama.cpp recopie les poids Q4_K dans un format réarrangé pour le processeur et
-garde le fichier projeté, dont les pages propres se récupèrent sous pression — est à confirmer
-par le bilan que le moteur écrit dans son journal, relevé par le même essai. La VRAM n'est pas
-mesurée.
+Ces relevés sont ceux d'un moteur qui projette ses poids : la mémoire résidente dépasse
+l'estimation de 30 à 50 %, parce que llama.cpp recopie les poids réarrangés pour le processeur
+depuis la projection et garde celle-ci résidente (confirmé dans la source épinglée,
+ADR 0047). L'image charge désormais sans projection (`--load-mode none`) ; les relevés suivants
+diront la mémoire de cette configuration. La VRAM n'est pas mesurée.
 
 ## Affichage
 

@@ -1590,8 +1590,11 @@ donne le détail.
   mémoire résidente de chaque instance du vrai llama-server et la confronte à l'estimation :
   vert sur `89b1b3a` — l'estimation couvre la part anonyme (Qwen3 8B : 5,8 Go estimés, 3,7 Go
   anonymes), la résidente totale la dépasse de 30 à 50 % (8,8 Go), le fichier restant projeté
-  pendant qu'une copie réarrangée des poids sert le calcul (hypothèse, bilan du moteur relevé
-  au passage suivant ; matrice matérielle).
+  pendant qu'une copie réarrangée des poids sert le calcul. Confirmé dans la source épinglée
+  (llama.cpp `v0.4.0`, `llama-model-loader.cpp` : tenseurs recopiés depuis la projection, dont
+  seuls le début et la fin sont libérés) : l'image charge désormais les poids sans projection
+  (`--load-mode none`, `load-mode = none` dans chaque préréglage), et l'essai des familles le
+  mesure ainsi (matrice matérielle, ADR 0047).
 - Découverte des capacités (FRONTIER, moteurs locaux) : l'en-tête GGUF dit ce que le gabarit de
   conversation déclare — appels d'outils, réflexion. Relevé sur les huit fichiers du catalogue :
   Qwen3, Granite 3.3 et Llama 3.2 déclarent les outils, Phi-3 mini et SmolLM2 non. Les agents le

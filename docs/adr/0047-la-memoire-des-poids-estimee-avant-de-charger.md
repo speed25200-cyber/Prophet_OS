@@ -88,6 +88,21 @@ mémoire vive non.
   que le moteur écrit dans son journal (tampons projetés et réarrangés, cache KV, calcul) pour
   la confirmer ou la corriger ; si elle tient, charger sans projection (`--no-mmap`) rendrait la
   mémoire résidente égale à l'estimation, et l'OOM ne compterait plus deux fois les poids.
+- **Complément (même jour) : l'image charge les poids sans projection.** La source épinglée
+  (llama.cpp `v0.4.0`, celle du nixpkgs du `flake.lock`) tranche l'hypothèse :
+  `llama-model-loader.cpp` recopie depuis la projection tout tenseur qui ne vit pas dans le
+  tampon projeté — c'est le cas de la copie réarrangée pour le processeur — et, le chargement
+  fini, ne libère que le début et la fin de la projection ; les pages du milieu restent
+  résidentes, comptées à l'instance (et par l'OOM). `--no-mmap` y est déprécié au profit de
+  `--load-mode` (`auto`, `none`, `mmap`, `mlock`, `dio`) ; un préréglage le nomme par l'option
+  sans tirets (`preset.cpp`, `get_map_key_opt`). Le module du moteur local passe donc
+  `--load-mode none` en mode simple et `load-mode = none` à chaque section du mode relais,
+  section globale `[*]` comprise ; le contrôle `llama-router` vérifie que l'instance le reçoit.
+  Coût : les poids se lisent par `read` au lieu d'être projetés — le même disque, et le cache
+  de pages garde le fichier, propre et récupérable, hors de la mémoire du moteur. L'essai des
+  familles tourne désormais ainsi, et exige que l'estimation couvre au moins 90 % de la mémoire
+  anonyme sans dépasser 1,3 fois la résidente. Le journal du routeur, tamponné, était perdu
+  quand l'essai le tuait (SIGKILL) : il est arrêté par SIGTERM avant d'être lu.
 - Les architectures à fenêtre glissante (Gemma 3) ou à attention latente (DeepSeek) ont un
   cache plus petit que la formule : l'estimation les surestime, du côté sûr.
 - La VRAM reste à mesurer sur une carte (`needs_gpu`) : la même estimation vaudra pour les
