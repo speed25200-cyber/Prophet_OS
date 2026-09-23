@@ -284,7 +284,7 @@ impl Supervision {
                         0,
                         ATTENTE,
                     );
-                    ui.horizontal(|ui| {
+                    hud::rangee(ui, |ui| {
                         let (dot, _) =
                             ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
                         ui.painter().circle_filled(dot.center(), 3.0, ATTENTE);
@@ -735,7 +735,7 @@ impl Supervision {
         }
         let (label, color) = statut_mission(c, &accent);
         let wide = ui.available_width() > 620.0;
-        ui.horizontal(|ui| {
+        hud::rangee(ui, |ui| {
             etiquette(ui, "MISSION EN FOCALE");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if bouton(ui, "copier-reference", "Copier la référence", false).clicked() {
@@ -839,7 +839,11 @@ impl Supervision {
                     .inner_margin(32),
             )
             .show(ctx, |ui| {
-                ui.set_max_width(600.0);
+                // Sur un écran étroit, la décision garde sa gouttière de 16 points de chaque
+                // côté, marges intérieures comprises.
+                let largeur =
+                    (ctx.content_rect().width() - 2.0 * (16.0 + 32.0)).clamp(260.0, 600.0);
+                ui.set_max_width(largeur);
                 ui.horizontal(|ui| {
                     let (dot, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
                     ui.painter().circle_filled(dot.center(), 3.0, ATTENTE);
@@ -2036,7 +2040,7 @@ fn modeles(ui: &mut egui::Ui, atelier: &mut Atelier) {
             plaque(ui, 28, |ui| {
                 ui.set_width(ui.available_width());
                 // L'adresse et ses commandes se centrent sur une même ligne.
-                ui.horizontal(|ui| {
+                hud::rangee(ui, |ui| {
                     ui.label(
                         RichText::new(&atelier.endpoint)
                             .monospace()

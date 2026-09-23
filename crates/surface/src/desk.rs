@@ -589,7 +589,7 @@ pub(crate) fn empty(ui: &mut egui::Ui, compact: bool, brouillon: &mut String) ->
                     .inner;
                 let entree = champ.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 ui.add_space(10.);
-                ui.horizontal(|ui| {
+                hud::rangee(ui, |ui| {
                     let pret = !brouillon.trim().is_empty();
                     let bouton = ui
                         .add_enabled_ui(pret, |ui| {

@@ -136,7 +136,7 @@ fn form(ui: &mut egui::Ui, preparation: &mut Preparation, compact: bool) {
         // machine a un modèle de parole ; le son ne quitte pas la machine.
         if crate::preparation::voice_ready() {
             ui.add_space(6.0);
-            ui.horizontal(|ui| {
+            crate::hud::rangee(ui, |ui| {
                 ui.add_enabled_ui(!locked && !preparation.dictating() && !preparation.listening(),|ui| {
                     if bouton(ui,"mission-dictate",if preparation.dictating(){"Écoute…"}else{"Dicter (6 s)"},false).clicked(){preparation.dictate(&ctx,6);}
                 });
