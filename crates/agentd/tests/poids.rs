@@ -84,6 +84,8 @@ async fn depot(contenu: Vec<u8>, recu: Arc<Mutex<Vec<String>>>) -> u16 {
 
 struct Chaine {
     dir: tempfile::TempDir,
+    cap: std::path::PathBuf,
+    egress: std::path::PathBuf,
     _capd: Daemon,
     _ledger: Daemon,
     _egress: Daemon,
@@ -147,6 +149,8 @@ impl Chaine {
         let agents = agentd.joindre().await;
         Self {
             dir,
+            cap,
+            egress: egress_socket,
             _capd: capd,
             _ledger: ledger,
             _egress: egress,
@@ -332,4 +336,97 @@ async fn un_vrai_poids_du_catalogue_arrive_de_hugging_face_par_egress() {
         poses[0]["payload"]["sha256"],
         "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031"
     );
+}
+
+/// Le dépôt, l'organisation et la révision d'une adresse `…/<org>/<dépôt>/resolve/<rév>/<fichier>`.
+fn depot_de(url: &str) -> (String, String, String) {
+    let chemin = url.strip_prefix("https://huggingface.co/").unwrap();
+    let (depot, reste) = chemin.split_once("/resolve/").unwrap();
+    let (revision, fichier) = reste.split_once('/').unwrap();
+    (depot.to_owned(), revision.to_owned(), fichier.to_owned())
+}
+
+/// Le catalogue ne porte que des empreintes publiées : pour chaque entrée, l'API de Hugging Face,
+/// lue par le vrai egress sous un jeton de capd, dit l'empreinte et la taille du fichier à la
+/// révision épinglée, et elles doivent être celles du catalogue. L'essai relève aussi ce que le
+/// dépôt publie des candidats à inscrire (`qwen3-8b-q4`, l'exemple du plan), pour qu'une entrée
+/// n'entre qu'avec une empreinte relevée à la source.
+#[tokio::test]
+#[ignore = "needs_network: Hugging Face joignable"]
+async fn le_catalogue_porte_les_empreintes_que_le_depot_publie() {
+    let chaine = Chaine::new(None).await;
+    let catalogue = providers::catalogue::Catalogue::builtin();
+    let entree = catalogue.entries[0].clone();
+    let manifeste = agentd::poids::manifest(&entree).unwrap();
+    let capd = Client::connect(&chaine.cap).await.unwrap();
+    let jeton: prophet_types::cap::Token = serde_json::from_value(
+        capd.call(
+            "cap.mint",
+            json!({
+                "manifest": manifeste,
+                "grants": agentd::poids::grants(&entree),
+                "task": "essai:empreintes",
+                "user": "essai",
+                "ttl_seconds": 600,
+            }),
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    let egress = providers::pull::Egress::new(chaine.egress.clone(), &jeton).unwrap();
+    let lire = move |url: String| {
+        let url = providers::catalogue::Url::parse(&url).unwrap();
+        providers::pull::get_json(&egress, &url, 4 * 1024 * 1024)
+            .unwrap_or_else(|e| panic!("{} : {e}", url.full()))
+    };
+    let lire = std::sync::Arc::new(lire);
+    for entree in &catalogue.entries {
+        let (depot, revision, fichier) = depot_de(&entree.url);
+        let l = lire.clone();
+        let url = format!("https://huggingface.co/api/models/{depot}/tree/{revision}");
+        let arbre = tokio::task::spawn_blocking(move || l(url)).await.unwrap();
+        let publie = arbre
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["path"] == fichier.as_str())
+            .unwrap_or_else(|| panic!("{fichier} absent de {depot}@{revision}"))
+            .clone();
+        eprintln!(
+            "mesure : {} publié {} octets, sha256 {}",
+            entree.id, publie["size"], publie["lfs"]["oid"]
+        );
+        assert_eq!(
+            publie["lfs"]["oid"],
+            entree.sha256.as_str(),
+            "{}",
+            entree.id
+        );
+        if let Some(octets) = entree.bytes {
+            assert_eq!(publie["size"], octets, "{}", entree.id);
+        }
+    }
+    for (depot, motif) in [
+        ("Qwen/Qwen3-8B-GGUF", "Q4_K_M.gguf"),
+        ("Qwen/Qwen3-4B-GGUF", "Q4_K_M.gguf"),
+    ] {
+        let l = lire.clone();
+        let url = format!("https://huggingface.co/api/models/{depot}");
+        let modele = tokio::task::spawn_blocking(move || l(url)).await.unwrap();
+        let revision = modele["sha"].as_str().unwrap().to_owned();
+        let l = lire.clone();
+        let url = format!("https://huggingface.co/api/models/{depot}/tree/{revision}");
+        let arbre = tokio::task::spawn_blocking(move || l(url)).await.unwrap();
+        for f in arbre.as_array().unwrap() {
+            if f["path"].as_str().is_some_and(|p| p.ends_with(motif)) {
+                eprintln!(
+                    "mesure : candidat https://huggingface.co/{depot}/resolve/{revision}/{} {} octets, sha256 {}",
+                    f["path"].as_str().unwrap(),
+                    f["size"],
+                    f["lfs"]["oid"]
+                );
+            }
+        }
+    }
 }

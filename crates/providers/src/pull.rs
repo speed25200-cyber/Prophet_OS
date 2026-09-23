@@ -292,6 +292,36 @@ pub fn pull(
     Ok(dest)
 }
 
+/// Lit un document JSON par le proxy de sortie (`GET`), au plus `max_bytes`, sans suivre de
+/// redirection : l'API d'un dépôt de poids, pour relever ce qu'il publie d'un fichier.
+///
+/// # Errors
+/// Proxy injoignable, refus, réponse autre que 200, trop longue ou illisible.
+pub fn get_json(
+    egress: &Egress,
+    url: &Url,
+    max_bytes: u64,
+) -> Result<serde_json::Value, PullError> {
+    let mut lecteur = request(egress, url, 0)?;
+    let (status, entetes) = read_head(&mut lecteur)?;
+    if status != 200 {
+        let detail = error_detail(lecteur, &entetes);
+        return Err(PullError::Refused { status, detail });
+    }
+    let mut texte = Vec::new();
+    body(lecteur, &entetes)?
+        .take(max_bytes + 1)
+        .read_to_end(&mut texte)
+        .map_err(|e| PullError::Transport(e.to_string()))?;
+    if texte.len() as u64 > max_bytes {
+        return Err(PullError::Transport(format!(
+            "réponse de plus de {max_bytes} octets"
+        )));
+    }
+    serde_json::from_slice(&texte)
+        .map_err(|e| PullError::Transport(format!("JSON illisible : {e}")))
+}
+
 /// Taille et empreinte SHA-256 d'un fichier.
 ///
 /// # Errors
@@ -796,6 +826,35 @@ mod tests {
         let (r, _) = tirer(&entry, dir.path(), &proxy.egress());
         assert!(matches!(r, Err(PullError::Integrity(_))), "{r:?}");
         assert!(!partial_path(dir.path(), &entry).exists());
+    }
+
+    #[test]
+    fn un_document_json_se_lit_par_le_proxy() {
+        let proxy = FauxProxy::poser(|requete| {
+            assert!(
+                requete.starts_with("GET https://depot.example/api/x "),
+                "{requete}"
+            );
+            let corps = br#"{"sha":"abc"}"#;
+            let mut r = format!(
+                "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n",
+                corps.len()
+            )
+            .into_bytes();
+            r.extend(corps);
+            r.extend(b"\r\n0\r\n\r\n");
+            r
+        });
+        let url = Url::parse("https://depot.example/api/x").unwrap();
+        let lu = get_json(&proxy.egress(), &url, 1024).unwrap();
+        assert_eq!(lu["sha"], "abc");
+        let refus = FauxProxy::poser(|_| {
+            b"HTTP/1.1 404 Not Found\r\nContent-Length: 3\r\n\r\nnon".to_vec()
+        });
+        assert!(matches!(
+            get_json(&refus.egress(), &url, 1024),
+            Err(PullError::Refused { status: 404, .. })
+        ));
     }
 
     #[test]
