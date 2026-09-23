@@ -90,6 +90,7 @@ impl Handler for Pilot {
                         pilotd::Error::Launch { .. } | pilotd::Error::Timeout { .. } => {
                             ErrorCode::InternalError
                         }
+                        pilotd::Error::Cage { .. } => ErrorCode::SandboxError,
                     };
                     Error::new(code, e.to_string())
                 })?;
@@ -166,7 +167,6 @@ async fn main() {
                 .filter(|p| p.is_file())
         })
         .unwrap_or_else(|| PathBuf::from("prophet-mcp"));
-    let documents = home.join("Documents/Prophet");
     let overrides = match std::env::var("PROPHET_PILOT_CLIENTS") {
         Ok(json) => match Launcher::parse_overrides(&json) {
             Ok(map) => {
@@ -190,9 +190,20 @@ async fn main() {
             .map_or_else(|| prophet_ipc::socket_path("agentd"), PathBuf::from),
         bridge,
         runtime_dir,
-        workdir: if documents.is_dir() { documents } else { home },
         overrides,
         arrets: Default::default(),
+        // La cage est voisine du lanceur ; `PROPHET_PILOT_CAGE` la désigne ailleurs.
+        cage: std::env::var_os("PROPHET_PILOT_CAGE")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|d| d.join("prophet-pilot-cage")))
+            })
+            .unwrap_or_else(|| PathBuf::from("prophet-pilot-cage")),
+        lecture_seule: std::env::var_os("PROPHET_PILOT_READ_ONLY")
+            .map(|v| std::env::split_paths(&v).collect())
+            .unwrap_or_default(),
     };
     let server = match Server::bind(&socket) {
         Ok(s) => s,

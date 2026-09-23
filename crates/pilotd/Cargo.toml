@@ -10,10 +10,17 @@ description = "Lanceur de pilotes de la session humaine : Claude Code, Codex et 
 name = "prophet-pilotd"
 path = "src/bin/prophet-pilotd.rs"
 
+[[bin]]
+name = "prophet-pilot-cage"
+path = "src/bin/prophet-pilot-cage.rs"
+
 [dependencies]
+capd = { workspace = true }
 libc = { workspace = true }
+nix = { version = "0.29", features = ["process", "signal"] }
 prophet-ipc = { workspace = true }
 providers = { workspace = true }
+sandboxd = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

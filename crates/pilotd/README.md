@@ -20,6 +20,12 @@ ils restent dans son profil privé (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GEMINI_C
 | `PROPHET_AGENTD_SOCKET` | Socket d'agentd que le pont joindra |
 | `PROPHET_MCP_BRIDGE` | Le pont `prophet-mcp` (voisin du binaire par défaut) |
 | `PROPHET_PILOT_CLIENTS` | Clients de remplacement, JSON `{"codex": {"program": "…", "args": ["{intent}"]}}` (essais) |
+| `PROPHET_PILOT_CAGE` | La cage des clients (`prophet-pilot-cage`, voisine du lanceur par défaut) |
+| `PROPHET_PILOT_READ_ONLY` | Chemins supplémentaires visibles en lecture seule dans la cage, séparés par `:` (un client installé hors du système) |
+
+Chaque client tourne dans une cage (ADR 0056) : il ne voit que le système en lecture seule,
+son profil privé, les lieux de sa mission et un socket qui ne mène qu'à la séance de sa
+mission. Sans espaces de noms utilisateur, la cage ne se pose pas et aucun client n'est lancé.
 
 Les clients sont sondés par leurs propres commandes (`claude auth status`, `codex login
 status`) ; un client absent ou non connecté n'est pas lancé, et `task.options` ne propose pas
@@ -40,6 +46,10 @@ profil privé (`prophet provider login <pilote>`).
 nix develop --command cargo test -p pilotd
 nix develop --command cargo test -p agentd --test pilot
 ```
+
+Les essais de la cage (`pilotd --test cage`, `agentd --test pilot`) exigent des espaces de noms
+utilisateur : ailleurs, ils le disent et s'arrêtent ; `PROPHET_EXIGER_ESPACES_DE_NOMS=1` les
+rend obligatoires, comme sur le coureur d'isolation.
 
 Le second lance capd, ledger, agentd, `prophet-pilotd` et la CLI, avec un script à la place
 de Codex ; le vrai client suit le même chemin, mais exige une connexion que seul l'humain peut

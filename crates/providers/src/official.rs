@@ -209,8 +209,8 @@ impl ClientProfile {
 
 /// Répertoire de configuration privé d'un client, pour un utilisateur.
 ///
-/// Il est réservé au client. Son montage dans la sandbox reste à raccorder ; le pilote n'en
-/// lit jamais le contenu.
+/// Il est réservé au client. La cage du lanceur de pilotes le lui monte en écriture (ADR
+/// 0056) ; ni le lanceur ni le pilote n'en lisent jamais le contenu.
 #[must_use]
 pub fn private_config_dir(root: &Path, driver: &str, user: &str) -> PathBuf {
     root.join("providers").join(driver).join(user)

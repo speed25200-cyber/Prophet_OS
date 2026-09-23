@@ -10,8 +10,9 @@
 //! la mission (ADR 0026), puis rendre ce que le client a répondu.
 //!
 //! Ce que le client fait dans la mission passe par le pont `prophet-mcp`, donc par le jeton
-//! délégué par capd et par le journal. Ce que le client fait *hors* de la mission n'est pas
-//! confiné par ce lanceur : c'est la limite déjà nommée de la séance MCP.
+//! délégué par capd et par le journal. Le client tourne dans une cage (ADR 0056, [`cage`]) : il
+//! ne voit ni la maison de l'humain, ni `/run/prophet`, ni sa session, et ne joint agentd que
+//! pour la séance de sa mission. Le réseau de l'hôte lui reste, en attendant qu'egress le porte.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read as _;
@@ -23,6 +24,8 @@ use std::time::{Duration, Instant};
 
 use providers::official::{ClientProfile, ConnectionState, OfficialDriver};
 use serde::{Deserialize, Serialize};
+
+pub mod cage;
 
 /// Socket par défaut, dans le répertoire des services : agentd en est membre par le groupe
 /// système, le reste de la machine non.
@@ -78,6 +81,14 @@ pub enum Error {
     /// Requête invalide.
     #[error("{0}")]
     Invalid(String),
+    /// La cage du client n'a pas pu se poser : le client n'a pas été lancé (ADR 0056).
+    #[error("cage de {driver} impossible : {detail} ; le client n'est pas lancé sans elle")]
+    Cage {
+        /// Pilote visé.
+        driver: String,
+        /// Ce qui manque.
+        detail: String,
+    },
 }
 
 /// Ce que le lanceur sait d'un client.
@@ -228,12 +239,15 @@ pub struct Launcher {
     pub bridge: PathBuf,
     /// Où écrire les configurations MCP, une par mission, en 0600.
     pub runtime_dir: PathBuf,
-    /// Répertoire de travail des clients.
-    pub workdir: PathBuf,
     /// Clients de remplacement, par pilote (essais).
     pub overrides: BTreeMap<String, Override>,
     /// Arrêts demandés et clients en cours, partagés entre les appels.
     pub arrets: Arrets,
+    /// La cage (`prophet-pilot-cage`) où chaque client est lancé (ADR 0056).
+    pub cage: PathBuf,
+    /// Chemins supplémentaires visibles, en lecture seule, dans la cage : un client installé
+    /// hors du système, ou les binaires d'un essai.
+    pub lecture_seule: Vec<PathBuf>,
 }
 
 impl Launcher {
@@ -288,11 +302,12 @@ impl Launcher {
         Status { drivers }
     }
 
-    /// La configuration MCP qui raccorde un client à la séance de `task`, écrite en 0600.
+    /// La configuration MCP qui raccorde un client à la séance de `task` par `socket` (le
+    /// socket filtré de la mission), écrite en 0600.
     ///
     /// # Errors
     /// Répertoire ou fichier impossible à écrire.
-    pub fn write_mcp_config(&self, task: &str) -> Result<PathBuf, std::io::Error> {
+    pub fn write_mcp_config(&self, task: &str, socket: &Path) -> Result<PathBuf, std::io::Error> {
         std::fs::create_dir_all(&self.runtime_dir)?;
         let path = self.runtime_dir.join(format!("{task}.json"));
         let config = serde_json::json!({
@@ -302,7 +317,7 @@ impl Launcher {
                     "args": [],
                     "env": {
                         "PROPHET_TASK": task,
-                        "PROPHET_AGENTD_SOCKET": self.agentd_socket.display().to_string()
+                        "PROPHET_AGENTD_SOCKET": socket.display().to_string()
                     }
                 }
             }
@@ -315,7 +330,12 @@ impl Launcher {
     ///
     /// # Errors
     /// Pilote inconnu.
-    pub fn command(&self, request: &RunRequest, mcp_config: &Path) -> Result<ClientCommand, Error> {
+    pub fn command(
+        &self,
+        request: &RunRequest,
+        mcp_config: &Path,
+        socket: &Path,
+    ) -> Result<ClientCommand, Error> {
         let profile = ClientProfile::all()
             .into_iter()
             .find(|p| p.driver == request.driver)
@@ -331,7 +351,7 @@ impl Launcher {
             ("PROPHET_TASK".to_owned(), request.task.clone()),
             (
                 "PROPHET_AGENTD_SOCKET".to_owned(),
-                self.agentd_socket.display().to_string(),
+                socket.display().to_string(),
             ),
             ("PROPHET_MCP_CONFIG".to_owned(), config.clone()),
         ];
@@ -384,7 +404,7 @@ impl Launcher {
                     format!(
                         "mcp_servers.prophet.env={{PROPHET_TASK={},PROPHET_AGENTD_SOCKET={}}}",
                         toml_string(&request.task),
-                        toml_string(&self.agentd_socket.display().to_string())
+                        toml_string(&socket.display().to_string())
                     ),
                 ],
             );
@@ -416,29 +436,84 @@ impl Launcher {
                 state: state.connection,
             });
         }
-        let mcp_config = self
-            .write_mcp_config(&request.task)
-            .map_err(|source| Error::Launch {
+        let cage_impossible = |detail: String| Error::Cage {
+            driver: request.driver.clone(),
+            detail,
+        };
+        if !self.cage.is_file() {
+            return Err(cage_impossible(format!(
+                "{} introuvable",
+                self.cage.display()
+            )));
+        }
+        let lieux = cage::Lieux::de(&self.root, &request.task).map_err(Error::Invalid)?;
+        let programme = state
+            .executable
+            .as_deref()
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .ok_or_else(|| Error::NotReady {
                 driver: request.driver.clone(),
-                source,
+                state: "exécutable introuvable".into(),
             })?;
-        let ClientCommand { program, args, env } = self.command(request, &mcp_config)?;
+        let lancement = |source| Error::Launch {
+            driver: request.driver.clone(),
+            source,
+        };
+        // Le socket filtré de la mission : la seule porte vers agentd que le client verra.
+        let socket = self.runtime_dir.join(format!("{}.sock", request.task));
+        let mcp_config = self
+            .write_mcp_config(&request.task, &socket)
+            .map_err(lancement)?;
+        let racine = self.runtime_dir.join(format!("{}.racine", request.task));
+        let mut menage = Menage {
+            configuration: mcp_config.clone(),
+            relais: None,
+            lieux: lieux.clone(),
+            racine: racine.clone(),
+        };
+        let ClientCommand { args, env, .. } = self.command(request, &mcp_config, &socket)?;
+        lieux.creer().map_err(lancement)?;
+        menage.relais = Some(
+            cage::Relais::ouvrir(&socket, &self.agentd_socket, &request.task).map_err(lancement)?,
+        );
+        let profile = ClientProfile::all()
+            .into_iter()
+            .find(|p| p.driver == request.driver)
+            .ok_or_else(|| Error::UnknownDriver(request.driver.clone()))?;
+        let profil =
+            providers::official::private_config_dir(&self.root, &profile.driver, &self.user);
+        let spec = cage::description(
+            &cage::Plan {
+                programme: &programme,
+                args: &args,
+                env: &env,
+                profil: &profil,
+                lieux: &lieux,
+                configuration: &mcp_config,
+                socket: &socket,
+                pont: &self.bridge,
+                lecture_seule: &self.lecture_seule,
+            },
+            |cle| std::env::var(cle).ok(),
+        );
+        let spec = serde_json::to_string(&spec)
+            .map_err(|e| cage_impossible(format!("description illisible : {e}")))?;
         let started = Instant::now();
-        // Le client mène son propre groupe de processus : le tuer au délai ou à la demande tue
-        // aussi ce qu'il a lancé, sans quoi un sous-processus garderait la sortie ouverte.
-        let mut child = Command::new(&program)
-            .args(&args)
-            .envs(env)
-            .current_dir(&self.workdir)
+        // La cage mène son propre groupe de processus : la tuer au délai ou à la demande tue
+        // aussi le client et ce qu'il a lancé, sans quoi un sous-processus garderait la sortie
+        // ouverte. Rien de la session ne passe : la description dit tout ce que le client reçoit.
+        let mut child = Command::new(&self.cage)
+            .env_clear()
+            .env(sandboxd::spec::SPEC_ENV, spec)
+            .env(cage::RACINE_ENV, &racine)
+            .current_dir("/")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .process_group(0)
             .spawn()
-            .map_err(|source| Error::Launch {
-                driver: request.driver.clone(),
-                source,
-            })?;
+            .map_err(lancement)?;
         self.arrets.commence(&request.task);
         let mut stdout = child.stdout.take().expect("sortie standard demandée");
         let reader = std::thread::spawn(move || {
@@ -502,12 +577,41 @@ impl Launcher {
         let (output, output_bytes) = reader.join().unwrap_or_default();
         let _ = std::fs::remove_file(&mcp_config);
         self.arrets.finit(&request.task);
+        drop(menage);
+        if exit_code == Some(CAGE_IMPOSSIBLE) && output_bytes == 0 {
+            return Err(cage_impossible(
+                "la cage n'a pas pu se poser (espaces de noms ou montages refusés, voir le journal)"
+                    .into(),
+            ));
+        }
         Ok(RunResult {
             exit_code,
             text: final_text(&request.driver, &output),
             duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             output_bytes,
         })
+    }
+}
+
+/// Code de sortie de la cage quand elle n'a pas pu se poser (`prophet-pilot-cage`).
+const CAGE_IMPOSSIBLE: i32 = 125;
+
+/// Ce qu'une mission laisse derrière elle, retiré quoi qu'il arrive : la configuration MCP, le
+/// socket filtré, les lieux de la cage.
+struct Menage {
+    configuration: PathBuf,
+    relais: Option<cage::Relais>,
+    lieux: cage::Lieux,
+    /// Point de montage de la racine minimale, vide une fois la cage partie.
+    racine: PathBuf,
+}
+
+impl Drop for Menage {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.configuration);
+        self.relais.take();
+        self.lieux.retirer();
+        let _ = std::fs::remove_dir(&self.racine);
     }
 }
 
@@ -636,56 +740,20 @@ mod tests {
             agentd_socket: dir.join("agent.sock"),
             bridge: dir.join("prophet-mcp"),
             runtime_dir: dir.join("run"),
-            workdir: dir.to_path_buf(),
             overrides: BTreeMap::new(),
             arrets: Arrets::default(),
+            cage: dir.join("prophet-pilot-cage"),
+            lecture_seule: Vec::new(),
         }
-    }
-
-    #[test]
-    fn un_client_est_tue_a_la_demande_avec_ce_qu_il_a_lance() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut launcher = launcher(dir.path());
-        // Le client lance un sous-processus qui garderait sa sortie ouverte : l'arrêt doit
-        // emporter le groupe entier, sinon `run` attendrait la fin du sous-processus.
-        launcher.overrides = Launcher::parse_overrides(
-            r#"{"gemini": {"program": "/bin/sh", "args": ["-c", "sleep 30 & wait"]}}"#,
-        )
-        .unwrap();
-        let demandeur = launcher.clone();
-        let stop = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(400));
-            demandeur.stop("m")
-        });
-        let debut = Instant::now();
-        let erreur = launcher
-            .run(&RunRequest {
-                task: "m".into(),
-                driver: "gemini".into(),
-                intent: "attendre".into(),
-                wall_time_s: 30,
-                model: None,
-            })
-            .unwrap_err();
-        assert!(matches!(erreur, Error::Stopped { .. }), "{erreur}");
-        assert!(
-            debut.elapsed() < Duration::from_secs(5),
-            "{:?}",
-            debut.elapsed()
-        );
-        assert!(
-            stop.join().unwrap(),
-            "un client tournait pour cette mission"
-        );
-        assert!(!dir.path().join("run/m.json").exists());
-        // Une mission dont aucun client ne tourne : la demande est retenue, sans effet.
-        assert!(!launcher.stop("autre"));
     }
 
     #[test]
     fn la_configuration_mcp_nomme_le_pont_la_mission_et_le_socket() {
         let dir = tempfile::tempdir().unwrap();
-        let path = launcher(dir.path()).write_mcp_config("m-1").unwrap();
+        let socket = dir.path().join("run/m-1.sock");
+        let path = launcher(dir.path())
+            .write_mcp_config("m-1", &socket)
+            .unwrap();
         let config: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(
@@ -713,6 +781,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let launcher = launcher(dir.path());
         let config = dir.path().join("run/m.json");
+        let socket = dir.path().join("run/m.sock");
         let claude = launcher
             .command(
                 &RunRequest {
@@ -723,6 +792,7 @@ mod tests {
                     model: None,
                 },
                 &config,
+                &socket,
             )
             .unwrap();
         assert_eq!(claude.program, "claude");
@@ -751,6 +821,7 @@ mod tests {
                     model: None,
                 },
                 &config,
+                &socket,
             )
             .unwrap();
         assert_eq!(codex.program, "codex");
@@ -771,37 +842,11 @@ mod tests {
                     wall_time_s: 1,
                     model: None,
                 },
-                &config
+                &config,
+                &socket
             ),
             Err(Error::UnknownDriver(_))
         ));
-    }
-
-    #[test]
-    fn un_client_de_remplacement_recoit_l_intention_et_l_environnement() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut launcher = launcher(dir.path());
-        launcher.overrides = Launcher::parse_overrides(
-            r#"{"codex": {"program": "/bin/echo", "args": ["fait :", "{intent}"]}}"#,
-        )
-        .unwrap();
-        assert_eq!(launcher.status().drivers[1].connection, "simulated");
-        assert!(launcher.status().drivers[1].ready());
-        let result = launcher
-            .run(&RunRequest {
-                task: "m".into(),
-                driver: "codex".into(),
-                intent: "écrire".into(),
-                wall_time_s: 10,
-                model: None,
-            })
-            .unwrap();
-        assert_eq!(result.exit_code, Some(0));
-        assert_eq!(result.text, "fait : écrire");
-        assert!(
-            !dir.path().join("run/m.json").exists(),
-            "la configuration est retirée après"
-        );
     }
 
     #[test]
@@ -809,6 +854,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut launcher = launcher(dir.path());
         let config = dir.path().join("run/m.json");
+        let socket = dir.path().join("run/m.sock");
         let requete = |driver: &str| RunRequest {
             task: "m".into(),
             driver: driver.into(),
@@ -816,7 +862,9 @@ mod tests {
             wall_time_s: 10,
             model: Some("opus".into()),
         };
-        let claude = launcher.command(&requete("claude-code"), &config).unwrap();
+        let claude = launcher
+            .command(&requete("claude-code"), &config, &socket)
+            .unwrap();
         let separateur = claude.args.iter().position(|a| a == "--").unwrap();
         let option = claude.args.iter().position(|a| a == "--model").unwrap();
         assert!(
@@ -824,7 +872,9 @@ mod tests {
             "{:?}",
             claude.args
         );
-        let codex = launcher.command(&requete("codex"), &config).unwrap();
+        let codex = launcher
+            .command(&requete("codex"), &config, &socket)
+            .unwrap();
         let option = codex.args.iter().position(|a| a == "-m").unwrap();
         assert!(
             option > 0 && codex.args[option + 1] == "opus",
@@ -835,40 +885,10 @@ mod tests {
             r#"{"codex": {"program": "/bin/echo", "args": ["{intent}"]}}"#,
         )
         .unwrap();
-        let faux = launcher.command(&requete("codex"), &config).unwrap();
+        let faux = launcher
+            .command(&requete("codex"), &config, &socket)
+            .unwrap();
         assert_eq!(faux.args, ["Écris", "--model", "opus"]);
-    }
-
-    #[test]
-    fn un_client_trop_long_est_tue_et_un_client_absent_refuse() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut launcher = launcher(dir.path());
-        launcher.overrides =
-            Launcher::parse_overrides(r#"{"gemini": {"program": "/bin/sleep", "args": ["30"]}}"#)
-                .unwrap();
-        let debut = Instant::now();
-        let erreur = launcher
-            .run(&RunRequest {
-                task: "m".into(),
-                driver: "gemini".into(),
-                intent: "attendre".into(),
-                wall_time_s: 1,
-                model: None,
-            })
-            .unwrap_err();
-        assert!(matches!(erreur, Error::Timeout { .. }), "{erreur}");
-        assert!(debut.elapsed() < Duration::from_secs(10));
-        // Sans remplacement, un client absent de cette machine n'est pas lancé.
-        let erreur = launcher
-            .run(&RunRequest {
-                task: "m".into(),
-                driver: "claude-code".into(),
-                intent: "x".into(),
-                wall_time_s: 1,
-                model: None,
-            })
-            .unwrap_err();
-        assert!(matches!(erreur, Error::NotReady { .. }), "{erreur}");
     }
 
     #[test]
