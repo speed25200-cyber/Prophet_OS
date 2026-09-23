@@ -42,6 +42,10 @@ pub enum EventKind {
     /// Tâche annulée après coup (undo).
     #[serde(rename = "task.rolled_back")]
     TaskRolledBack,
+    /// Le service a rappelé au modèle un livrable que l'objectif nomme et qu'il n'a pas
+    /// produit avant de conclure (ADR 0049).
+    #[serde(rename = "task.reminded")]
+    TaskReminded,
     /// Appel d'outil émis.
     #[serde(rename = "tool.call")]
     ToolCall,

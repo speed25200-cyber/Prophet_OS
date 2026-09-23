@@ -12,6 +12,7 @@
 
 pub mod budget;
 pub mod delegate;
+pub mod livrables;
 pub mod local;
 pub mod poids;
 pub mod preparation;

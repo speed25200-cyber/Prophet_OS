@@ -117,6 +117,7 @@ pub const fn kind_label(kind: EventKind) -> &'static str {
         EventKind::TaskFailed => "tâche échouée",
         EventKind::TaskCancelled => "tâche annulée",
         EventKind::TaskRolledBack => "tâche annulée après",
+        EventKind::TaskReminded => "livrable rappelé",
         EventKind::ToolCall => "appel d'outil",
         EventKind::ToolResult => "résultat d'outil",
         EventKind::PolicyAllow => "politique : accord",

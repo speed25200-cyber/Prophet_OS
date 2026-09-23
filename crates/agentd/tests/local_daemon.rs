@@ -1429,3 +1429,89 @@ async fn une_mission_sur_un_modele_qui_ne_tient_pas_en_memoire_ne_demarre_pas() 
     assert_eq!(info["task"]["state"], "planned", "{info}");
     assert_eq!(info["can_start"], true);
 }
+
+#[tokio::test]
+async fn une_conclusion_sans_le_fichier_demande_est_rappelee_et_la_mission_le_produit() {
+    let (endpoint, corps) = modele_scripte(vec![
+        json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"Le total est 330."}}],"usage":{"prompt_tokens":50,"completion_tokens":6}}),
+        appel_d_outil(1, "fs.write", json!({"path":"~/docs/out/total.txt","content":"330"})),
+        json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"C'est écrit."}}],"usage":{"prompt_tokens":70,"completion_tokens":4}}),
+    ])
+    .await;
+    let chain = Chain::new(&endpoint).await;
+    std::fs::create_dir_all(chain.dir.path().join("home/docs")).unwrap();
+    std::fs::write(
+        chain.dir.path().join("home/docs/ventes.csv"),
+        "montant\n330\n",
+    )
+    .unwrap();
+    chain.agents.call("task.spawn",json!({
+        "id":"local-test", "intent":"calcule le total de ~/docs/ventes.csv et écris-le dans ~/docs/out/total.txt", "user":"prophet",
+        "manifest": {
+            "agent":{"id":"org.prophet.local-test","version":"1.0.0","name":"Test local","publisher_key":"ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+            "model":{"preferred":["local:m"]},
+            "sandbox":{"min_level":0},
+            "capabilities":{"max":{"fs.read":["~/docs/**"],"fs.write":["~/docs/**"],"tool.call":["fs.read","fs.write"]}},
+            "budget":{"default":{"tokens":20000,"wall_time":"90s","approvals":3}}
+        },
+        "requested":[{"res":"fs","act":"read","match":"~/docs/**"},{"res":"fs","act":"write","match":"~/docs/**"},{"res":"tool","act":"call","match":"fs.read"},{"res":"tool","act":"call","match":"fs.write"}],
+        "scopes":["~/docs"],"availability":{"local_models":["m"]}
+    })).await.unwrap();
+    chain
+        .agents
+        .call("task.start", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    let status = chain.wait_terminal().await;
+    assert_eq!(status["state"], "done", "{status}");
+    // Trois interrogations, chacune comptée comme une étape.
+    assert_eq!(status["budget"]["spent"]["steps"], 3, "{status}");
+    let corps = corps.lock().unwrap().clone();
+    assert_eq!(corps.len(), 3, "le modèle est interrogé de nouveau");
+
+    // Le modèle relit sa conclusion et le rappel, qui nomme le fichier demandé ; le fichier
+    // lu en entrée, qui existait, n'est pas un livrable.
+    let messages = corps[1]["messages"].as_array().unwrap();
+    let rappel = messages.last().unwrap();
+    assert_eq!(rappel["role"], "user", "{rappel}");
+    let texte = rappel["content"].as_str().unwrap();
+    assert!(texte.contains("~/docs/out/total.txt"), "{texte}");
+    assert!(!texte.contains("ventes.csv"), "{texte}");
+    assert_eq!(messages[messages.len() - 2]["content"], "Le total est 330.");
+    // Au tour suivant, l'insertion est rejouée avant l'appel d'outil et son résultat.
+    let suivants = corps[2]["messages"].as_array().unwrap();
+    let position = suivants
+        .iter()
+        .position(|m| m["role"] == "user" && m["content"] == texte)
+        .expect("rappel rejoué");
+    assert!(suivants[position + 1..].iter().any(|m| m["role"] == "tool"));
+
+    let result = chain
+        .agents
+        .call("task.result", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        result["reminded"],
+        json!(["~/docs/out/total.txt"]),
+        "{result}"
+    );
+    assert_eq!(result["text"], "C'est écrit.");
+    assert_eq!(result["diff"]["changes"][0]["path"], "docs/out/total.txt");
+    let events = chain
+        .journal
+        .call("ledger.query", json!({"task":"local-test"}))
+        .await
+        .unwrap();
+    let rappele = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "task.reminded")
+        .unwrap_or_else(|| panic!("task.reminded absent : {events}"));
+    assert_eq!(
+        rappele["payload"]["missing"],
+        json!(["~/docs/out/total.txt"])
+    );
+    assert_eq!(rappele["payload"]["nth"], 1);
+}

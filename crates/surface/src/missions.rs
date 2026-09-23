@@ -118,6 +118,20 @@ pub fn trail_from(events: &[Value]) -> Vec<TrailEntry> {
                 target: None,
                 outcome: Outcome::Ok,
             }),
+            // Le service a rappelé au modèle un fichier que l'objectif demande (ADR 0049).
+            Some("task.reminded") => trail.push(TrailEntry {
+                seq,
+                step,
+                tool: "rappel".into(),
+                target: payload["missing"].as_array().map(|manquants| {
+                    manquants
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }),
+                outcome: Outcome::Ok,
+            }),
             _ => {}
         }
     }
@@ -832,9 +846,12 @@ mod tests {
             json!({"seq":4,"step":2,"kind":"tool.result","payload":{"tool":"fs.write","ok":false,"error_code":"PolicyDenied"}}),
             json!({"seq":5,"kind":"policy.deny","payload":{"stage":"publish","path":"docs/note.txt","reason":"RevokedParent"}}),
             json!({"seq":6,"kind":"fs.commit","payload":{"added":1}}),
+            json!({"seq":7,"step":3,"kind":"task.reminded","payload":{"missing":["~/docs/out/total.txt"],"nth":1}}),
         ];
         let trail = trail_from(&events);
-        assert_eq!(trail.len(), 4);
+        assert_eq!(trail.len(), 5);
+        assert_eq!(trail[4].tool, "rappel");
+        assert_eq!(trail[4].target.as_deref(), Some("~/docs/out/total.txt"));
         assert_eq!(trail[0].tool, "web.open");
         assert_eq!(trail[0].target.as_deref(), Some("exemple.fr"));
         assert_eq!(trail[0].outcome, Outcome::Ok);

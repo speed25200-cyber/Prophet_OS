@@ -721,15 +721,41 @@ impl Mission {
             }
             None => (generative, None),
         };
+        let metered: Box<dyn ModelClient> = Box::new(Metered {
+            inner: model,
+            control: control.clone(),
+            name: self.plan.choice.reference.clone(),
+            decider: trace
+                .clone()
+                .zip(decider.map(|d| format!("jev:{}", d.model))),
+        });
+        // Ce que l'objectif nomme et que la portée couvre, absent au départ, est un livrable :
+        // une conclusion qui ne l'a pas produit est rappelée au modèle (ADR 0049).
+        let attendus = crate::livrables::attendus(
+            &crate::livrables::nommes(&self.task.intent, &self.home),
+            |reel| workspace.to_work_path(reel),
+        );
+        let rappeles = Arc::new(Mutex::new(Vec::<String>::new()));
+        let consigne = {
+            let control = control.clone();
+            let rappeles = rappeles.clone();
+            Box::new(move |manquants: &[String], rang: u8| {
+                control.append(
+                    EventKind::TaskReminded,
+                    json!({"missing": manquants, "nth": rang}),
+                )?;
+                if let Ok(mut rappeles) = rappeles.lock() {
+                    for manquant in manquants {
+                        if !rappeles.contains(manquant) {
+                            rappeles.push(manquant.clone());
+                        }
+                    }
+                }
+                Ok(())
+            })
+        };
         let mut driver = NativeDriver::new(
-            Box::new(Metered {
-                inner: model,
-                control: control.clone(),
-                name: self.plan.choice.reference.clone(),
-                decider: trace
-                    .clone()
-                    .zip(decider.map(|d| format!("jev:{}", d.model))),
-            }),
+            Box::new(crate::livrables::Rappel::new(metered, attendus, consigne)),
             Box::new(executor),
         );
         let request = StartRequest {
@@ -778,12 +804,14 @@ impl Mission {
                         let jev = trace
                             .as_ref()
                             .and_then(|t| t.lock().ok().map(|t| t.clone()));
+                        let reminded = rappeles.lock().map(|r| r.clone()).unwrap_or_default();
                         return Ok(json!({
                             "text": text,
                             "tool_calls": calls,
                             "diff": diff,
                             "review": review,
                             "jev": jev,
+                            "reminded": reminded,
                         }));
                     }
                     DriverEvent::Done { reason, .. } => {

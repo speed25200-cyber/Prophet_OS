@@ -37,6 +37,7 @@
 | `task.planned` | `provider`, `sandbox_level`, `grants_digest`, `budget` |
 | `task.started` / `task.done` / `task.failed` / `task.cancelled` / `task.rolled_back` | `reason?`, `stats {steps, tool_calls, approvals, wall_ms, tokens?}`, `by_model? {<modèle>: {turns, tokens_in, tokens_out}}`, `role?` (relais de modèles, ADR 0034) |
 | `task.waiting` | `approval_id` |
+| `task.reminded` | `missing` (chemins `~/…` que l'objectif nomme et que la mission n'a pas produits), `nth` (rang du rappel, au plus 2) (ADR 0049) |
 | `tool.call` | `tool`, `args_digest`, `args_size`, `requires` |
 | `tool.result` | `tool`, `ok`, `error_code?`, `result_digest`, `result_size`, `duration_ms` |
 | `policy.allow` / `policy.deny` | `res`, `act`, `target`, `rule`, `reason?` |
