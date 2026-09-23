@@ -738,10 +738,11 @@ impl Mission {
         });
         // Ce que l'objectif nomme et que la portée couvre, absent au départ, est un livrable :
         // une conclusion qui ne l'a pas produit est rappelée au modèle (ADR 0049).
-        let attendus = crate::livrables::attendus(
-            &crate::livrables::nommes(&self.task.intent, &self.home),
-            |reel| workspace.to_work_path(reel),
-        );
+        let nommes = crate::livrables::nommes(&self.task.intent, &self.home);
+        let attendus = crate::livrables::attendus(&nommes, |reel| workspace.to_work_path(reel));
+        // Ce qu'il nomme et qui existe est une entrée : écrire sans en avoir rien lu est dit au
+        // modèle, une fois (ADR 0049, complément).
+        let entrees = crate::livrables::entrees(&nommes, |reel| workspace.to_work_path(reel));
         let rappeles = Arc::new(Mutex::new(Vec::<String>::new()));
         let consigne = {
             let control = control.clone();
@@ -763,7 +764,9 @@ impl Mission {
         };
         let mut driver = NativeDriver::new(
             Box::new(crate::livrables::Rappel::new(metered, attendus, consigne)),
-            Box::new(crate::garde::Garde::new(Box::new(executor))),
+            Box::new(crate::garde::Garde::new(Box::new(
+                crate::livrables::Lecture::new(Box::new(executor), entrees),
+            ))),
         );
         let request = StartRequest {
             driver: "prophet-agent".into(),

@@ -43,6 +43,14 @@ message. Le service sait, sans interpréter l'objectif, ce qu'il nomme et ce qui
   politique Cedar et le même espace de travail ; un chemin que le jeton ne permet pas reste
   refusé.
 
+- **Complément (même jour) : écrire sans avoir lu.** Au cinquième passage du banc, le modèle
+  écrit souvent le livrable sans avoir lu ce qu'il devait résumer (« Total des ventes : 0 € »).
+  Les chemins que l'objectif nomme et qui existent au départ sont des entrées ; la première
+  écriture (`fs.write`, `fs.edit`) faite alors qu'aucune lecture (`fs.read`, `doc.read`,
+  `fs.edit`, `fs.search` par contenu) n'a porté sur une entrée reçoit, dans son résultat réussi,
+  une note qui le dit et invite à lire puis corriger — une fois par mission
+  (`agentd::livrables::Lecture`). Rien n'est refusé.
+
 ## Alternatives écartées
 
 - **Une consigne générale au départ** (« écrivez les fichiers demandés ») : elle coûte des

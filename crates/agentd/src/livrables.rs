@@ -13,8 +13,10 @@
 //! la même politique.
 use std::path::{Component, Path, PathBuf};
 
+use std::sync::Mutex;
+
 use providers::DriverError;
-use providers::native::{ModelClient, ModelTurn, Usage};
+use providers::native::{ModelClient, ModelTurn, ToolExecutor, Usage};
 use serde_json::{Value, json};
 
 /// Rappels au plus par mission : au-delà, la conclusion du modèle est rendue telle quelle.
@@ -91,6 +93,104 @@ pub fn attendus(nommes: &[Nomme], vers_travail: impl Fn(&Path) -> Option<PathBuf
             })
         })
         .collect()
+}
+
+/// Les entrées que l'objectif nomme : les chemins nommés que la portée couvre et qui existent
+/// au départ dans l'espace de travail — ce que la mission doit lire. Rendus relatifs au
+/// répertoire personnel (`ventes`, `ventes/q3.csv`).
+pub fn entrees(nommes: &[Nomme], vers_travail: impl Fn(&Path) -> Option<PathBuf>) -> Vec<String> {
+    nommes
+        .iter()
+        .filter(|nomme| vers_travail(&nomme.reel).is_some_and(|travail| travail.exists()))
+        .map(|nomme| nomme.tel_quel.trim_start_matches("~/").to_owned())
+        .collect()
+}
+
+/// Le chemin qu'un appel d'outil vise, relatif au répertoire personnel, s'il en nomme un.
+fn visee(arguments: &Value) -> Option<String> {
+    let brut = arguments
+        .get("path")
+        .or_else(|| arguments.get("root"))?
+        .as_str()?;
+    Some(
+        brut.trim_start_matches("~/")
+            .trim_end_matches('/')
+            .to_owned(),
+    )
+}
+
+/// Vrai si `chemin` est `entree` ou lui appartient (composant par composant).
+fn sous(chemin: &str, entree: &str) -> bool {
+    Path::new(chemin).starts_with(Path::new(entree))
+}
+
+/// L'exécuteur d'une mission, vu à travers les entrées que l'objectif nomme.
+///
+/// Un petit modèle écrit souvent le livrable sans avoir lu ce qu'il devait résumer (« Total des
+/// ventes : 0 € »). Quand la mission écrit pour la première fois alors qu'aucune lecture n'a
+/// encore porté sur une entrée nommée, le résultat de l'écriture — réussie, elle — porte une
+/// note qui le lui dit, une fois par mission. Rien n'est refusé ni modifié d'autre.
+pub struct Lecture {
+    inner: Box<dyn ToolExecutor>,
+    entrees: Vec<String>,
+    /// Une entrée a été lue ; la note a été donnée.
+    etat: Mutex<(bool, bool)>,
+}
+
+impl Lecture {
+    /// Enveloppe l'exécuteur ; sans entrée nommée, les appels passent tels quels.
+    #[must_use]
+    pub fn new(inner: Box<dyn ToolExecutor>, entrees: Vec<String>) -> Self {
+        Self {
+            inner,
+            entrees,
+            etat: Mutex::new((false, false)),
+        }
+    }
+}
+
+impl ToolExecutor for Lecture {
+    fn call(&self, tool: &str, arguments: &Value) -> (bool, Value) {
+        let (ok, mut result) = self.inner.call(tool, arguments);
+        if !ok || self.entrees.is_empty() {
+            return (ok, result);
+        }
+        let Ok(mut etat) = self.etat.lock() else {
+            return (ok, result);
+        };
+        let cible = visee(arguments);
+        let sur_entree = cible
+            .as_deref()
+            .is_some_and(|c| self.entrees.iter().any(|e| sous(c, e)));
+        let lit = match tool {
+            "fs.read" | "doc.read" | "fs.edit" => true,
+            // Une recherche par contenu lit ; une recherche par nom ne fait que lister.
+            "fs.search" => arguments.get("content_contains").is_some(),
+            _ => false,
+        };
+        if lit && sur_entree {
+            etat.0 = true;
+        }
+        if matches!(tool, "fs.write" | "fs.edit") && !etat.0 && !etat.1 {
+            etat.1 = true;
+            let liste = self
+                .entrees
+                .iter()
+                .map(|e| format!("~/{e}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            if let Some(objet) = result.as_object_mut() {
+                objet.insert(
+                    "note".into(),
+                    json!(format!(
+                        "Vous n'avez encore lu aucun des fichiers que l'objectif nomme ({liste}). \
+                         Lisez-les avec fs.read, puis corrigez ce que vous venez d'écrire si besoin."
+                    )),
+                );
+            }
+        }
+        (ok, result)
+    }
 }
 
 /// Ce que la mission n'a pas encore produit.
@@ -439,6 +539,61 @@ mod tests {
             .expect("tour");
         assert!(matches!(tour, ModelTurn::Final { ref text } if text == "tour 3"));
         assert_eq!(modele.faits(), usize::from(RAPPELS));
+    }
+
+    struct Outils;
+    impl ToolExecutor for Outils {
+        fn call(&self, _: &str, _: &Value) -> (bool, Value) {
+            (true, json!({"staged": true}))
+        }
+    }
+
+    #[test]
+    fn les_entrees_sont_les_chemins_nommes_qui_existent() {
+        let dossier = tempfile::tempdir().expect("dossier");
+        let travail = dossier.path().join("work");
+        std::fs::create_dir_all(travail.join("ventes")).expect("ventes");
+        let home = Path::new("/home/p");
+        let vus = nommes("résume ~/ventes dans ~/ventes/out/resume.md", home);
+        let traduire = |reel: &Path| Some(travail.join(reel.strip_prefix(home).ok()?));
+        assert_eq!(entrees(&vus, traduire), ["ventes"]);
+    }
+
+    #[test]
+    fn ecrire_sans_avoir_lu_les_entrees_porte_une_note_une_fois() {
+        let lecture = Lecture::new(Box::new(Outils), vec!["ventes".into()]);
+        let (_, liste) = lecture.call("fs.search", &json!({"root": "~/ventes"}));
+        assert!(liste.get("note").is_none());
+        let (ok, ecrit) = lecture.call(
+            "fs.write",
+            &json!({"path": "~/ventes/out/resume.md", "content": "0 €"}),
+        );
+        assert!(ok);
+        assert!(
+            ecrit["note"]
+                .as_str()
+                .is_some_and(|n| n.contains("~/ventes")),
+            "{ecrit}"
+        );
+        let (_, encore) = lecture.call("fs.write", &json!({"path": "~/ventes/out/resume.md"}));
+        assert!(encore.get("note").is_none(), "une fois par mission");
+    }
+
+    #[test]
+    fn ecrire_apres_avoir_lu_une_entree_passe_tel_quel() {
+        let lecture = Lecture::new(Box::new(Outils), vec!["ventes".into()]);
+        lecture.call("fs.read", &json!({"path": "~/ventes/q3.csv"}));
+        let (_, ecrit) = lecture.call("fs.write", &json!({"path": "~/ventes/out/resume.md"}));
+        assert!(ecrit.get("note").is_none(), "{ecrit}");
+        // Lire ailleurs ne compte pas ; chercher par contenu, si.
+        let lecture = Lecture::new(Box::new(Outils), vec!["ventes".into()]);
+        lecture.call("fs.read", &json!({"path": "~/ventesbis/a.txt"}));
+        lecture.call(
+            "fs.search",
+            &json!({"root": "~/ventes", "content_contains": "total"}),
+        );
+        let (_, ecrit) = lecture.call("fs.write", &json!({"path": "~/ventes/out/resume.md"}));
+        assert!(ecrit.get("note").is_none(), "{ecrit}");
     }
 
     #[test]

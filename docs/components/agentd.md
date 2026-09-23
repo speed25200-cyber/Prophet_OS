@@ -129,7 +129,9 @@ rappels au plus par mission, le second plus net.
 Chaque interrogation est une étape du budget. Le rappel
 est journalisé (`task.reminded`, `missing`, `nth`) et le résultat porte `reminded`. Il ne donne
 aucun droit : l'écriture passe par le même outil, le même jeton et la même politique
-(ADR 0049).
+(ADR 0049). Les chemins nommés qui existent au départ sont des entrées : la première écriture
+faite sans qu'aucune n'ait été lue porte, dans son résultat, une note qui le dit, une fois par
+mission.
 
 Un appel refusé sur sa cible (un chemin hors de la portée) revient au modèle avec son code
 `PolicyDenied` et les motifs où la mission peut agir ; après chaque refus, agentd redemande à capd
