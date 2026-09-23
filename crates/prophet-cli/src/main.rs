@@ -1394,6 +1394,7 @@ fn catalogue_lisible(catalogue: &serde_json::Value) -> String {
                 }
             }
             (Some(true), _) => "✓ téléchargé".to_owned(),
+            _ if e["provided"].is_string() => "✓ fourni par le système".to_owned(),
             (_, Some("failed")) => format!("✗ {}", e["pull"]["error"].as_str().unwrap_or("échec")),
             _ => match e["partial_bytes"].as_u64() {
                 Some(n) => format!("· interrompu à {}, reprendra", octets(n)),
@@ -3091,7 +3092,8 @@ mod tests {
             {"id": "qwen3-1.7b-q8", "name": "Qwen3 1.7B", "quantization": "Q8_0", "installed": true, "note": "Le modèle de réflexion."},
             {"id": "qwen3-0.6b-q8", "name": "Qwen3 0.6B", "installed": false, "pull": {"state": "running", "received": 320_000_000u64, "total": 640_000_000u64}},
             {"id": "autre", "name": "Autre", "installed": false, "partial_bytes": 12_000_000u64},
-            {"id": "faux", "name": "Faux", "installed": false, "pull": {"state": "failed", "error": "fichier refusé : empreinte"}}
+            {"id": "faux", "name": "Faux", "installed": false, "pull": {"state": "failed", "error": "fichier refusé : empreinte"}},
+            {"id": "defaut", "name": "Défaut", "installed": false, "provided": "/nix/store/x-defaut.gguf"}
         ]});
         let dit = catalogue_lisible(&catalogue);
         assert!(
@@ -3102,6 +3104,7 @@ mod tests {
         assert!(dit.contains("interrompu à 12 Mo, reprendra"), "{dit}");
         assert!(dit.contains("✗ fichier refusé : empreinte"), "{dit}");
         assert!(dit.contains("Le modèle de réflexion."), "{dit}");
+        assert!(dit.contains("✓ fourni par le système"), "{dit}");
         assert_eq!(octets(1_834_000_000), "1.83 Go");
     }
 

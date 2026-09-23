@@ -13,6 +13,9 @@ let
   # Le relais local (ADR 0034) : avec un second poids, le moteur sert deux modèles en mode
   # routeur, le grand réfléchit, le petit exécute ; sans lui, un seul modèle fait tout.
   relais = cfg.executeWeights != null;
+  # Les poids que le moteur sert, tels que `PROPHET_WEIGHTS` les nomme (chemins séparés par `:`).
+  poidsServis = lib.concatStringsSep ":"
+    (map toString (lib.filter (w: w != null) [ cfg.weights cfg.executeWeights ]));
   modelesLocaux = [ "local:${cfg.model}" ] ++ lib.optional relais "local:${cfg.executeModel}";
   # Les clients officiels de l'humain — Claude Code (Anthropic) et Codex (OpenAI) — sont les
   # modèles principaux de tout contexte (ADR 0035, complément du 14 septembre) : le service les
@@ -240,13 +243,13 @@ in {
     environment.sessionVariables.PROPHET_MODEL_ENDPOINT = endpoint;
     # Les poids que le moteur sert : le modèle par défaut vit dans /nix/store (ADR 0033), hors
     # de /var/lib/prophet/models ; `prophet model ls` et la page Modèles les lisent par ici.
-    environment.sessionVariables.PROPHET_WEIGHTS = lib.mkIf (cfg.weights != null)
-      (lib.concatStringsSep ":"
-        (map toString (lib.filter (w: w != null) [ cfg.weights cfg.executeWeights ])));
+    environment.sessionVariables.PROPHET_WEIGHTS = lib.mkIf (cfg.weights != null) poidsServis;
     systemd.services.prophet-agentd.environment = {
       PROPHET_LOCAL_ENDPOINT = endpoint;
       PROPHET_MISSION_PROFILES = "/etc/prophet/mission-profiles.json";
-    };
+      # Le catalogue du système reconnaît ces poids comme déjà fournis : il ne propose pas de
+      # retélécharger le modèle par défaut (ADR 0046).
+    } // lib.optionalAttrs (cfg.weights != null) { PROPHET_WEIGHTS = poidsServis; };
     users.groups.prophet-model = { };
     users.users.prophet-model = {
       isSystemUser = true;

@@ -443,7 +443,7 @@ impl Handler for Agents {
                     .map_err(|e| Error::new(ErrorCode::InternalError, e))?;
                 commun::repondre(&json!({
                     "dir": self.pulls.dir(),
-                    "entries": self.pulls.view(&catalogue),
+                    "entries": self.pulls.view(&catalogue, &providers::weights::configured()),
                 }))
             }
             "model.pull" => {
@@ -452,6 +452,18 @@ impl Handler for Agents {
                     && statut.state == agentd::poids::PullState::Running
                 {
                     return commun::repondre(&statut);
+                }
+                if let Some(fourni) =
+                    agentd::poids::provided_by_system(&entree, &providers::weights::configured())
+                {
+                    return Err(Error::new(
+                        ErrorCode::Conflict,
+                        format!(
+                            "{} est déjà fourni par la configuration du système : {}",
+                            entree.id,
+                            fourni.display()
+                        ),
+                    ));
                 }
                 let manifeste = agentd::poids::manifest(&entree)
                     .map_err(|e| Error::new(ErrorCode::InternalError, e))?;

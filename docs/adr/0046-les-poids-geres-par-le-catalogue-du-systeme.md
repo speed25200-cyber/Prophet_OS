@@ -42,6 +42,13 @@ hostile.
   seul que le téléchargement écrit et que `model.remove` touche ; les poids que la configuration
   pose ailleurs ne se retirent pas par là. `prophet model ls` et la page Modèles le lisent avec le
   reste.
+- **Un poids déjà fourni n'est pas retéléchargé.** Le modèle par défaut vit dans `/nix/store`
+  (ADR 0033), sous l'empreinte même que porte le catalogue ; agentd reçoit `PROPHET_WEIGHTS` et
+  dit d'une entrée dont la configuration pose le fichier (même nom, ou `<empreinte>-<nom>` du
+  magasin) qu'elle est fournie par le système (`provided`) ; `model.pull` la refuse.
+- **La page Modèles** montre le catalogue : fourni, téléchargé et vérifié, en cours (barre de
+  progression relue toutes les demi-secondes), échoué avec son motif, interrompu ; un geste par
+  entrée — Télécharger, Reprendre, Arrêter, Retirer.
 - **Le journal le dit** : `model.pulled` et `model.removed` (`id`, `file`, `sha256`, `bytes`),
   sous l'acteur qui l'a demandé.
 - La CLI : `prophet model catalog`, `prophet model pull <id>` (progression, `--detach`),

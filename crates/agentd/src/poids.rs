@@ -63,6 +63,10 @@ pub struct EntryView {
     pub entry: Entry,
     /// Le fichier est posé dans le dossier des téléchargements.
     pub installed: bool,
+    /// La configuration du système fournit déjà ce poids (le modèle par défaut, dans
+    /// `/nix/store`, ADR 0033) : rien à télécharger.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provided: Option<PathBuf>,
     /// Son chemin, s'il l'est.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
@@ -122,9 +126,10 @@ impl Pulls {
         &self.dir
     }
 
-    /// Le catalogue, entrée par entrée, avec ce que la machine en a.
+    /// Le catalogue, entrée par entrée, avec ce que la machine en a ; `configured` est la
+    /// liste des poids que la configuration du système pose ailleurs (`PROPHET_WEIGHTS`).
     #[must_use]
-    pub fn view(&self, catalogue: &Catalogue) -> Vec<EntryView> {
+    pub fn view(&self, catalogue: &Catalogue, configured: &[PathBuf]) -> Vec<EntryView> {
         catalogue
             .entries
             .iter()
@@ -137,6 +142,7 @@ impl Pulls {
                 EntryView {
                     entry: entry.clone(),
                     installed,
+                    provided: provided_by_system(entry, configured),
                     path: installed.then_some(chemin),
                     partial_bytes,
                     pull: self.status(&entry.id),
@@ -307,6 +313,24 @@ impl Pulls {
     }
 }
 
+/// Le poids que la configuration du système fournit déjà pour cette entrée, s'il y en a un : un
+/// fichier du même nom, ou, dans `/nix/store`, un chemin qui finit par `-<nom>` (`fetchurl` le
+/// nomme ainsi, sous l'empreinte même que porte le catalogue).
+#[must_use]
+pub fn provided_by_system(entry: &Entry, configured: &[PathBuf]) -> Option<PathBuf> {
+    let suffixe = format!("-{}", entry.file);
+    configured
+        .iter()
+        .find(|chemin| {
+            chemin.is_file()
+                && chemin
+                    .file_name()
+                    .map(|n| n.to_string_lossy())
+                    .is_some_and(|n| n == entry.file || n.ends_with(&suffixe))
+        })
+        .cloned()
+}
+
 /// Le manifeste du téléchargement d'une entrée : sortie réseau vers ses seuls hôtes, rien
 /// d'autre. capd émet le jeton sous ce plafond, et la politique Cedar tranche comme pour toute
 /// sortie.
@@ -381,13 +405,33 @@ mod tests {
         std::fs::create_dir_all(pulls.dir()).unwrap();
         std::fs::write(pulls.dir().join(&entry.file), b"GGUF").unwrap();
         std::fs::write(partial_path(pulls.dir(), &entry), b"GG").unwrap();
-        let vue = pulls.view(&Catalogue::builtin());
+        let vue = pulls.view(&Catalogue::builtin(), &[]);
         assert!(vue[0].installed);
         assert_eq!(vue[0].partial_bytes, Some(2));
         let retire = pulls.remove(&entry).unwrap().unwrap();
         assert_eq!(retire.bytes, 4);
         assert!(!pulls.dir().join(&entry.file).exists());
         assert!(!partial_path(pulls.dir(), &entry).exists());
-        assert!(!pulls.view(&Catalogue::builtin())[0].installed);
+        assert!(!pulls.view(&Catalogue::builtin(), &[])[0].installed);
+    }
+
+    #[test]
+    fn un_poids_fourni_par_la_configuration_n_est_pas_a_telecharger() {
+        let magasin = tempfile::tempdir().unwrap();
+        let entry = Catalogue::builtin().entries[0].clone();
+        let fourni = magasin.path().join(format!("0a1b2c3d4e5f-{}", entry.file));
+        std::fs::write(&fourni, b"GGUF").unwrap();
+        let autre = magasin.path().join("autre.gguf");
+        std::fs::write(&autre, b"GGUF").unwrap();
+        assert_eq!(
+            provided_by_system(&entry, &[autre.clone(), fourni.clone()]),
+            Some(fourni)
+        );
+        assert_eq!(provided_by_system(&entry, &[autre]), None);
+        // Nommé mais absent : la configuration promet un fichier que la machine n'a pas.
+        assert_eq!(
+            provided_by_system(&entry, &[magasin.path().join(&entry.file)]),
+            None
+        );
     }
 }
