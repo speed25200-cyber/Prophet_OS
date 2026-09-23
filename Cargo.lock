@@ -569,6 +569,8 @@ dependencies = [
  "ed25519-dalek",
  "egress",
  "mcp-system",
+ "prophet-daemon",
+ "prophet-ipc",
  "prophet-types",
  "providers",
  "rand 0.8.8",
@@ -578,6 +580,7 @@ dependencies = [
  "sup",
  "tempfile",
  "time",
+ "tokio",
  "vault",
 ]
 

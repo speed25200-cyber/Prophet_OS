@@ -25,6 +25,9 @@ tempfile = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+prophet-daemon = { workspace = true, features = ["essai"] }
+prophet-ipc = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }
 
 [lints]
 workspace = true

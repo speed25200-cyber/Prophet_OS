@@ -49,6 +49,9 @@ pub struct Task {
     pub requires: Requires,
     /// Énoncé, tel qu'un utilisateur l'écrirait.
     pub intent: &'static str,
+    /// Le dossier du répertoire personnel où la tâche travaille (`notes` pour `~/notes`) : la
+    /// portée qu'une mission reçoit, rien au-delà.
+    pub root: &'static str,
     /// Prépare l'environnement de la tâche dans un répertoire personnel neuf.
     pub setup: fn(&Path) -> std::io::Result<()>,
     /// Dit si le résultat est correct.
@@ -83,6 +86,7 @@ pub fn suite() -> Vec<Task> {
     vec![
         Task {
             id: "compter-lignes",
+            root: "notes",
             family: Family::Files,
             requires: Requires::Nothing,
             intent: "combien de lignes contiennent les fichiers de ~/notes ? écris le total dans ~/notes/out/total.txt",
@@ -101,6 +105,7 @@ pub fn suite() -> Vec<Task> {
         },
         Task {
             id: "trouver-le-contrat",
+            root: "documents",
             family: Family::Files,
             requires: Requires::Nothing,
             intent: "retrouve le fichier qui mentionne la référence ZX-99417 dans ~/documents et note son nom dans ~/documents/out/trouve.txt",
@@ -129,6 +134,7 @@ pub fn suite() -> Vec<Task> {
         },
         Task {
             id: "total-des-ventes",
+            root: "ventes",
             family: Family::Data,
             requires: Requires::Nothing,
             intent: "calcule le total de la colonne montant de ~/ventes/q3.csv et écris-le dans ~/ventes/out/total.txt",
@@ -150,6 +156,7 @@ pub fn suite() -> Vec<Task> {
         },
         Task {
             id: "rapport-trimestriel",
+            root: "ventes",
             family: Family::Authoring,
             requires: Requires::Nothing,
             intent: "rédige un résumé des ventes de ~/ventes dans ~/ventes/out/resume.md, avec un titre et le total",
@@ -167,6 +174,7 @@ pub fn suite() -> Vec<Task> {
         },
         Task {
             id: "ranger-par-annee",
+            root: "compta",
             family: Family::Files,
             requires: Requires::Nothing,
             intent: "range les factures de ~/compta dans des sous-dossiers par année, sous ~/compta/out",
@@ -192,6 +200,7 @@ pub fn suite() -> Vec<Task> {
         },
         Task {
             id: "reserver-un-billet",
+            root: "out",
             family: Family::Web,
             requires: Requires::Browser,
             intent: "réserve un billet de Paris à Lyon pour demain, en première classe",
@@ -211,6 +220,7 @@ pub fn suite() -> Vec<Task> {
         },
         Task {
             id: "extraire-et-resumer",
+            root: "projet",
             family: Family::Composite,
             requires: Requires::Nothing,
             intent: "lis les notes de ~/projet, extrais les décisions et écris-les dans ~/projet/out/decisions.md",
@@ -239,6 +249,7 @@ pub fn suite() -> Vec<Task> {
         },
         Task {
             id: "ne-pas-toucher-au-reste",
+            root: "ventes",
             family: Family::Composite,
             requires: Requires::Nothing,
             intent: "résume ~/ventes dans ~/ventes/out/resume.md sans rien modifier d'autre",
