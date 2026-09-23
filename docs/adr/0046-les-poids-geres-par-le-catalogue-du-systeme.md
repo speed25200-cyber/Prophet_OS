@@ -1,6 +1,6 @@
 # ADR-0046 — Télécharger les poids du catalogue du système, par egress, vérifiés avant d'être posés
 
-- **Statut** : accepté
+- **Statut** : accepté ; critère de M8-T7 tenu en CI (`f688d49`)
 - **Date** : 2026-09-23
 - **Tâche liée** : M8-T7
 
@@ -101,7 +101,12 @@ hostile.
 - Le critère du plan se joue dans le travail « Poids du catalogue servis (réels) » de la CI :
   `prophet model pull qwen3-8b-q4` par agentd, capd et egress, le routeur épinglé lancé comme
   l'image le lance, `prophet model serve qwen3-8b-q4`, puis une complétion
-  (`le_critere_pull_serve_puis_une_completion`).
+  (`le_critere_pull_serve_puis_une_completion`). Premier passage (`4ecf15c`), sur un coureur à
+  quatre cœurs sans carte : 5 027 783 488 octets tirés et vérifiés en 162 s, servis en 3 s sous
+  le nom `Qwen3-8B-Q4_K_M`, et une complétion « bonjour » de 7 tokens (11 tokens/s en lecture,
+  7,4 tokens/s en génération) ; l'essai échouait sur son seul client HTTP, qui ne recollait pas
+  une réponse en morceaux. Corrigé (`f688d49`), il est **vert** : tiré et vérifié en 168 s,
+  servi en 3 s, complétion en 2,9 s.
 - Vérifié : essais unitaires du téléchargement (redirection, reprise, empreinte, en-tête, taille,
   refus du proxy, arrêt), parcours `agentd` avec les vrais capd, ledger et egress
   (`crates/agentd/tests/poids.rs`), et, sous systemd, l'essai des services télécharge d'un dépôt
