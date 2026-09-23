@@ -1680,6 +1680,23 @@ fn poids_installes(ui: &mut egui::Ui, atelier: &Atelier) {
                         {
                             ui.label(RichText::new(valeur).size(12.0).color(couleur));
                         }
+                        // Ce que son gabarit déclare : un agent n'y confie pas d'outils sinon.
+                        if let Some(t) = w.template {
+                            let (texte, couleur) = if t.tool_calls {
+                                ("OUTILS", accent.vif)
+                            } else {
+                                ("SANS OUTILS", DISCRET)
+                            };
+                            ui.label(RichText::new(texte).size(11.0).strong().color(couleur));
+                            if t.reasoning {
+                                ui.label(
+                                    RichText::new("RÉFLEXION")
+                                        .size(11.0)
+                                        .strong()
+                                        .color(accent.sourd),
+                                );
+                            }
+                        }
                         // Le fichier que le moteur a chargé, et la fenêtre qu'il accorde
                         // vraiment : souvent dix fois moins que ce que le fichier annonce.
                         if let Some(servi) = servi {
@@ -1698,12 +1715,17 @@ fn poids_installes(ui: &mut egui::Ui, atelier: &Atelier) {
                     })
                     .response;
                 let decrit = format!(
-                    "{} — {} {} {}{}",
+                    "{} — {} {} {}{}{}",
                     fichier,
                     w.architecture.as_deref().unwrap_or(""),
                     w.quantization.as_deref().unwrap_or(""),
                     w.context_length
                         .map_or_else(String::new, |c| format!("{c} tokens de contexte")),
+                    match w.template {
+                        Some(t) if t.tool_calls => " — appelle des outils",
+                        Some(_) => " — sans appels d'outils déclarés",
+                        None => "",
+                    },
                     servi.map_or_else(String::new, |s| s.fenetre.map_or_else(
                         || " — servi par le moteur".to_owned(),
                         |n| format!(" — servi par le moteur, fenêtre de {n} tokens par requête")

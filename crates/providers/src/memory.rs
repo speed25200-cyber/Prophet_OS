@@ -218,6 +218,7 @@ mod tests {
             tensors: 0,
             kv_bytes_per_token: kv,
             vocabulary,
+            template: None,
         }
     }
 

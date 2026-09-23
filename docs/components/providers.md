@@ -122,6 +122,14 @@ poids qu'il sert. `prophet model ls` et la page Modèles de l'atelier le lisent 
 que `prophet model ls` place en face du fichier (un routeur de modèles n'est pas interrogé
 modèle par modèle : cela en chargerait un).
 
+L'en-tête dit aussi ce que le gabarit de conversation du fichier (`tokenizer.chat_template`)
+déclare : appels d'outils (le gabarit reçoit `tools` et rend `tool_call`) et phase de réflexion
+(`<think>`, `enable_thinking`). Le moteur suit ce gabarit (`--jinja`) ; un modèle qui ne
+déclare pas d'outils n'en reçoit que par l'adaptation générique du moteur. Relevé sur les huit
+fichiers du catalogue : Qwen3, Granite 3.3 et Llama 3.2 déclarent les outils, Phi-3 mini et
+SmolLM2 non ; Qwen3 et Granite, la réflexion. `model.list` (`template`), `prophet model ls`
+(colonne « outils ») et la page Modèles (« OUTILS », « RÉFLEXION ») le disent.
+
 ## Mémoire d'un poids
 
 `providers::memory` estime ce que le moteur réservera pour servir un poids à la fenêtre de la

@@ -2334,8 +2334,8 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
         return Ok(format!("Aucun poids GGUF dans {}.\n", dir.display()));
     }
     let mut out = format!(
-        "{:<28} {:<10} {:<8} {:<8} {:>9} {:>8} {:>9}\n",
-        "fichier", "archi.", "taille", "quant.", "contexte", "Go", "mémoire"
+        "{:<28} {:<10} {:<8} {:<8} {:>9} {:>8} {:>9}  {:<7}\n",
+        "fichier", "archi.", "taille", "quant.", "contexte", "Go", "mémoire", "outils"
     );
     let tiret = || "—".to_owned();
     let mut trop_grands = Vec::new();
@@ -2367,8 +2367,14 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
                 } else {
                     String::new()
                 };
+                let outils = match w.template {
+                    Some(t) if t.tool_calls && t.reasoning => "✓ +réfl.",
+                    Some(t) if t.tool_calls => "✓",
+                    Some(_) => "✗",
+                    None => "—",
+                };
                 out.push_str(&format!(
-                    "{:<28} {:<10} {:<8} {:<8} {:>9} {:>8.1} {:>9}{marque}\n",
+                    "{:<28} {:<10} {:<8} {:<8} {:>9} {:>8.1} {:>9}  {outils:<7}{marque}\n",
                     w.path
                         .file_name()
                         .map_or_else(tiret, |n| n.to_string_lossy().into_owned()),
@@ -2405,6 +2411,9 @@ fn model(action: &ModelAction, as_json: bool) -> anyhow::Result<String> {
             providers::memory::gigabytes(m.available)
         ))
     ));
+    out.push_str(
+        "Outils : ce que le gabarit de conversation du fichier déclare ; ✗, le moteur n'en passe que par son adaptation générique.\n",
+    );
     if !trop_grands.is_empty() {
         out.push_str(&format!(
             "✗ ne tient pas en mémoire ici : {} (le système garde {} pour lui)\n",
@@ -3413,6 +3422,7 @@ mod tests {
                 tensors: 310,
                 kv_bytes_per_token: Some(114_688),
                 vocabulary: Some(151_936),
+                template: None,
             }),
             Err("casse.gguf : signature absente".into()),
         ];

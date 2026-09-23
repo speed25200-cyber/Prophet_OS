@@ -1113,6 +1113,19 @@ fn gguf(architecture: &str, contexte: u32) -> Vec<u8> {
     gguf_avec(architecture, contexte, &[])
 }
 
+/// Ajoute un gabarit de conversation à un en-tête : une paire de plus, comptée.
+fn avec_gabarit(mut gguf: Vec<u8>, gabarit: &str) -> Vec<u8> {
+    let n = u64::from_le_bytes(gguf[16..24].try_into().unwrap()) + 1;
+    gguf[16..24].copy_from_slice(&n.to_le_bytes());
+    let cle = "tokenizer.chat_template";
+    gguf.extend((cle.len() as u64).to_le_bytes());
+    gguf.extend(cle.as_bytes());
+    gguf.extend(8u32.to_le_bytes());
+    gguf.extend((gabarit.len() as u64).to_le_bytes());
+    gguf.extend(gabarit.as_bytes());
+    gguf
+}
+
 /// Le même, avec des nombres de plus sous l'architecture (couches, têtes…).
 fn gguf_avec(architecture: &str, contexte: u32, en_plus: &[(&str, u32)]) -> Vec<u8> {
     let mut kv = Vec::new();
@@ -1197,7 +1210,10 @@ fn la_page_modeles_dit_la_memoire_que_chaque_poids_demande() {
     };
     std::fs::write(
         dir.path().join("qwen3-1.7b.gguf"),
-        gguf_avec("qwen3", 40_960, &tetes(28)),
+        avec_gabarit(
+            gguf_avec("qwen3", 40_960, &tetes(28)),
+            "{%- if tools %}{{ tools }}{%- endif %}<tool_call></tool_call><think></think>",
+        ),
     )
     .unwrap();
     // Des couches par centaines de milliers : un cache KV qu'aucune machine ne tient.
@@ -1249,6 +1265,13 @@ fn la_page_modeles_dit_la_memoire_que_chaque_poids_demande() {
         "{estimations:?}"
     );
     assert_eq!(estimations[1].need.kv_cache, 28 * 8 * 256 * 2 * 4096);
+    // Le gabarit de conversation dit ce que le modèle sait faire ; sans gabarit, rien.
+    let qwen = bureau.atelier.poids[1].as_ref().unwrap();
+    assert_eq!(
+        qwen.template.map(|t| (t.tool_calls, t.reasoning)),
+        Some((true, true))
+    );
+    assert_eq!(bureau.atelier.poids[0].as_ref().unwrap().template, None);
 }
 
 /// Un moteur simulé : `/props` comme llama-server, un 404 pour le reste, le temps de l'essai.

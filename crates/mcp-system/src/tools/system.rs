@@ -762,6 +762,7 @@ fn poids_locaux(
                 "context_length": w.context_length,
                 "gigabytes": w.gigabytes(),
                 "memory": providers::memory::assess(&w, context, machine),
+                "template": w.template,
             })
         })
         .collect()
@@ -829,6 +830,8 @@ mod tests {
         assert_eq!(memoire["context"], 4096);
         assert_eq!(memoire["kv_cache"], 28 * 8 * 256 * 2 * 4096);
         assert_eq!(memoire["fit"], "fits");
+        // Sans gabarit de conversation, rien n'est déclaré.
+        assert!(poids[1]["template"].is_null());
     }
 
     #[test]

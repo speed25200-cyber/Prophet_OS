@@ -59,6 +59,34 @@ pub struct Weights {
     /// moteur réserve.
     #[serde(default)]
     pub vocabulary: Option<u64>,
+    /// Ce que le gabarit de conversation du fichier (`tokenizer.chat_template`) déclare savoir
+    /// faire ; absent sans gabarit.
+    #[serde(default)]
+    pub template: Option<Template>,
+}
+
+/// Ce qu'un gabarit de conversation déclare : le moteur (`--jinja`) le suit à la lettre. Un
+/// gabarit qui ne parle pas d'outils n'en reçoit que par l'adaptation générique du moteur, qui
+/// réussit mal aux petits modèles ; un agent le sait avant de confier une étape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Template {
+    /// Le gabarit reçoit la liste des outils et rend leurs appels.
+    pub tool_calls: bool,
+    /// Le gabarit sait une phase de réflexion (`<think>`, `enable_thinking`).
+    pub reasoning: bool,
+}
+
+impl Template {
+    /// Ce qu'un gabarit déclare, lu dans son texte.
+    #[must_use]
+    pub fn of(text: &str) -> Self {
+        Self {
+            tool_calls: text.contains("tools") && text.contains("tool_call"),
+            reasoning: text.contains("<think>")
+                || text.contains("enable_thinking")
+                || text.contains("thinking"),
+        }
+    }
 }
 
 impl Weights {
@@ -146,6 +174,7 @@ pub fn read(path: &Path) -> Result<Weights, String> {
         Value::Array(n) if key == "tokenizer.ggml.tokens" => Some(*n),
         _ => None,
     });
+    let template = text("tokenizer.chat_template").map(|t| Template::of(&t));
     Ok(Weights {
         path: path.to_owned(),
         bytes,
@@ -159,6 +188,7 @@ pub fn read(path: &Path) -> Result<Weights, String> {
         tensors,
         kv_bytes_per_token,
         vocabulary,
+        template,
     })
 }
 
@@ -452,7 +482,11 @@ mod tests {
             .u32("qwen3.attention.head_count", 16)
             .u32("qwen3.attention.head_count_kv", 8)
             .u32("qwen3.attention.key_length", 128)
-            .u32("qwen3.attention.value_length", 128);
+            .u32("qwen3.attention.value_length", 128)
+            .text(
+                "tokenizer.chat_template",
+                "{%- if tools %}<tools>{{ tools }}</tools>{%- endif %}<tool_call></tool_call><think></think>",
+            );
         // Un vocabulaire, qu'il faut sauter sans le garder.
         e.key("tokenizer.ggml.tokens", 9);
         e.0.extend(8u32.to_le_bytes());
@@ -487,6 +521,13 @@ mod tests {
         // 28 couches × 8 têtes KV × (128 + 128) × 2 octets ; trois tokens de vocabulaire.
         assert_eq!(w.kv_bytes_per_token, Some(28 * 8 * 256 * 2));
         assert_eq!(w.vocabulary, Some(3));
+        assert_eq!(
+            w.template,
+            Some(Template {
+                tool_calls: true,
+                reasoning: true
+            })
+        );
         assert_eq!(w.version, 3);
         assert_eq!(w.bytes, std::fs::metadata(&path).unwrap().len());
     }
@@ -603,6 +644,7 @@ mod tests {
         let w = read(&ecrire(dir.path(), "l.gguf", &e.bytes())).unwrap();
         assert_eq!(w.kv_bytes_per_token, Some(2 * 4 * (16 + 16) * 2));
         assert_eq!(w.vocabulary, None);
+        assert_eq!(w.template, None);
         // Rien pour le calculer : rien d'inventé.
         assert_eq!(
             kv_per_token(None, Some(64), Some(4), None, None, None),
@@ -617,6 +659,23 @@ mod tests {
             kv_per_token(Some(u64::MAX), None, Some(2), None, Some(8), Some(8)),
             None
         );
+    }
+
+    #[test]
+    fn un_gabarit_sans_outils_ne_les_declare_pas() {
+        // Le gabarit de Phi-3 mini : des rôles, ni outils ni réflexion.
+        let phi = "{% for message in messages %}{% if message['role'] == 'user' %}{{'<|user|>' + message['content'] + '<|end|>'}}{% endif %}{% endfor %}";
+        assert_eq!(
+            Template::of(phi),
+            Template {
+                tool_calls: false,
+                reasoning: false
+            }
+        );
+        // Llama 3.2 : des outils, pas de réflexion.
+        let llama = "{%- if tools is not none %}{{- 'Given the following functions' }}{%- endif %}{{- '{\"name\": \"' + tool_call.name + '\"' }}";
+        assert!(Template::of(llama).tool_calls);
+        assert!(!Template::of(llama).reasoning);
     }
 
     #[test]
