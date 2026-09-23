@@ -219,11 +219,14 @@ se téléchargent depuis la machine, par le proxy de sortie, vérifiés avant d'
 
 ```sh
 prophet model catalog               # ce que le système sait télécharger, et ce que la machine a
-prophet model pull qwen3-0.6b-q8    # progression affichée ; une coupure reprend où elle s'arrêtait
-prophet model rm qwen3-0.6b-q8      # retire un poids téléchargé (jamais un poids de la configuration)
+prophet model pull qwen3-8b-q4      # 5 Go ; progression affichée, une coupure reprend où elle s'arrêtait
+sudo systemctl restart prophet-local-engine   # le moteur lit le dossier des téléchargements à son démarrage
+prophet model serve qwen3-8b-q4     # le fait charger ; il répond ensuite sous le nom que le moteur dit
+prophet model rm qwen3-8b-q4        # retire un poids téléchargé (jamais un poids de la configuration)
 ```
 
-La page Modèles de la surface fait de même, barre de progression comprise.
+La page Modèles de la surface fait de même, barre de progression comprise, et dit « Servi »
+pour le poids que le moteur a chargé. Qwen3 8B demande environ 6 Go de mémoire libre.
 
 ```sh
 prophet status                        # les services, l'isolation, les limites de la machine

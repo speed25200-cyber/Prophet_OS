@@ -251,5 +251,8 @@ aléas distincts, deux machines ensemble sans réseau, et l'instantané repris d
 l'autre ; le niveau 0 applique enfin Landlock, qu'il annonçait. Celui des moteurs locaux gagne
 le cycle de vie des poids (ADR 0046) : un catalogue du système à empreintes, un téléchargement
 par egress sous un jeton borné au dépôt, vérifié avant d'être posé, repris après une coupure,
-retiré sur demande, depuis la CLI ou la page Modèles. Restent servir un poids téléchargé sans
-reconfigurer le moteur, les budgets VRAM et la matrice GPU ; aucun critère complet n'est coché.
+retiré sur demande, depuis la CLI ou la page Modèles, puis servi par le routeur du moteur :
+le critère de M8-T7 est tenu en CI par les vrais binaires (`prophet model pull qwen3-8b-q4`,
+5 Go par egress en 168 s ; `prophet model serve` en 3 s ; une complétion en 2,9 s). Restent la
+VRAM, ses budgets et la matrice GPU, à mesurer sur une carte ; aucun critère complet de la
+version complète n'est coché.
