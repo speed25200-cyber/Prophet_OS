@@ -965,14 +965,20 @@ fn les_widgets_comparent_les_versions_et_refusent_un_travail_altere() {
     );
 }
 
-/// Un moteur scripté sans porte : il rend ses réponses dans l'ordre, une par requête de
-/// complétion, et le catalogue de modèles à qui le demande.
-fn moteur_scripte(reponses: Vec<Value>) -> (String, std::thread::JoinHandle<()>) {
+/// Un moteur scripté : il rend ses réponses dans l'ordre, une par requête de complétion, et le
+/// catalogue de modèles à qui le demande ; la réponse de rang `retenue` attend que le test la
+/// libère, pour qu'il observe la mission en cours.
+fn moteur_scripte(
+    reponses: Vec<Value>,
+    retenue: Option<usize>,
+) -> (String, std::thread::JoinHandle<()>, mpsc::Sender<()>) {
+    let (liberer, porte) = mpsc::channel::<()>();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
     let worker = std::thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(60);
+        let mut rang = 0;
         let mut reponses = reponses.into_iter();
         loop {
             let stream = loop {
@@ -1009,6 +1015,10 @@ fn moteur_scripte(reponses: Vec<Value>) -> (String, std::thread::JoinHandle<()>)
             let body = if completion {
                 let mut request = vec![0; size];
                 let _ = stream.read_exact(&mut request);
+                if retenue == Some(rang) && porte.recv_timeout(Duration::from_secs(30)).is_err() {
+                    return;
+                }
+                rang += 1;
                 let Some(reponse) = reponses.next() else {
                     return;
                 };
@@ -1026,7 +1036,7 @@ fn moteur_scripte(reponses: Vec<Value>) -> (String, std::thread::JoinHandle<()>)
             }
         }
     });
-    (endpoint, worker)
+    (endpoint, worker, liberer)
 }
 
 fn appel(n: u32, outil: &str, arguments: Value) -> Value {
@@ -1044,21 +1054,26 @@ fn conclusion(texte: &str) -> Value {
 #[test]
 #[ignore = "needs_gpu: services réels et modèle HTTP scripté"]
 fn le_parcours_montre_le_refus_rendu_au_modele_et_le_rappel_du_livrable() {
-    let (endpoint, worker) = moteur_scripte(vec![
-        appel(1, "fs.search", json!({"root":"~/docs"})),
-        appel(
-            2,
-            "fs.write",
-            json!({"path":"~/ailleurs/note.txt","content":"hors de la portée"}),
-        ),
-        conclusion("C'est fait."),
-        appel(
-            3,
-            "fs.write",
-            json!({"path":"~/docs/note.txt","content":"L'humain définit, supervise et examine."}),
-        ),
-        conclusion(TEXT),
-    ]);
+    // La réponse de rang 3 (l'écriture juste) attend : la mission est alors en cours, après la
+    // recherche, le refus et le rappel.
+    let (endpoint, worker, liberer) = moteur_scripte(
+        vec![
+            appel(1, "fs.search", json!({"root":"~/docs"})),
+            appel(
+                2,
+                "fs.write",
+                json!({"path":"~/ailleurs/note.txt","content":"hors de la portée"}),
+            ),
+            conclusion("C'est fait."),
+            appel(
+                3,
+                "fs.write",
+                json!({"path":"~/docs/note.txt","content":"L'humain définit, supervise et examine."}),
+            ),
+            conclusion(TEXT),
+        ],
+        Some(3),
+    );
     let chain = Chain::with_model(&endpoint, "modele-controle");
     chain.call("task.spawn", json!({"id":ID,"intent":"Écris une note sur la supervision humaine dans ~/docs/note.txt","user":"prophet",
         "manifest":{"agent":{"id":"org.prophet.surface-test","version":"1.0.0","name":"Essai de supervision","publisher_key":"ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},"model":{"preferred":["local:modele-controle"]},"sandbox":{"min_level":0},"capabilities":{"max":{"fs.read":["~/docs/**"],"fs.write":["~/docs/**"],"tool.call":["fs.write","fs.search"]}},"budget":{"default":{"tokens":4000,"wall_time":"60s","approvals":3}}},
@@ -1080,6 +1095,30 @@ fn le_parcours_montre_le_refus_rendu_au_modele_et_le_rappel_du_livrable() {
         std::thread::sleep(Duration::from_millis(20));
     }
     chain.call("task.start", json!({"id":ID}));
+    // En cours : les derniers gestes se lisent en direct dans l'onglet Proposition.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        let rappele = bureau.missions().trail().iter().any(|e| e.tool == "rappel");
+        if rappele
+            && bureau
+                .missions()
+                .snapshot()
+                .is_some_and(|s| s.task.state == State::Running)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "la mission n'atteint pas le rappel"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    capture(&context, &target, "direct");
+    liberer.send(()).unwrap();
     chain.wait(bureau.missions(), State::Done);
     worker.join().unwrap();
     let deadline = Instant::now() + Duration::from_secs(8);

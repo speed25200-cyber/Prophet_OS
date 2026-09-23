@@ -259,15 +259,19 @@ pub(crate) fn draw(
         if !reviewing && let Some(geste) = missions.trail().last() {
             ui.add_space(4.0);
             let (marque, couleur, note) = issue(&geste.outcome);
+            let (outil, couleur_outil) = libelle(geste, &accent);
+            let appel = matches!(nature(geste), Nature::Appel);
             let ligne = ui
                 .horizontal_wrapped(|ui| {
                     small(ui, "Dernier geste :");
-                    ui.label(RichText::new(marque).color(couleur).size(13.0));
+                    if appel {
+                        ui.label(RichText::new(marque).color(couleur).size(13.0));
+                    }
                     ui.label(
-                        RichText::new(&geste.tool)
+                        RichText::new(&outil)
                             .size(13.0)
                             .monospace()
-                            .color(accent.sourd),
+                            .color(couleur_outil),
                     );
                     if let Some(cible) = &geste.target {
                         ui.label(
@@ -283,7 +287,7 @@ pub(crate) fn draw(
                 .response;
             let decrit = format!(
                 "Dernier geste : {} {} — {}",
-                geste.tool,
+                outil,
                 geste.target.as_deref().unwrap_or(""),
                 issue_en_mots(&geste.outcome)
             );
@@ -360,7 +364,7 @@ pub(crate) fn draw(
                     Tab::Files => {
                         file_requested = crate::file_review_view::draw(ui, info, &missions.files)
                     }
-                    _ => result(ui, info, &mut file_requested),
+                    _ => result(ui, info, missions.trail(), &mut file_requested),
                 }
             });
         ui.add_space(12.0);
@@ -582,7 +586,12 @@ fn plan(ui: &mut egui::Ui, info: &Inspection, busy: bool, command: &mut Option<A
     }
 }
 
-fn result(ui: &mut egui::Ui, info: &Inspection, file_requested: &mut Option<String>) {
+fn result(
+    ui: &mut egui::Ui,
+    info: &Inspection,
+    trail: &[crate::missions::TrailEntry],
+    file_requested: &mut Option<String>,
+) {
     let state = info.task.state;
     if let Some(reason) = &info.task.reason {
         Frame::new()
@@ -630,6 +639,18 @@ fn result(ui: &mut egui::Ui, info: &Inspection, file_requested: &mut Option<Stri
                 "Les fichiers et la réponse finale apparaîtront ici lorsqu'ils seront disponibles."
             },
         );
+        // Pendant l'exécution, les derniers gestes de l'agent se suivent ici même, relus dans
+        // le journal : on voit qu'il travaille, et sur quoi, sans ouvrir le parcours.
+        if state == State::Running && !trail.is_empty() {
+            ui.add_space(18.0);
+            let accent = Accent::de(ui.ctx());
+            touches(
+                ui,
+                &trail[trail.len().saturating_sub(DIRECT)..],
+                &accent,
+                "En direct — ses derniers gestes",
+            );
+        }
         return;
     };
     ui.horizontal(|ui| {
@@ -768,6 +789,16 @@ enum Nature {
     Publication,
 }
 
+/// Le libellé d'un geste et sa couleur, les mêmes dans la frise et dans le dernier geste.
+fn libelle(entry: &crate::missions::TrailEntry, accent: &Accent) -> (String, Color32) {
+    match nature(entry) {
+        Nature::Refus => ("refusé par capd".to_owned(), RED),
+        Nature::Rappel => ("livrable rappelé".to_owned(), ATTENTE_DOUCE),
+        Nature::Publication => (entry.tool.clone(), GREEN),
+        Nature::Appel => (entry.tool.clone(), accent.sourd),
+    }
+}
+
 fn nature(entry: &crate::missions::TrailEntry) -> Nature {
     match entry.tool.as_str() {
         "refus" => Nature::Refus,
@@ -826,12 +857,12 @@ fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::Trail
                 etats(ui, info, &accent);
             });
             ui.add_space(28.0);
-            ui.vertical(|ui| touches(ui, trail, &accent));
+            ui.vertical(|ui| touches(ui, trail, &accent, "Ce que l'agent a touché"));
         });
     } else {
         etats(ui, info, &accent);
         ui.add_space(16.0);
-        touches(ui, trail, &accent);
+        touches(ui, trail, &accent, "Ce que l'agent a touché");
     }
     ui.add_space(12.0);
     small(
@@ -945,9 +976,12 @@ fn etats(ui: &mut egui::Ui, info: &Inspection, accent: &Accent) {
     }
 }
 
+/// Gestes montrés en direct pendant l'exécution.
+const DIRECT: usize = 5;
+
 /// Ce que l'agent a touché : chaque appel, chaque refus, chaque rappel, dans l'ordre du journal.
-fn touches(ui: &mut egui::Ui, trail: &[crate::missions::TrailEntry], accent: &Accent) {
-    label(ui, "Ce que l'agent a touché");
+fn touches(ui: &mut egui::Ui, trail: &[crate::missions::TrailEntry], accent: &Accent, titre: &str) {
+    label(ui, titre);
     ui.add_space(8.0);
     if trail.is_empty() {
         small(
@@ -960,12 +994,7 @@ fn touches(ui: &mut egui::Ui, trail: &[crate::missions::TrailEntry], accent: &Ac
     for (index, entry) in trail.iter().take(200).enumerate() {
         let (mark, color, note) = issue(&entry.outcome);
         let kind = nature(entry);
-        let (outil, couleur_outil) = match kind {
-            Nature::Refus => ("refusé par capd".to_owned(), RED),
-            Nature::Rappel => ("livrable rappelé".to_owned(), ATTENTE_DOUCE),
-            Nature::Publication => (entry.tool.clone(), GREEN),
-            Nature::Appel => (entry.tool.clone(), accent.sourd),
-        };
+        let (outil, couleur_outil) = libelle(entry, accent);
         let row = ui
             .horizontal_wrapped(|ui| {
                 ui.set_min_height(30.0);
