@@ -1,6 +1,6 @@
 # ADR-0045 — Tenir des microVM prêtes, restaurées d'un instantané d'un invité en attente
 
-- **Statut** : proposé ; vérifié par tests unitaires ici, essai sur le coureur KVM de la CI
+- **Statut** : accepté ; vérifié sur le coureur KVM de la CI (`3314b74`, `41def9e`) : microVM rendue en 8,9 ms (médiane de cinq prises, de 8,4 à 10,0 ms)
 - **Date** : 2026-09-23
 - **Tâche liée** : M5-T4
 
@@ -62,4 +62,7 @@ garde en propre que les pages qu'elle modifie. Le mode réserve suppose que Fire
 de remplacer un disque sur une machine restaurée ; l'ordre inverse (reprendre, puis remplacer)
 est essayé si le moniteur refuse l'ordre direct. La mesure du critère (médiane de cinq prises,
 réserve chaude) est l'essai `la_reserve_rend_une_microvm_de_niveau_deux_en_moins_de_150_ms`,
-qui n'a de sens que sur une machine où KVM s'ouvre.
+qui n'a de sens que sur une machine où KVM s'ouvre ; sur le coureur de la CI, Firecracker a
+accepté le remplacement du disque sur une machine restaurée — l'essai ne dit pas lequel des
+deux ordres a servi —, et une prise coûte 8,9 ms, dont l'essentiel pour construire le disque
+de la tâche (6,5 ms mesurées sur l'hôte de développement).

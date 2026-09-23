@@ -153,7 +153,9 @@ lancer() {
     ok "$titre"
     # Ce qu'un essai réussi mesure (« mesure : … ») atteint le journal : sans cela, la preuve
     # d'un objectif chiffré ne se lirait que dans un rapport qu'on n'ouvre pas.
-    grep -h '^mesure : ' "$sortie" | sed 's/^/    /' || true
+    # Avec --nocapture, libtest écrit le nom de l'essai sur la ligne où arrive la première
+    # sortie : la mesure est cherchée partout dans la ligne, pas seulement au début.
+    grep -ho 'mesure : .*' "$sortie" | sed 's/^/    /' || true
     rm -f "$sortie"
     echo '```' >> "$RAPPORT"
     echo >> "$RAPPORT"
