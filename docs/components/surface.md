@@ -94,9 +94,11 @@ les autres adresses IP. La conversation directe n'expose pas d'outils système ;
 tient plus dans la fenêtre du moteur, ses premiers messages sont laissés hors de l'envoi et la
 page dit combien ; au-delà de 32 Kio, seuls les tours les plus récents partent, au lieu que la
 conversation s'arrête, et le fil affiché reste entier. La page Modèles lit l'en-tête de chaque poids installé et marque celui que le
-moteur a chargé, avec la fenêtre qu'il accorde par requête (`/props`). Le téléchargement,
-le démarrage des modèles, la persistance des conversations et le parcours agentique complet
-restent à raccorder. Voir l'ADR 0008 et les exigences FRONTIER.
+moteur a chargé, avec la fenêtre qu'il accorde par requête (`/props`) ; elle montre aussi le
+catalogue du système qu'agentd rend (`model.catalog`, ADR 0046) — fourni, téléchargé et
+vérifié, en cours avec sa barre de progression, échoué avec son motif — et demande à agentd de
+télécharger, reprendre, arrêter ou retirer un poids. Le démarrage des modèles, la persistance
+des conversations et le parcours agentique complet restent à raccorder. Voir l'ADR 0008 et les exigences FRONTIER.
 
 Une seule décision est montrée à la fois, la plus ancienne. Faire patienter quelqu'un est déjà
 désagréable ; changer d'avis sur ce qu'on lui demande pendant qu'il patiente le serait davantage.

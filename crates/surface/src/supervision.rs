@@ -2,7 +2,7 @@
 
 use egui::{Align2, Color32, FontId, Frame, RichText, Stroke, pos2, vec2};
 
-use crate::atelier::{Atelier, Page};
+use crate::atelier::{Atelier, CommandeDePoids, EntreeCatalogue, Page};
 use crate::fenetre::Reponse;
 use crate::hud;
 use crate::scene::{Courant, Etat, Scene};
@@ -1393,6 +1393,170 @@ fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
     });
 }
 
+/// Octets en mégaoctets ou gigaoctets, pour l'humain.
+fn octets(n: u64) -> String {
+    let n = n as f64;
+    if n >= 1e9 {
+        format!("{:.2} Go", n / 1e9).replace('.', ",")
+    } else {
+        format!("{:.0} Mo", n / 1e6)
+    }
+}
+
+/// Le catalogue du système : ce qu'il sait télécharger, vérifié avant d'être posé (ADR 0046).
+/// Rend la commande que l'humain a demandée, s'il en a demandé une.
+fn catalogue_du_systeme(ui: &mut egui::Ui, atelier: &Atelier) -> Option<(CommandeDePoids, String)> {
+    let accent = Accent::de(ui.ctx());
+    etiquette(ui, "CATALOGUE DU SYSTÈME");
+    ui.add_space(6.0);
+    petit(
+        ui,
+        "Téléchargés par le proxy de sortie, sous un droit borné au dépôt ; l'empreinte SHA-256 et l'en-tête sont vérifiés avant que le moteur les voie.",
+    );
+    ui.add_space(10.0);
+    let entrees = match &atelier.catalogue {
+        None => {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                petit(ui, "Lecture du catalogue…");
+            });
+            return None;
+        }
+        Some(Err(erreur)) => {
+            ui.label(RichText::new(format!("Catalogue indisponible : {erreur}")).color(ATTENTE));
+            return None;
+        }
+        Some(Ok(entrees)) => entrees,
+    };
+    if let Some(erreur) = &atelier.erreur_de_poids {
+        ui.label(RichText::new(erreur).size(12.0).color(ATTENTE));
+        ui.add_space(6.0);
+    }
+    let mut demande = None;
+    for (rang, e) in entrees.iter().enumerate() {
+        if rang > 0 {
+            ui.add_space(12.0);
+        }
+        let ligne = ui
+            .horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(titre(&e.name, 18.0));
+                        if let Some(q) = &e.quantization {
+                            ui.label(RichText::new(q).size(12.0).color(ENCRE));
+                        }
+                        if let Some(n) = e.bytes.or_else(|| e.pull.as_ref().and_then(|p| p.total)) {
+                            ui.label(RichText::new(octets(n)).size(12.0).color(DISCRET));
+                        }
+                    });
+                    if let Some(note) = &e.note {
+                        petit(ui, note);
+                    }
+                    etat_du_poids(ui, e, &accent);
+                });
+                if e.provided.is_some() && !e.installed {
+                    return;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let (commande, texte, cle) = if e.en_cours() {
+                        (CommandeDePoids::Arreter, "Arrêter", "arreter")
+                    } else if e.installed {
+                        (CommandeDePoids::Retirer, "Retirer", "retirer")
+                    } else if e.partial_bytes.is_some() {
+                        (CommandeDePoids::Telecharger, "Reprendre", "telecharger")
+                    } else {
+                        (CommandeDePoids::Telecharger, "Télécharger", "telecharger")
+                    };
+                    if bouton(ui, &format!("catalogue-{cle}-{}", e.id), texte, true).clicked() {
+                        demande = Some((commande, e.id.clone()));
+                    }
+                });
+            })
+            .response;
+        ui.interact(
+            ligne.rect,
+            egui::Id::new(format!("catalogue-{}", e.id)),
+            egui::Sense::hover(),
+        )
+        .widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, true, description_du_poids(e))
+        });
+    }
+    demande
+}
+
+/// Ce que la machine a d'une entrée, en une ligne : posé, en cours (avec la barre), échoué,
+/// interrompu ou disponible.
+fn etat_du_poids(ui: &mut egui::Ui, e: &EntreeCatalogue, accent: &Accent) {
+    if let Some(suivi) = e.pull.as_ref().filter(|_| e.en_cours()) {
+        let part = suivi
+            .total
+            .filter(|t| *t > 0)
+            .map(|t| (suivi.received as f64 / t as f64).clamp(0.0, 1.0) as f32);
+        ui.add_space(4.0);
+        let largeur = ui.available_width().min(420.0);
+        let (rect, _) = ui.allocate_exact_size(vec2(largeur, 6.0), egui::Sense::hover());
+        let peintre = ui.painter();
+        peintre.rect_filled(rect, 3.0, CREUX);
+        let fraction = part.unwrap_or(0.12);
+        let plein =
+            egui::Rect::from_min_size(rect.min, vec2(rect.width() * fraction, rect.height()));
+        peintre.rect_filled(plein, 3.0, accent.vif);
+        // Un halo à la tête de la barre : on voit qu'elle avance.
+        peintre.circle_filled(
+            pos2(plein.right(), rect.center().y),
+            5.0,
+            accent.vif.gamma_multiply(0.35),
+        );
+        let texte = match (part, suivi.total) {
+            (Some(p), Some(total)) => format!(
+                "{} % · {} sur {}",
+                (p * 100.0).floor(),
+                octets(suivi.received),
+                octets(total)
+            ),
+            _ => format!("{} reçus", octets(suivi.received)),
+        };
+        ui.label(RichText::new(texte).size(12.0).color(accent.vif));
+        return;
+    }
+    if e.installed {
+        pastille(ui, "Téléchargé · vérifié", ACCOMPLI);
+        return;
+    }
+    if e.provided.is_some() {
+        pastille(ui, "Fourni par le système", ACCOMPLI);
+        return;
+    }
+    if let Some(erreur) = e
+        .pull
+        .as_ref()
+        .filter(|p| p.state == "failed")
+        .and_then(|p| p.error.as_ref())
+    {
+        ui.label(RichText::new(erreur).size(12.0).color(ATTENTE));
+        return;
+    }
+    match e.partial_bytes {
+        Some(n) => pastille(ui, &format!("Interrompu à {}", octets(n)), DISCRET),
+        None => pastille(ui, "Disponible", DISCRET),
+    }
+}
+
+fn description_du_poids(e: &EntreeCatalogue) -> String {
+    let etat = if e.en_cours() {
+        let suivi = e.pull.as_ref().map_or(0, |p| p.received);
+        format!("téléchargement en cours, {} reçus", octets(suivi))
+    } else if e.installed {
+        "téléchargé et vérifié".to_owned()
+    } else if e.provided.is_some() {
+        "fourni par le système".to_owned()
+    } else {
+        "disponible".to_owned()
+    };
+    format!("{} — {etat}", e.name)
+}
+
 /// Les poids installés, tels que leurs fichiers les décrivent : l'agent qui confie une étape et
 /// l'humain qui choisit un modèle lisent la même fenêtre de contexte et la même quantification.
 fn poids_installes(ui: &mut egui::Ui, atelier: &Atelier) {
@@ -1546,6 +1710,7 @@ fn modeles(ui: &mut egui::Ui, atelier: &mut Atelier) {
     hud::etiquette(ui, "MOTEUR LOCAL ET CLIENTS OFFICIELS", EFFACE);
     atelier.sonder_les_clients(&ui.ctx().clone());
     atelier.lire_les_poids(&ui.ctx().clone());
+    atelier.lire_le_catalogue(&ui.ctx().clone());
     ui.add_space(26.0);
     egui::ScrollArea::vertical()
         .id_salt("bibliotheque")
@@ -1610,6 +1775,14 @@ fn modeles(ui: &mut egui::Ui, atelier: &mut Atelier) {
                 ui.set_width(ui.available_width());
                 poids_installes(ui, atelier);
             });
+            ui.add_space(14.0);
+            let demande = plaque(ui, 28, |ui| {
+                ui.set_width(ui.available_width());
+                catalogue_du_systeme(ui, atelier)
+            });
+            if let Some((commande, id)) = demande {
+                atelier.commander_un_poids(&ui.ctx().clone(), commande, &id);
+            }
             ui.add_space(18.0);
             for model in &atelier.modeles {
                 plaque(ui, 24, |ui| {

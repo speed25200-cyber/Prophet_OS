@@ -1302,3 +1302,122 @@ fn la_page_systeme_dit_la_reserve_de_microvm() {
         "sans réserve, rien n'est inventé"
     );
 }
+
+/// Les méthodes qu'un faux service a reçues, avec leurs paramètres.
+type Recues = std::sync::Arc<std::sync::Mutex<Vec<(String, serde_json::Value)>>>;
+
+/// Un faux agentd : répond au catalogue par ce que `catalogue` rend, et note chaque méthode
+/// reçue avec ses paramètres.
+fn faux_agentd(
+    catalogue: impl Fn() -> serde_json::Value + Send + 'static,
+) -> (tempfile::TempDir, std::path::PathBuf, Recues) {
+    use std::io::{BufRead as _, Write as _};
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("agentd.sock");
+    let ecoute = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    let recues = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let notees = recues.clone();
+    std::thread::spawn(move || {
+        for flux in ecoute.incoming() {
+            let Ok(flux) = flux else { return };
+            let mut lecteur = std::io::BufReader::new(flux);
+            let mut ligne = String::new();
+            while lecteur.read_line(&mut ligne).unwrap_or(0) > 0 {
+                let requete: serde_json::Value = serde_json::from_str(&ligne).unwrap();
+                ligne.clear();
+                let methode = requete["method"].as_str().unwrap_or_default().to_owned();
+                notees
+                    .lock()
+                    .unwrap()
+                    .push((methode.clone(), requete["params"].clone()));
+                let resultat = if methode == "model.catalog" {
+                    catalogue()
+                } else {
+                    serde_json::json!({"id": requete["params"]["id"], "state": "running", "received": 0})
+                };
+                let reponse =
+                    serde_json::json!({"jsonrpc": "2.0", "id": requete["id"], "result": resultat});
+                let _ = writeln!(lecteur.get_mut(), "{reponse}");
+            }
+        }
+    });
+    (dir, socket, recues)
+}
+
+#[test]
+#[ignore = "needs_gpu: rendu wgpu hors écran"]
+fn la_page_modeles_montre_le_catalogue_du_systeme_et_ce_qui_se_telecharge() {
+    // Scène d'exemple : un poids posé, un autre à 62 %. La page les dit, chacun avec son geste.
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1440, 2000);
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), true);
+    bureau.figer_transitions();
+    bureau.atelier.page = Page::Modeles;
+    for _ in 0..4 {
+        frame(&mut bureau, &context, &target, vec![]);
+    }
+    capture(&context, &target, "catalogue");
+    for id in [
+        "catalogue-retirer-qwen3-1.7b-q8",
+        "catalogue-arreter-qwen3-0.6b-q8",
+    ] {
+        assert!(
+            bureau.ctx.read_response(egui::Id::new(id)).is_some(),
+            "{id} absent"
+        );
+    }
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("catalogue-telecharger-qwen3-1.7b-q8"))
+            .is_none(),
+        "un poids posé ne se télécharge pas une seconde fois"
+    );
+}
+
+#[test]
+#[ignore = "needs_gpu: rendu wgpu hors écran"]
+fn telecharger_depuis_la_page_modeles_le_demande_a_agentd_et_suit_la_progression() {
+    let clics = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let lance = clics.clone();
+    let (_dir, socket, recues) = faux_agentd(move || {
+        let pull = if lance.load(std::sync::atomic::Ordering::Relaxed) {
+            serde_json::json!({"state": "running", "received": 250_000_000u64, "total": 1_000_000_000u64})
+        } else {
+            serde_json::Value::Null
+        };
+        serde_json::json!({"dir": "/var/lib/prophet/models/catalogue", "entries": [
+            {"id": "essai", "name": "Poids d'essai", "quantization": "Q4_K_M", "installed": false, "pull": pull}
+        ]})
+    });
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1440, 2000);
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.figer_transitions();
+    bureau.atelier.socket_agentd = socket;
+    bureau.atelier.page = Page::Modeles;
+    let attendre = |bureau: &mut Bureau, id: &str| {
+        let limite = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while bureau.ctx.read_response(egui::Id::new(id)).is_none() {
+            frame(bureau, &context, &target, vec![]);
+            assert!(std::time::Instant::now() < limite, "{id} jamais rendu");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    };
+    attendre(&mut bureau, "catalogue-telecharger-essai");
+    clics.store(true, std::sync::atomic::Ordering::Relaxed);
+    let clic = click_widget(&bureau, "catalogue-telecharger-essai");
+    frame(&mut bureau, &context, &target, clic);
+    attendre(&mut bureau, "catalogue-arreter-essai");
+    for _ in 0..2 {
+        frame(&mut bureau, &context, &target, vec![]);
+    }
+    capture(&context, &target, "catalogue-telechargement");
+    let recues = recues.lock().unwrap().clone();
+    assert!(
+        recues
+            .iter()
+            .any(|(m, p)| m == "model.pull" && p["id"] == "essai"),
+        "{recues:?}"
+    );
+}

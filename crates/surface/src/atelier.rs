@@ -63,9 +63,90 @@ pub struct Servi {
     pub fenetre: Option<u64>,
 }
 
+/// Une entrée du catalogue des poids du système, telle qu'agentd la rend (`model.catalog`,
+/// ADR 0046) : ce que le système sait télécharger, et ce que la machine en a.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+pub struct EntreeCatalogue {
+    /// Identifiant au catalogue.
+    pub id: String,
+    /// Nom pour l'humain.
+    pub name: String,
+    /// Quantification annoncée.
+    #[serde(default)]
+    pub quantization: Option<String>,
+    /// À quoi sert ce modèle ici.
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Taille exacte, quand le catalogue la connaît.
+    #[serde(default)]
+    pub bytes: Option<u64>,
+    /// Posé et vérifié.
+    #[serde(default)]
+    pub installed: bool,
+    /// Déjà fourni par la configuration du système (le modèle par défaut, dans `/nix/store`).
+    #[serde(default)]
+    pub provided: Option<std::path::PathBuf>,
+    /// Octets reçus d'un téléchargement interrompu, qui reprendra d'ici.
+    #[serde(default)]
+    pub partial_bytes: Option<u64>,
+    /// Le dernier téléchargement depuis le démarrage d'agentd.
+    #[serde(default)]
+    pub pull: Option<SuiviDePoids>,
+}
+
+/// Où en est un téléchargement.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+pub struct SuiviDePoids {
+    /// `running`, `done`, `failed` ou `cancelled`.
+    pub state: String,
+    /// Octets reçus.
+    #[serde(default)]
+    pub received: u64,
+    /// Taille totale, si elle est connue.
+    #[serde(default)]
+    pub total: Option<u64>,
+    /// Motif d'un échec.
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl EntreeCatalogue {
+    /// Un téléchargement de cette entrée est en cours.
+    #[must_use]
+    pub fn en_cours(&self) -> bool {
+        self.pull.as_ref().is_some_and(|p| p.state == "running")
+    }
+}
+
+/// Ce que la page Modèles peut demander pour un poids du catalogue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandeDePoids {
+    /// Télécharger, ou reprendre.
+    Telecharger,
+    /// Arrêter un téléchargement en cours.
+    Arreter,
+    /// Retirer un poids téléchargé.
+    Retirer,
+}
+
+impl CommandeDePoids {
+    const fn methode(self) -> &'static str {
+        match self {
+            Self::Telecharger => "model.pull",
+            Self::Arreter => "model.cancel",
+            Self::Retirer => "model.remove",
+        }
+    }
+}
+
+/// Entre deux relectures du catalogue pendant un téléchargement.
+const RELECTURE_DU_CATALOGUE: Duration = Duration::from_millis(500);
+
 enum Evenement {
     Modeles(Result<Vec<String>, String>),
     Poids(Vec<Poids>, Option<Servi>),
+    Catalogue(Result<Vec<EntreeCatalogue>, String>),
+    ErreurDePoids(String),
     Clients(Vec<ClientCard>),
     Fragment(u64, String),
     Fin(u64, Result<Completion, String>),
@@ -109,6 +190,14 @@ pub struct Atelier {
     pub poids_lus: bool,
     /// Ce que le moteur sert, s'il a répondu à la lecture du catalogue.
     pub servi: Option<Servi>,
+    /// Le catalogue du système, tel qu'agentd le rend ; `None` tant qu'il n'a pas répondu.
+    pub catalogue: Option<Result<Vec<EntreeCatalogue>, String>>,
+    /// Le dernier refus d'une commande sur un poids (téléchargement refusé par capd…).
+    pub erreur_de_poids: Option<String>,
+    /// Socket d'agentd (`PROPHET_AGENTD_SOCKET`, sinon le défaut).
+    pub socket_agentd: std::path::PathBuf,
+    lecture_du_catalogue: bool,
+    catalogue_lu_a: Option<std::time::Instant>,
     lecture_des_poids: bool,
     tx: Sender<Evenement>,
     rx: Receiver<Evenement>,
@@ -140,6 +229,14 @@ impl Atelier {
             poids: Vec::new(),
             poids_lus: false,
             servi: None,
+            catalogue: None,
+            erreur_de_poids: None,
+            socket_agentd: std::env::var_os("PROPHET_AGENTD_SOCKET").map_or_else(
+                || prophet_ipc::socket_path("agentd"),
+                std::path::PathBuf::from,
+            ),
+            lecture_du_catalogue: false,
+            catalogue_lu_a: None,
             lecture_des_poids: false,
             tx,
             rx,
@@ -253,6 +350,64 @@ impl Atelier {
         });
     }
 
+    /// Lit le catalogue du système auprès d'agentd, en arrière-plan : une fois, puis toutes les
+    /// demi-secondes tant qu'un téléchargement court. Une scène de démonstration reçoit un
+    /// catalogue d'exemple : un poids posé, un autre en cours.
+    pub fn lire_le_catalogue(&mut self, ctx: &egui::Context) {
+        let en_cours =
+            matches!(&self.catalogue, Some(Ok(e)) if e.iter().any(EntreeCatalogue::en_cours));
+        if en_cours {
+            ctx.request_repaint_after(RELECTURE_DU_CATALOGUE);
+        }
+        let due = self
+            .catalogue_lu_a
+            .is_none_or(|lu| en_cours && lu.elapsed() >= RELECTURE_DU_CATALOGUE);
+        if self.lecture_du_catalogue || !due {
+            return;
+        }
+        if self.demonstration {
+            self.catalogue = Some(Ok(catalogue_d_exemple()));
+            self.catalogue_lu_a = Some(std::time::Instant::now());
+            return;
+        }
+        self.lecture_du_catalogue = true;
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        let socket = self.socket_agentd.clone();
+        std::thread::spawn(move || {
+            let lu = execution().and_then(|runtime| runtime.block_on(lire_catalogue(&socket)));
+            let _ = tx.send(Evenement::Catalogue(lu));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Envoie une commande sur un poids du catalogue à agentd, puis relit le catalogue.
+    pub fn commander_un_poids(&mut self, ctx: &egui::Context, commande: CommandeDePoids, id: &str) {
+        self.erreur_de_poids = None;
+        if self.demonstration {
+            return;
+        }
+        self.lecture_du_catalogue = true;
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        let socket = self.socket_agentd.clone();
+        let id = id.to_owned();
+        std::thread::spawn(move || {
+            let lu = execution().and_then(|runtime| {
+                runtime.block_on(async {
+                    if let Err(erreur) =
+                        appeler_agentd(&socket, commande.methode(), json!({"id": id})).await
+                    {
+                        let _ = tx.send(Evenement::ErreurDePoids(format!("{id} : {erreur}")));
+                    }
+                    lire_catalogue(&socket).await
+                })
+            });
+            let _ = tx.send(Evenement::Catalogue(lu));
+            ctx.request_repaint();
+        });
+    }
+
     /// Interroge le moteur en arrière-plan, avec un délai court pour une découverte.
     pub fn decouvrir(&mut self, ctx: &egui::Context) {
         if self.decouverte || self.demonstration {
@@ -307,6 +462,18 @@ impl Atelier {
                     self.servi = servi;
                     self.poids_lus = true;
                 }
+                Evenement::Catalogue(lu) => {
+                    let avant = self.poids_poses();
+                    self.catalogue = Some(lu);
+                    self.lecture_du_catalogue = false;
+                    self.catalogue_lu_a = Some(std::time::Instant::now());
+                    // Un poids posé ou retiré change les poids installés : on les relit.
+                    if self.poids_poses() != avant && self.poids_lus {
+                        self.lecture_des_poids = false;
+                        self.poids_lus = false;
+                    }
+                }
+                Evenement::ErreurDePoids(erreur) => self.erreur_de_poids = Some(erreur),
                 Evenement::Fragment(id, text) if id == self.numero => {
                     if let Some(tour) = self.tours.last_mut() {
                         tour.reponse.push_str(&text);
@@ -441,6 +608,68 @@ impl Atelier {
         history.push(json!({"role":"user","content":self.brouillon}));
         Ok((history, omis))
     }
+}
+
+impl Atelier {
+    /// Les entrées du catalogue posées sur la machine.
+    fn poids_poses(&self) -> Vec<String> {
+        match &self.catalogue {
+            Some(Ok(entrees)) => entrees
+                .iter()
+                .filter(|e| e.installed)
+                .map(|e| e.id.clone())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// Un catalogue d'exemple pour les scènes de démonstration : rien n'y est lu.
+fn catalogue_d_exemple() -> Vec<EntreeCatalogue> {
+    vec![
+        EntreeCatalogue {
+            id: "qwen3-1.7b-q8".into(),
+            name: "Qwen3 1.7B".into(),
+            quantization: Some("Q8_0".into()),
+            note: Some("Le modèle de réflexion par défaut.".into()),
+            installed: true,
+            ..EntreeCatalogue::default()
+        },
+        EntreeCatalogue {
+            id: "qwen3-0.6b-q8".into(),
+            name: "Qwen3 0.6B".into(),
+            quantization: Some("Q8_0".into()),
+            note: Some("Le modèle d'exécution du relais.".into()),
+            pull: Some(SuiviDePoids {
+                state: "running".into(),
+                received: 397_000_000,
+                total: Some(640_000_000),
+                error: None,
+            }),
+            ..EntreeCatalogue::default()
+        },
+    ]
+}
+
+async fn appeler_agentd(
+    socket: &std::path::Path,
+    methode: &str,
+    params: Value,
+) -> Result<Value, String> {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let client = prophet_ipc::Client::connect(socket)
+            .await
+            .map_err(|e| format!("agentd injoignable : {e}"))?;
+        client.call(methode, params).await.map_err(|e| e.message)
+    })
+    .await
+    .map_err(|_| "agentd ne répond pas".to_owned())?
+}
+
+async fn lire_catalogue(socket: &std::path::Path) -> Result<Vec<EntreeCatalogue>, String> {
+    let catalogue = appeler_agentd(socket, "model.catalog", json!({})).await?;
+    serde_json::from_value(catalogue["entries"].clone())
+        .map_err(|e| format!("catalogue illisible : {e}"))
 }
 
 impl Drop for Atelier {
