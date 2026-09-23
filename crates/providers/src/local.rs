@@ -65,7 +65,7 @@ impl LocalModel {
             .connect_timeout(Duration::from_secs(3).min(timeout))
             .timeout(timeout)
             .build()
-            .map_err(transport)?;
+            .map_err(request)?;
         Ok(Self {
             client,
             endpoint,
@@ -114,7 +114,7 @@ impl LocalModel {
             .client
             .get(self.url("models")?)
             .send()
-            .map_err(transport)?;
+            .map_err(request)?;
         let body = read_response(response)?;
         let items = body["data"]
             .as_array()
@@ -170,7 +170,7 @@ impl ModelClient for LocalModel {
             .post(self.url("chat/completions")?)
             .json(&body)
             .send()
-            .map_err(transport)?;
+            .map_err(request)?;
         let body = read_response(response)?;
         parse_turn(&body, &self.tools)
     }
@@ -623,7 +623,7 @@ impl AsyncLocalModel {
             .connect_timeout(Duration::from_secs(3).min(timeout))
             .timeout(timeout)
             .build()
-            .map_err(transport)?;
+            .map_err(request)?;
         Ok(Self {
             client,
             endpoint,
@@ -761,7 +761,7 @@ impl AsyncLocalModel {
             .json(&body)
             .send()
             .await
-            .map_err(transport)?;
+            .map_err(request)?;
         let status = response.status();
         if !status.is_success() {
             // Seul le refus de fenêtre est lu, et seulement ses nombres : le corps d'une erreur
@@ -791,7 +791,7 @@ pub(crate) async fn read_body(
     limit: usize,
 ) -> Result<Vec<u8>, DriverError> {
     let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(transport)? {
+    while let Some(chunk) = response.chunk().await.map_err(request)? {
         if bytes.len().saturating_add(chunk.len()) > limit {
             return Err(invalid("réponse du moteur trop volumineuse"));
         }
@@ -806,4 +806,28 @@ fn invalid(message: &str) -> DriverError {
 
 fn transport(error: impl std::fmt::Display) -> DriverError {
     DriverError::Io(format!("moteur local : {error}"))
+}
+
+/// Une panne d'échange HTTP dite à l'humain : où le moteur a été cherché et quoi faire, plutôt
+/// que la phrase de la bibliothèque. Ni requête ni réponse n'y figurent.
+pub(crate) fn request(error: reqwest::Error) -> DriverError {
+    let place = error
+        .url()
+        .and_then(|url| {
+            Some(format!(
+                " ({}:{})",
+                url.host_str()?,
+                url.port_or_known_default()?
+            ))
+        })
+        .unwrap_or_default();
+    DriverError::Io(if error.is_timeout() {
+        format!("le moteur local{place} n'a pas répondu dans le délai")
+    } else if error.is_connect() {
+        format!("le moteur local est injoignable{place} : lancez-le ou vérifiez son adresse")
+    } else if error.is_body() || error.is_decode() {
+        format!("la réponse du moteur local{place} s'est interrompue")
+    } else {
+        format!("moteur local : {error}")
+    })
 }

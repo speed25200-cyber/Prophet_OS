@@ -210,9 +210,24 @@ fn un_moteur_silencieux_est_interrompu_par_le_delai() {
     });
     let mut model = LocalModel::new(&endpoint, "model", Duration::from_millis(80)).unwrap();
     let started = std::time::Instant::now();
-    assert!(model.next_turn(&[]).is_err());
+    let error = model.next_turn(&[]).unwrap_err().to_string();
+    assert!(error.contains("délai"), "{error}");
     assert!(started.elapsed() < Duration::from_secs(2));
     waiting.join().unwrap();
+}
+
+#[test]
+fn un_moteur_eteint_est_dit_injoignable_en_francais() {
+    // Ce que lit l'humain quand le moteur n'écoute pas : où on l'a cherché et quoi faire, pas
+    // la phrase anglaise de la bibliothèque HTTP.
+    let mut model =
+        LocalModel::new("http://127.0.0.1:1/v1", "model", Duration::from_secs(2)).unwrap();
+    let error = model.next_turn(&[]).unwrap_err().to_string();
+    assert!(
+        error.contains("injoignable") && error.contains("127.0.0.1:1"),
+        "{error}"
+    );
+    assert!(!error.contains("error sending request"), "{error}");
 }
 
 #[test]

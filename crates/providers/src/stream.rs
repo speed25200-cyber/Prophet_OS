@@ -12,7 +12,7 @@ use tokio::sync::watch;
 use crate::DriverError;
 use crate::local::{
     MAX_ERROR_BYTES, MAX_FIT_ATTEMPTS, Overflow, SAFETY, local_endpoint, messages, read_body,
-    serialized_len,
+    request, serialized_len,
 };
 use crate::native::Usage;
 
@@ -71,7 +71,7 @@ impl ChatClient {
                 .connect_timeout(Duration::from_secs(3).min(timeout))
                 .timeout(timeout)
                 .build()
-                .map_err(io)?,
+                .map_err(request)?,
             endpoint,
         })
     }
@@ -86,10 +86,10 @@ impl ChatClient {
             .get(self.url("models")?)
             .send()
             .await
-            .map_err(io)?;
+            .map_err(request)?;
         status(&response)?;
         let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(io)? {
+        while let Some(chunk) = response.chunk().await.map_err(request)? {
             if bytes.len().saturating_add(chunk.len()) > MAX_FRAME {
                 return Err(bad("liste de modèles trop volumineuse"));
             }
@@ -175,7 +175,7 @@ impl ChatClient {
                 }))
                 .send()
                 .await
-                .map_err(io)?;
+                .map_err(request)?;
             if response.status() != reqwest::StatusCode::BAD_REQUEST {
                 status(&response)?;
                 break response;
@@ -195,7 +195,7 @@ impl ChatClient {
         let mut decoder = Decoder::default();
         let mut result = Assembly::default();
         let mut transferred = 0usize;
-        while let Some(chunk) = response.chunk().await.map_err(io)? {
+        while let Some(chunk) = response.chunk().await.map_err(request)? {
             transferred = transferred.saturating_add(chunk.len());
             if transferred > MAX_TRANSFER {
                 return Err(bad("flux du moteur trop volumineux"));
@@ -374,10 +374,6 @@ fn status(response: &reqwest::Response) -> Result<(), DriverError> {
 
 fn bad(message: &str) -> DriverError {
     DriverError::BadModelOutput(message.to_owned())
-}
-
-fn io(error: impl std::fmt::Display) -> DriverError {
-    DriverError::Io(format!("moteur local : {error}"))
 }
 
 #[cfg(test)]
