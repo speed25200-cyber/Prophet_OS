@@ -1404,7 +1404,7 @@ fn model_serve(id: &str, endpoint: &str, as_json: bool) -> anyhow::Result<String
     let modeles = moteur.router_models()?;
     let Some(modele) = providers::local::router_model_for(&modeles, &chemin).cloned() else {
         anyhow::bail!(
-            "le moteur ({endpoint}) ne connaît pas {} : il ne le sert que s'il lit le dossier des téléchargements, en mode routeur",
+            "le moteur ({endpoint}) ne connaît pas {} : son routeur lit le dossier des téléchargements à son démarrage ; redémarrez-le (systemctl restart prophet-local-engine), puis relancez cette commande",
             chemin.display()
         );
     };

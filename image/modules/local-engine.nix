@@ -305,8 +305,22 @@ in {
         min-p = 0
         presence-penalty = 1.5
       '';
-      prereglages = pkgs.writeText "prophet-modeles.ini"
-        (section cfg.model cfg.weights + "\n" + section cfg.executeModel cfg.executeWeights);
+      # La section globale `[*]` vaut pour tout modèle sans préréglage propre — les poids que
+      # `prophet model pull` pose dans le dossier des téléchargements (ADR 0046) : sans elle,
+      # un tel poids chargerait avec toute sa fenêtre d'entraînement, et la mémoire qui va avec.
+      globale = ''
+        [*]
+        jinja = 1
+        ctx-size = ${toString cfg.contextSize}
+        threads = ${toString cfg.threads}
+        parallel = 1
+        n-gpu-layers = ${couches}
+      '';
+      prereglages = pkgs.writeText "prophet-modeles.ini" (globale + "\n"
+        + section cfg.model cfg.weights + "\n" + section cfg.executeModel cfg.executeWeights);
+      # Le routeur lit ce dossier à son démarrage et refuse de démarrer s'il manque ;
+      # `prophet.nix` le crée (tmpfiles), avant ce service.
+      telecharges = "/var/lib/prophet/models/catalogue";
     in lib.mkIf (cfg.weights != null) {
       description = "Prophet OS — moteur local ${if cfg.gpu.enable then "sur carte graphique (Vulkan)" else "CPU"}";
       wantedBy = [ "multi-user.target" ];
@@ -319,7 +333,8 @@ in {
         ExecStart = utils.escapeSystemdExecArgs (
           [ "${engine}/bin/llama-server" "--host" "127.0.0.1" "--port" (toString cfg.port) ]
           ++ (if relais
-            then [ "--models-preset" (toString prereglages) "--models-max" "2" ]
+            then [ "--models-preset" (toString prereglages) "--models-max" "2"
+                   "--models-dir" telecharges ]
             else [ "--model" (toString cfg.weights) "--alias" cfg.model ] ++ reglages)
         );
         User = "prophet-model";

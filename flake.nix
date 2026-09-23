@@ -190,6 +190,10 @@
             inherit pkgs;
             engine = self.packages.${system}.llama-cpp;
           };
+          llama-router = import ./image/tests/llama-router.nix {
+            inherit pkgs;
+            engine = self.packages.${system}.llama-cpp;
+          };
           services = import ./image/tests/services.nix {
             inherit pkgs;
             module = nixosModules.prophet;

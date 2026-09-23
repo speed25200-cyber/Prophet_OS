@@ -52,6 +52,10 @@ jobs:
             cores = 2
       - name: Vérifier la grammaire et le parseur du moteur corrigé
         run: nix build .#checks.x86_64-linux.llama-tool-grammar --print-build-logs
+      # Le routeur tel que l'image le lance en mode relais : préréglages avec section globale et
+      # dossier des poids téléchargés (ADR 0046). Aucun essai en VM n'exerce ce mode.
+      - name: Vérifier le routeur du moteur et son dossier de poids
+        run: nix build .#checks.x86_64-linux.llama-router --print-build-logs
       # La variante Vulkan du moteur (ADR 0037) : aucun coureur n'a de carte, mais elle doit
       # compiler à chaque poussée, avec le même correctif, pour qu'une machine à carte la
       # reçoive sans surprise.
