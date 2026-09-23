@@ -70,7 +70,17 @@ téléchargé ou chargé, la mémoire qu'il demandera à la fenêtre du moteur e
 sait faire (outils, réflexion) — un agent reçoit le poids recommandé (`model.list`), et un
 modèle qui ferait paginer la machine n'est ni servi ni confié à une mission ; le moteur charge
 ses poids sans projection, ce qui a fait baisser sa mémoire résidente d'un tiers (ADR 0047) ;
-une mission échouée se relance par son contexte (« Relancer », `prophet task retry`).
+une mission échouée se relance par son contexte (« Relancer », `prophet task retry`). Un agent
+corrige un passage sans réécrire tout le fichier (`fs.edit`) ; `fs.read` compte les lignes pour
+lui ; un chemin refusé lui est rendu avec l'endroit où il peut agir, au lieu d'arrêter la
+mission (la révocation, elle, l'arrête) ; et s'il conclut sans avoir écrit le fichier que
+l'objectif nomme, le service le lui rappelle (ADR 0049 à 0051).
+
+Le [banc M13](docs/reports/banc-m13-2026-09-23.md) joue la suite de tâches avec le modèle de
+l'image, par Prophet et par une boucle nue qui appelle les mêmes outils sans capd ni journal :
+au quatrième passage, **8 réussites sur 45 par Prophet contre 5**, pour 0,28 s de processeur et
+47 Mo de services par mission. Il le rejoue à chaque poussée et publie chaque exécution : les
+outils appelés, la réponse du modèle, ce qui a été rappelé.
 
 Le code d'un agent tourne dans une microVM Firecracker **rendue en une dizaine de
 millisecondes** : sandboxd en tient deux prêtes, restaurées d'un instantané, et chaque exécution
