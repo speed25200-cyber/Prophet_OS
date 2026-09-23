@@ -1605,7 +1605,14 @@ donne le détail.
   lancée, publiée) et par une boucle nue qui appelle les mêmes outils sans registre ni capd —,
   et le banc mesure réussite, durée médiane et p95, tokens et étapes ; la CI le joue dans le
   travail « Poids du catalogue servis (réels) ». Sa plomberie est éprouvée sans modèle dans
-  `just check`.
+  `just check`. Premier passage (`f4d13c6`, Qwen3 1.7B Q8_0, sept tâches, une exécution) :
+  Prophet 0/7, boucle nue 2/7 — cinq échecs de chaque côté ont la même forme, le modèle lit puis
+  conclut par du texte sans écrire le fichier demandé ; l'écart tient à l'échantillonnage
+  (température 0,7). D'où l'ADR 0049 : agentd rappelle au modèle le livrable que l'objectif
+  nomme quand il conclut sans lui (deux fois au plus, chaque interrogation comptée, événement
+  `task.reminded`), et le banc relève outils appelés et réponse finale, rejoue chaque tâche
+  trois fois en CI et compte seize tâches (quinze sans navigateur), chaque vérificateur éprouvé
+  sur une solution juste et une fausse (`docs/reports/banc-m13-2026-09-23.md`).
 - Concurrence et annulation sur le vrai moteur (FRONTIER, moteurs locaux ; essai
   `deux_requetes_se_partagent_le_moteur_et_un_abandon_le_libere`, vert sur `dd5ce52`) : sur une
   instance à une place comme celle de l'image, deux requêtes simultanées aboutissent toutes

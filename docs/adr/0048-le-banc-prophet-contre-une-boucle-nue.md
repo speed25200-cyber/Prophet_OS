@@ -32,7 +32,10 @@ mesurant réussite, latences médiane et p95, tokens et interventions humaines.
   (une mission du banc n'a ni rôle ni relais : agentd ne lui donne pas de consigne). Le banc
   mesure donc le prix et le gain de ces couches, pas un autre agent.
 - **Mesures** : réussite par tâche (vérificateur), durée, tokens, étapes (Prophet) ou tours
-  (boucle nue) ; par côté, taux de réussite, durée médiane et p95, tokens moyens. `just bench`
+  (boucle nue), outils appelés et réponse finale du modèle ; par côté, taux de réussite, durée
+  médiane et p95, tokens moyens. Le modèle échantillonne comme l'image le règle (température
+  0,7) : chaque tâche se rejoue `PROPHET_BENCH_REPETITIONS` fois (trois en CI) et le bilan
+  compte les réussites par tâche sur ces passages. `just bench`
   les écrit dans `bench/results/<date>.json` ; le travail « Poids du catalogue servis (réels) »
   de la CI les joue à chaque poussée et les publie (résumé et artefact `banc-m13`).
 - **Le banc mesure, il ne juge pas** : il n'échoue que si rien n'a pu être joué. Un essai sans

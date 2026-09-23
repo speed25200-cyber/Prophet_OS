@@ -266,5 +266,10 @@ La découverte des capacités lit le gabarit de conversation (outils, réflexion
 moteur, deux requêtes simultanées aboutissent et une génération abandonnée par son client
 libère l'instance en moins d'une seconde ; et un essai prouve que la surface compose ses
 images pendant une génération en flux (médiane 6,0 ms en release). Le moteur charge désormais
-ses poids sans projection, ce qui a réduit sa mémoire résidente d'un tiers. Restent la VRAM, ses budgets et la matrice GPU, à mesurer sur une carte ; aucun
-critère complet de la version complète n'est coché.
+ses poids sans projection, ce qui a réduit sa mémoire résidente d'un tiers. La comparaison
+avec une base Linux commence (ADR 0048) : le banc M13 joue la suite de tâches avec le modèle
+de l'image, par Prophet et par une boucle nue qui appelle les mêmes outils sans capd ni
+journal. Le premier passage (0/7 contre 2/7) mesure surtout le petit modèle, qui lit puis
+conclut sans écrire le fichier demandé ; agentd le lui rappelle désormais (ADR 0049), et le
+banc rejoue chaque tâche trois fois. Restent la VRAM, ses budgets et la matrice GPU, à
+mesurer sur une carte ; aucun critère complet de la version complète n'est coché.

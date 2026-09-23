@@ -10,7 +10,10 @@ capture d'écran.
 à travers Prophet (capd, journal, espace de travail SFS publié par `task.apply`) et à travers
 une boucle nue qui appelle les mêmes outils fichiers sans registre — même modèle, mêmes outils,
 mêmes vérificateurs ([ADR 0048](../../docs/adr/0048-le-banc-prophet-contre-une-boucle-nue.md)).
-Il mesure réussite, durée médiane et p95, tokens et étapes, et écrit `bench/results/<date>.json`.
+Il mesure réussite, durée médiane et p95, tokens et étapes, relève pour chaque exécution les
+outils appelés, la réponse finale du modèle et les livrables que Prophet a rappelés
+([ADR 0049](../../docs/adr/0049-le-livrable-rappele-au-modele.md)), rejoue chaque tâche
+`PROPHET_BENCH_REPETITIONS` fois (trois en CI), et écrit `bench/results/<date>.json`.
 
 ```sh
 cargo test -p bench                         # suites sans modèle, plomberie du banc comprise

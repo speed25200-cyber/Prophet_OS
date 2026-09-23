@@ -12,11 +12,13 @@
 //! Lancé par `just bench` et par le travail « Poids du catalogue servis (réels) » de la CI :
 //! `PROPHET_TEST_LLAMA_SERVER` nomme le llama-server épinglé ; le modèle (`PROPHET_BENCH_MODEL`,
 //! `qwen3-1.7b-q8` par défaut, celui de l'image) se tire du catalogue du système par egress ;
-//! `PROPHET_BENCH_RESULTS` reçoit les résultats en JSON.
+//! `PROPHET_BENCH_REPETITIONS` (1 par défaut) rejoue chaque tâche, le modèle échantillonnant
+//! comme l'image le règle ; `PROPHET_BENCH_RESULTS` reçoit les résultats en JSON, avec, pour
+//! chaque exécution, les outils appelés et la réponse finale du modèle.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bench::tasks::{Requires, Task, suite};
@@ -34,13 +36,47 @@ use serde_json::{Value, json};
 const OUTILS: [&str; 5] = ["fs.read", "fs.write", "fs.list", "fs.stat", "fs.search"];
 
 /// Ce qu'une exécution a donné.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 struct Issue {
     reussie: bool,
     motif: Option<String>,
     secondes: f64,
     tokens: u64,
     etapes: u64,
+    /// Les outils appelés, dans l'ordre, marqués `✗` quand l'appel a échoué.
+    outils: Vec<String>,
+    /// La réponse finale du modèle, tronquée.
+    reponse: String,
+    /// Livrables rappelés par Prophet (ADR 0049) ; toujours vide pour la boucle nue.
+    rappels: Vec<String>,
+}
+
+/// La réponse finale, bornée pour le rapport.
+fn tronquer(texte: &str) -> String {
+    let texte = texte.trim();
+    match texte.char_indices().nth(240) {
+        Some((i, _)) => format!("{}…", &texte[..i]),
+        None => texte.to_owned(),
+    }
+}
+
+/// Les appels d'outils d'une mission, relus dans son journal.
+fn appels_du_journal(evenements: &Value) -> Vec<String> {
+    evenements
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .filter(|e| e["kind"] == "tool.result")
+        .map(|e| {
+            let outil = e["payload"]["tool"].as_str().unwrap_or("?");
+            if e["payload"]["ok"] == true {
+                outil.to_owned()
+            } else {
+                format!("{outil} ✗")
+            }
+        })
+        .collect()
 }
 
 /// capd, ledger et agentd pour un répertoire personnel neuf, reliés au moteur local.
@@ -51,6 +87,7 @@ struct Chaine {
     _ledger: Daemon,
     _agentd: Daemon,
     agents: Client,
+    journal: Client,
 }
 
 impl Chaine {
@@ -89,6 +126,7 @@ impl Chaine {
             &env,
         );
         let agents = agentd.joindre().await;
+        let journal = ledger.joindre().await;
         let home = home.canonicalize().unwrap();
         Self {
             _dir: dir,
@@ -97,6 +135,7 @@ impl Chaine {
             _ledger: ledger,
             _agentd: agentd,
             agents,
+            journal,
         }
     }
 }
@@ -166,12 +205,28 @@ async fn par_prophet(tache: &Task, endpoint: &str, modele: &str) -> Issue {
     .unwrap_or_else(|_| panic!("{id} : la mission ne finit pas"));
     let depense = &statut["budget"]["spent"];
     let mut issue = Issue {
-        reussie: false,
-        motif: None,
         secondes: debut.elapsed().as_secs_f64(),
         tokens: depense["tokens"].as_u64().unwrap_or(0),
         etapes: depense["steps"].as_u64().unwrap_or(0),
+        ..Issue::default()
     };
+    if let Ok(evenements) = chaine
+        .journal
+        .call("ledger.query", json!({"task": id}))
+        .await
+    {
+        issue.outils = appels_du_journal(&evenements);
+    }
+    if let Ok(resultat) = chaine.agents.call("task.result", json!({"id": id})).await {
+        issue.reponse = tronquer(resultat["text"].as_str().unwrap_or(""));
+        issue.rappels = resultat["reminded"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|r| r.as_str().map(ToOwned::to_owned))
+            .collect();
+    }
     if statut["state"] != "done" {
         issue.motif = Some(format!(
             "mission {} : {}",
@@ -205,6 +260,7 @@ impl ResourceAccess for ToutPermis {
 struct OutilsNus {
     outils: Vec<Box<dyn Tool>>,
     contexte: ToolContext,
+    appels: Arc<Mutex<Vec<String>>>,
 }
 
 impl OutilsNus {
@@ -241,6 +297,7 @@ impl OutilsNus {
                 sandbox_level: 0,
                 step: 1,
             },
+            appels: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -262,9 +319,15 @@ impl OutilsNus {
 impl ToolExecutor for OutilsNus {
     fn call(&self, tool: &str, arguments: &Value) -> (bool, Value) {
         let Some(outil) = self.outils.iter().find(|o| o.spec().name == tool) else {
+            self.appels.lock().unwrap().push(format!("{tool} ✗"));
             return (false, json!({"code":"NotFound","detail":"outil inconnu"}));
         };
         let resultat = outil.call_checked(arguments, &self.contexte, &ToutPermis);
+        self.appels.lock().unwrap().push(if resultat.is_error {
+            format!("{tool} ✗")
+        } else {
+            tool.to_owned()
+        });
         (
             !resultat.is_error,
             resultat
@@ -349,6 +412,7 @@ fn par_la_boucle_nue(tache: &Task, endpoint: &str, modele: &str) -> Issue {
         nom: modele.into(),
     };
     let workdir = outils.contexte.workdir.clone();
+    let appels = outils.appels.clone();
     let mut boucle = NativeDriver::new(Box::new(modele_nu), Box::new(outils));
     let debut = Instant::now();
     let run = boucle
@@ -371,12 +435,17 @@ fn par_la_boucle_nue(tache: &Task, endpoint: &str, modele: &str) -> Issue {
         })
         .unwrap()
         .run;
+    let mut reponse = String::new();
     let fin = loop {
-        let evenements = boucle.poll(&run).unwrap();
-        if let Some(fin) = evenements.into_iter().find_map(|e| match e {
-            DriverEvent::Done { status, reason, .. } => Some((status, reason)),
-            _ => None,
-        }) {
+        let mut fin = None;
+        for evenement in boucle.poll(&run).unwrap() {
+            match evenement {
+                DriverEvent::Text { text, .. } => reponse = text,
+                DriverEvent::Done { status, reason, .. } => fin = Some((status, reason)),
+                _ => {}
+            }
+        }
+        if let Some(fin) = fin {
             break fin;
         }
         assert!(
@@ -385,11 +454,12 @@ fn par_la_boucle_nue(tache: &Task, endpoint: &str, modele: &str) -> Issue {
         );
     };
     let mut issue = Issue {
-        reussie: false,
-        motif: None,
         secondes: debut.elapsed().as_secs_f64(),
         tokens: tokens.load(Ordering::Relaxed),
         etapes: tours.load(Ordering::Relaxed),
+        outils: appels.lock().unwrap().clone(),
+        reponse: tronquer(&reponse),
+        ..Issue::default()
     };
     if fin.0 != RunStatus::Ok {
         issue.motif = Some(format!(
@@ -530,6 +600,19 @@ async fn tirer(id: &str) -> (tempfile::TempDir, PathBuf) {
     (dir, chemin)
 }
 
+/// Réussites, durées et tokens d'un côté du banc, sur toutes ses exécutions.
+fn resumer(issues: &[&Issue]) -> Value {
+    let durees: Vec<f64> = issues.iter().map(|i| i.secondes).collect();
+    json!({
+        "success": issues.iter().filter(|i| i.reussie).count(),
+        "runs": issues.len(),
+        "median_seconds": centile(&durees, 0.5),
+        "p95_seconds": centile(&durees, 0.95),
+        "mean_tokens": issues.iter().map(|i| i.tokens).sum::<u64>() / issues.len().max(1) as u64,
+        "reminded_runs": issues.iter().filter(|i| !i.rappels.is_empty()).count(),
+    })
+}
+
 fn centile(valeurs: &[f64], p: f64) -> f64 {
     let mut v = valeurs.to_vec();
     v.sort_by(f64::total_cmp);
@@ -560,72 +643,102 @@ async fn la_suite_se_joue_par_prophet_et_par_une_boucle_nue() {
         .into_iter()
         .filter(|t| t.requires == Requires::Nothing)
         .collect();
-    let mut lignes = Vec::new();
-    for tache in &taches {
-        let prophet = par_prophet(tache, &endpoint, &alias).await;
-        let (endpoint_nu, alias_nu, id_tache) = (endpoint.clone(), alias.clone(), tache.id);
-        let nue = std::thread::spawn(move || {
-            let tache = suite().into_iter().find(|t| t.id == id_tache).unwrap();
-            par_la_boucle_nue(&tache, &endpoint_nu, &alias_nu)
-        })
-        .join()
-        .unwrap();
-        eprintln!(
-            "mesure : banc {} | Prophet {} {:.1} s, {} tokens, {} étapes{} | nue {} {:.1} s, {} tokens, {} tours{}",
-            tache.id,
-            if prophet.reussie { "✓" } else { "✗" },
-            prophet.secondes,
-            prophet.tokens,
-            prophet.etapes,
-            prophet
-                .motif
-                .as_deref()
-                .map_or_else(String::new, |m| format!(" ({m})")),
-            if nue.reussie { "✓" } else { "✗" },
-            nue.secondes,
-            nue.tokens,
-            nue.etapes,
-            nue.motif
-                .as_deref()
-                .map_or_else(String::new, |m| format!(" ({m})")),
-        );
-        lignes.push(
-            json!({"task": tache.id, "family": tache.family, "prophet": prophet, "bare": nue}),
-        );
+    let repetitions: u32 = std::env::var("PROPHET_BENCH_REPETITIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(1);
+    let mut executions: Vec<(&Task, u32, Issue, Issue)> = Vec::new();
+    for passage in 1..=repetitions {
+        for tache in &taches {
+            let prophet = par_prophet(tache, &endpoint, &alias).await;
+            let (endpoint_nu, alias_nu, id_tache) = (endpoint.clone(), alias.clone(), tache.id);
+            let nue = std::thread::spawn(move || {
+                let tache = suite().into_iter().find(|t| t.id == id_tache).unwrap();
+                par_la_boucle_nue(&tache, &endpoint_nu, &alias_nu)
+            })
+            .join()
+            .unwrap();
+            let decrire = |issue: &Issue, tours: &str| {
+                format!(
+                    "{} {:.1} s, {} tokens, {} {tours}{}{} [{}] « {} »",
+                    if issue.reussie { "✓" } else { "✗" },
+                    issue.secondes,
+                    issue.tokens,
+                    issue.etapes,
+                    issue
+                        .motif
+                        .as_deref()
+                        .map_or_else(String::new, |m| format!(" ({m})")),
+                    if issue.rappels.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", rappel : {}", issue.rappels.join(", "))
+                    },
+                    issue.outils.join(" → "),
+                    issue.reponse.replace('\n', " "),
+                )
+            };
+            eprintln!(
+                "mesure : banc {} #{passage} | Prophet {} | nue {}",
+                tache.id,
+                decrire(&prophet, "étapes"),
+                decrire(&nue, "tours"),
+            );
+            executions.push((tache, passage, prophet, nue));
+        }
     }
 
-    let resume = |cote: &str| {
-        let issues: Vec<Issue> = lignes
-            .iter()
-            .map(|l| serde_json::from_value::<Value>(l[cote].clone()).unwrap())
-            .map(|v| Issue {
-                reussie: v["reussie"] == true,
-                motif: None,
-                secondes: v["secondes"].as_f64().unwrap_or(0.0),
-                tokens: v["tokens"].as_u64().unwrap_or(0),
-                etapes: v["etapes"].as_u64().unwrap_or(0),
+    let par_tache: Vec<Value> = taches
+        .iter()
+        .map(|tache| {
+            let siennes: Vec<_> = executions
+                .iter()
+                .filter(|(t, ..)| t.id == tache.id)
+                .collect();
+            json!({
+                "task": tache.id,
+                "family": tache.family,
+                "prophet_success": siennes.iter().filter(|(_, _, p, _)| p.reussie).count(),
+                "bare_success": siennes.iter().filter(|(_, _, _, n)| n.reussie).count(),
+                "runs": siennes.len(),
             })
-            .collect();
-        let durees: Vec<f64> = issues.iter().map(|i| i.secondes).collect();
-        json!({
-            "success": issues.iter().filter(|i| i.reussie).count(),
-            "tasks": issues.len(),
-            "median_seconds": centile(&durees, 0.5),
-            "p95_seconds": centile(&durees, 0.95),
-            "mean_tokens": issues.iter().map(|i| i.tokens).sum::<u64>() / issues.len().max(1) as u64,
         })
-    };
-    let bilan =
-        json!({"model": id, "prophet": resume("prophet"), "bare": resume("bare"), "tasks": lignes});
+        .collect();
+    let lignes: Vec<Value> = executions
+        .iter()
+        .map(|(tache, passage, prophet, nue)| {
+            json!({"task": tache.id, "family": tache.family, "repetition": passage, "prophet": prophet, "bare": nue})
+        })
+        .collect();
+    let bilan = json!({
+        "model": id,
+        "repetitions": repetitions,
+        "prophet": resumer(&executions.iter().map(|e| &e.2).collect::<Vec<_>>()),
+        "bare": resumer(&executions.iter().map(|e| &e.3).collect::<Vec<_>>()),
+        "by_task": par_tache,
+        "runs": lignes,
+    });
+    for ligne in &par_tache {
+        eprintln!(
+            "mesure : banc {} — Prophet {}/{}, nue {}/{}",
+            ligne["task"].as_str().unwrap_or("?"),
+            ligne["prophet_success"],
+            ligne["runs"],
+            ligne["bare_success"],
+            ligne["runs"],
+        );
+    }
     eprintln!(
-        "mesure : banc {id} — Prophet {}/{} réussies, médiane {:.1} s, p95 {:.1} s, {} tokens en moyenne ; nue {}/{}, médiane {:.1} s, p95 {:.1} s, {} tokens",
+        "mesure : banc {id} — Prophet {}/{} réussies ({} rappelées), médiane {:.1} s, p95 {:.1} s, {} tokens en moyenne ; nue {}/{}, médiane {:.1} s, p95 {:.1} s, {} tokens",
         bilan["prophet"]["success"],
-        bilan["prophet"]["tasks"],
+        bilan["prophet"]["runs"],
+        bilan["prophet"]["reminded_runs"],
         bilan["prophet"]["median_seconds"].as_f64().unwrap_or(0.0),
         bilan["prophet"]["p95_seconds"].as_f64().unwrap_or(0.0),
         bilan["prophet"]["mean_tokens"],
         bilan["bare"]["success"],
-        bilan["bare"]["tasks"],
+        bilan["bare"]["runs"],
         bilan["bare"]["median_seconds"].as_f64().unwrap_or(0.0),
         bilan["bare"]["p95_seconds"].as_f64().unwrap_or(0.0),
         bilan["bare"]["mean_tokens"],
@@ -635,7 +748,7 @@ async fn la_suite_se_joue_par_prophet_et_par_une_boucle_nue() {
     }
     // Le banc mesure ; il n'échoue que si rien n'a pu être joué.
     assert!(
-        bilan["prophet"]["tasks"].as_u64().unwrap_or(0) > 0,
+        bilan["prophet"]["runs"].as_u64().unwrap_or(0) > 0,
         "aucune tâche jouée"
     );
 }
@@ -705,6 +818,9 @@ async fn le_banc_joue_une_tache_des_deux_cotes_avec_un_faux_moteur() {
     let prophet = par_prophet(&tache, &endpoint, "faux").await;
     assert!(prophet.reussie, "{prophet:?}");
     assert!(prophet.tokens > 0 && prophet.etapes > 0, "{prophet:?}");
+    assert_eq!(prophet.outils, ["fs.write"], "{prophet:?}");
+    assert_eq!(prophet.reponse, "Le total est écrit.");
+    assert!(prophet.rappels.is_empty(), "{prophet:?}");
     let e = endpoint.clone();
     let nue = std::thread::spawn(move || {
         let tache = suite()
@@ -718,11 +834,22 @@ async fn le_banc_joue_une_tache_des_deux_cotes_avec_un_faux_moteur() {
     assert!(nue.reussie, "{nue:?}");
     assert_eq!(nue.tokens, 30 + 12 + 40 + 5, "{nue:?}");
     assert_eq!(nue.etapes, 2);
+    assert_eq!(nue.outils, ["fs.write"], "{nue:?}");
+    assert_eq!(nue.reponse, "Le total est écrit.");
     // Une tâche que le faux moteur ne sait pas faire échoue au vérificateur, des deux côtés.
     let autre = suite()
         .into_iter()
         .find(|t| t.id == "total-des-ventes")
         .unwrap();
+    // Son écriture sort de la portée de la mission : capd la refuse, la mission s'arrête.
     let echec = par_prophet(&autre, &endpoint, "faux").await;
     assert!(!echec.reussie, "{echec:?}");
+    assert_eq!(echec.outils, ["fs.write ✗"], "{echec:?}");
+    assert!(
+        echec
+            .motif
+            .as_deref()
+            .is_some_and(|m| m.contains("PolicyDenied")),
+        "{echec:?}"
+    );
 }
