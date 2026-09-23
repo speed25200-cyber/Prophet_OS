@@ -337,6 +337,14 @@ fn une_edition_ambigue_ou_introuvable_est_refusee_sans_rien_ecrire() {
         json!({"path":"~/docs/liste.txt","old":"beurre","new":"x"}),
     );
     assert_eq!(absente.structured.unwrap()["code"], "Invalid");
+    // Éditer un fichier qui n'existe pas encore dit d'utiliser fs.write.
+    let nouveau = m.call(
+        "fs.edit",
+        json!({"path":"~/docs/out/nouveau.md","old":"x","new":"y"}),
+    );
+    let d = nouveau.structured.unwrap();
+    assert_eq!(d["code"], "NotFound", "{d}");
+    assert!(d["detail"].as_str().unwrap().contains("fs.write"), "{d}");
     assert!(!m.work.join("docs/liste.txt").exists());
     let toutes = m.call(
         "fs.edit",

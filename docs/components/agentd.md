@@ -134,7 +134,10 @@ aucun droit : l'écriture passe par le même outil, le même jeton et la même p
 Un appel refusé sur sa cible (un chemin hors de la portée) revient au modèle avec son code
 `PolicyDenied` et les motifs où la mission peut agir ; après chaque refus, agentd redemande à capd
 le droit d'appeler l'outil : refusé (jeton révoqué ou expiré), la mission s'arrête aussitôt. Au
-troisième refus, ou à la première panne (`Internal`), elle s'arrête aussi (ADR 0050).
+troisième refus, ou à la première panne (`Internal`), elle s'arrête aussi (ADR 0050). Quand le
+même outil échoue de la même façon deux fois de suite, le résultat rendu au modèle porte
+`repeated` et une note qui lui demande de changer d'approche ; au cinquième appel d'outil
+échoué de suite, la mission s'arrête (ADR 0052).
 
 Le statut d'annulation final confirme la sortie du travailleur. Les fichiers déjà préparés
 restent dans le travail SFS. `result` expose le diff à une fin normale, sans appliquer les

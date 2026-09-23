@@ -628,7 +628,19 @@ fn edit(view: &View<'_>, relative: &Path, logical: &Path, args: &Value) -> Resul
     if !view.permits(Act::Write, relative) {
         return Err(denied());
     }
-    let chunk = view.read_from(relative, 0, MAX_WRITE)?;
+    // Un modèle essaie souvent d'« éditer » le fichier qu'il doit créer : l'erreur le dit et
+    // nomme l'outil qui convient, sinon il recommence à l'identique.
+    let chunk = match view.read_from(relative, 0, MAX_WRITE) {
+        Err(Failure(ErrorCode::NotFound, _)) => {
+            return Err(Failure(
+                ErrorCode::NotFound,
+                "ce fichier n'existe pas encore : fs.edit ne modifie qu'un fichier existant ; \
+                 pour le créer, écrivez-le en entier avec fs.write"
+                    .into(),
+            ));
+        }
+        other => other?,
+    };
     if chunk.next.is_some() {
         return Err(Failure(
             ErrorCode::BudgetExceeded,

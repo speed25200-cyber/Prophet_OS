@@ -1631,7 +1631,14 @@ donne le détail.
   exécutions rappelées écrivent ; Prophet paie ses réussites en calcul du modèle (96 s de
   processeur moteur contre 48, 1,7 fois les tokens), ses services restant à 0,28 s et 47 Mo.
   ADR 0051 : `fs.edit` (remplacer un passage exact, sous le droit de `fs.write`) et, dans les
-  contextes de l'image, `fs.list`, `fs.stat`, `fs.search` et `fs.edit`.
+  contextes de l'image, `fs.list`, `fs.stat`, `fs.search` et `fs.edit`. Cinquième passage
+  (`06c432d`) : **Prophet 12/45, boucle nue 9/45** ; `fs.edit` débloque « corriger-une-faute »
+  (3/3 des deux côtés), la recherche d'un nom dans le contenu « trouver-le-contrat » (3/3), le
+  second rappel « ne-pas-toucher-au-reste » (2/3) ; mais le modèle essaie d'éditer le fichier à
+  créer et recommence jusqu'à 24 fois (p95 170 s). ADR 0052 : `fs.edit` sur un fichier absent
+  renvoie vers `fs.write`, note au deuxième échec identique, arrêt au cinquième échec de suite.
+  La surface montre le parcours en frise (refus et rappels à leur place) et propose trois
+  départs à un dialogue vide.
 - Concurrence et annulation sur le vrai moteur (FRONTIER, moteurs locaux ; essai
   `deux_requetes_se_partagent_le_moteur_et_un_abandon_le_libere`, vert sur `dd5ce52`) : sur une
   instance à une place comme celle de l'image, deux requêtes simultanées aboutissent toutes

@@ -64,7 +64,7 @@ file_tool!(
 file_tool!(
     Edit,
     "fs.edit",
-    "Remplace un passage exact d'un fichier texte et écrit le résultat dans l'espace de travail de la tâche, comme fs.write, sans recopier le reste du fichier. `old` doit apparaître une seule fois (sinon allongez-le, ou passez `all: true` pour remplacer chaque occurrence). Rend le nombre de remplacements. La validation des changements reste explicite.",
+    "Remplace un passage exact d'un fichier texte et écrit le résultat dans l'espace de travail de la tâche, comme fs.write, sans recopier le reste du fichier. `old` doit apparaître une seule fois (sinon allongez-le, ou passez `all: true` pour remplacer chaque occurrence). Rend le nombre de remplacements. Ne crée pas de fichier : pour en créer un, utilisez fs.write. La validation des changements reste explicite.",
     "fs.write",
     Edit,
     "path",

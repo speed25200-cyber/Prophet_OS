@@ -1594,3 +1594,59 @@ async fn une_conclusion_sans_le_fichier_demande_est_rappelee_et_la_mission_le_pr
     );
     assert_eq!(rappele["payload"]["nth"], 1);
 }
+
+#[tokio::test]
+async fn un_echec_repete_est_signale_au_modele_et_cinq_de_suite_arretent_la_mission() {
+    let absent = |n| appel_d_outil(n, "fs.read", json!({"path":"~/docs/absent.txt"}));
+    let (endpoint, corps) = modele_scripte(vec![
+        absent(1),
+        absent(2),
+        absent(3),
+        absent(4),
+        absent(5),
+        json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"Jamais atteint."}}],"usage":{"prompt_tokens":10,"completion_tokens":2}}),
+    ])
+    .await;
+    let chain = Chain::new(&endpoint).await;
+    chain
+        .plan_scopes("m", "Lis la note", 20000, &["~/docs"])
+        .await;
+    chain
+        .agents
+        .call("task.start", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    let status = chain.wait_terminal().await;
+    assert_eq!(status["state"], "failed", "{status}");
+    assert!(
+        status["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("5 appels d'outil ont échoué de suite")),
+        "{status}"
+    );
+    let corps = corps.lock().unwrap().clone();
+    assert_eq!(
+        corps.len(),
+        5,
+        "le modèle n'est pas interrogé après le cinquième échec"
+    );
+    let resultat = |requete: &Value| -> String {
+        requete["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|m| m["role"] == "tool")
+            .unwrap()["content"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    // Le premier échec est rendu tel quel ; le deuxième, identique, porte la note.
+    assert!(!resultat(&corps[1]).contains("changez d'approche"));
+    assert!(
+        resultat(&corps[2]).contains("changez d'approche"),
+        "{}",
+        resultat(&corps[2])
+    );
+}

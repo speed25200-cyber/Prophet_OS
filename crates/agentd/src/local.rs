@@ -761,7 +761,7 @@ impl Mission {
         };
         let mut driver = NativeDriver::new(
             Box::new(crate::livrables::Rappel::new(metered, attendus, consigne)),
-            Box::new(executor),
+            Box::new(crate::garde::Garde::new(Box::new(executor))),
         );
         let request = StartRequest {
             driver: "prophet-agent".into(),
@@ -784,9 +784,31 @@ impl Mission {
         let mut text = String::new();
         let mut calls = 0;
         let mut refus = 0;
+        let mut echecs = 0;
         loop {
             control.check_live()?;
             for event in driver.poll(&run).map_err(|e| e.to_string())? {
+                match &event {
+                    // Une décision humaine attendue n'est pas un échec : le modèle attend et
+                    // réessaie (ADR 0041). Tout autre échec compte ; un succès remet à zéro.
+                    DriverEvent::ToolResult { ok: true, .. } => echecs = 0,
+                    DriverEvent::ToolResult {
+                        ok: false,
+                        error: Some(code),
+                        ..
+                    } if code == "ApprovalRequired" => {}
+                    DriverEvent::ToolResult {
+                        ok: false, tool, ..
+                    } => {
+                        echecs += 1;
+                        if echecs >= crate::garde::ECHECS_MAX {
+                            return Err(format!(
+                                "{tool} interrompu : {echecs} appels d'outil ont échoué de suite"
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
                 match event {
                     DriverEvent::ToolCall { .. } => calls += 1,
                     DriverEvent::ToolResult {
