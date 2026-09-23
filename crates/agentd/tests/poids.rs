@@ -622,8 +622,8 @@ async fn le_critere_pull_serve_puis_une_completion() {
         .arg(&prereglages)
         .args(["--models-max", "1", "--models-dir"])
         .arg(chaine.poids())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(journal_du_routeur(&chaine, port).0)
+        .stderr(journal_du_routeur(&chaine, port).1)
         .kill_on_drop(true)
         .spawn()
         .unwrap();
@@ -698,10 +698,36 @@ async fn le_critere_pull_serve_puis_une_completion() {
             servi["memory"]["total"], r.rss, r.anonyme, r.fichier, r.pic
         );
     }
+    for ligne in bilan_du_moteur(&chaine, port) {
+        eprintln!("mesure : moteur ({id}) : {ligne}");
+    }
     let _ = routeur.kill().await;
 }
 
-/// Le routeur épinglé, lancé comme l'image le lance, sur le dossier des téléchargements.
+/// Le journal d'un routeur : sa sortie et ses erreurs dans le même fichier, en ajout.
+fn journal_du_routeur(chaine: &Chaine, port: u16) -> (std::fs::File, std::fs::File) {
+    let fichier = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(chaine.dir.path().join(format!("routeur-{port}.log")))
+        .unwrap();
+    (fichier.try_clone().unwrap(), fichier)
+}
+
+/// Ce que le moteur dit avoir réservé, lu dans son journal : tampons des poids (projetés,
+/// réarrangés), cache KV, calcul, sorties. C'est l'étalon de `providers::memory`.
+fn bilan_du_moteur(chaine: &Chaine, port: u16) -> Vec<String> {
+    std::fs::read_to_string(chaine.dir.path().join(format!("routeur-{port}.log")))
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| l.contains("buffer size") || l.contains("repack"))
+        .map(|l| l.trim().to_owned())
+        .take(40)
+        .collect()
+}
+
+/// Le routeur épinglé, lancé comme l'image le lance, sur le dossier des téléchargements. Son
+/// journal va dans `routeur-<port>.log` : le moteur y dit ce qu'il a réservé.
 async fn routeur(moteur: &str, chaine: &Chaine, port: u16) -> tokio::process::Child {
     let prereglages = chaine.dir.path().join("prereglages.ini");
     std::fs::write(
@@ -715,8 +741,8 @@ async fn routeur(moteur: &str, chaine: &Chaine, port: u16) -> tokio::process::Ch
         .arg(&prereglages)
         .args(["--models-max", "1", "--models-dir"])
         .arg(chaine.poids())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(journal_du_routeur(chaine, port).0)
+        .stderr(journal_du_routeur(chaine, port).1)
         .kill_on_drop(true)
         .spawn()
         .unwrap();
@@ -914,6 +940,9 @@ async fn plusieurs_familles_se_servent_et_repondent() {
             r.pic,
             estimee as f64 / r.rss.max(1) as f64
         );
+        for ligne in bilan_du_moteur(&chaine, port) {
+            eprintln!("mesure : moteur ({id}) : {ligne}");
+        }
         assert!(
             estimee >= r.anonyme,
             "{id} : estimée {estimee}, mais {} de mémoire anonyme",

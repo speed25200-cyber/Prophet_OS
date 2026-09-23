@@ -20,19 +20,27 @@ disque (`docs/installation.md`, section 3) dit, depuis la clé, ce qu'une machin
 ## Modèles locaux sur processeur
 
 Vus sur le coureur de la CI (quatre cœurs x86-64, sans carte), travail « Poids du catalogue
-servis (réels) », `c44a349` : chaque poids tiré de Hugging Face par egress, vérifié par son
-empreinte, servi par le routeur épinglé (fenêtre 4 096, section `[*]` de l'image) et interrogé.
-Les débits sont ceux d'une seule requête ; la mémoire et la VRAM n'y sont pas mesurées.
+servis (réels) » : chaque poids tiré de Hugging Face par egress, vérifié par son empreinte,
+servi par le routeur épinglé et interrogé. Débits et réponses de `c44a349` (fenêtre 4 096) ;
+mémoire de `89b1b3a`, fenêtre 2 048 : l'estimation de `providers::memory` (ADR 0047) face à la
+mémoire résidente de l'instance du moteur une fois la réponse rendue, dont sa part anonyme.
 
-| Entrée du catalogue | Taille | Réponse | Génération | Vu |
-|---|---|---|---|---|
-| `qwen3-8b-q4` (Qwen3 8B, Q4_K_M) | 5,0 Go | « bonjour », 2,8 s | 7,4 tokens/s (relevé sur `4ecf15c`) | hôte CI |
-| `granite-3.3-2b-q4` (IBM Granite 3.3 2B) | 1,5 Go | « Paris. », 2,5 s | 21 tokens/s | hôte CI |
-| `smollm2-1.7b-q4` (SmolLM2 1.7B) | 1,1 Go | « Paris », 1,2 s | 31 tokens/s | hôte CI |
-| `phi-3-mini-q4` (Phi-3 mini 4k) | 2,4 Go | « Paris », 0,9 s | 13 tokens/s | hôte CI |
-| `llama-3.2-3b-q4` (Llama 3.2 3B) | 2,0 Go | « Paris. », 2,2 s | 17 tokens/s | hôte CI |
-| `qwen3-1.7b-q8`, `qwen3-0.6b-q8` (modèles du relais) | 1,8 et 0,6 Go | missions réelles | — | VM (mission locale sous NixOS) |
-| Tout modèle, sur carte (Vulkan) | — | — | — | non |
+| Entrée du catalogue | Taille | Réponse | Génération | Mémoire estimée | Résidente (anonyme) | Vu |
+|---|---|---|---|---|---|---|
+| `qwen3-8b-q4` (Qwen3 8B, Q4_K_M) | 5,0 Go | « bonjour », 2,8 s | 7,4 tokens/s (relevé sur `4ecf15c`) | 5,8 Go | 8,8 Go (3,7 Go) | hôte CI |
+| `granite-3.3-2b-q4` (IBM Granite 3.3 2B) | 1,5 Go | « Paris. », 2,5 s | 21 tokens/s | 2,0 Go | 3,0 Go (1,5 Go) | hôte CI |
+| `smollm2-1.7b-q4` (SmolLM2 1.7B) | 1,1 Go | « Paris », 1,2 s | 31 tokens/s | 1,8 Go | 2,4 Go (1,3 Go) | hôte CI |
+| `phi-3-mini-q4` (Phi-3 mini 4k) | 2,4 Go | « Paris », 0,9 s | 13 tokens/s | 3,5 Go | 4,6 Go (2,1 Go) | hôte CI |
+| `llama-3.2-3b-q4` (Llama 3.2 3B) | 2,0 Go | « Paris. », 2,2 s | 17 tokens/s | 2,7 Go | 3,9 Go (1,8 Go) | hôte CI |
+| `qwen3-1.7b-q8`, `qwen3-0.6b-q8` (modèles du relais) | 1,8 et 0,6 Go | missions réelles | — | — | — | VM (mission locale sous NixOS) |
+| Tout modèle, sur carte (Vulkan) | — | — | — | — | — | non |
+
+La mémoire résidente dépasse l'estimation de 30 à 50 % : la part anonyme dépasse le cache KV et
+le calcul d'environ les deux tiers du fichier, tandis que le fichier entier reste projeté.
+L'hypothèse — llama.cpp recopie les poids Q4_K dans un format réarrangé pour le processeur et
+garde le fichier projeté, dont les pages propres se récupèrent sous pression — est à confirmer
+par le bilan que le moteur écrit dans son journal, relevé par le même essai. La VRAM n'est pas
+mesurée.
 
 ## Affichage
 

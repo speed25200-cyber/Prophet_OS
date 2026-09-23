@@ -1584,7 +1584,16 @@ donne le détail.
   par l'essai `needs_network` : la mémoire se dit avant de télécharger (`prophet model catalog`,
   page Modèles). `prophet model pull` refuse, avant
   toute requête, ce qui ne tient pas sur le disque. L'essai des familles en CI relève la
-  mémoire résidente de chaque instance du vrai llama-server et la confronte à l'estimation.
+  mémoire résidente de chaque instance du vrai llama-server et la confronte à l'estimation :
+  vert sur `89b1b3a` — l'estimation couvre la part anonyme (Qwen3 8B : 5,8 Go estimés, 3,7 Go
+  anonymes), la résidente totale la dépasse de 30 à 50 % (8,8 Go), le fichier restant projeté
+  pendant qu'une copie réarrangée des poids sert le calcul (hypothèse, bilan du moteur relevé
+  au passage suivant ; matrice matérielle).
+- Découverte des capacités (FRONTIER, moteurs locaux) : l'en-tête GGUF dit ce que le gabarit de
+  conversation déclare — appels d'outils, réflexion. Relevé sur les huit fichiers du catalogue :
+  Qwen3, Granite 3.3 et Llama 3.2 déclarent les outils, Phi-3 mini et SmolLM2 non. Les agents le
+  lisent dans `model.list` (`template`) avant de confier une étape ; `prophet model ls` et la
+  page Modèles le montrent.
 - Pas de blocage pendant l'inférence (FRONTIER, interface) : un essai rend la page Conversation
   pendant qu'un moteur répond en flux (30 fragments espacés de 60 ms) et mesure chaque image.
   En release sur lavapipe, ici : médiane 0,5 ms, p95 0,6 ms, maximum 5,3 ms, la réponse

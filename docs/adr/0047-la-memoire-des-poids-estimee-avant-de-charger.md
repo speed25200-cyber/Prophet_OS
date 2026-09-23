@@ -71,6 +71,17 @@ mémoire vive non.
   (`/proc/<pid>/status`) et exige que l'estimation ne manque pas la mémoire anonyme (cache KV,
   calcul, poids recopiés par le moteur) ni ne dépasse 1,5 fois ce que le moteur tient. Les
   constantes se recalibrent sur ces relevés.
+- Premier passage (`89b1b3a`, fenêtre 2 048, quatre cœurs sans carte) : **vert**. L'estimation
+  couvre la mémoire anonyme de chaque instance (Qwen3 8B : 5,8 Go estimés, 3,7 Go anonymes),
+  mais la mémoire résidente totale la dépasse de 30 à 50 % (8,8 Go pour Qwen3 8B ; rapport
+  estimation / résident de 0,66 à 0,76 sur les quatre autres familles) : la part anonyme dépasse
+  cache KV et calcul d'environ les deux tiers du fichier, et le fichier entier reste projeté.
+  Hypothèse : le processeur reçoit une copie réarrangée des poids Q4_K (« repack » de llama.cpp)
+  pendant que la projection du fichier reste résidente ; ses pages propres se récupèrent sous
+  pression, et la mémoire de travail vaut alors l'estimation. L'essai relève désormais le bilan
+  que le moteur écrit dans son journal (tampons projetés et réarrangés, cache KV, calcul) pour
+  la confirmer ou la corriger ; si elle tient, charger sans projection (`--no-mmap`) rendrait la
+  mémoire résidente égale à l'estimation, et l'OOM ne compterait plus deux fois les poids.
 - Les architectures à fenêtre glissante (Gemma 3) ou à attention latente (DeepSeek) ont un
   cache plus petit que la formule : l'estimation les surestime, du côté sûr.
 - La VRAM reste à mesurer sur une carte (`needs_gpu`) : la même estimation vaudra pour les
