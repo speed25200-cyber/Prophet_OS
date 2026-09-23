@@ -1599,7 +1599,8 @@ donne le détail.
   et ISO compris. CI de `468324a` (instantané repris, poids gérés, servir, `prophet status`) :
   **verte des deux côtés** — réserve reprise en 6,9 ms, vrai téléchargement de Hugging Face par
   egress, téléchargement sous systemd, mission réelle Qwen3, système installé (UEFI et BIOS),
-  ISO.
+  ISO. CI de `12daf73` (le routeur lit le dossier des téléchargements) : **verte des deux
+  côtés**, contrôle `llama-router` compris.
 - `just check` : **883 réussis, 0 échec, 54 ignorés** (`32a20ea`), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
