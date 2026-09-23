@@ -578,6 +578,7 @@ fn la_reserve_rend_une_microvm_de_niveau_deux_en_moins_de_150_ms() {
         reserve.statut()
     );
     let mut durees = Vec::new();
+    let mut aleas = Vec::new();
     for tour in 0..5 {
         assert!(
             reserve.attendre_pleine(std::time::Duration::from_secs(30)),
@@ -590,7 +591,7 @@ fn la_reserve_rend_une_microvm_de_niveau_deux_en_moins_de_150_ms() {
         let spec = SandboxSpec::new(2, "/usr/bin/python3", travail.path().display().to_string())
             .args([
                 "-c",
-                "import os, sys\na, b = open('entree.txt').read().split(' et ')\nprint('neuve' if not os.path.exists('/tmp/deja') else 'reprise')\nopen('/tmp/deja', 'w').write('1')\nprint('somme', int(a) + int(b))\nopen('resultat.txt', 'w').write('fait')\nsys.exit(7)",
+                "import os, sys\na, b = open('entree.txt').read().split(' et ')\nprint('neuve' if not os.path.exists('/tmp/deja') else 'reprise')\nopen('/tmp/deja', 'w').write('1')\nprint('alea', os.urandom(16).hex())\nprint('somme', int(a) + int(b))\nopen('resultat.txt', 'w').write('fait')\nsys.exit(7)",
             ])
             .env("PATH", "/usr/bin:/bin");
         let lance = std::time::Instant::now();
@@ -635,6 +636,12 @@ fn la_reserve_rend_une_microvm_de_niveau_deux_en_moins_de_150_ms() {
             lu.sortie
         );
         assert_eq!(code_moniteur, Some(0), "{console}");
+        aleas.extend(
+            lu.sortie
+                .lines()
+                .filter_map(|l| l.strip_prefix("alea "))
+                .map(str::to_owned),
+        );
         sandboxd::invite::rapatrier(&vm.disque, travail.path()).unwrap();
         assert_eq!(
             std::fs::read_to_string(travail.path().join("resultat.txt")).unwrap(),
@@ -642,6 +649,22 @@ fn la_reserve_rend_une_microvm_de_niveau_deux_en_moins_de_150_ms() {
         );
         let _ = std::fs::remove_dir_all(&vm.base);
     }
+    // Cinq machines clonées de la même mémoire : si le noyau d'invité n'apprenait pas le
+    // clonage (VMGenID), elles tireraient les mêmes octets aléatoires (ADR 0045).
+    let mut distincts = aleas.clone();
+    distincts.sort();
+    distincts.dedup();
+    eprintln!(
+        "mesure : aléa des clones, {} tirages distincts sur {}",
+        distincts.len(),
+        aleas.len()
+    );
+    assert_eq!(aleas.len(), 5, "chaque prise dit son aléa : {aleas:?}");
+    assert_eq!(
+        distincts.len(),
+        aleas.len(),
+        "des clones de la réserve tirent les mêmes octets aléatoires : {aleas:?}"
+    );
     durees.sort();
     let mediane = durees[durees.len() / 2];
     eprintln!("mesure : microVM rendue par la réserve en {mediane:?} (médiane de {durees:?})");
