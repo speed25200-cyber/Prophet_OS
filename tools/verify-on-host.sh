@@ -309,9 +309,21 @@ etape_niveaux() {
       env PROPHET_EXIGER_ESPACES_DE_NOMS=1 PROPHET_EXIGER_LANDLOCK="$LANDLOCK" \
       cargo test -p sandboxd --test enforcement $JOBS -- --nocapture \
       || ECHECS=$((ECHECS + 1))
+    # La cage des clients officiels (ADR 0056) : mêmes espaces de noms, mêmes exigences. Ses
+    # essais se taisent eux aussi sur « check » ; ici, ils doivent jouer.
+    lancer "Clients officiels en cage (lanceur de pilotes)" \
+      env PROPHET_EXIGER_ESPACES_DE_NOMS=1 \
+      cargo test -p pilotd --test cage $JOBS -- --nocapture \
+      || ECHECS=$((ECHECS + 1))
+    lancer "Clients officiels en cage (missions de bout en bout)" \
+      env PROPHET_EXIGER_ESPACES_DE_NOMS=1 \
+      cargo test -p agentd --test pilot $JOBS -- --nocapture \
+      || ECHECS=$((ECHECS + 1))
   else
     hors "Niveau 0 réellement confiné — non vérifiable : espaces de noms utilisateur inutilisables"
     NON_VERIFIES+=("niveau 0 réellement confiné — espaces de noms utilisateur inutilisables")
+    hors "Clients officiels en cage — non vérifiable : espaces de noms utilisateur inutilisables"
+    NON_VERIFIES+=("clients officiels en cage — espaces de noms utilisateur inutilisables")
   fi
 
   local marqueur crate nom raison

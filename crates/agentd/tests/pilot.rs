@@ -48,10 +48,46 @@ fn fin(text: &str) -> Value {
     json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":text}}],"usage":{"prompt_tokens":32,"completion_tokens":3}})
 }
 
+/// Les clients de remplacement vivent à part : la cage ne voit que ce répertoire et la CLI, pas
+/// la maison de l'essai (ADR 0056).
+fn repertoire_des_clients(dir: &std::path::Path) -> std::path::PathBuf {
+    let clients = dir.join("clients");
+    std::fs::create_dir_all(&clients).unwrap();
+    clients
+}
+
+/// La marque de l'attente du faux Codex, lisible de l'hôte dans la ligne de commande de son
+/// processus : dans la cage, son numéro ne dit rien au-dehors (ADR 0056).
+fn marque(dir: &std::path::Path) -> String {
+    format!(
+        "attente-{}",
+        dir.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .trim_start_matches('.')
+    )
+}
+
+/// Vrai si des espaces de noms utilisateur permettent la cage des clients (ADR 0056) ; sinon
+/// l'essai le dit et s'arrête, sauf là où ils sont exigés.
+fn cage_disponible() -> bool {
+    let disponible = sandboxd::Capabilities::probe().user_namespaces;
+    assert!(
+        disponible || std::env::var("PROPHET_EXIGER_ESPACES_DE_NOMS").as_deref() != Ok("1"),
+        "espaces de noms indisponibles alors que PROPHET_EXIGER_ESPACES_DE_NOMS=1"
+    );
+    if !disponible {
+        eprintln!(
+            "espaces de noms utilisateur indisponibles : la cage des clients ne se pose pas ici"
+        );
+    }
+    disponible
+}
+
 /// Le faux Codex : un script qui rejoint la mission par la CLI, écrit, se retire ; il reçoit
-/// de `prophet-pilotd` exactement l'environnement d'un vrai client.
+/// de `prophet-pilotd` exactement l'environnement d'un vrai client, dans sa cage.
 fn faux_codex(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathBuf {
-    let script = dir.join("faux-codex.sh");
+    let script = repertoire_des_clients(dir).join("faux-codex.sh");
     std::fs::write(
         &script,
         format!(
@@ -60,7 +96,17 @@ fn faux_codex(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathBu
              [ -n \"$CODEX_HOME\" ] || exit 4\n\
              [ -f \"$PROPHET_MCP_CONFIG\" ] || exit 5\n\
              \"$P\" task attach \"$PROPHET_TASK\" --client codex >/dev/null\n\
-             case \"$1\" in *attends*) sleep 30 & echo $! > \"$HOME/attente.pid\"; wait ;; esac\n\
+             case \"$1\" in *attends*) sh -c 'sleep 30; true' {marque} & wait ;; esac\n\
+             case \"$1\" in *sonde*)\n\
+               \"$P\" --json task ls >/dev/null 2>&1 && r=liste:permise || r=liste:refusee\n\
+               \"$P\" task cancel autre >/dev/null 2>&1 && r=\"$r annulation:permise\" || r=\"$r annulation:refusee\"\n\
+               [ -e {maison}/docs ] && r=\"$r maison:visible\" || r=\"$r maison:cachee\"\n\
+               [ -e {capd} ] && r=\"$r capd:visible\" || r=\"$r capd:cache\"\n\
+               [ -e {agentd} ] && r=\"$r agentd:visible\" || r=\"$r agentd:cache\"\n\
+               \"$P\" task detach \"$PROPHET_TASK\" --text \"$r\" >/dev/null\n\
+               echo \"{{\\\"item\\\":{{\\\"type\\\":\\\"agent_message\\\",\\\"text\\\":\\\"$r\\\"}}}}\"\n\
+               exit 0 ;;\n\
+             esac\n\
              case \"$1\" in *outil*)\n\
                \"$P\" task call \"$PROPHET_TASK\" fs.write '{{\"path\":\"~/docs/somme.py\",\"content\":\"print(\\\"somme\\\", 3 + 4)\\nopen(\\\"docs/resultat.txt\\\", \\\"w\\\").write(\\\"fait\\\")\\n\"}}' >/dev/null\n\
                sortie=$(\"$P\" task call \"$PROPHET_TASK\" proc.exec '{{\"program\":\"python3\",\"args\":[\"docs/somme.py\"]}}' --json)\n\
@@ -76,7 +122,11 @@ fn faux_codex(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathBu
              esac\n\
              \"$P\" task detach \"$PROPHET_TASK\" --text \"$texte\" >/dev/null\n\
              echo '{{\"item\":{{\"type\":\"agent_message\",\"text\":\"Code écrit par le faux Codex.\"}}}}'\n",
-            cli = cli.display()
+            cli = cli.display(),
+            marque = marque(dir),
+            maison = dir.join("home").display(),
+            capd = dir.join("cap.sock").display(),
+            agentd = dir.join("agent.sock").display()
         ),
     )
     .unwrap();
@@ -91,7 +141,7 @@ fn faux_codex(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathBu
 /// Le faux Claude Code : rejoint la mission qu'on lui confie, lit le fichier, rend son avis ;
 /// il reçoit de `prophet-pilotd` l'environnement d'un vrai Claude Code et parle comme lui.
 fn faux_claude(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathBuf {
-    let script = dir.join("faux-claude.sh");
+    let script = repertoire_des_clients(dir).join("faux-claude.sh");
     std::fs::write(
         &script,
         format!(
@@ -324,6 +374,15 @@ impl Chain {
                 ),
                 ("PROPHET_AGENTD_SOCKET", agent_socket.display().to_string()),
                 ("PROPHET_MCP_BRIDGE", pont),
+                // Dans la cage, seuls les clients de remplacement et la CLI s'ajoutent au système.
+                (
+                    "PROPHET_PILOT_READ_ONLY",
+                    format!(
+                        "{}:{}",
+                        repertoire_des_clients(dir.path()).display(),
+                        cli.display()
+                    ),
+                ),
                 ("HOME", home.display().to_string()),
                 (
                     "XDG_RUNTIME_DIR",
@@ -428,6 +487,9 @@ impl Chain {
 
 #[tokio::test]
 async fn le_role_code_lance_le_client_officiel_dans_une_seance_et_son_texte_revient_au_parent() {
+    if !cage_disponible() {
+        return;
+    }
     let chain = Chain::new(
         vec![
             tool_call(
@@ -508,6 +570,9 @@ async fn le_role_code_lance_le_client_officiel_dans_une_seance_et_son_texte_revi
 
 #[tokio::test]
 async fn une_mission_demarre_directement_sur_le_client_officiel_connecte() {
+    if !cage_disponible() {
+        return;
+    }
     let chain = Chain::new(vec![], true).await;
     // Le catalogue propose Codex comme modèle de l'atelier, avant le modèle local du service.
     let options = chain.client.call("task.options", json!({})).await.unwrap();
@@ -607,6 +672,9 @@ async fn une_mission_demarre_directement_sur_le_client_officiel_connecte() {
 /// cet avis. Chaque client dans sa propre mission contrôlée, chaque appel compté sous son nom.
 #[tokio::test]
 async fn codex_mene_la_mission_et_confie_la_relecture_a_claude_code() {
+    if !cage_disponible() {
+        return;
+    }
     let chain = Chain::new(vec![], true).await;
     let options = chain.client.call("task.options", json!({})).await.unwrap();
     let atelier = options["profiles"]
@@ -712,6 +780,9 @@ async fn codex_mene_la_mission_et_confie_la_relecture_a_claude_code() {
 /// contexte n'admet pas est une erreur d'argument que le modèle corrige, pas un refus.
 #[tokio::test]
 async fn un_modele_nomme_dans_une_delegation_peut_etre_un_client_officiel() {
+    if !cage_disponible() {
+        return;
+    }
     let chain = Chain::new(
         vec![
             tool_call(
@@ -769,6 +840,9 @@ async fn un_modele_nomme_dans_une_delegation_peut_etre_un_client_officiel() {
 /// tué sur-le-champ par le lanceur, avec ce qu'il a lancé ; la place est libre pour la suite.
 #[tokio::test]
 async fn annuler_une_mission_menee_par_un_client_le_tue_sur_le_champ() {
+    if !cage_disponible() {
+        return;
+    }
     let chain = Chain::new(vec![], true).await;
     chain
         .client
@@ -815,23 +889,18 @@ async fn annuler_une_mission_menee_par_un_client_le_tue_sur_le_champ() {
     assert_eq!(reponse["cancel_requested"], "lente", "{reponse}");
     let info = chain.attendre("lente").await;
     assert_eq!(info["task"]["state"], "cancelled", "{info}");
-    // Le lanceur a tué le client et son groupe de processus : l'attente qu'il avait lancée —
-    // dont il a écrit le PID — n'existe plus, bien avant ses trente secondes. (Un `pgrep` sur
-    // toute la machine confondrait un autre `sleep 30` du coureur avec le sien.)
-    let pid: u32 = std::fs::read_to_string(chain.dir.path().join("home/attente.pid"))
-        .expect("le faux Codex a écrit le PID de son attente")
-        .trim()
-        .parse()
-        .unwrap();
+    // Le lanceur a tué la cage du client : l'attente qu'il avait lancée, reconnue à sa marque
+    // dans sa ligne de commande, n'existe plus, bien avant ses trente secondes.
+    let marque = marque(chain.dir.path());
+    let en_vie = || {
+        std::fs::read_dir("/proc").unwrap().flatten().any(|e| {
+            std::fs::read(e.path().join("cmdline"))
+                .is_ok_and(|c| String::from_utf8_lossy(&c).contains(&marque))
+        })
+    };
     let mut tue = false;
     for _ in 0..50 {
-        let etat = std::fs::read_to_string(format!("/proc/{pid}/status")).ok();
-        let vivant = etat.is_some_and(|s| {
-            s.lines()
-                .find(|l| l.starts_with("State:"))
-                .is_some_and(|l| !l.contains('Z'))
-        });
-        if !vivant {
+        if !en_vie() {
             tue = true;
             break;
         }
@@ -839,7 +908,7 @@ async fn annuler_une_mission_menee_par_un_client_le_tue_sur_le_champ() {
     }
     assert!(
         tue,
-        "l'attente du faux Codex ({pid}) a survécu à l'annulation"
+        "l'attente du faux Codex ({marque}) a survécu à l'annulation"
     );
     // Le client tué, sa place est libre bien avant ses trente secondes d'attente : une autre
     // mission sur le même client se lance et finit.
@@ -866,6 +935,46 @@ async fn annuler_une_mission_menee_par_un_client_le_tue_sur_le_champ() {
     assert!(chain.asked.lock().unwrap().is_empty());
 }
 
+/// La cage du client (ADR 0056) : lancé pour une mission, le client ne voit ni la maison de
+/// l'humain, ni capd, ni le socket d'agentd ; le seul qu'il joint ne lui ouvre que la séance de
+/// sa mission — ni la liste des missions, ni l'annulation d'une autre. Il rejoint pourtant la
+/// sienne et la conclut.
+#[tokio::test]
+async fn le_client_en_mission_ne_joint_que_sa_seance() {
+    if !cage_disponible() {
+        return;
+    }
+    let chain = Chain::new(vec![], true).await;
+    chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"sondee","intent":"sonde ta cage","profile":"atelier","model":"codex"}),
+        )
+        .await
+        .unwrap();
+    chain
+        .client
+        .call("task.start", json!({"id":"sondee"}))
+        .await
+        .unwrap();
+    let info = chain.attendre("sondee").await;
+    assert_eq!(info["task"]["state"], "done", "{info}");
+    let texte = info["result"]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    for attendu in [
+        "liste:refusee",
+        "annulation:refusee",
+        "maison:cachee",
+        "capd:cache",
+        "agentd:cache",
+    ] {
+        assert!(texte.contains(attendu), "{attendu} attendu dans : {info}");
+    }
+}
+
 /// Le vrai client, sur une machine où l'humain s'est connecté : le lanceur le dit connecté, une
 /// mission se prépare sur lui, il la rejoint par le pont, écrit un fichier avec l'outil
 /// `fs.write` et se retire. Se lance comme l'humain, dans sa session :
@@ -875,6 +984,9 @@ async fn annuler_une_mission_menee_par_un_client_le_tue_sur_le_champ() {
 #[tokio::test]
 #[ignore = "needs_codex_login : PROPHET_TEST_CLIENT (codex ou claude-code) et PROPHET_TEST_PILOT_STATE (racine des profils privés où l'humain s'est connecté, ~/.local/state/prophet), sous l'identité de l'humain"]
 async fn needs_codex_login_un_vrai_client_rejoint_une_mission_et_ecrit_un_fichier() {
+    if !cage_disponible() {
+        return;
+    }
     let client =
         std::env::var("PROPHET_TEST_CLIENT").expect("PROPHET_TEST_CLIENT : codex ou claude-code");
     let etat =
@@ -949,6 +1061,9 @@ async fn needs_codex_login_un_vrai_client_rejoint_une_mission_et_ecrit_un_fichie
 #[tokio::test]
 #[ignore = "needs_kvm"]
 async fn needs_kvm_un_client_ecrit_un_outil_et_l_execute_en_microvm() {
+    if !cage_disponible() {
+        return;
+    }
     let chain = Chain::demarrer(vec![], Pilote::Faux, true).await;
     chain
         .client
