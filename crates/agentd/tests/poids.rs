@@ -375,12 +375,14 @@ async fn le_catalogue_porte_les_empreintes_que_le_depot_publie() {
     )
     .unwrap();
     let egress = providers::pull::Egress::new(chaine.egress.clone(), &jeton).unwrap();
-    let lire = move |url: String| {
+    let essayer = move |url: String| {
         let url = providers::catalogue::Url::parse(&url).unwrap();
         providers::pull::get_json(&egress, &url, 4 * 1024 * 1024)
-            .unwrap_or_else(|e| panic!("{} : {e}", url.full()))
+            .map_err(|e| format!("{} : {e}", url.full()))
     };
-    let lire = std::sync::Arc::new(lire);
+    let essayer = std::sync::Arc::new(essayer);
+    let e = essayer.clone();
+    let lire = std::sync::Arc::new(move |url: String| e(url).unwrap_or_else(|m| panic!("{m}")));
     for entree in &catalogue.entries {
         let (depot, revision, fichier) = depot_de(&entree.url);
         let l = lire.clone();
@@ -407,19 +409,44 @@ async fn le_catalogue_porte_les_empreintes_que_le_depot_publie() {
             assert_eq!(publie["size"], octets, "{}", entree.id);
         }
     }
+    // D'autres familles, à licence ouverte, pour valider le moteur au-delà de Qwen3.
     for (depot, motif) in [
-        ("Qwen/Qwen3-8B-GGUF", "Q4_K_M.gguf"),
-        ("Qwen/Qwen3-4B-GGUF", "Q4_K_M.gguf"),
+        ("Qwen/Qwen3-8B-GGUF", "q4_k_m.gguf"),
+        ("Qwen/Qwen3-4B-GGUF", "q4_k_m.gguf"),
+        ("ibm-granite/granite-3.3-2b-instruct-GGUF", "q4_k_m.gguf"),
+        ("HuggingFaceTB/SmolLM2-1.7B-Instruct-GGUF", "q4_k_m.gguf"),
+        ("microsoft/Phi-3-mini-4k-instruct-gguf", "q4.gguf"),
+        ("bartowski/Llama-3.2-3B-Instruct-GGUF", "q4_k_m.gguf"),
     ] {
-        let l = lire.clone();
+        // Un candidat introuvable se dit ; il ne fait pas échouer la vérification du catalogue.
+        let l = essayer.clone();
         let url = format!("https://huggingface.co/api/models/{depot}");
-        let modele = tokio::task::spawn_blocking(move || l(url)).await.unwrap();
-        let revision = modele["sha"].as_str().unwrap().to_owned();
-        let l = lire.clone();
+        let modele = match tokio::task::spawn_blocking(move || l(url)).await.unwrap() {
+            Ok(modele) => modele,
+            Err(erreur) => {
+                eprintln!("mesure : candidat {depot} illisible : {erreur}");
+                continue;
+            }
+        };
+        let Some(revision) = modele["sha"].as_str().map(str::to_owned) else {
+            eprintln!("mesure : candidat {depot} sans révision");
+            continue;
+        };
+        eprintln!(
+            "mesure : dépôt {depot} licence {} ; accès restreint : {}",
+            modele["cardData"]["license"], modele["gated"]
+        );
+        let l = essayer.clone();
         let url = format!("https://huggingface.co/api/models/{depot}/tree/{revision}");
-        let arbre = tokio::task::spawn_blocking(move || l(url)).await.unwrap();
-        for f in arbre.as_array().unwrap() {
-            if f["path"].as_str().is_some_and(|p| p.ends_with(motif)) {
+        let Ok(arbre) = tokio::task::spawn_blocking(move || l(url)).await.unwrap() else {
+            eprintln!("mesure : candidat {depot} : arbre illisible");
+            continue;
+        };
+        for f in arbre.as_array().into_iter().flatten() {
+            if f["path"]
+                .as_str()
+                .is_some_and(|p| p.to_ascii_lowercase().ends_with(motif))
+            {
                 eprintln!(
                     "mesure : candidat https://huggingface.co/{depot}/resolve/{revision}/{} {} octets, sha256 {}",
                     f["path"].as_str().unwrap(),
@@ -487,8 +514,15 @@ fn une_reponse_en_morceaux_se_recolle() {
     std::thread::spawn(move || {
         use std::io::{Read as _, Write as _};
         let (mut flux, _) = ecoute.accept().unwrap();
+        // Lire la requête entière avant de répondre : fermer sur des octets non lus ferait
+        // envoyer un RST au client, qui verrait « Connection reset » au lieu de la réponse.
+        let mut recu = Vec::new();
         let mut tampon = [0u8; 4096];
-        let _ = flux.read(&mut tampon);
+        while !recu.ends_with(b"\r\n\r\n{}") {
+            let n = flux.read(&mut tampon).unwrap();
+            assert!(n > 0, "requête tronquée");
+            recu.extend_from_slice(&tampon[..n]);
+        }
         let a = "{\"choices\":[{\"message\":{\"content\":\"bonjour é".as_bytes();
         let b = "\"}}],\"usage\":{\"completion_tokens\":7}}".as_bytes();
         let mut r = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
