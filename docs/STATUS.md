@@ -1537,7 +1537,10 @@ donne le détail.
   model catalog | pull | cancel | rm` et la page Modèles, barre de progression comprise
   (`78b7791`) ; un poids que la configuration fournit déjà n'est pas retéléchargé (`32a20ea`).
   Prouvé avec les vrais capd, ledger et egress (`crates/agentd/tests/poids.rs`), et, sous
-  systemd, par l'essai des services qui télécharge d'un dépôt local sous le compte de l'humain.
+  systemd, par l'essai des services qui télécharge d'un dépôt local sous le compte de l'humain :
+  vert sur `468324a` — capd émet le jeton de `model-pull:essai-vm` (un grant), egress autorise
+  le `GET`, agentd pose le fichier vérifié (`agentd 644`), le journal le dit, le retrait
+  l'efface.
   Le catalogue ne porte que Qwen3 1.7B et 0.6B : l'empreinte de `qwen3-8b-q4`, exemple du plan,
   n'a pas été relevée (Hugging Face est injoignable d'ici). Servir : `prophet model serve <id>`
   fait charger un poids par le routeur du moteur (`GET /models`, `POST /models/load`), reconnu
