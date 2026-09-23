@@ -1686,10 +1686,11 @@ travail de la mission et au profil privé du client, masque `/run/prophet` et
 conception à prendre avec l'utilisateur, les clients parlant à leur éditeur sous son
 abonnement.
 
-**Pour la session suivante.** Lire la CI de la branche (l'instantané de la réserve repris au
-redémarrage sur le coureur KVM ; le téléchargement de poids sous systemd dans l'essai des
-services, le contrôle `llama-router`, le travail « Poids du catalogue servis (réels) » qui joue
-le critère de M8-T7 avec `qwen3-8b-q4`) ; décider avec l'utilisateur du confinement des clients officiels ; trancher avec l'utilisateur le sort de
+**Pour la session suivante.** Lire la CI de la branche (le travail « Poids du catalogue servis
+(réels) » porte désormais cinq familles, la mémoire de chaque instance sans projection, et un
+essai de concurrence et d'annulation sur le vrai moteur) ; mesurer la mémoire et la VRAM sur
+une machine à carte graphique, où l'estimation de l'ADR 0047 vaudra pour les couches
+déchargées ; décider avec l'utilisateur du confinement des clients officiels ; trancher avec l'utilisateur le sort de
 `task.spawn` pour le compte de l'humain, et le chemin de confiance qui distinguerait la surface
 d'un autre programme du compte pour `approval.resolve` (ADR 0044) ; mesurer la surface sur une
 carte graphique ; faire le premier appel réel de Jev avec une clé déposée.
