@@ -272,6 +272,8 @@ de l'image, par Prophet et par une boucle nue qui appelle les mêmes outils sans
 journal. Le premier passage (0/7 contre 2/7) mesure surtout le petit modèle, qui lit puis
 conclut sans écrire le fichier demandé ; agentd le lui rappelle désormais (ADR 0049), rend au
 modèle un refus de chemin en disant où agir (ADR 0050), et le banc rejoue chaque tâche trois
-fois : au troisième passage, Prophet réussit 8 exécutions sur 45 contre 6 pour la boucle nue,
-pour 0,27 s de processeur et 47 Mo de services par mission (le moteur en prend 114 s). Restent la VRAM, ses budgets et la matrice GPU, à
+fois : au septième passage, après `fs.edit`, `calc.eval`, la garde des échecs répétés et des
+outils qui comptent pour le modèle, Prophet réussit 15 exécutions sur 45 contre 9 pour la boucle
+nue, et avec Qwen3 4B 11 sur 15 contre 9, pour moins de tokens ; ses services coûtent 0,3 à
+0,6 s de processeur et 47 Mo par mission. Restent la VRAM, ses budgets et la matrice GPU, à
 mesurer sur une carte ; aucun critère complet de la version complète n'est coché.

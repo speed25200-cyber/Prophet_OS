@@ -742,6 +742,19 @@ fn search(view: &View<'_>, root: &Path, args: &Value) -> Result<Value> {
     // du filtre qu'il voulait, et le vide ne doit ni tout accepter ni empêcher le repli.
     let name = text_arg("name_contains")?.filter(|t| !t.is_empty());
     let content = text_arg("content_contains")?.filter(|t| !t.is_empty());
+    // Une racine qui est un fichier est déjà choisie : un filtre de nom n'y a pas de sens
+    // (« email » sur notes.txt), et sans texte à chercher, l'outil en rend les premières lignes
+    // et leur compte, plutôt que rien.
+    if view.metadata(root).is_ok_and(|m| !m.is_dir()) {
+        let mut found = search_with(view, root, None, Some(content.unwrap_or("")))?;
+        if content.is_none() {
+            found["note"] = json!(
+                "root est un fichier et aucun texte n'est cherché : voici ses premières lignes \
+                 et leur nombre ; lisez-le en entier avec fs.read"
+            );
+        }
+        return Ok(found);
+    }
     let found = search_with(view, root, name, content)?;
     // Un modèle cherche souvent par nom ce qui figure dans le contenu (« la référence
     // ZX-99417 ») : quand aucun nom ne correspond, le même texte est cherché dans le contenu,

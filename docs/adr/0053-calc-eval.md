@@ -35,5 +35,10 @@ et les combine mal ; le calcul exact est une tâche que le système sait faire.
 
 ## Conséquences
 
-- Le banc dira si « total-des-ventes » et « le-plus-gros-achat » deviennent possibles quand le
-  modèle peut déléguer le calcul.
+- **Complément (septième passage, `1b98847`)** : le modèle appelle l'outil, mais à sa façon —
+  `{expression: "sum(numbers)", numbers: []}`, `sum(1200, 4800, 950, 3100)` avec la liste en
+  plus — et l'outil refusait. Il comprend désormais les fonctions `sum`, `min`, `max`, `mean`
+  (`avg`) et `count` sur des arguments (la virgule y sépare ; ailleurs, entre deux chiffres, elle
+  est décimale) ou sur `numbers`, qu'une expression peut nommer ; les deux paramètres ensemble
+  rendent la valeur et les agrégats ; une liste vide que l'expression porte est dite (« mettez-y
+  les nombres »). « total-des-ventes » a réussi une fois sur trois avant ce complément.

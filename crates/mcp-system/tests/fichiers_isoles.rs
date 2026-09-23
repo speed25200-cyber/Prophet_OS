@@ -252,6 +252,35 @@ fn une_recherche_par_contenu_compte_toutes_les_lignes_trouvees() {
 }
 
 #[test]
+fn chercher_dans_un_fichier_sans_texte_rend_ses_premieres_lignes() {
+    // Relevé au banc : root sur le fichier, un nom qui n'est pas le sien, un contenu vide.
+    let m = monde(&["~/docs/**"]);
+    std::fs::write(
+        m.home.join("docs/notes.txt"),
+        "Réunion.\nClaire : claire.martin@exemple.fr\nPaul : paul@exemple.fr\n",
+    )
+    .unwrap();
+    let r = m.call(
+        "fs.search",
+        json!({"root":"~/docs/notes.txt","name_contains":"email","content_contains":""}),
+    );
+    assert!(!r.is_error, "{r:?}");
+    let d = r.structured.unwrap();
+    let fichier = &d["results"][0];
+    assert_eq!(fichier["matching_lines"], 3, "{d}");
+    assert!(d.to_string().contains("claire.martin@exemple.fr"), "{d}");
+    assert!(d["note"].as_str().unwrap().contains("fs.read"), "{d}");
+    // Avec un texte, la recherche porte sur lui, sans note.
+    let r = m.call(
+        "fs.search",
+        json!({"root":"~/docs/notes.txt","content_contains":"@"}),
+    );
+    let d = r.structured.unwrap();
+    assert_eq!(d["results"][0]["matching_lines"], 2, "{d}");
+    assert!(d.get("note").is_none(), "{d}");
+}
+
+#[test]
 fn chercher_par_nom_ce_qui_est_dans_le_contenu_trouve_quand_meme() {
     let m = monde(&["~/docs/**"]);
     std::fs::write(
