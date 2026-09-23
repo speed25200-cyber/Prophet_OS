@@ -339,8 +339,8 @@ impl Atelier {
             self.erreur = Some("Choisissez un modèle disponible avant d'envoyer.".to_owned());
             return;
         }
-        let history = match self.historique() {
-            Ok(history) => history,
+        let (history, omis) = match self.historique() {
+            Ok(envoi) => envoi,
             Err(error) => {
                 self.erreur = Some(error);
                 return;
@@ -375,6 +375,12 @@ impl Atelier {
                             ctx.request_repaint();
                         })
                         .await
+                        // Ce que la page dit oublié : ce qui n'est pas parti, et ce que le
+                        // client a retiré pour tenir dans la fenêtre du moteur.
+                        .map(|completion| Completion {
+                            forgotten: completion.forgotten + omis,
+                            ..completion
+                        })
                         .map_err(|e| match e {
                             StreamError::Cancelled => {
                                 "Génération interrompue. La réponse est partielle.".to_owned()
@@ -407,27 +413,33 @@ impl Atelier {
         self.page = Page::Accueil;
     }
 
-    fn historique(&self) -> Result<Vec<Value>, String> {
-        if self.brouillon.len() > 16_384 || self.tours.len() >= 32 {
+    /// Ce qui part au moteur : les tours terminés les plus récents qui tiennent en 32 Kio, puis
+    /// la demande ; rend aussi le nombre de messages laissés de côté, que la page dit. Le fil
+    /// affiché, lui, reste entier.
+    fn historique(&self) -> Result<(Vec<Value>, usize), String> {
+        const BUDGET: usize = 32_768;
+        if self.brouillon.len() > 16_384 || self.tours.len() >= 200 {
             return Err("Cette conversation atteint sa limite. Ouvrez une nouvelle conversation ou raccourcissez la demande.".to_owned());
         }
-        let mut history = Vec::new();
+        let finis: Vec<&Tour> = self.tours.iter().filter(|t| t.mesure.is_some()).collect();
         let mut size = self.brouillon.len();
-        for tour in &self.tours {
-            if tour.mesure.is_some() {
-                size += tour.demande.len() + tour.reponse.len();
-                history.push(json!({"role":"user","content":tour.demande}));
-                history.push(json!({"role":"assistant","content":tour.reponse}));
+        let mut gardes = 0;
+        for tour in finis.iter().rev() {
+            let poids = tour.demande.len() + tour.reponse.len();
+            if size + poids > BUDGET {
+                break;
             }
+            size += poids;
+            gardes += 1;
         }
-        if size > 32_768 {
-            return Err(
-                "Le contexte est trop long pour cette session. Ouvrez une nouvelle conversation."
-                    .to_owned(),
-            );
+        let omis = (finis.len() - gardes) * 2;
+        let mut history = Vec::new();
+        for tour in &finis[finis.len() - gardes..] {
+            history.push(json!({"role":"user","content":tour.demande}));
+            history.push(json!({"role":"assistant","content":tour.reponse}));
         }
         history.push(json!({"role":"user","content":self.brouillon}));
-        Ok(history)
+        Ok((history, omis))
     }
 }
 
@@ -459,6 +471,61 @@ mod tests {
         atelier.actualiser();
         assert!(atelier.tours.is_empty());
         assert!(!atelier.generation);
+    }
+
+    fn tour_fini(demande: &str, reponse: &str) -> Tour {
+        Tour {
+            demande: demande.into(),
+            modele: "m".into(),
+            reponse: reponse.into(),
+            mesure: Some(Completion {
+                text: reponse.into(),
+                usage: providers::native::Usage {
+                    tokens_in: 1,
+                    tokens_out: 1,
+                },
+                elapsed: Duration::from_millis(1),
+                first_token: None,
+                forgotten: 0,
+            }),
+            erreur: None,
+        }
+    }
+
+    #[test]
+    fn une_longue_conversation_envoie_ses_tours_recents_au_lieu_de_s_arreter() {
+        // Soixante échanges d'un kilo-octet : la conversation continue, avec les tours les plus
+        // récents qui tiennent, et dit combien de messages sont restés de côté.
+        let mut atelier = Atelier::nouveau("http://127.0.0.1:1/v1".into(), false);
+        for i in 0..60 {
+            atelier.tours.push(tour_fini(
+                &format!("question {i} {}", "q".repeat(500)),
+                &format!("réponse {i} {}", "r".repeat(500)),
+            ));
+        }
+        atelier.brouillon = "Et maintenant ?".into();
+        let (history, omis) = atelier.historique().unwrap();
+        let taille: usize = history
+            .iter()
+            .map(|m| m["content"].as_str().unwrap().len())
+            .sum();
+        assert!(taille <= 32_768, "{taille}");
+        assert!(omis > 0 && omis % 2 == 0, "{omis}");
+        assert_eq!(history.len() + omis, 60 * 2 + 1);
+        assert_eq!(history[0]["role"], "user");
+        assert!(
+            history[0]["content"]
+                .as_str()
+                .unwrap()
+                .starts_with(&format!("question {}", omis / 2))
+        );
+        assert_eq!(history.last().unwrap()["content"], "Et maintenant ?");
+        // Une conversation courte part entière.
+        let mut courte = Atelier::nouveau("http://127.0.0.1:1/v1".into(), false);
+        courte.tours.push(tour_fini("Bonjour", "Salut"));
+        courte.brouillon = "Ça va ?".into();
+        let (history, omis) = courte.historique().unwrap();
+        assert_eq!((history.len(), omis), (3, 0));
     }
 
     #[test]

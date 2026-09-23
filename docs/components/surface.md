@@ -92,7 +92,8 @@ Le modèle doit déjà être servi sur une adresse HTTP de boucle locale, config
 `--endpoint` ou `PROPHET_MODEL_ENDPOINT`. Le service systemd permet la boucle locale et refuse
 les autres adresses IP. La conversation directe n'expose pas d'outils système ; quand elle ne
 tient plus dans la fenêtre du moteur, ses premiers messages sont laissés hors de l'envoi et la
-page dit combien. La page Modèles lit l'en-tête de chaque poids installé et marque celui que le
+page dit combien ; au-delà de 32 Kio, seuls les tours les plus récents partent, au lieu que la
+conversation s'arrête, et le fil affiché reste entier. La page Modèles lit l'en-tête de chaque poids installé et marque celui que le
 moteur a chargé, avec la fenêtre qu'il accorde par requête (`/props`). Le téléchargement,
 le démarrage des modèles, la persistance des conversations et le parcours agentique complet
 restent à raccorder. Voir l'ADR 0008 et les exigences FRONTIER.
