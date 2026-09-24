@@ -131,6 +131,34 @@ pub fn trail_from(events: &[Value]) -> Vec<TrailEntry> {
                 target: None,
                 outcome: Outcome::Ok,
             }),
+            // Ce qui est sorti par egress, sous le jeton de la mission (ADR 0056) : l'hôte, la
+            // méthode, les octets dans chaque sens, le statut. Jamais le contenu.
+            Some("net.request") => trail.push(TrailEntry {
+                seq,
+                step,
+                tool: "sortie".into(),
+                target: Some(sortie_lisible(payload)),
+                outcome: match payload["status"].as_u64() {
+                    Some(statut) if !(200..400).contains(&statut) => {
+                        Outcome::Error(format!("HTTP {statut}"))
+                    }
+                    _ => Outcome::Ok,
+                },
+            }),
+            Some(genre @ ("net.deny" | "net.exfil_suspected")) => trail.push(TrailEntry {
+                seq,
+                step,
+                tool: "sortie".into(),
+                target: payload["host"].as_str().map(str::to_owned),
+                outcome: Outcome::Denied(if genre == "net.exfil_suspected" {
+                    format!(
+                        "exfiltration suspectée : {}",
+                        payload["reason"].as_str().unwrap_or("signaux relevés")
+                    )
+                } else {
+                    payload["reason"].as_str().unwrap_or("refusé").to_owned()
+                }),
+            }),
             // Le service a rappelé au modèle un fichier que l'objectif demande (ADR 0049).
             Some("task.reminded") => trail.push(TrailEntry {
                 seq,
@@ -149,6 +177,30 @@ pub fn trail_from(events: &[Value]) -> Vec<TrailEntry> {
         }
     }
     trail
+}
+
+/// Une sortie réseau en une ligne : « api.exemple.fr — CONNECT, 12,4 Ko envoyés, 48 Ko reçus ».
+fn sortie_lisible(payload: &Value) -> String {
+    let hote = payload["host"].as_str().unwrap_or("hôte inconnu");
+    let methode = payload["method"].as_str().unwrap_or("?");
+    let sortis = payload["bytes_out"].as_u64().unwrap_or(0);
+    let recus = payload["bytes_in"].as_u64().unwrap_or(0);
+    format!(
+        "{hote} — {methode}, {} envoyés, {} reçus",
+        octets(sortis),
+        octets(recus)
+    )
+}
+
+/// Un volume dit comme on le lit : « 512 o », « 12,4 Ko », « 3,1 Mo ».
+fn octets(n: u64) -> String {
+    #[allow(clippy::cast_precision_loss)]
+    let decimal = |valeur: f64| format!("{valeur:.1}").replace('.', ",");
+    match n {
+        0..1_000 => format!("{n} o"),
+        1_000..1_000_000 => format!("{} Ko", decimal(n as f64 / 1e3)),
+        _ => format!("{} Mo", decimal(n as f64 / 1e6)),
+    }
 }
 
 /// Accusé de réception ou erreur, lié à l'identité de la mission commandée.
@@ -892,6 +944,33 @@ mod tests {
         assert_eq!(trail[1].outcome, Outcome::Error("PolicyDenied".into()));
         assert_eq!(trail[2].outcome, Outcome::Denied("RevokedParent".into()));
         assert_eq!(trail[3].tool, "publication");
+    }
+
+    #[test]
+    fn les_sorties_reseau_prennent_place_dans_le_parcours() {
+        let events = vec![
+            json!({"seq":1,"kind":"net.request","actor":"egress","payload":{"host":"api.anthropic.com","port":443,"method":"CONNECT","bytes_out":12_400,"bytes_in":48_000,"status":200}}),
+            json!({"seq":2,"kind":"net.request","actor":"egress","payload":{"host":"exemple.fr","port":80,"method":"GET","bytes_out":90,"bytes_in":512,"status":404}}),
+            json!({"seq":3,"kind":"net.deny","actor":"egress","payload":{"host":"ailleurs.fr","reason":"no_grant"}}),
+            json!({"seq":4,"kind":"net.exfil_suspected","actor":"egress","payload":{"host":"fuite.fr","reason":"volume inhabituel"}}),
+        ];
+        let trail = trail_from(&events);
+        assert_eq!(trail.len(), 4);
+        assert!(trail.iter().all(|e| e.tool == "sortie"));
+        assert_eq!(
+            trail[0].target.as_deref(),
+            Some("api.anthropic.com — CONNECT, 12,4 Ko envoyés, 48,0 Ko reçus")
+        );
+        assert_eq!(trail[0].outcome, Outcome::Ok);
+        assert_eq!(trail[1].outcome, Outcome::Error("HTTP 404".into()));
+        assert_eq!(trail[2].target.as_deref(), Some("ailleurs.fr"));
+        assert_eq!(trail[2].outcome, Outcome::Denied("no_grant".into()));
+        assert_eq!(
+            trail[3].outcome,
+            Outcome::Denied("exfiltration suspectée : volume inhabituel".into())
+        );
+        assert_eq!(octets(0), "0 o");
+        assert_eq!(octets(3_100_000), "3,1 Mo");
     }
 
     #[test]

@@ -260,7 +260,7 @@ pub(crate) fn draw(
             ui.add_space(4.0);
             let (marque, couleur, note) = issue(&geste.outcome);
             let (outil, couleur_outil) = libelle(geste, &accent);
-            let appel = matches!(nature(geste), Nature::Appel);
+            let appel = matches!(nature(geste), Nature::Appel | Nature::Sortie);
             let ligne = ui
                 .horizontal_wrapped(|ui| {
                     small(ui, "Dernier geste :");
@@ -787,6 +787,8 @@ enum Nature {
     Refus,
     Rappel,
     Publication,
+    /// Une requête sortie par egress (ADR 0056).
+    Sortie,
 }
 
 /// Le libellé d'un geste et sa couleur, les mêmes dans la frise et dans le dernier geste.
@@ -796,6 +798,7 @@ fn libelle(entry: &crate::missions::TrailEntry, accent: &Accent) -> (String, Col
         Nature::Rappel => ("livrable rappelé".to_owned(), ATTENTE_DOUCE),
         Nature::Publication => (entry.tool.clone(), GREEN),
         Nature::Appel => (entry.tool.clone(), accent.sourd),
+        Nature::Sortie => ("sortie réseau".to_owned(), accent.vif),
     }
 }
 
@@ -804,6 +807,7 @@ fn nature(entry: &crate::missions::TrailEntry) -> Nature {
         "refus" => Nature::Refus,
         "rappel" => Nature::Rappel,
         "publication" | "annulation" => Nature::Publication,
+        "sortie" => Nature::Sortie,
         _ => Nature::Appel,
     }
 }
@@ -832,6 +836,10 @@ fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::Trail
             .iter()
             .filter(|e| matches!(nature(e), Nature::Rappel))
             .count();
+        let sorties = trail
+            .iter()
+            .filter(|e| matches!(nature(e), Nature::Sortie))
+            .count();
         pastille(
             ui,
             &format!("{appels} appel{}", pluriel(appels)),
@@ -845,6 +853,13 @@ fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::Trail
                 ui,
                 &format!("{rappels} rappel{}", pluriel(rappels)),
                 ATTENTE_DOUCE,
+            );
+        }
+        if sorties > 0 {
+            pastille(
+                ui,
+                &format!("{sorties} sortie{} réseau", pluriel(sorties)),
+                accent.vif,
             );
         }
     });
@@ -867,7 +882,7 @@ fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::Trail
     ui.add_space(12.0);
     small(
         ui,
-        "États conservés par le service ; appels relus dans le journal, avec leur cible contrôlée et leur issue.",
+        "États conservés par le service ; appels et sorties réseau relus dans le journal, avec leur cible contrôlée et leur issue.",
     );
 }
 
@@ -1022,7 +1037,7 @@ fn touches(ui: &mut egui::Ui, trail: &[crate::missions::TrailEntry], accent: &Ac
                         open_in_browser(&format!("https://{target}/"));
                     }
                 }
-                if matches!(kind, Nature::Appel) {
+                if matches!(kind, Nature::Appel | Nature::Sortie) {
                     ui.label(RichText::new(mark).color(color).size(13.0));
                 }
                 if !note.is_empty() {
@@ -1045,7 +1060,7 @@ fn touches(ui: &mut egui::Ui, trail: &[crate::missions::TrailEntry], accent: &Ac
             (_, Outcome::Error(_)) => (None, RED, false),
             (_, Outcome::Pending) => (None, MUTED, false),
             (Nature::Publication, _) => (Some(GREEN), GREEN, false),
-            (Nature::Appel, Outcome::Ok) => (Some(accent.vif), accent.vif, false),
+            (Nature::Appel | Nature::Sortie, Outcome::Ok) => (Some(accent.vif), accent.vif, false),
         };
         noeud(
             ui,
@@ -1123,6 +1138,13 @@ fn motif_lisible(reason: &str) -> String {
         "ConstraintViolated" => "contrainte du droit non respectée".into(),
         "ApprovalRequired" => "décision humaine attendue".into(),
         "UnknownVersion" => "jeton d'une version inconnue".into(),
+        // egress rend les motifs de capd sous leur nom d'échange.
+        "policy_denied" => "hors de la portée de la mission".into(),
+        "no_grant" => "aucun hôte du jeton ne le permet".into(),
+        "expired" => "jeton expiré".into(),
+        "revoked_parent" => "droits retirés".into(),
+        "constraint_violated" => "contrainte du droit non respectée".into(),
+        "approval_required" => "décision humaine attendue".into(),
         autre => autre.into(),
     }
 }

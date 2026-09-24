@@ -188,6 +188,22 @@ impl Chain {
             .block_on(self.agents.call(method, params))
             .unwrap()
     }
+    /// Écrit au journal un événement de la mission, comme egress le fait pour ses sorties.
+    fn journaliser(&self, kind: &str, payload: Value) {
+        let journal = self.dir.path().join("ledger.sock");
+        self.runtime
+            .block_on(async {
+                prophet_ipc::Client::connect(journal)
+                    .await
+                    .unwrap()
+                    .call(
+                        "ledger.append",
+                        json!({"kind": kind, "task": ID, "actor": "egress", "payload": payload}),
+                    )
+                    .await
+            })
+            .unwrap();
+    }
     fn wait(&self, missions: &mut Missions, state: State) {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
@@ -1023,6 +1039,91 @@ fn l_arret_d_urgence_arrete_la_mission_en_cours_par_le_service() {
     assert!(!chain.dir.path().join("home/docs/note.txt").exists());
     drop(model.release);
     model.worker.unwrap().join().unwrap();
+}
+
+/// Les sorties réseau d'une mission prennent place dans sa frise (ADR 0056) : egress les écrit
+/// au journal de la mission — une requête relayée, un hôte refusé —, et le parcours les montre
+/// avec l'hôte, les octets et l'issue, à côté des appels d'outils.
+#[test]
+#[ignore = "needs_gpu: parcours des sorties réseau avec les services réels"]
+fn le_parcours_montre_les_sorties_reseau_de_la_mission() {
+    let (endpoint, worker, _liberer) = moteur_scripte(
+        vec![
+            appel(
+                1,
+                "fs.write",
+                json!({"path":"~/docs/note.txt","content":TEXT}),
+            ),
+            conclusion(TEXT),
+        ],
+        None,
+    );
+    let chain = Chain::with_model(&endpoint, "modele-controle");
+    chain.seed();
+    let context = Contexte::hors_ecran().unwrap();
+    let mut source = Reel::demarrer(chain.sockets.clone());
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.brancher_missions(chain.sockets.agentd.clone());
+    bureau.brancher_journal(chain.dir.path().join("ledger.sock"));
+    bureau.figer_transitions();
+    let target = Cible::nouvelle(&context, 1440, 1000);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while bureau.missions().snapshot().is_none() {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    chain.call("task.start", json!({"id":ID}));
+    chain.wait(bureau.missions(), State::Done);
+    worker.join().unwrap();
+    chain.journaliser(
+        "net.request",
+        json!({"host":"api.anthropic.com","port":443,"method":"CONNECT","bytes_out":12_400,"bytes_in":48_000,"status":200}),
+    );
+    chain.journaliser(
+        "net.deny",
+        json!({"host":"collecte.exemple","reason":"no_grant"}),
+    );
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+        let sorties = bureau
+            .missions()
+            .trail()
+            .iter()
+            .filter(|e| e.tool == "sortie")
+            .count();
+        if sorties == 2 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "sorties absentes du parcours : {:?}",
+            bureau.missions().trail()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // Le dernier geste vient de paraître et décale la page : le clic vise l'onglet une fois la
+    // mise en page posée.
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    let events = click(&bureau, &target, "mission-history-tab");
+    frame(&mut bureau, &mut source, &context, &target, events);
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &target, vec![]);
+    }
+    capture(&context, &target, "sorties-reseau");
+    let trail = bureau.missions().trail();
+    assert!(trail.iter().any(|e| {
+        e.tool == "sortie"
+            && e.outcome == surface::missions::Outcome::Ok
+            && e.target
+                .as_deref()
+                .is_some_and(|t| t.starts_with("api.anthropic.com"))
+    }));
+    assert!(trail.iter().any(|e| e.tool == "sortie"
+        && matches!(&e.outcome, surface::missions::Outcome::Denied(m) if m == "no_grant")));
 }
 
 /// Un moteur scripté : il rend ses réponses dans l'ordre, une par requête de complétion, et le
