@@ -121,6 +121,18 @@ impl Handler for Agents {
         match methode.as_str() {
             "ping" => Ok(json!("pong")),
 
+            // Combien d'événements attendent le journal (ADR 0059) : zéro quand il suit, un
+            // nombre qui grandit quand il est injoignable. Aucun contenu n'est rendu.
+            "journal.pending" => {
+                let en_attente = self.runtime.lock().await.journal_a_envoyer();
+                Ok(json!({
+                    "pending": en_attente.len(),
+                    "oldest": en_attente
+                        .first()
+                        .and_then(|d| d.ts.format(&time::format_description::well_known::Rfc3339).ok()),
+                }))
+            }
+
             "task.options" => {
                 let (models, model_error) = match self.local_models().await {
                     Ok(models) => (models, None),

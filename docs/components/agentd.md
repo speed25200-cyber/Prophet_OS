@@ -27,6 +27,7 @@
 | `task.halt` | Arrêt d'urgence, sans paramètre : chaque mission en main s'arrête comme par `task.cancel` (travailleur prié de s'arrêter, séance conclue, client officiel tué par le lanceur, plan annulé) ; rend `cancel_requested`, `cancelled`, `unattended` (non finies mais menées par rien) et `errors` ; rien n'est publié ni défait. Une mission qui attend une décision humaine (`approval.wait`) s'arrête à la fin de son attente, 45 s au plus |
 | `task.apply` | Publie dans le home l'index exact examiné, pour le créateur d'une mission `done` |
 | `task.undo` | Annule cette publication si les documents n'ont pas changé depuis ; avec `keep_changes`, laisse à l'humain ceux qu'il a changés et rétablit le reste (ADR 0058) |
+| `journal.pending` | Combien d'événements du service attendent le journal, et depuis quand (`pending`, `oldest`) ; aucun contenu (ADR 0059) |
 | `task.resolve` | Tranche une publication arrêtée sur un conflit (`{id, choice}`) : `keep_mine` garde la version de l'humain et poursuit, `roll_back` rétablit ce qui a été publié (ADR 0058) |
 | `task.attach` | Ouvre pour le créateur une séance d'outils sur une mission préparée : jeton, travail SFS, registre, journal, sans modèle (`{id, client?}`) |
 | `task.tools` | Rend les outils que le jeton de la séance couvre |

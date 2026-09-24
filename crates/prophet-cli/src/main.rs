@@ -480,6 +480,11 @@ fn run(cli: &Cli) -> anyhow::Result<String> {
             out.push_str(&status_reserve(
                 capacites_du_bac(&socket_sandboxd()).as_ref(),
             ));
+            out.push_str(&status_journal(
+                task_rpc(&socket_agentd(), "journal.pending", serde_json::json!({}))
+                    .ok()
+                    .as_ref(),
+            ));
             out.push_str(&status_modeles(
                 &providers::weights::installed(
                     &providers::weights::dir(),
@@ -3357,6 +3362,30 @@ fn status_modeles(
     out
 }
 
+/// Ce que le journal n'a pas encore reçu des événements du service (ADR 0059).
+fn status_journal(attente: Option<&serde_json::Value>) -> String {
+    let mut out = String::from("\n  Journal du service\n");
+    let Some(attente) = attente else {
+        out.push_str("    ? agentd ne répond pas\n");
+        return out;
+    };
+    match attente["pending"].as_u64().unwrap_or(0) {
+        0 => out.push_str("    ✓ à jour : aucun événement n'attend le journal\n"),
+        n => out.push_str(&format!(
+            "    · {n} événement{s} attend{ent} le journal{depuis} ; {ils} partir{ont} dès qu'il répondra\n",
+            s = if n > 1 { "s" } else { "" },
+            ent = if n > 1 { "ent" } else { "" },
+            depuis = attente["oldest"]
+                .as_str()
+                .map(|t| format!(" depuis {t}"))
+                .unwrap_or_default(),
+            ils = if n > 1 { "ils" } else { "il" },
+            ont = if n > 1 { "ont" } else { "a" },
+        )),
+    }
+    out
+}
+
 fn status_reserve(capacites: Option<&serde_json::Value>) -> String {
     let mut out = String::from("\n  Réserve de microVM\n");
     let Some(capacites) = capacites else {
@@ -3927,6 +3956,25 @@ mod tests {
                 "{arguments:?} doit fonctionner hors service"
             );
         }
+    }
+
+    /// Le journal du service se dit à jour, ou dit combien d'événements l'attendent (ADR 0059).
+    #[test]
+    fn le_statut_dit_ce_qui_attend_le_journal() {
+        assert!(super::status_journal(None).contains("agentd ne répond pas"));
+        assert!(super::status_journal(Some(&serde_json::json!({"pending": 0}))).contains("à jour"));
+        let un = super::status_journal(Some(
+            &serde_json::json!({"pending": 1, "oldest": "2026-09-24T07:00:00Z"}),
+        ));
+        assert!(
+            un.contains("1 événement attend le journal depuis 2026-09-24T07:00:00Z ; il partira"),
+            "{un}"
+        );
+        let trois = super::status_journal(Some(&serde_json::json!({"pending": 3})));
+        assert!(
+            trois.contains("3 événements attendent le journal ; ils partiront"),
+            "{trois}"
+        );
     }
 
     /// Trancher un conflit demande une décision, et une seule (ADR 0058).

@@ -1111,6 +1111,13 @@ async fn les_evenements_attendent_le_journal_et_n_y_arrivent_qu_une_fois() {
         etat.contains("\"idem\""),
         "la file attend dans l'état : {etat}"
     );
+    let attente = chain
+        .agents
+        .call("journal.pending", json!({}))
+        .await
+        .unwrap();
+    assert!(attente["pending"].as_u64().unwrap() >= 1, "{attente}");
+    assert!(attente["oldest"].is_string(), "{attente}");
 
     // Le journal revient, sur le même état.
     let ledger = Daemon::lancer(
@@ -1155,6 +1162,12 @@ async fn les_evenements_attendent_le_journal_et_n_y_arrivent_qu_une_fois() {
     assert_eq!(crees(&events), 1, "{events}");
     let etat = std::fs::read_to_string(chain.dir.path().join("agent-state/taches.json")).unwrap();
     assert!(!etat.contains("\"idem\""), "la file s'est vidée : {etat}");
+    let attente = chain
+        .agents
+        .call("journal.pending", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(attente["pending"], 0, "{attente}");
     model.worker.abort();
 }
 
