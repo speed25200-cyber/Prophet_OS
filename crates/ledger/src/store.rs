@@ -102,6 +102,9 @@ pub struct Store {
     /// Lignes de chaque fichier du jour, vides comprises : une écriture sait où elle tombe sans
     /// relire le fichier. Ce service est le seul à écrire son journal.
     lignes: BTreeMap<PathBuf, usize>,
+    /// Le premier numéro de chaque tâche : lire le journal d'une tâche part de là, sans relire
+    /// l'historique de la machine qui la précède.
+    premiers: std::collections::HashMap<String, u64>,
     since_last_seal: u64,
     sealer: Option<Sealer>,
 }
@@ -120,6 +123,7 @@ impl Store {
             last_hash: GENESIS.to_owned(),
             index: BTreeMap::new(),
             lignes: BTreeMap::new(),
+            premiers: std::collections::HashMap::new(),
             since_last_seal: 0,
             sealer: None,
         };
@@ -181,6 +185,9 @@ impl Store {
                     })?;
                 self.index
                     .insert(event.seq, (path.clone(), line_number, debut));
+                if let Some(tache) = &event.task {
+                    self.premiers.entry(tache.clone()).or_insert(event.seq);
+                }
                 self.next_seq = event.seq + 1;
                 self.last_hash = event.hash.clone().unwrap_or_else(|| GENESIS.to_owned());
                 if event.kind == EventKind::LedgerSeal {
@@ -235,6 +242,9 @@ impl Store {
         writer.flush()?;
         self.lignes.insert(path.clone(), existing_lines + 1);
         self.index.insert(event.seq, (path, existing_lines, octet));
+        if let Some(tache) = &event.task {
+            self.premiers.entry(tache.clone()).or_insert(event.seq);
+        }
         Ok(())
     }
 
@@ -323,7 +333,15 @@ impl Store {
     /// # Erreurs
     /// Comme [`Store::read_all`].
     pub fn query(&self, filter: &Filter) -> Result<Vec<Event>, LedgerError> {
-        let lus = match filter.since_seq {
+        // Le journal d'une tâche commence à son premier événement : rien avant ne la concerne.
+        let depuis = match &filter.task {
+            Some(tache) => match self.premiers.get(tache) {
+                Some(&premier) => Some(filter.since_seq.map_or(premier, |s| s.max(premier))),
+                None => return Ok(Vec::new()),
+            },
+            None => filter.since_seq,
+        };
+        let lus = match depuis {
             Some(depuis) => self.read_since(depuis)?,
             None => self.read_all()?,
         };
@@ -657,11 +675,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = journal_sur_trois_jours(dir.path());
         let tout = store.read_all().unwrap();
-        for depuis in 0..=store.next_seq() + 1 {
-            for task in [None, Some("task:02")] {
+        for depuis in [None]
+            .into_iter()
+            .chain((0..=store.next_seq() + 1).map(Some))
+        {
+            for task in [None, Some("task:01"), Some("task:02"), Some("task:99")] {
                 let filtre = Filter {
                     task: task.map(str::to_owned),
-                    since_seq: Some(depuis),
+                    since_seq: depuis,
                     ..Filter::default()
                 };
                 let attendu: Vec<u64> = tout
@@ -675,7 +696,7 @@ mod tests {
                     .iter()
                     .map(|e| e.seq)
                     .collect();
-                assert_eq!(lu, attendu, "depuis {depuis}, tâche {task:?}");
+                assert_eq!(lu, attendu, "depuis {depuis:?}, tâche {task:?}");
             }
         }
     }
