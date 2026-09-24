@@ -40,11 +40,13 @@ session, ni sway ; il joint agentd par un seul socket, relayé par le lanceur, q
 passer que la séance de sa mission (`task.attach`, `task.tools`, `task.call`, `task.detach`).
 Sans cage, aucun client n'est lancé (`SandboxError`).
 
-## Limites
+La cage a son propre espace réseau. Si `pilot.run` porte un jeton de sortie (`egress_token`,
+émis par capd à la demande d'agentd pour les hôtes de l'éditeur du client), un relais écoute
+dans la cage sur `127.0.0.1:3128` — le proxy du client — et le lanceur pose le jeton sur chaque
+requête avant de la relayer vers egress (`PROPHET_EGRESS_SOCKET`). Sans jeton, la cage n'a aucun
+réseau.
 
-- Le réseau de l'hôte reste au client (phase 1 de l'ADR 0056) : il joint son éditeur
-  directement, pas par egress. Le relais vers egress et la politique des hôtes de chaque
-  éditeur sont la phase 2.
+## Limites
 - Les sondes d'état et la connexion (`prophet provider login`) tournent hors cage : ce sont les
   commandes du client, lancées pour l'humain, sans objectif de mission.
 - Le vrai Claude Code et le vrai Codex exigent une connexion que seul l'humain effectue ; les

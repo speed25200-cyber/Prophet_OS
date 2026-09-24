@@ -164,3 +164,10 @@ restent soumis à l'expiration et aux vérifications de capd.
 Le [guide du crate](../../crates/agentd/README.md) décrit la configuration et les commandes.
 L'[ADR 0013](../adr/0013-missions-locales-agentd.md) détaille les limites du confinement natif,
 des chemins de métadonnées, des commits SFS et des clients officiels.
+
+## Réseau des clients officiels (ADR 0056)
+
+Au lancement d'un client officiel (`task.start` d'une mission sur un client, ou `task.delegate`
+vers un rôle `driver:`), agentd fait émettre par capd un jeton qui ne porte que `net.egress` vers
+les hôtes de l'éditeur du client, avec la mission pour sujet, et le remet au lanceur de pilotes
+(`egress_token`). `PROPHET_CLIENT_HOSTS` (JSON `{"codex": ["hote"]}`) complète ces hôtes.

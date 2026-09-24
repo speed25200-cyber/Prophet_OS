@@ -292,7 +292,8 @@ Le critère des clients officiels avance aussi (ADR 0056, phase 1) : chaque clie
 mission tourne dans une cage — espaces de noms utilisateur, montage, processus, IPC ; système en
 lecture seule ; son profil privé et les lieux de la mission seuls en écriture ; Landlock ; un
 socket qui ne mène qu'à la séance de sa mission. Il ne voit plus la maison de l'humain, ni capd,
-ni les autres méthodes d'agentd, ni la session ; éprouvé par des clients de remplacement qui
-sondent la cage et mènent pourtant leur mission. Le critère n'est pas coché : le réseau du
-client ne passe pas encore par egress (phase 2), et aucune session réelle de Claude Code ou de
-Codex n'a été exercée en cage.
+ni les autres méthodes d'agentd, ni la session ; son réseau ne sort que par egress, sous un jeton
+de capd borné aux hôtes de son éditeur (phase 2) ; éprouvé par des clients de remplacement qui
+sondent la cage, lisent une page par le vrai egress et mènent pourtant leur mission. Le critère
+n'est pas coché : aucune session réelle de Claude Code ou de Codex n'a été exercée en cage, et
+la liste des hôtes de chaque éditeur reste à confirmer avec elle.

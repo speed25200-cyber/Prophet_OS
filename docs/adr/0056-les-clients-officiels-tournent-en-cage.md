@@ -1,6 +1,6 @@
 # ADR-0056 — Les clients officiels lancés en mission tournent en cage
 
-- **Statut** : accepté (phase 1 : fichiers, services, session ; phase 2 : réseau par egress)
+- **Statut** : accepté (phase 1 : fichiers, services, session ; phase 2 : réseau par egress — les deux en place)
 - **Date** : 2026-09-23
 - **Tâche liée** : M8-T4 à M8-T6 (« lance le binaire officiel dans une sandbox niveau 1 ») ;
   FRONTIER (« clients officiels effectivement exécutés dans le confinement requis ») ; ADR 0026,
@@ -39,20 +39,32 @@ réutilise les primitives de `sandboxd` (racine minimale, Landlock) :
 - un seul socket : un relais du lanceur, qui ne laisse passer vers agentd que la séance de
   **cette** mission (`task.attach`, `task.tools`, `task.call`, `task.detach` avec son
   identifiant) ; ni capd, ni le journal, ni `/run/prophet` ne sont visibles ;
-- un environnement vidé : langue, fuseau, identité, autorités de certification et proxy de
-  l'humain passent ; le bus de session, sway, Wayland et `XDG_RUNTIME_DIR` non ;
+- un environnement vidé : langue, fuseau, identité et autorités de certification passent ; le
+  bus de session, sway, Wayland, `XDG_RUNTIME_DIR` et les proxys de la session non ;
 - **pas de cage, pas de client** : sans `prophet-pilot-cage` ou si la cage ne se pose pas,
   `pilot.run` échoue en le disant (`SandboxError`).
 
 Aucun filtre d'appels système n'est posé dans la cage : Codex confine lui-même ses commandes
 avec les espaces de noms, et le filtre du niveau 0 les refuserait.
 
-**Phase 2, à faire.** Le réseau de l'hôte reste au client, qui joint son éditeur directement :
-l'invariant « toute sortie réseau passe par egress » n'est pas encore tenu pour les clients
-officiels. Le tenir demande un espace réseau propre à la cage, un relais dans la cage vers le
-socket d'egress (le client ne parle que TCP), le jeton de la mission ajouté hors de la cage, et
-une politique des hôtes de chaque éditeur (API, authentification, télémétrie) que seule
-l'épreuve d'un client connecté permet d'arrêter sans casser son fonctionnement.
+**Phase 2, en place.** La cage a son propre espace réseau, réduit à sa boucle locale. Le
+réseau du client ne sort que par egress :
+
+- agentd fait émettre par capd, à chaque lancement d'un client, un jeton qui ne porte que
+  `net.egress` vers les hôtes de son éditeur (`ClientProfile::hosts` : API et renouvellement de
+  la connexion ; l'administrateur les complète par `PROPHET_CLIENT_HOSTS`), avec la mission pour
+  sujet — ce qui sort s'inscrit à son journal, et la révoquer coupe son réseau ;
+- dans la cage, un relais écoute sur `127.0.0.1:3128` et recopie chaque connexion vers un socket
+  du lanceur ; c'est le proxy du client (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`), et sa seule
+  issue ;
+- hors de la cage, le lanceur pose sur chaque requête l'en-tête du jeton (celui qu'un client
+  prétendrait porter est retiré) et relaie vers `egress.sock` ; egress demande à capd, hôte par
+  hôte. Un tunnel `CONNECT` reste chiffré de bout en bout ; le jeton ne franchit jamais la cage ;
+- sans jeton (un client sans hôte connu), la cage n'a aucun réseau ;
+- Claude Code reçoit son réglage documenté `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` : ni
+  télémétrie, ni rapport d'erreur, ni mise à jour automatique en mission.
+
+Les proxys de la session de l'humain ne passent plus : dans la cage, le seul proxy est le relais.
 
 ## Alternatives écartées
 
@@ -79,4 +91,7 @@ l'épreuve d'un client connecté permet d'arrêter sans casser son fonctionnemen
   l'humain, sans objectif de mission. Le lanceur interactif « Claude Code · mission » du bureau
   reste la session de l'humain lui-même.
 - À vérifier avec un client connecté (`needs_codex_login`, `needs_claude_login`) : que Claude
-  Code et Codex trouvent tout ce qu'il leur faut dans la cage (profil, certificats, résolveur).
+  Code et Codex trouvent tout ce qu'il leur faut dans la cage (profil, certificats) et que la
+  liste des hôtes de chaque éditeur suffit. Un hôte manquant se voit (refus d'egress au journal
+  de la mission) et s'ajoute par `PROPHET_CLIENT_HOSTS`, sans reconstruire.
+- Un proxy d'entreprise en amont d'egress n'est pas pris en charge : egress sort directement.
