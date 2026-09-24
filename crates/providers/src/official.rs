@@ -84,6 +84,12 @@ pub struct ClientProfile {
     pub permission_delegation: bool,
     /// Le client sait-il reprendre une session ?
     pub resume_arg: Option<String>,
+    /// Hôtes de son éditeur que le client doit joindre pour travailler (API, renouvellement de
+    /// sa connexion) : en mission, sa sortie réseau passe par egress sous un jeton borné à ces
+    /// hôtes (ADR 0056). Relevés dans la documentation de chaque client ; l'administrateur les
+    /// complète par `PROPHET_CLIENT_HOSTS` sans reconstruire le système.
+    #[serde(default)]
+    pub hosts: Vec<String>,
 }
 
 impl ClientProfile {
@@ -105,6 +111,12 @@ impl ClientProfile {
             config_home_env: "CLAUDE_CONFIG_DIR".into(),
             permission_delegation: true,
             resume_arg: Some("--resume".into()),
+            hosts: vec![
+                "api.anthropic.com".into(),
+                "console.anthropic.com".into(),
+                "platform.claude.com".into(),
+                "claude.ai".into(),
+            ],
         }
     }
 
@@ -119,6 +131,11 @@ impl ClientProfile {
             config_home_env: "CODEX_HOME".into(),
             permission_delegation: true,
             resume_arg: Some("resume".into()),
+            hosts: vec![
+                "chatgpt.com".into(),
+                "auth.openai.com".into(),
+                "api.openai.com".into(),
+            ],
         }
     }
 
@@ -133,6 +150,11 @@ impl ClientProfile {
             config_home_env: "GEMINI_CONFIG_DIR".into(),
             permission_delegation: false,
             resume_arg: None,
+            hosts: vec![
+                "cloudcode-pa.googleapis.com".into(),
+                "oauth2.googleapis.com".into(),
+                "generativelanguage.googleapis.com".into(),
+            ],
         }
     }
 
