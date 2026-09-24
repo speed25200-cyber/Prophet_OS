@@ -7,7 +7,10 @@
 
 La surface propose un accueil, une conversation en flux, une sélection de modèle et les tâches
 des services. La saisie, le presse-papiers, le défilement et les événements d'accessibilité passent
-par egui/winit ; wgpu dessine l'interface. L'espace principal rassemble les missions reçues,
+par egui/winit ; wgpu dessine l'interface. Ce qui est peint plutôt que posé en widget — cartes des
+clients officiels, relevés et heure de l'en-tête, cadrans d'une mission, échelle d'isolation, gestes
+du parcours — porte une phrase dans l'arbre d'accessibilité (AccessKit), qu'un lecteur d'écran lit ;
+un essai du bureau l'exige page par page. L'espace principal rassemble les missions reçues,
 leur contexte et les décisions à examiner. Les compteurs viennent du moteur et des services,
 et les réponses du modèle sélectionné.
 

@@ -1848,7 +1848,11 @@ donne le détail.
 - CI de `4e82542` (journal à l'octet et par tâche, cartes des clients, barre d'état, intitulés) :
   **verte des deux côtés**, tous travaux compris. Banc Qwen3 4B : Prophet 11/15, boucle nue 11/15
   (médiane 35,4 s contre 31,9 s).
-- `just check` : **975 réussis, 0 échec, 71 ignorés** (sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
+- Accessibilité (FRONTIER, interface native) : une sonde d'AccessKit a montré que tout ce que la
+  surface peint restait muet pour un lecteur d'écran — état des clients officiels, relevés et
+  heure de l'en-tête, cadrans d'une mission, échelle d'isolation. Chacun porte une phrase, et un
+  essai l'exige sur les pages Missions, Modèles et Système (`88e0c6b`, rouge avant).
+- `just check` : **975 réussis, 0 échec, 72 ignorés** (sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   6 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
