@@ -17,5 +17,34 @@ pub struct Demande {
     pub definir: bool,
 }
 
+impl Demande {
+    /// Choisir son code sans décision en attente : depuis la page Système, ou au premier
+    /// lancement quand aucun n'est encore défini.
+    #[must_use]
+    pub fn definir_seulement() -> Self {
+        Self {
+            id: String::new(),
+            portee: String::new(),
+            message: String::new(),
+            definir: true,
+        }
+    }
+
+    /// Aucune décision n'attend ce code : il est seulement choisi.
+    #[must_use]
+    pub fn sans_decision(&self) -> bool {
+        self.id.is_empty()
+    }
+}
+
+/// Ce que capd dit du code d'approbation de cette machine (`approval.code_status`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EtatDuCode {
+    /// Un code est défini.
+    pub defini: bool,
+    /// Secondes de verrou restantes après trop de codes faux.
+    pub verrou_s: Option<i64>,
+}
+
 /// Le code d'approbation compte au moins autant de caractères (le même seuil que capd).
 pub const LONGUEUR_MIN: usize = 6;

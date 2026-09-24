@@ -42,6 +42,10 @@ pub(crate) struct Supervision {
     pub(crate) presence: Option<crate::presence::Demande>,
     /// Le code en cours de saisie ; vidé dès qu'il part.
     code_saisi: String,
+    /// Ce que capd dit du code d'approbation de cette machine (ADR 0057).
+    pub(crate) code: Option<crate::presence::EtatDuCode>,
+    /// La page Système demande à choisir le code : la réponse part à la fin de l'image.
+    demander_le_code: bool,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -393,6 +397,9 @@ impl Supervision {
         }
         if self.arret.confirmation() {
             self.confirmer_l_arret(&ctx, scene);
+        }
+        if std::mem::take(&mut self.demander_le_code) {
+            *reponse = Some(Reponse::DemanderLeCode);
         }
         if self.presence.is_some() {
             self.code_d_approbation(&ctx, reponse);
@@ -1051,13 +1058,18 @@ impl Supervision {
                 ui.add_space(20.0);
                 let mut choix = None;
                 hud::rangee(ui, |ui| {
-                    if bouton(ui, "code-renoncer", "Renoncer", false).clicked() {
+                    let renoncer = if demande.sans_decision() {
+                        "Plus tard"
+                    } else {
+                        "Renoncer"
+                    };
+                    if bouton(ui, "code-renoncer", renoncer, false).clicked() {
                         choix = Some(false);
                     }
-                    let libelle = if demande.definir {
-                        "Définir et accorder"
-                    } else {
-                        "Accorder"
+                    let libelle = match (demande.definir, demande.sans_decision()) {
+                        (true, true) => "Définir",
+                        (true, false) => "Définir et accorder",
+                        (false, _) => "Accorder",
                     };
                     if ui
                         .add_enabled_ui(pret, |ui| action(ui, "code-confirmer", libelle))
@@ -1234,6 +1246,15 @@ impl Supervision {
                     });
                 });
                 ui.add_space(22.0);
+                if let Some(code) = self.code {
+                    plaque(ui, 28, |ui| {
+                        ui.set_width(ui.available_width());
+                        if approbations(ui, code, &accent) {
+                            self.demander_le_code = true;
+                        }
+                    });
+                    ui.add_space(22.0);
+                }
                 plaque(ui, 28, |ui| {
                     ui.set_width(ui.available_width());
                     etiquette(ui, "MACHINE, VUE PAR L'INSTALLEUR");
@@ -2307,6 +2328,52 @@ fn jauge_de_memoire(
 }
 
 /// La réserve de microVM, dite en une ligne.
+/// Le code d'approbation de cette machine, tel que capd le dit (ADR 0057) : défini, verrouillé
+/// ou à choisir. Rend vrai quand l'humain demande à le choisir maintenant.
+fn approbations(ui: &mut egui::Ui, code: crate::presence::EtatDuCode, accent: &Accent) -> bool {
+    etiquette(ui, "APPROBATIONS");
+    ui.add_space(4.0);
+    let (titre_du_code, couleur) = match code {
+        crate::presence::EtatDuCode {
+            verrou_s: Some(s), ..
+        } => (
+            format!(
+                "Verrouillé après trop de codes faux : encore {} min.",
+                (s + 59) / 60
+            ),
+            ATTENTE,
+        ),
+        crate::presence::EtatDuCode { defini: true, .. } => (
+            "Votre code d'approbation est défini.".to_owned(),
+            accent.vif,
+        ),
+        crate::presence::EtatDuCode { defini: false, .. } => (
+            "Aucun code d'approbation n'est encore choisi.".to_owned(),
+            ATTENTE,
+        ),
+    };
+    let mut demande = false;
+    ui.horizontal_wrapped(|ui| {
+        let (dot, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
+        ui.painter().circle_filled(dot.center(), 3.0, couleur);
+        ui.label(titre(&titre_du_code, 22.0));
+    });
+    ui.add_space(6.0);
+    petit(
+        ui,
+        if code.defini {
+            "Il est demandé pour accorder une action ; refuser n'en demande jamais. Aucun programme de votre session ne peut accorder sans lui. La commande « prophet cap code » le change."
+        } else {
+            "Choisissez-le avant qu'une décision n'attende : sans lui, rien ne s'accorde, et le premier à le définir sur cette machine le garde."
+        },
+    );
+    if !code.defini {
+        ui.add_space(12.0);
+        demande = action(ui, "code-definir-maintenant", "Définir maintenant").clicked();
+    }
+    demande
+}
+
 fn reserve_en_mots(reserve: &crate::scene::Reserve) -> String {
     match &reserve.erreur {
         Some(erreur) if reserve.pretes == 0 => {

@@ -42,6 +42,8 @@ struct Partage {
     isolation: Option<Isolation>,
     /// Ce qui empêche de savoir, quand quelque chose l'empêche.
     panne: Option<String>,
+    /// Ce que capd dit du code d'approbation ; absent s'il ne répond pas (ADR 0057).
+    code: Option<crate::presence::EtatDuCode>,
 }
 
 /// Où joindre les daemons.
@@ -177,6 +179,15 @@ impl Source for Reel {
                 }
                 return;
             }
+            // Choisir son code sans décision en attente, depuis la page Système.
+            Reponse::DemanderLeCode => {
+                if let Ok(mut etat) = etat.lock()
+                    && etat.demande.is_none()
+                {
+                    etat.demande = Some(crate::presence::Demande::definir_seulement());
+                }
+                return;
+            }
             Reponse::Code(code) => {
                 prouver_puis_accorder(socket, etat, code, false);
                 return;
@@ -208,6 +219,10 @@ impl Source for Reel {
             .lock()
             .ok()
             .and_then(|etat| etat.demande.clone())
+    }
+
+    fn code_d_approbation(&self) -> Option<crate::presence::EtatDuCode> {
+        self.partage.lock().ok().and_then(|p| p.code)
     }
 }
 
@@ -339,7 +354,14 @@ fn prouver_puis_accorder(
                             Instant::now() + Duration::from_secs(secondes),
                         ));
                     }
-                    trancher(&socket, &etat, &demande.id, "allow", &demande.portee).await;
+                    if demande.sans_decision() {
+                        // Le code est choisi, et le ticket gardé : rien n'attendait d'accord.
+                        if let Ok(mut etat) = etat.lock() {
+                            etat.demande = None;
+                        }
+                    } else {
+                        trancher(&socket, &etat, &demande.id, "allow", &demande.portee).await;
+                    }
                 }
                 Err(erreur) => {
                     let non_defini = presence_demandee(&erreur) == Some("undefined");
@@ -465,7 +487,7 @@ fn interroger(sockets: &Sockets, partage: &Weak<Mutex<Partage>>) {
             if partage.strong_count() == 0 {
                 break;
             }
-            let (taches, approbations, capacites) = tokio::join!(
+            let (taches, approbations, capacites, code) = tokio::join!(
                 appeler(&sockets.agentd, "task.list", serde_json::json!({})),
                 appeler(&sockets.capd, "approval.pending", serde_json::json!({})),
                 appeler(
@@ -473,6 +495,7 @@ fn interroger(sockets: &Sockets, partage: &Weak<Mutex<Partage>>) {
                     "sandbox.capabilities",
                     serde_json::json!({})
                 ),
+                appeler(&sockets.capd, "approval.code_status", serde_json::json!({})),
             );
 
             let mut panne = None;
@@ -494,6 +517,12 @@ fn interroger(sockets: &Sockets, partage: &Weak<Mutex<Partage>>) {
                         .unwrap_or(0),
                     manque: manque_pour_monter(&valeur),
                     reserve: reserve_de(&valeur),
+                });
+                etat.code = code.ok().and_then(|valeur| {
+                    Some(crate::presence::EtatDuCode {
+                        defini: valeur["defined"].as_bool()?,
+                        verrou_s: valeur["locked_s"].as_i64(),
+                    })
                 });
                 etat.panne = panne;
             }
@@ -620,6 +649,7 @@ mod tests {
         let ecoute = std::os::unix::net::UnixListener::bind(&chemin).unwrap();
         let recus = Arc::new(Mutex::new(Vec::new()));
         let journal = Arc::clone(&recus);
+        let mut defini = false;
         std::thread::spawn(move || {
             for flux in ecoute.incoming().flatten() {
                 let mut lecteur = std::io::BufReader::new(flux.try_clone().unwrap());
@@ -630,7 +660,10 @@ mod tests {
                 let requete: serde_json::Value = serde_json::from_str(&ligne).unwrap();
                 let params = requete["params"].clone();
                 let methode = requete["method"].as_str().unwrap_or_default().to_owned();
-                if methode.starts_with("approval.resolve") || methode == "approval.presence" {
+                if methode.starts_with("approval.resolve")
+                    || methode == "approval.presence"
+                    || methode == "approval.set_code"
+                {
                     journal
                         .lock()
                         .unwrap()
@@ -639,6 +672,13 @@ mod tests {
                 let refus = |genre: &str, message: &str| serde_json::json!({"code": -32001, "message": message, "data": {"presence": genre}});
                 let reponse = match methode.as_str() {
                     "approval.pending" => serde_json::json!({"result": []}),
+                    "approval.code_status" => {
+                        serde_json::json!({"result": {"defined": defini, "locked_s": null}})
+                    }
+                    "approval.set_code" => {
+                        defini = true;
+                        serde_json::json!({"result": {"defined": true}})
+                    }
                     "approval.presence" if params["code"] == "pivoine-42" => {
                         serde_json::json!({"result": {"ticket": "T1", "expires_in_s": 600}})
                     }
@@ -724,6 +764,43 @@ mod tests {
                 .iter()
                 .any(|r| r["params"]["id"] == "apr-3" && r["params"].get("ticket").is_none())
         });
+    }
+
+    /// Choisir son code depuis la page Système : le champ s'ouvre sans décision, le code est
+    /// défini puis prouvé, rien n'est accordé, et le ticket sert au prochain accord.
+    #[test]
+    fn choisir_son_code_sans_decision_n_accorde_rien_et_garde_le_ticket() {
+        let dir = tempfile::tempdir().unwrap();
+        let (capd, recus) = faux_capd(dir.path());
+        let mut source = Reel::demarrer(Sockets {
+            agentd: PathBuf::from("/nulle/part/agentd.sock"),
+            capd,
+            sandboxd: PathBuf::from("/nulle/part/sandboxd.sock"),
+        });
+        attendre(|| source.code_d_approbation().is_some_and(|c| !c.defini));
+        source.repond(Reponse::DemanderLeCode);
+        let demande = source.presence().expect("le champ s'ouvre");
+        assert!(demande.definir && demande.sans_decision(), "{demande:?}");
+        source.repond(Reponse::DefinirCode("pivoine-42".into()));
+        attendre(|| source.presence().is_none());
+        attendre(|| source.code_d_approbation().is_some_and(|c| c.defini));
+        let methodes: Vec<String> = recus
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|r| r["method"].as_str().unwrap_or_default().to_owned())
+            .collect();
+        assert_eq!(methodes, ["approval.set_code", "approval.presence"]);
+        source.montree = Some("apr-9".into());
+        source.repond(Reponse::Accepte);
+        attendre(|| {
+            recus
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|r| r["params"]["id"] == "apr-9" && r["params"]["ticket"] == "T1")
+        });
+        assert!(source.presence().is_none(), "le ticket évite de redemander");
     }
 
     #[test]

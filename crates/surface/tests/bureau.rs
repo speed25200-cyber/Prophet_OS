@@ -519,6 +519,86 @@ fn accorder_demande_le_code_d_approbation_dans_un_champ_masque() {
     assert_eq!(rendu, Some(Reponse::DefinirCode("glycine-7".into())));
 }
 
+/// La page Système dit où en est le code d'approbation (ADR 0057) : à choisir, avec
+/// « Définir maintenant » qui ouvre le champ sans décision en attente ; défini ; verrouillé.
+#[test]
+#[ignore = "needs_gpu: rendu wgpu hors écran"]
+fn la_page_systeme_dit_le_code_d_approbation_et_le_fait_choisir() {
+    use surface::fenetre::Reponse;
+    use surface::presence::EtatDuCode;
+    let context = Contexte::hors_ecran().unwrap();
+    let target = Cible::nouvelle(&context, 1280, 1400);
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.figer_transitions();
+    bureau.atelier.page = Page::Activite;
+    let scene = scene();
+    bureau.code = Some(EtatDuCode {
+        defini: false,
+        verrou_s: None,
+    });
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
+    capture(&context, &target, "systeme-code-a-choisir");
+    let mut rendu = None;
+    for _ in 0..2 {
+        let clic = click_widget(&bureau, "code-definir-maintenant");
+        let (_, reponse) = avec_scene(&mut bureau, &context, &target, &scene, clic);
+        if reponse.is_some() {
+            rendu = reponse;
+            break;
+        }
+    }
+    assert_eq!(rendu, Some(Reponse::DemanderLeCode));
+    // La source ouvre alors le champ, sans décision : « Définir » et « Plus tard ».
+    bureau.presence = Some(surface::presence::Demande::definir_seulement());
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
+    capture(&context, &target, "systeme-code-definir-seulement");
+    avec_scene(
+        &mut bureau,
+        &context,
+        &target,
+        &scene,
+        vec![Event::Text("glycine-7".into())],
+    );
+    let mut rendu = None;
+    for _ in 0..2 {
+        let clic = click_widget(&bureau, "code-confirmer");
+        let (_, reponse) = avec_scene(&mut bureau, &context, &target, &scene, clic);
+        if reponse.is_some() {
+            rendu = reponse;
+            break;
+        }
+    }
+    assert_eq!(rendu, Some(Reponse::DefinirCode("glycine-7".into())));
+    bureau.presence = None;
+    // Défini : plus de bouton. Verrouillé : dit, en minutes.
+    bureau.code = Some(EtatDuCode {
+        defini: true,
+        verrou_s: None,
+    });
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
+    assert!(
+        bureau
+            .ctx
+            .read_response(egui::Id::new("code-definir-maintenant"))
+            .is_none(),
+        "un code défini ne se propose plus"
+    );
+    bureau.code = Some(EtatDuCode {
+        defini: true,
+        verrou_s: Some(240),
+    });
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
+    capture(&context, &target, "systeme-code-verrouille");
+}
+
 #[test]
 #[ignore = "needs_gpu"]
 fn la_decision_exige_un_examen_puis_un_choix_explicite_aux_trois_tailles() {

@@ -29,6 +29,8 @@ pub enum Reponse {
     DefinirCode(String),
     /// L'humain renonce à donner son code : l'accord n'est pas fait.
     RenoncerAuCode,
+    /// L'humain veut choisir son code maintenant, sans décision en attente.
+    DemanderLeCode,
 }
 
 /// Source des tâches, de l'isolation et des décisions du système.
@@ -39,6 +41,10 @@ pub trait Source {
     fn repond(&mut self, reponse: Reponse);
     /// La demande de code d'approbation en cours, s'il y en a une (ADR 0057).
     fn presence(&self) -> Option<crate::presence::Demande> {
+        None
+    }
+    /// Ce que capd dit du code d'approbation, s'il a répondu (ADR 0057).
+    fn code_d_approbation(&self) -> Option<crate::presence::EtatDuCode> {
         None
     }
 }
@@ -109,6 +115,7 @@ pub fn tenir_avec(source: Box<dyn Source>, options: Options) -> Result<(), Erreu
         repeindre: true,
         empreinte: None,
         presence: None,
+        code: None,
         erreur: None,
         proxy: boucle.create_proxy(),
     };
@@ -150,6 +157,8 @@ struct Application {
     empreinte: Option<u64>,
     /// La demande de code d'approbation montrée à la dernière image (ADR 0057).
     presence: Option<crate::presence::Demande>,
+    /// L'état du code d'approbation montré à la dernière image.
+    code: Option<crate::presence::EtatDuCode>,
     erreur: Option<ErreurFenetre>,
     proxy: EventLoopProxy<Evenement>,
 }
@@ -230,6 +239,8 @@ impl ApplicationHandler<Evenement> for Application {
                 self.repeindre = false;
                 self.presence = self.source.presence();
                 etat.bureau.presence.clone_from(&self.presence);
+                self.code = self.source.code_d_approbation();
+                etat.bureau.code = self.code;
                 if let Some(reponse) = dessiner(etat, &scene) {
                     self.source.repond(reponse);
                 }
@@ -249,7 +260,8 @@ impl ApplicationHandler<Evenement> for Application {
                 // Une demande de code d'approbation qui paraît, change ou se clôt se redessine.
                 if !etat.cachee
                     && (doit_redessiner(self.repeindre, self.empreinte, &self.source.scene())
-                        || self.source.presence() != self.presence)
+                        || self.source.presence() != self.presence
+                        || self.source.code_d_approbation() != self.code)
                 {
                     etat.fenetre.request_redraw();
                 }
