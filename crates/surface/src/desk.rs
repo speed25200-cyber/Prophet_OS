@@ -337,18 +337,33 @@ pub(crate) fn chrome(root: &mut egui::Ui, atelier: &mut Atelier, scene: &Scene, 
                         &mut atelier.mouvement_reduit,
                         RichText::new("Mouvement réduit").size(10.).color(DISCRET),
                     );
-                    // Le clavier suffit à tout : on le dit une fois, là où l'œil ne s'attarde pas.
+                    // Le clavier suffit à tout : on le dit une fois, là où l'œil ne s'attarde pas,
+                    // dans la version qui tient entre l'état et la case — sinon elle passerait
+                    // sur l'état.
                     if !compact {
-                        ui.add_space(22.);
-                        hud::etiquette(
-                            ui,
-                            "CTRL K RECHERCHER · CTRL N OBJECTIF · CTRL 1–4 PAGES · ÉCHAP FERMER · CTRL MAJ ÉCHAP TOUT ARRÊTER",
-                            EFFACE,
-                        );
+                        let place = ui.available_width() - 22. - 16.;
+                        if let Some(texte) =
+                            raccourcis_qui_tiennent(place, |t| hud::largeur_etiquette(ui, t))
+                        {
+                            ui.add_space(22.);
+                            hud::etiquette(ui, texte, EFFACE);
+                        }
                     }
                 });
             });
         });
+}
+
+/// Les raccourcis de la barre d'état, du plus complet au plus bref : la recherche et l'arrêt
+/// d'urgence restent dits le plus longtemps.
+const RACCOURCIS: [&str; 2] = [
+    "CTRL K RECHERCHER · CTRL N OBJECTIF · CTRL 1–4 PAGES · ÉCHAP FERMER · CTRL MAJ ÉCHAP TOUT ARRÊTER",
+    "CTRL K RECHERCHER · CTRL MAJ ÉCHAP TOUT ARRÊTER",
+];
+
+/// La première version des raccourcis qui tient dans `place`, mesurée par `largeur`.
+fn raccourcis_qui_tiennent(place: f32, largeur: impl Fn(&str) -> f32) -> Option<&'static str> {
+    RACCOURCIS.into_iter().find(|texte| largeur(texte) <= place)
 }
 
 /// L'emblème du rail : l'anneau des missions actives autour du chiffre qui les compte.
@@ -639,4 +654,22 @@ pub(crate) fn empty(ui: &mut egui::Ui, compact: bool, brouillon: &mut String) ->
         },
     );
     soumis
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn la_barre_dit_les_raccourcis_qui_tiennent_sans_passer_sur_l_etat() {
+        // Une mesure à 6 points par caractère : assez pour ordonner les versions.
+        let largeur = |t: &str| t.chars().count() as f32 * 6.0;
+        assert_eq!(
+            super::raccourcis_qui_tiennent(2_000.0, largeur),
+            Some(super::RACCOURCIS[0])
+        );
+        assert_eq!(
+            super::raccourcis_qui_tiennent(400.0, largeur),
+            Some(super::RACCOURCIS[1])
+        );
+        assert_eq!(super::raccourcis_qui_tiennent(100.0, largeur), None);
+    }
 }

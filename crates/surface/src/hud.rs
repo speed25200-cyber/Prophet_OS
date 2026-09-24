@@ -59,6 +59,21 @@ pub(crate) fn etiquette_peinte(p: &egui::Painter, at: Pos2, text: &str, color: C
     );
 }
 
+/// La largeur qu'occuperait une étiquette en capitales espacées, pour choisir ce qui tient.
+pub(crate) fn largeur_etiquette(ui: &egui::Ui, text: &str) -> f32 {
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        text,
+        0.0,
+        egui::TextFormat {
+            font_id: FontId::proportional(9.5),
+            extra_letter_spacing: 1.6,
+            ..Default::default()
+        },
+    );
+    ui.painter().layout_job(job).size().x
+}
+
 /// Une étiquette en capitales espacées, dans le flux.
 pub(crate) fn etiquette(ui: &mut egui::Ui, text: impl Into<String>, color: Color32) {
     ui.label(
