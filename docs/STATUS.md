@@ -1829,7 +1829,7 @@ donne le détail.
   que le jeton réseau du client permettra (`554f11b`), et « Plan & accès » les montre sous
   « Réseau du client » (`6f76f4e`) ; un essai de rendu du plan d'une mission Codex le vérifie
   et le capture.
-- `just check` : **973 réussis, 0 échec, 70 ignorés** (sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
+- `just check` : **973 réussis, 0 échec, 71 ignorés** (sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   6 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
