@@ -589,20 +589,25 @@ impl Handler for Agents {
                 let observation =
                     mcp_system::tools::Browsing::observation_path(&self.browser_root, &id);
                 let task = id.clone();
-                let (publication, browsing) = tokio::task::spawn_blocking(move || {
-                    let publication = has_review
+                let (publication, statut, browsing) = tokio::task::spawn_blocking(move || {
+                    let workspace = has_review
                         .then(|| sfs::Workspace::open(&home, &task).ok())
-                        .flatten()
-                        .map(|workspace| workspace.state());
+                        .flatten();
+                    let publication = workspace.as_ref().map(sfs::Workspace::state);
+                    // Le fichier en conflit et ce qui a été laissé à l'humain (ADR 0058).
+                    let statut = workspace
+                        .as_ref()
+                        .and_then(|w| w.publication_status().ok().flatten());
                     // Où l'agent navigue : déposé par les outils web, lu ici sans l'arbre.
                     let browsing = std::fs::read_to_string(observation)
                         .ok()
                         .and_then(|text| serde_json::from_str::<Value>(&text).ok());
-                    (publication, browsing)
+                    (publication, statut, browsing)
                 })
                 .await
                 .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?;
-                let mut inspection = inspection.with_publication(owner, publication);
+                let mut inspection =
+                    inspection.with_publication(owner, publication, statut.as_ref());
                 inspection.browsing = browsing;
                 // Une mission menée par un client officiel : les hôtes que son jeton réseau
                 // permettra, lus avant le lancement comme après (ADR 0056).
@@ -623,17 +628,44 @@ impl Handler for Agents {
             // La bibliothèque SFS relit les versions et refuse les conflits ; le service ne
             // fait qu'exiger l'identité, sérialiser les appels et consigner ce qui a eu lieu.
             "task.apply" => {
+                self.publish(commun::texte(&params, "id")?, pair.uid, Demande::Publier)
+                    .await
+            }
+
+            // `keep_changes` laisse à l'humain les fichiers qu'il a changés depuis la
+            // publication, et rétablit le reste (ADR 0058).
+            "task.undo" => {
+                let garder = params
+                    .get("keep_changes")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
                 self.publish(
                     commun::texte(&params, "id")?,
                     pair.uid,
-                    Publication::Applied,
+                    Demande::Annuler { garder },
                 )
                 .await
             }
 
-            "task.undo" => {
-                self.publish(commun::texte(&params, "id")?, pair.uid, Publication::Undone)
-                    .await
+            // Une publication arrêtée sur un conflit attend la décision de son créateur :
+            // garder sa version du fichier et poursuivre, ou tout annuler (ADR 0058).
+            "task.resolve" => {
+                let choix = match commun::texte(&params, "choice")?.as_str() {
+                    "keep_mine" => sfs::Resolution::KeepMine,
+                    "roll_back" => sfs::Resolution::RollBack,
+                    autre => {
+                        return Err(Error::new(
+                            ErrorCode::InvalidParams,
+                            format!("décision inconnue : {autre} (attendu keep_mine ou roll_back)"),
+                        ));
+                    }
+                };
+                self.publish(
+                    commun::texte(&params, "id")?,
+                    pair.uid,
+                    Demande::Trancher(choix),
+                )
+                .await
             }
 
             "task.result" => {
@@ -1115,11 +1147,13 @@ impl Agents {
             .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))
     }
 
-    /// Applique ou annule les versions examinées d'une mission, sous l'identité du créateur.
+    /// Applique ou annule les versions examinées d'une mission, ou tranche un conflit, sous
+    /// l'identité du créateur.
     ///
     /// Une publication ou une annulation interrompue laisse SFS en `applying` ou `undoing` ;
     /// la même commande reprend alors l'intention journalisée au lieu d'en créer une autre.
-    async fn publish(&self, id: String, uid: u32, outcome: Publication) -> Result<Value, Error> {
+    /// Ce qui est consigné suit l'état final : publiée, ou rétablie.
+    async fn publish(&self, id: String, uid: u32, demande: Demande) -> Result<Value, Error> {
         if id.len() > 160 {
             return Err(Error::new(
                 ErrorCode::InvalidParams,
@@ -1132,7 +1166,28 @@ impl Agents {
             .await
             .publication_context(&id, uid)
             .map_err(|e| Error::new(ErrorCode::PolicyDenied, e))?;
-        if outcome == Publication::Applied {
+        // Poursuivre une publication écrit encore les versions de la mission dans ses
+        // documents : capd retranche, comme la première fois. Rétablir n'écrit que les siennes.
+        let ecrit_la_mission = match demande {
+            Demande::Publier => true,
+            Demande::Annuler { .. } | Demande::Trancher(sfs::Resolution::RollBack) => false,
+            Demande::Trancher(sfs::Resolution::KeepMine) => {
+                let (home, task) = (home.clone(), id.clone());
+                !tokio::task::spawn_blocking(move || {
+                    sfs::Workspace::open(&home, &task)?.publication_status()
+                })
+                .await
+                .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?
+                .map_err(|e| publication_refusee(Publication::Applied, e))?
+                .is_some_and(|statut| statut.undoing)
+            }
+        };
+        let sens = if ecrit_la_mission {
+            Publication::Applied
+        } else {
+            Publication::Undone
+        };
+        if ecrit_la_mission {
             self.autoriser_la_publication(&id, &home, &review).await?;
         }
         let permit = self.publications.clone().try_acquire_owned().map_err(|_| {
@@ -1142,46 +1197,67 @@ impl Agents {
             )
         })?;
         let task = id.clone();
-        let diff = tokio::task::spawn_blocking(move || {
+        let (diff, rollback, kept) = tokio::task::spawn_blocking(move || {
             use sfs::WorkspaceState as W;
             let _permit = permit;
             let mut workspace = sfs::Workspace::open(&home, &task)?;
             let now = OffsetDateTime::now_utc();
-            match (outcome, workspace.state()) {
-                (Publication::Applied, W::Open) => {
+            let diff = match (demande, workspace.state()) {
+                (Demande::Publier, W::Open) => {
                     workspace.commit_review(&review, now, Some(&provenance))
                 }
-                (Publication::Applied, W::Applying) | (Publication::Undone, W::Undoing) => {
+                (Demande::Publier, W::Applying) | (Demande::Annuler { .. }, W::Undoing) => {
                     workspace.recover_publication()
                 }
-                (Publication::Undone, W::Committed) => workspace.undo(),
+                (Demande::Annuler { garder: false }, W::Committed) => workspace.undo(),
+                (Demande::Annuler { garder: true }, W::Committed) => {
+                    workspace.undo_keeping_changes()
+                }
+                (Demande::Trancher(choix), W::Conflict) => workspace.resolve_conflict(choix),
                 (_, state) => Err(sfs::SfsError::BadState { state }),
-            }
+            }?;
+            let kept: Vec<String> = workspace
+                .publication_status()?
+                .map(|statut| statut.kept)
+                .unwrap_or_default()
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect();
+            Ok((diff, workspace.state() == W::RolledBack, kept))
         })
         .await
         .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?
-        .map_err(|e| publication_refusee(outcome, e))?;
+        .map_err(|e| publication_refusee(sens, e))?;
+        let outcome = if rollback {
+            Publication::Undone
+        } else {
+            Publication::Applied
+        };
         let maintenant = OffsetDateTime::now_utc();
         {
             let mut runtime = self.runtime.lock().await;
             runtime
-                .record_publication(&id, outcome, &diff, maintenant)
+                .record_publication(&id, outcome, &diff, &kept, maintenant)
                 .map_err(runtime_erreur)?;
         }
         self.enregistrer().await?;
         self.vider_le_journal().await;
         let (added, modified, deleted) = diff.counts();
         let counts = json!({"added":added,"modified":modified,"deleted":deleted});
-        match outcome {
+        let mut reponse = match outcome {
             Publication::Applied => {
-                tracing::info!(tache = %id, "versions publiées");
-                Ok(json!({"applied":id,"changes":counts}))
+                tracing::info!(tache = %id, gardes = kept.len(), "versions publiées");
+                json!({"applied":id,"changes":counts})
             }
             Publication::Undone => {
-                tracing::info!(tache = %id, "publication annulée");
-                Ok(json!({"undone":id,"state":"rolled_back","changes":counts}))
+                tracing::info!(tache = %id, gardes = kept.len(), "publication annulée");
+                json!({"undone":id,"state":"rolled_back","changes":counts})
             }
+        };
+        if !kept.is_empty() {
+            reponse["kept"] = json!(kept);
         }
+        Ok(reponse)
     }
 
     /// Fait trancher capd sur chaque fichier de l'index exact avant la première mutation.
@@ -2514,6 +2590,18 @@ fn runtime_erreur(erreur: agentd::RuntimeError) -> Error {
     Error::new(code, erreur.to_string())
 }
 
+/// Ce que le créateur demande à la publication de sa mission.
+#[derive(Debug, Clone, Copy)]
+enum Demande {
+    /// Publier l'index examiné, ou reprendre sa publication interrompue.
+    Publier,
+    /// Annuler la publication, ou reprendre son annulation ; `garder` laisse à l'humain les
+    /// fichiers qu'il a changés depuis (ADR 0058).
+    Annuler { garder: bool },
+    /// Trancher le conflit sur lequel la publication s'est arrêtée (ADR 0058).
+    Trancher(sfs::Resolution),
+}
+
 /// Un refus de SFS, dit dans les termes de la commande demandée.
 ///
 /// L'état de l'espace de travail explique ce qui bloque : déjà publié, jamais publié, conflit
@@ -2532,7 +2620,7 @@ fn publication_refusee(outcome: Publication, erreur: sfs::SfsError) -> Error {
             "Cette publication a déjà été annulée.".to_owned()
         }
         (sfs::SfsError::BadState { state: W::Conflict }, _) => {
-            "Une publication interrompue sur un conflit conserve ses fichiers déplacés ; elle demande une résolution explicite.".to_owned()
+            "Cette publication s'est arrêtée sur un conflit, et ses fichiers déplacés sont conservés : elle attend votre décision — garder votre version du fichier, ou tout annuler.".to_owned()
         }
         (sfs::SfsError::BadState { state }, _) => {
             format!("Commande impossible dans l'état de publication {state:?}.")

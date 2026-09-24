@@ -64,6 +64,53 @@ mod review_ownership {
         legacy_runtime.reprendre(serde_json::from_value(legacy).unwrap());
         assert!(legacy_runtime.review_context("one", 1000).is_err());
     }
+
+    /// Un conflit se tranche par le créateur d'une mission finie et racine, jamais par un
+    /// autre ; le fichier en conflit et ce qui a été laissé à l'humain se lisent (ADR 0058).
+    #[test]
+    fn un_conflit_se_montre_et_se_tranche_par_le_createur_seul() {
+        use sfs::WorkspaceState as W;
+        let mut runtime = Runtime::sans_broker("/home/test");
+        let mut task = Task::new(
+            "one",
+            "Objectif",
+            "local:test",
+            "uid:2000",
+            Budget::new(Default::default()),
+            OffsetDateTime::now_utc(),
+        );
+        task.state = State::Done;
+        runtime.tasks.insert(task.id.clone(), task);
+        let statut = sfs::PublicationStatus {
+            state: W::Conflict,
+            undoing: true,
+            conflict: Some("docs/a.txt".into()),
+            kept: vec!["docs/b.txt".into()],
+        };
+        let vue = runtime
+            .inspect("one", false, false, false)
+            .unwrap()
+            .with_publication(true, Some(W::Conflict), Some(&statut));
+        assert!(vue.can_resolve && !vue.can_apply && !vue.can_undo);
+        assert_eq!(vue.conflict.as_deref(), Some("docs/a.txt"));
+        assert!(vue.conflict_in_undo);
+        assert_eq!(vue.kept, vec!["docs/b.txt".to_owned()]);
+        let autre = runtime
+            .inspect("one", false, false, false)
+            .unwrap()
+            .with_publication(false, Some(W::Conflict), Some(&statut));
+        assert!(!autre.can_resolve);
+        let publiee = runtime
+            .inspect("one", false, false, false)
+            .unwrap()
+            .with_publication(true, Some(W::Committed), None);
+        assert!(!publiee.can_resolve && publiee.conflict.is_none());
+        let json = serde_json::to_value(&publiee).unwrap();
+        assert!(
+            json.get("kept").is_none() && json.get("can_resolve").is_none(),
+            "{json}"
+        );
+    }
 }
 
 /// Erreur du runtime.
@@ -169,6 +216,19 @@ pub struct Inspection {
     /// Le créateur peut annuler une publication effectuée.
     #[serde(default)]
     pub can_undo: bool,
+    /// Le fichier sur lequel la publication s'est arrêtée, en conflit, relatif au répertoire
+    /// de l'humain (ADR 0058) ; absent sans conflit en attente.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conflict: Option<String>,
+    /// La publication arrêtée sur ce conflit était une annulation.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub conflict_in_undo: bool,
+    /// Le créateur peut trancher le conflit : garder sa version, ou tout annuler.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub can_resolve: bool,
+    /// Les fichiers laissés à la version de l'humain par une décision ou une annulation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept: Vec<String>,
     /// Où l'agent navigue en ce moment : adresse, titre et taille de la page, jamais son contenu.
     #[serde(default)]
     pub browsing: Option<serde_json::Value>,
@@ -184,8 +244,14 @@ impl Inspection {
     /// Les commandes ne sont offertes qu'au créateur constaté de la mission : la publication
     /// touche ses documents, et l'état SFS seul ne dit pas qui a le droit de la demander.
     /// Une publication ou une annulation interrompue se reprend par la même commande.
+    /// Un conflit en attente se tranche par le créateur seul, comme la publication.
     #[must_use]
-    pub fn with_publication(mut self, owner: bool, state: Option<sfs::WorkspaceState>) -> Self {
+    pub fn with_publication(
+        mut self,
+        owner: bool,
+        state: Option<sfs::WorkspaceState>,
+        status: Option<&sfs::PublicationStatus>,
+    ) -> Self {
         use sfs::WorkspaceState as W;
         self.publication = state;
         let done = self.task.state == State::Done;
@@ -194,6 +260,19 @@ impl Inspection {
         let racine = self.task.parent.is_none();
         self.can_apply = owner && done && racine && matches!(state, Some(W::Open | W::Applying));
         self.can_undo = owner && done && racine && matches!(state, Some(W::Committed | W::Undoing));
+        self.can_resolve = owner && done && racine && state == Some(W::Conflict);
+        if let Some(status) = status {
+            self.conflict = status
+                .conflict
+                .as_ref()
+                .map(|path| path.display().to_string());
+            self.conflict_in_undo = self.conflict.is_some() && status.undoing;
+            self.kept = status
+                .kept
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect();
+        }
         self
     }
 }
@@ -635,6 +714,10 @@ impl Runtime {
             publication: None,
             can_apply: false,
             can_undo: false,
+            conflict: None,
+            conflict_in_undo: false,
+            can_resolve: false,
+            kept: Vec::new(),
             browsing: None,
             client_hosts: None,
         })
@@ -698,10 +781,15 @@ impl Runtime {
         id: &str,
         outcome: Publication,
         diff: &sfs::Diff,
+        kept: &[String],
         now: OffsetDateTime,
     ) -> Result<(), RuntimeError> {
         let (added, modified, deleted) = diff.counts();
-        let counts = json!({"added":added,"modified":modified,"deleted":deleted});
+        let mut counts = json!({"added":added,"modified":modified,"deleted":deleted});
+        // Ce que l'humain a gardé pour lui se lit au journal, à côté de ce qui a changé.
+        if !kept.is_empty() {
+            counts["kept"] = json!(kept);
+        }
         if !self.tasks.contains_key(id) {
             return Err(RuntimeError::Unknown(id.into()));
         }

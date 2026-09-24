@@ -262,6 +262,12 @@ async fn controlled_model() -> ModelServer {
 }
 
 async fn controlled_reply(first: Option<Value>) -> ModelServer {
+    controlled_turns(first.into_iter().collect()).await
+}
+
+/// Un modèle qui joue ces tours dans l'ordre — le premier retenu jusqu'à `release` —, puis
+/// conclut ; sans tour donné, il écrit `~/docs/note.txt`.
+async fn controlled_turns(tours: Vec<Value>) -> ModelServer {
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
@@ -270,7 +276,7 @@ async fn controlled_reply(first: Option<Value>) -> ModelServer {
     let worker = tokio::spawn(async move {
         let mut received = Some(received);
         let mut gate = Some(gate);
-        for turn in 0..2 {
+        for turn in 0..tours.len().max(1) + 1 {
             let (stream, _) = listener.accept().await.unwrap();
             let mut stream = BufReader::new(stream);
             let mut size = 0;
@@ -295,8 +301,10 @@ async fn controlled_reply(first: Option<Value>) -> ModelServer {
                     return;
                 }
             }
-            let response = if turn == 0 {
-                first.clone().unwrap_or_else(|| json!({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"type":"function","id":"call_1","function":{"name":"fs.write","arguments":"{\"path\":\"~/docs/note.txt\",\"content\":\"preuve\"}"}}]}}],"usage":{"prompt_tokens":12,"completion_tokens":8}}))
+            let response = if let Some(tour) = tours.get(turn) {
+                tour.clone()
+            } else if turn == 0 {
+                json!({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"type":"function","id":"call_1","function":{"name":"fs.write","arguments":"{\"path\":\"~/docs/note.txt\",\"content\":\"preuve\"}"}}]}}],"usage":{"prompt_tokens":12,"completion_tokens":8}})
             } else {
                 json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"Terminé."}}],"usage":{"prompt_tokens":32,"completion_tokens":3}})
             };
@@ -982,6 +990,109 @@ async fn une_retouche_humaine_apres_publication_interdit_l_annulation() {
             .any(|e| e["kind"] == "fs.undo"),
         "un refus ne s'inscrit pas comme une annulation : {events}"
     );
+}
+
+/// Deux fichiers publiés, l'humain en reprend un : l'annulation stricte refuse, celle qui garde
+/// ses modifications rétablit l'autre et le dit, jusqu'au journal (ADR 0058). Trancher sans
+/// conflit en attente est refusé en le nommant.
+#[tokio::test]
+async fn annuler_en_gardant_ses_modifications_laisse_le_document_repris() {
+    let ecrire = |id: &str, chemin: &str, contenu: &str| {
+        json!({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[
+            {"type":"function","id":id,"function":{"name":"fs.write","arguments":json!({"path":chemin,"content":contenu}).to_string()}}
+        ]}}],"usage":{"prompt_tokens":12,"completion_tokens":8}})
+    };
+    let model = controlled_turns(vec![
+        ecrire("call_1", "~/docs/note.txt", "preuve"),
+        ecrire("call_2", "~/docs/autre.txt", "second"),
+    ])
+    .await;
+    let chain = Chain::new(&model.endpoint).await;
+    chain.plan("controlled", "Écris deux notes").await;
+    chain
+        .agents
+        .call("task.start", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    model.received.await.unwrap();
+    model.release.send(()).unwrap();
+    let fin = chain.wait_terminal().await;
+    assert_eq!(fin["state"], "done", "{fin}");
+    let applied = chain
+        .agents
+        .call("task.apply", json!({"id":"local-test"}))
+        .await
+        .unwrap();
+    assert_eq!(applied["changes"]["added"], 2, "{applied}");
+    assert!(applied.get("kept").is_none(), "{applied}");
+    let note = chain.dir.path().join("home/docs/note.txt");
+    let autre = chain.dir.path().join("home/docs/autre.txt");
+    std::fs::write(&note, "retouche humaine").unwrap();
+
+    let info = inspect(&chain).await;
+    assert_eq!(info["can_resolve"], json!(null), "{info}");
+    assert_eq!(info["conflict"], json!(null), "{info}");
+    let refused = chain
+        .agents
+        .call(
+            "task.resolve",
+            json!({"id":"local-test","choice":"keep_mine"}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        refused.code,
+        prophet_ipc::ErrorCode::Conflict,
+        "{refused:?}"
+    );
+    let refused = chain
+        .agents
+        .call("task.resolve", json!({"id":"local-test","choice":"tout"}))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, prophet_ipc::ErrorCode::InvalidParams);
+    let refused = chain
+        .agents
+        .call("task.undo", json!({"id":"local-test"}))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        refused.code,
+        prophet_ipc::ErrorCode::Conflict,
+        "{refused:?}"
+    );
+    assert!(autre.exists(), "l'annulation stricte ne touche à rien");
+
+    let undone = chain
+        .agents
+        .call("task.undo", json!({"id":"local-test","keep_changes":true}))
+        .await
+        .unwrap();
+    assert_eq!(undone["state"], "rolled_back", "{undone}");
+    assert_eq!(undone["changes"]["added"], 1, "{undone}");
+    assert_eq!(undone["kept"], json!(["docs/note.txt"]), "{undone}");
+    assert_eq!(std::fs::read_to_string(&note).unwrap(), "retouche humaine");
+    assert!(
+        !autre.exists(),
+        "le document que l'humain n'a pas repris est retiré"
+    );
+    let info = inspect(&chain).await;
+    assert_eq!(info["task"]["state"], "rolled_back", "{info}");
+    assert_eq!(info["kept"], json!(["docs/note.txt"]), "{info}");
+
+    let events = chain
+        .journal
+        .call("ledger.query", json!({"task":"local-test"}))
+        .await
+        .unwrap();
+    let undo = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "fs.undo")
+        .unwrap_or_else(|| panic!("fs.undo absent : {events}"));
+    assert_eq!(undo["actor"], "user", "{undo}");
+    assert_eq!(undo["payload"]["kept"], json!(["docs/note.txt"]), "{undo}");
 }
 
 #[tokio::test]
