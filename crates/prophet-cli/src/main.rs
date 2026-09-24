@@ -313,6 +313,22 @@ enum TaskAction {
     Undo {
         /// Identifiant.
         id: String,
+        /// Laisser à votre version les fichiers que vous avez changés depuis, et rétablir le
+        /// reste (ADR 0058).
+        #[arg(long)]
+        keep_changes: bool,
+    },
+    /// Tranche une publication arrêtée sur un conflit (ADR 0058).
+    #[command(group(clap::ArgGroup::new("decision").required(true).args(["keep_mine", "roll_back"])))]
+    Resolve {
+        /// Identifiant.
+        id: String,
+        /// Garder votre version du fichier en conflit et poursuivre.
+        #[arg(long)]
+        keep_mine: bool,
+        /// Ne plus publier : rétablir ce qui a déjà été publié, sans toucher vos changements.
+        #[arg(long)]
+        roll_back: bool,
     },
 }
 
@@ -2056,6 +2072,37 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                     "Pour annuler cette publication : prophet task undo {id}\n"
                 ));
             }
+            if let Some(chemin) = &inspection.conflict {
+                out.push_str(&format!(
+                    "Arrêtée sur un conflit : ~/{chemin} a changé pendant {}.\n",
+                    if inspection.conflict_in_undo {
+                        "l'annulation"
+                    } else {
+                        "la publication"
+                    }
+                ));
+            }
+            if inspection.can_resolve {
+                out.push_str(&format!(
+                    "Pour garder votre version et poursuivre : prophet task resolve {id} --keep-mine\n"
+                ));
+                if !inspection.conflict_in_undo {
+                    out.push_str(&format!(
+                        "Pour tout annuler, sans toucher vos changements : prophet task resolve {id} --roll-back\n"
+                    ));
+                }
+            }
+            if !inspection.kept.is_empty() {
+                out.push_str(&format!(
+                    "Laissés à votre version : {}\n",
+                    inspection
+                        .kept
+                        .iter()
+                        .map(|chemin| format!("~/{chemin}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
             if let Some(plan) = inspection.plan {
                 out.push_str(&plan.render());
             }
@@ -2085,18 +2132,31 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
             }
             Ok(out)
         }
-        // Les deux commandes passent par agentd : lui seul connaît le créateur de la mission
-        // et l'index exact qu'il a examiné. La bibliothèque refuse un document retouché depuis.
-        TaskAction::Apply { id } | TaskAction::Undo { id } => {
-            let apply = matches!(action, TaskAction::Apply { .. });
-            let result = task_rpc(
-                &socket_agentd(),
-                if apply { "task.apply" } else { "task.undo" },
-                serde_json::json!({"id":id}),
-            )?;
+        // Ces commandes passent par agentd : lui seul connaît le créateur de la mission et
+        // l'index exact qu'il a examiné. La bibliothèque refuse un document retouché depuis ;
+        // l'humain tranche alors le conflit, ou annule en gardant ses changements (ADR 0058).
+        TaskAction::Apply { id } | TaskAction::Undo { id, .. } | TaskAction::Resolve { id, .. } => {
+            let (methode, params) = match action {
+                TaskAction::Apply { .. } => ("task.apply", serde_json::json!({"id":id})),
+                TaskAction::Undo { keep_changes, .. } => (
+                    "task.undo",
+                    serde_json::json!({"id":id, "keep_changes": keep_changes}),
+                ),
+                TaskAction::Resolve { keep_mine, .. } => (
+                    "task.resolve",
+                    serde_json::json!({
+                        "id": id,
+                        "choice": if *keep_mine { "keep_mine" } else { "roll_back" },
+                    }),
+                ),
+                _ => unreachable!("filtré par le motif"),
+            };
+            let result = task_rpc(&socket_agentd(), methode, params)?;
             if as_json {
                 return Ok(format!("{}\n", serde_json::to_string_pretty(&result)?));
             }
+            // Trancher finit en publication ou en annulation : la réponse dit laquelle.
+            let apply = result.get("applied").is_some();
             let key = if apply { "applied" } else { "undone" };
             anyhow::ensure!(
                 result[key].as_str() == Some(id.as_str()),
@@ -2108,7 +2168,7 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                 changes["modified"].as_u64().unwrap_or(0),
                 changes["deleted"].as_u64().unwrap_or(0),
             );
-            Ok(if apply {
+            let mut out = if apply {
                 format!(
                     "Mission {id} : versions publiées dans vos documents : {a} ajout(s), {m} modification(s), {s} suppression(s)\n"
                 )
@@ -2116,7 +2176,19 @@ fn task(action: &TaskAction, as_json: bool) -> anyhow::Result<String> {
                 format!(
                     "Mission {id} : publication annulée : {a} ajout(s) retiré(s), {m} modification(s) rétablie(s), {s} suppression(s) rétablie(s)\n"
                 )
-            })
+            };
+            if let Some(gardes) = result["kept"].as_array().filter(|g| !g.is_empty()) {
+                out.push_str(&format!(
+                    "Laissés à votre version : {}\n",
+                    gardes
+                        .iter()
+                        .filter_map(|g| g.as_str())
+                        .map(|g| format!("~/{g}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+            Ok(out)
         }
         TaskAction::Options => {
             let options: agentd::preparation::Options = serde_json::from_value(task_rpc(
@@ -3112,7 +3184,9 @@ fn publication_lisible(state: sfs::WorkspaceState) -> &'static str {
         W::Open => "versions examinables, non appliquées",
         W::Applying => "publication interrompue ; `prophet task apply` la reprend",
         W::Undoing => "annulation interrompue ; `prophet task undo` la reprend",
-        W::Conflict => "interrompue sur un conflit ; les fichiers déplacés sont conservés",
+        W::Conflict => {
+            "arrêtée sur un conflit, fichiers déplacés conservés ; `prophet task resolve` la tranche"
+        }
         W::Committed => "versions publiées dans vos documents",
         W::RolledBack => "publication annulée, documents initiaux rétablis",
         W::Abandoned => "travail abandonné sans publication",
@@ -3747,6 +3821,9 @@ mod tests {
             vec!["prophet", "task", "cancel", "task:01"],
             vec!["prophet", "task", "apply", "task:01"],
             vec!["prophet", "task", "undo", "task:01"],
+            vec!["prophet", "task", "undo", "task:01", "--keep-changes"],
+            vec!["prophet", "task", "resolve", "task:01", "--keep-mine"],
+            vec!["prophet", "task", "resolve", "task:01", "--roll-back"],
             vec!["prophet", "log", "tail"],
             vec!["prophet", "log", "replay", "task:01"],
             vec!["prophet", "log", "verify"],
@@ -3850,6 +3927,23 @@ mod tests {
                 "{arguments:?} doit fonctionner hors service"
             );
         }
+    }
+
+    /// Trancher un conflit demande une décision, et une seule (ADR 0058).
+    #[test]
+    fn trancher_un_conflit_demande_une_seule_decision() {
+        assert!(Cli::try_parse_from(["prophet", "task", "resolve", "task:01"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "prophet",
+                "task",
+                "resolve",
+                "task:01",
+                "--keep-mine",
+                "--roll-back"
+            ])
+            .is_err()
+        );
     }
 
     #[test]

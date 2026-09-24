@@ -463,6 +463,10 @@ fn inspection() -> Value {
         publication: None,
         can_apply: false,
         can_undo: false,
+        conflict: None,
+        conflict_in_undo: false,
+        can_resolve: false,
+        kept: Vec::new(),
         browsing: None,
         client_hosts: None,
     })

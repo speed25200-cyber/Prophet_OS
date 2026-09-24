@@ -33,6 +33,14 @@ Validation : `nix develop --command cargo test -p prophet-cli`. Les tests de pro
 `task_service` reproduisent une consultation avec captures inaccessibles. Les vrais comptes
 et services sont exercés par `nix build .#checks.x86_64-linux.services`.
 
+## Publier, annuler, trancher
+
+`prophet task apply <id>` publie les versions examinées ; `prophet task undo <id>` annule, et
+refuse si vos documents ont changé depuis — `--keep-changes` les laisse alors tels quels et
+rétablit le reste. Une publication arrêtée sur un conflit se tranche par `prophet task resolve
+<id> --keep-mine` (garder votre version et poursuivre) ou `--roll-back` (rétablir ce qui a été
+publié) ; `prophet task show` dit le fichier en conflit et ce qui vous a été laissé (ADR 0058).
+
 ## Les décisions
 
 `prophet cap approvals` liste ce qui attend une décision ; `prophet cap deny <id>` refuse ;
