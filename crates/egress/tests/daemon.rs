@@ -986,3 +986,127 @@ async fn un_amont_https_est_joint_en_tls_termine_par_le_proxy() {
         "la seule requête reçue reste la première : {recue}"
     );
 }
+
+/// Chaque décision s'inscrit au journal de la mission du jeton (ADR 0056) : une sortie relayée
+/// en `net.request` avec son hôte, son statut et ses octets ; un refus de capd en `net.deny`. Un
+/// jeton forgé, lui, n'écrit rien : il ne ferait qu'imiter une autre mission.
+#[tokio::test]
+async fn chaque_decision_s_inscrit_au_journal_de_la_mission() {
+    let temp = tempfile::tempdir().expect("répertoire temporaire");
+    let temoin = Temoin::poser().await;
+    let socket_capd = temp.path().join("capd.sock");
+    let capd = Daemon::lancer(
+        prophet_daemon::essai::binaire_voisin("prophet-capd")
+            .to_str()
+            .expect("chemin lisible"),
+        &socket_capd,
+        &temp.path().join("etat-capd"),
+    );
+    let client_capd = capd.joindre().await;
+    let socket_journal = temp.path().join("ledger.sock");
+    let journal = Daemon::lancer(
+        prophet_daemon::essai::binaire_voisin("prophet-ledger")
+            .to_str()
+            .expect("chemin lisible"),
+        &socket_journal,
+        &temp.path().join("etat-journal"),
+    );
+    let client_journal = journal.joindre().await;
+    let jeton = client_capd
+        .call(
+            "cap.mint",
+            json!({
+                "manifest": manifeste(),
+                "grants": [{ "res": "net", "act": "egress", "match": "127.0.0.1" }],
+                "task": "task:journal",
+                "user": "prophet"
+            }),
+        )
+        .await
+        .expect("jeton émis");
+    let socket = temp.path().join("egress.sock");
+    let daemon = Daemon::lancer_avec(
+        EGRESS,
+        &socket,
+        &temp.path().join("etat"),
+        &[
+            ("PROPHET_CAPD_SOCKET", socket_capd.to_str().expect("chemin")),
+            (
+                "PROPHET_LEDGER_SOCKET",
+                socket_journal.to_str().expect("chemin"),
+            ),
+        ],
+    );
+    daemon.attendre_reponse(SONDE).await;
+
+    let (reponse, _) = demander_avec_corps(
+        &socket,
+        &format!(
+            "GET http://127.0.0.1:{}/page HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+             Proxy-Authorization: Prophet {}\r\n\r\n",
+            temoin.port,
+            base64_json(&jeton)
+        ),
+    )
+    .await;
+    assert!(reponse.contains("200"), "{reponse}");
+    // Un hôte que le jeton ne couvre pas : capd refuse, et le refus s'inscrit aussi.
+    let (refus, _) = demander_avec_corps(
+        &socket,
+        &format!(
+            "GET http://exemple.invalide/ HTTP/1.1\r\nHost: exemple.invalide\r\n\
+             Proxy-Authorization: Prophet {}\r\n\r\n",
+            base64_json(&jeton)
+        ),
+    )
+    .await;
+    assert!(refus.contains("403"), "{refus}");
+    // Un jeton forgé au nom d'une autre mission : refusé, et rien n'est écrit pour elle.
+    let _ = demander(
+        &socket,
+        &format!(
+            "GET http://127.0.0.1:{}/forge HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+             Proxy-Authorization: Prophet {}\r\n\r\n",
+            temoin.port,
+            base64_json(&jeton_forge())
+        ),
+    )
+    .await;
+
+    let mut evenements = Vec::new();
+    for _ in 0..50 {
+        evenements = client_journal
+            .call("ledger.query", json!({"task": "task:journal"}))
+            .await
+            .expect("journal lisible")
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if evenements.len() >= 2 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let sortie = evenements
+        .iter()
+        .find(|e| e["kind"] == "net.request")
+        .unwrap_or_else(|| panic!("net.request attendu : {evenements:?}"));
+    assert_eq!(sortie["payload"]["host"], "127.0.0.1");
+    assert_eq!(sortie["payload"]["method"], "GET");
+    assert_eq!(sortie["payload"]["status"], 200);
+    assert!(
+        sortie["payload"]["bytes_in"].as_u64().unwrap_or(0) > 0,
+        "{sortie}"
+    );
+    assert_eq!(sortie["actor"], "egress");
+    let refus = evenements
+        .iter()
+        .find(|e| e["kind"] == "net.deny")
+        .unwrap_or_else(|| panic!("net.deny attendu : {evenements:?}"));
+    assert_eq!(refus["payload"]["host"], "exemple.invalide");
+    let forge = client_journal
+        .call("ledger.query", json!({"task": "task:forge"}))
+        .await
+        .expect("journal lisible");
+    assert_eq!(forge, json!([]), "un jeton forgé n'écrit rien");
+}

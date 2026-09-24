@@ -47,6 +47,8 @@ const CORPS_MAX: usize = 8 * 1024 * 1024;
 
 struct Sortie {
     capd: std::path::PathBuf,
+    /// Le journal, où chaque décision s'inscrit sous la mission du jeton.
+    journal: std::path::PathBuf,
     /// Le coffre. Lui seul peut rendre une valeur, et seulement à ce processus.
     coffre: std::path::PathBuf,
     detecteur: Detector,
@@ -75,6 +77,10 @@ async fn main() -> anyhow::Result<()> {
         |_| prophet_ipc::socket_path("vault"),
         std::path::PathBuf::from,
     );
+    let journal = std::env::var("PROPHET_LEDGER_SOCKET").map_or_else(
+        |_| prophet_ipc::socket_path("ledger"),
+        std::path::PathBuf::from,
+    );
     // Une liste illisible arrête le service : une configuration qui ne se lit pas ne doit pas
     // se transformer silencieusement en « aucun hôte », ni en « tous ».
     let hotes_d_interrogation = std::env::var("PROPHET_EGRESS_QUERY_HOSTS")
@@ -95,6 +101,7 @@ async fn main() -> anyhow::Result<()> {
 
     let sortie = Arc::new(Sortie {
         capd,
+        journal,
         coffre,
         detecteur: Detector::new(),
         hotes_d_interrogation,
@@ -201,9 +208,23 @@ impl Sortie {
             }
         };
 
+        // La mission est le sujet du jeton ; capd vient d'en juger la signature. Un jeton forgé
+        // n'écrit rien au journal : il ne ferait qu'y imiter une autre mission.
+        let mission = jeton["sub"].as_str().map(str::to_owned);
         if decision["decision"] != "allow" {
             let motif = decision["reason"].as_str().unwrap_or("refusé").to_owned();
             tracing::info!(hote = %requete.host, %motif, "sortie refusée par capd");
+            // Un jeton dont capd n'a pas pu vérifier la signature ne dit rien de sa mission.
+            if !matches!(
+                motif.as_str(),
+                "bad_signature" | "unknown_version" | "BadSignature" | "UnknownVersion"
+            ) {
+                self.journaliser(
+                    mission.as_deref(),
+                    "net.deny",
+                    json!({"host": requete.host, "reason": motif}),
+                );
+            }
             ecriture
                 .write_all(&reponse(403, &motif, &decision.to_string()))
                 .await?;
@@ -224,6 +245,11 @@ impl Sortie {
                 .collect::<Vec<_>>()
                 .join(" ; ");
             tracing::warn!(hote = %requete.host, %explication, "exfiltration suspectée");
+            self.journaliser(
+                mission.as_deref(),
+                "net.exfil_suspected",
+                json!({"host": requete.host, "reason": explication}),
+            );
             ecriture
                 .write_all(&reponse(403, "ExfiltrationSuspected", &explication))
                 .await?;
@@ -258,14 +284,18 @@ impl Sortie {
                     .await?;
                 return Ok(());
             }
-            relayer_tunnel(&requete, lecteur, ecriture).await
+            let bilan = relayer_tunnel(&requete, lecteur, ecriture).await?;
+            self.journaliser_la_sortie(mission.as_deref(), &requete, bilan);
+            Ok(())
         } else {
             // La substitution a lieu ici, au tout dernier moment, et jamais avant : ce qui a été
             // journalisé et inspecté plus haut ne contenait que des références.
             match self.substituer(&requete.host, &requete.headers).await {
                 Ok(entetes) => {
                     requete.headers = entetes;
-                    relayer_http(&requete, ecriture, &self.tls).await
+                    let bilan = relayer_http(&requete, ecriture, &self.tls).await?;
+                    self.journaliser_la_sortie(mission.as_deref(), &requete, bilan);
+                    Ok(())
                 }
                 Err(raison) => {
                     tracing::warn!(hote = %requete.host, %raison, "substitution refusée");
@@ -336,6 +366,58 @@ impl Sortie {
             sortants.push((nom.clone(), reference.remplacer_par(valeur_reelle)));
         }
         Ok(sortants)
+    }
+
+    /// Inscrit une décision au journal, sous la mission du jeton, sans retenir la requête : une
+    /// panne du journal se dit dans le journal du service, elle n'arrête pas la sortie déjà
+    /// tranchée.
+    fn journaliser(&self, mission: Option<&str>, genre: &'static str, charge: Value) {
+        let Some(mission) = mission.map(str::to_owned) else {
+            return;
+        };
+        let journal = self.journal.clone();
+        tokio::spawn(async move {
+            let ecrit = async {
+                let client = Client::connect(&journal).await.map_err(|e| e.to_string())?;
+                client
+                    .call(
+                        "ledger.append",
+                        json!({"kind": genre, "task": mission, "actor": "egress", "payload": charge}),
+                    )
+                    .await
+                    .map_err(|e| e.message)
+            };
+            if let Err(erreur) = ecrit.await {
+                tracing::warn!(%erreur, genre, "décision de sortie non journalisée");
+            }
+        });
+    }
+
+    /// Une sortie relayée, telle que la mission la relira : hôte, port, méthode, octets et
+    /// statut. Ni chemin complet, ni en-tête, ni corps.
+    fn journaliser_la_sortie(
+        &self,
+        mission: Option<&str>,
+        requete: &egress::ParsedRequest,
+        bilan: Bilan,
+    ) {
+        let defaut = if requete.method == "CONNECT" || requete.target.starts_with("https://") {
+            443
+        } else {
+            80
+        };
+        self.journaliser(
+            mission,
+            "net.request",
+            json!({
+                "host": requete.host,
+                "port": port_de(&requete.target, defaut),
+                "method": requete.method,
+                "bytes_out": bilan.sortis,
+                "bytes_in": bilan.recus,
+                "status": bilan.statut,
+            }),
+        );
     }
 
     /// Demande à `capd` si ce jeton autorise une sortie vers cet hôte.
@@ -505,12 +587,21 @@ async fn joindre_amont(hote: &str, port: u16) -> Result<TcpStream, String> {
     }
 }
 
+/// Ce qu'une sortie relayée a fait passer : octets dans chaque sens et statut rendu par l'amont
+/// (`None` si l'amont n'a rien répondu de lisible).
+#[derive(Debug, Clone, Copy, Default)]
+struct Bilan {
+    sortis: u64,
+    recus: u64,
+    statut: Option<u16>,
+}
+
 /// Relaie une requête HTTP, en clair vers `http://`, sous TLS terminé ici vers `https://`.
 async fn relayer_http(
     requete: &egress::ParsedRequest,
     mut ecriture: tokio::net::unix::OwnedWriteHalf,
     tls: &Arc<rustls::ClientConfig>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Bilan> {
     let chiffre = requete.target.starts_with("https://");
     let port = port_de(&requete.target, if chiffre { 443 } else { 80 });
     let tcp = match joindre_amont(&requete.host, port).await {
@@ -519,7 +610,10 @@ async fn relayer_http(
             ecriture
                 .write_all(&reponse(502, "Unreachable", &erreur))
                 .await?;
-            return Ok(());
+            return Ok(Bilan {
+                statut: Some(502),
+                ..Bilan::default()
+            });
         }
     };
     if chiffre {
@@ -529,7 +623,10 @@ async fn relayer_http(
                 ecriture
                     .write_all(&reponse(502, "BadServerName", &erreur.to_string()))
                     .await?;
-                return Ok(());
+                return Ok(Bilan {
+                    statut: Some(502),
+                    ..Bilan::default()
+                });
             }
         };
         let connecteur = tokio_rustls::TlsConnector::from(Arc::clone(tls));
@@ -541,7 +638,10 @@ async fn relayer_http(
                 ecriture
                     .write_all(&reponse(502, "TlsFailed", &erreur.to_string()))
                     .await?;
-                Ok(())
+                Ok(Bilan {
+                    statut: Some(502),
+                    ..Bilan::default()
+                })
             }
         }
     } else {
@@ -554,7 +654,7 @@ async fn transmettre<A: AsyncRead + AsyncWrite + Unpin>(
     requete: &egress::ParsedRequest,
     mut amont: A,
     mut ecriture: tokio::net::unix::OwnedWriteHalf,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Bilan> {
     let mut brut = format!(
         "{} {} HTTP/1.1\r\n",
         requete.method,
@@ -568,9 +668,21 @@ async fn transmettre<A: AsyncRead + AsyncWrite + Unpin>(
     amont.write_all(&requete.body).await?;
     amont.flush().await?;
 
-    tokio::io::copy(&mut amont, &mut ecriture).await?;
+    // La ligne de statut est relue au passage, pour le journal ; le reste est recopié tel quel.
+    let mut amont = BufReader::new(amont);
+    let mut statut = Vec::new();
+    amont.read_until(b'\n', &mut statut).await?;
+    ecriture.write_all(&statut).await?;
+    let reste = tokio::io::copy_buf(&mut amont, &mut ecriture).await?;
     ecriture.flush().await?;
-    Ok(())
+    Ok(Bilan {
+        sortis: (brut.len() + requete.body.len()) as u64,
+        recus: statut.len() as u64 + reste,
+        statut: String::from_utf8_lossy(&statut)
+            .split_whitespace()
+            .nth(1)
+            .and_then(|code| code.parse().ok()),
+    })
 }
 
 /// Établit un tunnel `CONNECT`.
@@ -584,7 +696,7 @@ async fn relayer_tunnel(
     requete: &egress::ParsedRequest,
     mut lecteur: BufReader<tokio::net::unix::OwnedReadHalf>,
     mut ecriture: tokio::net::unix::OwnedWriteHalf,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Bilan> {
     let port = port_de(&requete.target, 443);
     let amont = match joindre_amont(&requete.host, port).await {
         Ok(flux) => flux,
@@ -592,7 +704,10 @@ async fn relayer_tunnel(
             ecriture
                 .write_all(&reponse(502, "Unreachable", &erreur))
                 .await?;
-            return Ok(());
+            return Ok(Bilan {
+                statut: Some(502),
+                ..Bilan::default()
+            });
         }
     };
     ecriture
@@ -602,15 +717,21 @@ async fn relayer_tunnel(
 
     let (mut amont_lecture, mut amont_ecriture) = amont.into_split();
     let montant = async {
-        tokio::io::copy_buf(&mut lecteur, &mut amont_ecriture).await?;
-        amont_ecriture.shutdown().await
+        let octets = tokio::io::copy_buf(&mut lecteur, &mut amont_ecriture).await?;
+        amont_ecriture.shutdown().await?;
+        Ok::<u64, std::io::Error>(octets)
     };
     let descendant = async {
-        tokio::io::copy(&mut amont_lecture, &mut ecriture).await?;
-        ecriture.shutdown().await
+        let octets = tokio::io::copy(&mut amont_lecture, &mut ecriture).await?;
+        ecriture.shutdown().await?;
+        Ok::<u64, std::io::Error>(octets)
     };
-    let (_, _) = tokio::join!(montant, descendant);
-    Ok(())
+    let (sortis, recus) = tokio::join!(montant, descendant);
+    Ok(Bilan {
+        sortis: sortis.unwrap_or(0),
+        recus: recus.unwrap_or(0),
+        statut: Some(200),
+    })
 }
 
 fn port_de(cible: &str, defaut: u16) -> u16 {
