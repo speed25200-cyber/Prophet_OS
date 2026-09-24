@@ -346,6 +346,41 @@ impl Node {
     }
 }
 
+impl Node {
+    /// L'arbre borné à `max_noeuds` nœuds, pris dans l'ordre du document, et chaque nom ou
+    /// valeur à `max_texte` caractères ; rend aussi le nombre de nœuds laissés de côté. C'est la
+    /// borne de ce qu'on rend à un modèle : une page ou une fenêtre démesurée ne doit pas remplir
+    /// son contexte. La racine est toujours gardée.
+    #[must_use]
+    pub fn borner(&self, max_noeuds: usize, max_texte: usize) -> (Self, usize) {
+        let mut reste = max_noeuds.max(1);
+        let mut laisses = 0;
+        let node = self.borner_dans(&mut reste, &mut laisses, max_texte);
+        (node, laisses)
+    }
+
+    fn borner_dans(&self, reste: &mut usize, laisses: &mut usize, max_texte: usize) -> Self {
+        *reste = reste.saturating_sub(1);
+        let mut children = Vec::new();
+        for child in &self.children {
+            if *reste == 0 {
+                *laisses += child.count();
+            } else {
+                children.push(child.borner_dans(reste, laisses, max_texte));
+            }
+        }
+        Self {
+            id: self.id.clone(),
+            role: self.role,
+            name: truncate(&self.name, max_texte),
+            value: self.value.as_ref().map(|v| truncate(v, max_texte)),
+            actionable: self.actionable,
+            disabled: self.disabled,
+            children,
+        }
+    }
+}
+
 fn truncate(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         return text.to_owned();
@@ -584,6 +619,34 @@ mod tests {
         t.root.walk(&mut |node| roles.push(node.role));
         assert_eq!(roles.len(), t.root.count());
         assert!(roles.contains(&Role::RichText));
+    }
+
+    /// Une page de mille liens ne remplit pas le contexte d'un modèle : l'arbre rendu garde les
+    /// cinq cents premiers nœuds dans l'ordre du document, coupe chaque texte, et dit combien il
+    /// en laisse.
+    #[test]
+    fn un_arbre_borne_garde_les_premiers_noeuds_et_compte_les_autres() {
+        let liens: Vec<Node> = (0..999)
+            .map(|n| Node::new(format!("l{n}"), Role::Link, format!("lien {n}")).actionable())
+            .collect();
+        let racine = Node::new("root", Role::Group, "x".repeat(10_000)).children(liens);
+        assert_eq!(racine.count(), 1_000);
+        let (borne, laisses) = racine.borner(500, 4_000);
+        assert_eq!(borne.count(), 500);
+        assert_eq!(laisses, 500);
+        assert_eq!(
+            borne.children.last().unwrap().id,
+            "l498",
+            "dans l'ordre du document"
+        );
+        assert_eq!(borne.name.chars().count(), 4_000);
+        let (entier, aucun) = arbre().root.borner(500, 4_000);
+        assert_eq!(
+            entier,
+            arbre().root,
+            "un arbre sous les bornes reste tel quel"
+        );
+        assert_eq!(aucun, 0);
     }
 
     #[test]
