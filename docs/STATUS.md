@@ -1921,7 +1921,10 @@ outils natifs n'écrivent plus dans les documents sans examen. Phase 2 : son ré
 par egress, sous un jeton borné aux hôtes de son éditeur. Reste à confirmer ces listes d'hôtes
 avec un client connecté.
 
-**Pour la session suivante.** La CI de `3c4bea7` est verte des deux côtés. Sur une machine à
+**Pour la session suivante.** La CI de `0e9d502` est verte sur tous ses travaux — services
+sous systemd (code d'approbation sous le compte de l'humain, redémarrage de capd compris),
+système installé (UEFI et BIOS), mission locale, isolation, surface — le banc M13 et les poids
+réels tournaient encore à l'écriture de ces lignes. Sur une machine à
 carte graphique : mesurer la surface avec les mêmes commandes que l'audit du 23 septembre
 (`prophet-surface --mesure 120 --champ-complet`, `--repos 150`) et la mémoire et la VRAM des
 poids, où l'estimation de l'ADR 0047 vaudra pour les couches déchargées. Avec l'utilisateur :
