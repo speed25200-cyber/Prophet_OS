@@ -831,15 +831,18 @@ fn history(ui: &mut egui::Ui, info: &Inspection, trail: &[crate::missions::Trail
                     || matches!(&e.outcome, Outcome::Denied(_))
                     || matches!(&e.outcome, Outcome::Error(code) if code == "PolicyDenied")
             })
-            .count();
+            .map(|e| e.fois as usize)
+            .sum::<usize>();
         let rappels = trail
             .iter()
             .filter(|e| matches!(nature(e), Nature::Rappel))
             .count();
+        // Chaque sortie compte, même réunie avec d'autres sur une ligne.
         let sorties = trail
             .iter()
             .filter(|e| matches!(nature(e), Nature::Sortie))
-            .count();
+            .map(|e| e.fois as usize)
+            .sum::<usize>();
         pastille(
             ui,
             &format!("{appels} appel{}", pluriel(appels)),
@@ -1046,6 +1049,14 @@ fn touches(ui: &mut egui::Ui, trail: &[crate::missions::TrailEntry], accent: &Ac
                     {
                         open_in_browser(&format!("https://{target}/"));
                     }
+                }
+                // Un refus répété se compte sur sa ligne ; une sortie relayée le dit dans sa cible.
+                if entry.fois > 1 && matches!(entry.outcome, Outcome::Denied(_)) {
+                    ui.label(
+                        RichText::new(format!("{} fois", entry.fois))
+                            .size(12.0)
+                            .color(MUTED),
+                    );
                 }
                 if matches!(kind, Nature::Appel | Nature::Sortie) {
                     ui.label(RichText::new(mark).color(color).size(13.0));

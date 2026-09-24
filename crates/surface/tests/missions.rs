@@ -1076,14 +1076,20 @@ fn le_parcours_montre_les_sorties_reseau_de_la_mission() {
     chain.call("task.start", json!({"id":ID}));
     chain.wait(bureau.missions(), State::Done);
     worker.join().unwrap();
-    chain.journaliser(
-        "net.request",
-        json!({"host":"api.anthropic.com","port":443,"method":"CONNECT","bytes_out":12_400,"bytes_in":48_000,"status":200}),
-    );
-    chain.journaliser(
-        "net.deny",
-        json!({"host":"collecte.exemple","reason":"no_grant"}),
-    );
+    // Un client ouvre plusieurs connexions de suite vers son éditeur, puis bute deux fois sur
+    // un hôte que son jeton ne porte pas : deux lignes, qui comptent chacune les leurs.
+    for _ in 0..3 {
+        chain.journaliser(
+            "net.request",
+            json!({"host":"api.anthropic.com","port":443,"method":"CONNECT","bytes_out":12_400,"bytes_in":48_000,"status":200}),
+        );
+    }
+    for _ in 0..2 {
+        chain.journaliser(
+            "net.deny",
+            json!({"host":"collecte.exemple","reason":"no_grant"}),
+        );
+    }
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
         frame(&mut bureau, &mut source, &context, &target, vec![]);
@@ -1092,8 +1098,9 @@ fn le_parcours_montre_les_sorties_reseau_de_la_mission() {
             .trail()
             .iter()
             .filter(|e| e.tool == "sortie")
-            .count();
-        if sorties == 2 {
+            .map(|e| e.fois)
+            .sum::<u32>();
+        if sorties == 5 {
             break;
         }
         assert!(
@@ -1118,11 +1125,13 @@ fn le_parcours_montre_les_sorties_reseau_de_la_mission() {
     assert!(trail.iter().any(|e| {
         e.tool == "sortie"
             && e.outcome == surface::missions::Outcome::Ok
+            && e.fois == 3
             && e.target
                 .as_deref()
-                .is_some_and(|t| t.starts_with("api.anthropic.com"))
+                .is_some_and(|t| t.starts_with("api.anthropic.com — 3 × CONNECT"))
     }));
     assert!(trail.iter().any(|e| e.tool == "sortie"
+        && e.fois == 2
         && matches!(&e.outcome, surface::missions::Outcome::Denied(m) if m == "no_grant")));
     // En largeur étroite, la frise passe sous les états et chaque sortie tient dans la colonne.
     let etroite = Cible::nouvelle(&context, 640, 1000);

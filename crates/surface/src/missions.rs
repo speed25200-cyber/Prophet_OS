@@ -55,13 +55,29 @@ pub struct TrailEntry {
     pub target: Option<String>,
     /// Ce qu'il en est advenu.
     pub outcome: Outcome,
+    /// Événements du journal réunis sur cette ligne : des sorties réseau successives vers le
+    /// même hôte, avec la même issue, n'en font qu'une. Un sinon.
+    pub fois: u32,
+}
+
+/// Des sorties réseau successives vers le même hôte, par la même méthode et avec la même
+/// issue, réunies sur la dernière ligne du parcours : un client officiel ouvre des dizaines de
+/// connexions vers son éditeur par mission, et elles ne doivent pas recouvrir ses gestes.
+struct Cumul {
+    hote: String,
+    methode: String,
+    sortis: u64,
+    recus: u64,
 }
 
 /// Reconstruit le parcours à partir des événements du journal, dans l'ordre.
 #[must_use]
 pub fn trail_from(events: &[Value]) -> Vec<TrailEntry> {
     let mut trail: Vec<TrailEntry> = Vec::new();
+    // La sortie relayée que porte la dernière ligne, pour y ajouter les suivantes.
+    let mut cumul: Option<Cumul> = None;
     for event in events {
+        let avant = trail.len();
         let seq = event["seq"].as_u64().unwrap_or(0);
         let step = event["step"].as_u64().and_then(|s| u32::try_from(s).ok());
         let payload = &event["payload"];
@@ -72,6 +88,7 @@ pub fn trail_from(events: &[Value]) -> Vec<TrailEntry> {
                 tool: payload["tool"].as_str().unwrap_or("outil").to_owned(),
                 target: payload["target"].as_str().map(str::to_owned),
                 outcome: Outcome::Pending,
+                fois: 1,
             }),
             Some("tool.result") => {
                 let tool = payload["tool"].as_str().unwrap_or_default();
@@ -114,6 +131,7 @@ pub fn trail_from(events: &[Value]) -> Vec<TrailEntry> {
                             .or_else(|| payload["target"].as_str())
                             .map(str::to_owned),
                         outcome: Outcome::Denied(reason),
+                        fois: 1,
                     });
                 }
             }
@@ -123,6 +141,7 @@ pub fn trail_from(events: &[Value]) -> Vec<TrailEntry> {
                 tool: "publication".into(),
                 target: None,
                 outcome: Outcome::Ok,
+                fois: 1,
             }),
             Some("fs.undo") => trail.push(TrailEntry {
                 seq,
@@ -130,35 +149,80 @@ pub fn trail_from(events: &[Value]) -> Vec<TrailEntry> {
                 tool: "annulation".into(),
                 target: None,
                 outcome: Outcome::Ok,
+                fois: 1,
             }),
             // Ce qui est sorti par egress, sous le jeton de la mission (ADR 0056) : l'hôte, la
             // méthode, les octets dans chaque sens, le statut. Jamais le contenu.
-            Some("net.request") => trail.push(TrailEntry {
-                seq,
-                step,
-                tool: "sortie".into(),
-                target: Some(sortie_lisible(payload)),
-                outcome: match payload["status"].as_u64() {
+            Some("net.request") => {
+                let hote = payload["host"]
+                    .as_str()
+                    .unwrap_or("hôte inconnu")
+                    .to_owned();
+                let methode = payload["method"].as_str().unwrap_or("?").to_owned();
+                let sortis = payload["bytes_out"].as_u64().unwrap_or(0);
+                let recus = payload["bytes_in"].as_u64().unwrap_or(0);
+                let outcome = match payload["status"].as_u64() {
                     Some(statut) if !(200..400).contains(&statut) => {
                         Outcome::Error(format!("HTTP {statut}"))
                     }
                     _ => Outcome::Ok,
-                },
-            }),
-            Some(genre @ ("net.deny" | "net.exfil_suspected")) => trail.push(TrailEntry {
-                seq,
-                step,
-                tool: "sortie".into(),
-                target: payload["host"].as_str().map(str::to_owned),
-                outcome: Outcome::Denied(if genre == "net.exfil_suspected" {
+                };
+                let suite = trail.last_mut().zip(cumul.as_mut()).filter(|(e, c)| {
+                    e.tool == "sortie"
+                        && e.outcome == outcome
+                        && c.hote == hote
+                        && c.methode == methode
+                });
+                if let Some((entry, c)) = suite {
+                    c.sortis += sortis;
+                    c.recus += recus;
+                    entry.fois += 1;
+                    entry.target = Some(sortie_lisible(
+                        &c.hote, &c.methode, entry.fois, c.sortis, c.recus,
+                    ));
+                } else {
+                    trail.push(TrailEntry {
+                        seq,
+                        step,
+                        tool: "sortie".into(),
+                        target: Some(sortie_lisible(&hote, &methode, 1, sortis, recus)),
+                        outcome,
+                        fois: 1,
+                    });
+                    cumul = Some(Cumul {
+                        hote,
+                        methode,
+                        sortis,
+                        recus,
+                    });
+                }
+            }
+            Some(genre @ ("net.deny" | "net.exfil_suspected")) => {
+                let hote = payload["host"].as_str().map(str::to_owned);
+                let outcome = Outcome::Denied(if genre == "net.exfil_suspected" {
                     format!(
                         "exfiltration suspectée : {}",
                         payload["reason"].as_str().unwrap_or("signaux relevés")
                     )
                 } else {
                     payload["reason"].as_str().unwrap_or("refusé").to_owned()
-                }),
-            }),
+                });
+                // Un refus répété vers le même hôte, pour le même motif, se compte sur sa ligne.
+                if let Some(entry) = trail.last_mut().filter(|e| {
+                    e.tool == "sortie" && e.outcome == outcome && e.target == hote && hote.is_some()
+                }) {
+                    entry.fois += 1;
+                } else {
+                    trail.push(TrailEntry {
+                        seq,
+                        step,
+                        tool: "sortie".into(),
+                        target: hote,
+                        outcome,
+                        fois: 1,
+                    });
+                }
+            }
             // Le service a rappelé au modèle un fichier que l'objectif demande (ADR 0049).
             Some("task.reminded") => trail.push(TrailEntry {
                 seq,
@@ -172,21 +236,28 @@ pub fn trail_from(events: &[Value]) -> Vec<TrailEntry> {
                         .join(", ")
                 }),
                 outcome: Outcome::Ok,
+                fois: 1,
             }),
             _ => {}
+        }
+        // Une autre ligne s'est posée : la sortie cumulée n'est plus la dernière.
+        if trail.len() != avant && !matches!(event["kind"].as_str(), Some("net.request")) {
+            cumul = None;
         }
     }
     trail
 }
 
-/// Une sortie réseau en une ligne : « api.exemple.fr — CONNECT, 12,4 Ko envoyés, 48 Ko reçus ».
-fn sortie_lisible(payload: &Value) -> String {
-    let hote = payload["host"].as_str().unwrap_or("hôte inconnu");
-    let methode = payload["method"].as_str().unwrap_or("?");
-    let sortis = payload["bytes_out"].as_u64().unwrap_or(0);
-    let recus = payload["bytes_in"].as_u64().unwrap_or(0);
+/// Une sortie réseau en une ligne : « api.exemple.fr — CONNECT, 12,4 Ko envoyés, 48 Ko reçus »,
+/// ou « api.exemple.fr — 14 × CONNECT, … » pour des sorties réunies.
+fn sortie_lisible(hote: &str, methode: &str, fois: u32, sortis: u64, recus: u64) -> String {
+    let combien = if fois > 1 {
+        format!("{fois} × ")
+    } else {
+        String::new()
+    };
     format!(
-        "{hote} — {methode}, {} envoyés, {} reçus",
+        "{hote} — {combien}{methode}, {} envoyés, {} reçus",
         octets(sortis),
         octets(recus)
     )
@@ -971,6 +1042,56 @@ mod tests {
         );
         assert_eq!(octets(0), "0 o");
         assert_eq!(octets(3_100_000), "3,1 Mo");
+        assert!(trail.iter().all(|e| e.fois == 1));
+    }
+
+    #[test]
+    fn des_sorties_successives_vers_le_meme_hote_se_reunissent_sur_une_ligne() {
+        let requete = |seq: u64, hote: &str, statut: u64| json!({"seq":seq,"kind":"net.request","actor":"egress","payload":{"host":hote,"port":443,"method":"CONNECT","bytes_out":1_000,"bytes_in":4_000,"status":statut}});
+        let refus = |seq: u64| json!({"seq":seq,"kind":"net.deny","actor":"egress","payload":{"host":"collecte.exemple","reason":"no_grant"}});
+        let events = vec![
+            requete(1, "api.anthropic.com", 200),
+            requete(2, "api.anthropic.com", 200),
+            requete(3, "api.anthropic.com", 200),
+            // Une autre issue ouvre une autre ligne.
+            requete(4, "api.anthropic.com", 503),
+            refus(5),
+            refus(6),
+            // Un geste de l'agent coupe la suite : la chronologie tient.
+            json!({"seq":7,"kind":"tool.call","step":1,"payload":{"tool":"fs.write","target":"/maison/note.txt"}}),
+            requete(8, "api.anthropic.com", 200),
+            requete(9, "claude.ai", 200),
+        ];
+        let trail = trail_from(&events);
+        let lignes: Vec<_> = trail
+            .iter()
+            .map(|e| (e.target.clone().unwrap_or_default(), e.fois))
+            .collect();
+        assert_eq!(
+            lignes,
+            vec![
+                (
+                    "api.anthropic.com — 3 × CONNECT, 3,0 Ko envoyés, 12,0 Ko reçus".to_owned(),
+                    3
+                ),
+                (
+                    "api.anthropic.com — CONNECT, 1,0 Ko envoyés, 4,0 Ko reçus".to_owned(),
+                    1
+                ),
+                ("collecte.exemple".to_owned(), 2),
+                ("/maison/note.txt".to_owned(), 1),
+                (
+                    "api.anthropic.com — CONNECT, 1,0 Ko envoyés, 4,0 Ko reçus".to_owned(),
+                    1
+                ),
+                (
+                    "claude.ai — CONNECT, 1,0 Ko envoyés, 4,0 Ko reçus".to_owned(),
+                    1
+                ),
+            ]
+        );
+        assert_eq!(trail[1].outcome, Outcome::Error("HTTP 503".into()));
+        assert_eq!(trail[2].outcome, Outcome::Denied("no_grant".into()));
     }
 
     #[test]
