@@ -47,6 +47,10 @@ par titre, référence ou pilote avec Ctrl+K. Les objets hors de la vue ne sont 
 La Focale agrandit l'inspecteur ; une mission seule reçoit directement cet espace. Le plan
 nouvellement préparé s'ouvre en Focale et efface la recherche antérieure. Le fond ne bouge
 qu'avec les missions en cours. Voir l'[ADR 0019](../adr/0019-atelier-et-focale.md).
+Sans mission, l'accueil tient l'objectif à gauche et, sur un grand écran, « CE QUE VOS AGENTS
+TROUVENT ICI » calé à droite (dessous sur un écran moyen, absent en fenêtre étroite) : moteur
+local et modèles servis, clients officiels connectés, niveau d'isolation, code d'approbation,
+journal du service. Chaque ligne mène à la page qui en dit plus et se lit au lecteur d'écran.
 
 Les filtres et la sélection pilotent l'inspecteur. À petite taille, celui-ci remplace la liste
 avec un retour aux missions. Une décision attend dans une bande persistante ; l'humain ouvre

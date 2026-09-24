@@ -1866,6 +1866,10 @@ donne le détail.
   définisse avant l'humain. La CI de `8477b88` a d'abord rougi sur « Les sept services » : le
   contrôle des droits repasse après un redémarrage de capd, où le code est déjà défini ; il le
   vérifie désormais (le code survit au redémarrage, toujours exigé).
+- L'accueil vide dit ce que les agents trouvent sur la machine (« CE QUE VOS AGENTS TROUVENT
+  ICI ») : moteur local, clients officiels, isolation, approbations, journal, chaque ligne
+  menant à sa page. L'audit des captures montrait la moitié droite de l'accueil vide à 1440 et
+  1920 px. Rendu éprouvé à 1920, 1440, 1100 et 640 px (absent en fenêtre étroite).
 - Le journal ne perd plus les événements du service (ADR 0059, FRONTIER journalisation
   durable ; ADR 0013 laissait « une outbox durable » à construire) : agentd jetait ses
   événements si `ledger` était injoignable, et un redémarrage perdait ceux qui n'étaient pas
@@ -1895,7 +1899,7 @@ donne le détail.
   PUBLICATION » dans la surface (rendu à 900 et 420 px), `prophet task resolve`,
   `prophet task undo --keep-changes`. Essais : six de la bibliothèque, un du service, un de
   l'inspection, un du contrôleur, un de rendu.
-- `just check` : **1001 réussis, 0 échec, 75 ignorés** (journal sans perte ni doublon ; révocation et approbations persistantes ; code à choisir depuis Système ; conflits de publication ; code d'approbation ; sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
+- `just check` : **1001 réussis, 0 échec, 76 ignorés** (accueil et état de la machine ; journal sans perte ni doublon ; révocation et approbations persistantes ; code à choisir depuis Système ; conflits de publication ; code d'approbation ; sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   6 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.

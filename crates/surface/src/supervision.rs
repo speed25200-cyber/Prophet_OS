@@ -353,7 +353,13 @@ impl Supervision {
                         ui.memory_mut(|m| m.request_focus(egui::Id::new("mission-intent")));
                     }
                 }),
-                Page::Accueil => largeur(ui, 1560.0, |ui| self.accueil(ui, scene)),
+                Page::Accueil => largeur(ui, 1560.0, |ui| {
+                    let machine =
+                        MachinePourLesAgents::de(atelier, scene, self.code, self.journal.as_ref());
+                    if let Some(page) = self.accueil(ui, scene, &machine) {
+                        atelier.page = page;
+                    }
+                }),
                 Page::Conversation => largeur(ui, 900.0, |ui| {
                     if !atelier.generation
                         && (!atelier.brouillon.trim().is_empty() || !atelier.tours.is_empty())
@@ -411,7 +417,13 @@ impl Supervision {
         self.focus_precedent = ctx.memory(|m| m.focused().is_some());
     }
 
-    fn accueil(&mut self, ui: &mut egui::Ui, scene: &Scene) {
+    /// Rend la page que l'humain demande depuis l'état de la machine, s'il en demande une.
+    fn accueil(
+        &mut self,
+        ui: &mut egui::Ui,
+        scene: &Scene,
+        machine: &MachinePourLesAgents,
+    ) -> Option<Page> {
         let accent = Accent::de(ui.ctx());
         let compact = ui.available_width() < 850.0;
         ui.horizontal(|ui| {
@@ -546,7 +558,7 @@ impl Supervision {
                 if let Some(error) = self.missions.error() {
                     ui.label(error);
                 }
-                return;
+                return None;
             }
         }
         let query = self.query.trim().to_lowercase();
@@ -574,16 +586,45 @@ impl Supervision {
         }
         if scene.courants.is_empty() {
             self.missions.select(None);
+            let mut aller = None;
             let soumis = egui::ScrollArea::vertical()
                 .id_salt("supervision-vide")
                 .show(ui, |ui| {
-                    crate::desk::empty(ui, compact, &mut self.brouillon_accueil)
+                    // Sur un grand écran, l'état de la machine se lit à côté de l'objectif ;
+                    // sur un écran moyen, dessous ; une fenêtre étroite garde l'objectif seul.
+                    if !compact && ui.available_width() >= 1180.0 {
+                        ui.horizontal_top(|ui| {
+                            let soumis =
+                                crate::desk::empty(ui, compact, &mut self.brouillon_accueil);
+                            // Calé sur le bord droit de la page, comme « Nouvel objectif » : le
+                            // champ respire entre les deux.
+                            let reste = ui.available_width();
+                            let largeur = (reste - 36.0).min(520.0);
+                            ui.add_space(reste - largeur);
+                            ui.vertical(|ui| {
+                                ui.set_width(largeur);
+                                aller = machine_pour_les_agents(ui, machine, &accent);
+                            });
+                            soumis
+                        })
+                        .inner
+                    } else {
+                        let soumis = crate::desk::empty(ui, compact, &mut self.brouillon_accueil);
+                        if !compact {
+                            ui.add_space(24.0);
+                            ui.scope(|ui| {
+                                ui.set_max_width(720.0);
+                                aller = machine_pour_les_agents(ui, machine, &accent);
+                            });
+                        }
+                        soumis
+                    }
                 })
                 .inner;
             if soumis {
                 self.preparer_depuis_l_accueil(ui.ctx());
             }
-            return;
+            return aller;
         }
         let selection = self.selection.clone();
         if self.detail_id != selection {
@@ -624,7 +665,7 @@ impl Supervision {
                         }
                     }
                 });
-            return;
+            return None;
         }
         // Sur un grand écran, la liste tient à gauche et l'espace de mission à droite, avec
         // de l'air entre les deux ; la Focale retire la liste pour lire un plan ou comparer
@@ -692,6 +733,7 @@ impl Supervision {
                 },
             );
         });
+        None
     }
 
     /// Ouvre la préparation d'une mission : un brouillon réussi est remis à neuf, une
@@ -2337,6 +2379,234 @@ fn jauge_de_memoire(
 }
 
 /// La réserve de microVM, dite en une ligne.
+/// Ce que les agents trouvent sur cette machine, pour l'accueil : ce qu'un humain veut savoir
+/// avant de confier un objectif, lu dans les mêmes états que les autres pages.
+pub(crate) struct MachinePourLesAgents {
+    /// Modèles que le moteur local sert.
+    modeles: usize,
+    /// Clients officiels dont une session est ouverte, nommés.
+    clients: Vec<String>,
+    /// Clients officiels installés.
+    clients_installes: usize,
+    /// Le niveau d'isolation le plus haut disponible.
+    isolation: u8,
+    /// Le code d'approbation, si capd a répondu.
+    code: Option<crate::presence::EtatDuCode>,
+    /// La file du journal du service, si agentd a répondu.
+    journal: Option<crate::scene::AttenteDuJournal>,
+}
+
+impl MachinePourLesAgents {
+    fn de(
+        atelier: &Atelier,
+        scene: &Scene,
+        code: Option<crate::presence::EtatDuCode>,
+        journal: Option<&crate::scene::AttenteDuJournal>,
+    ) -> Self {
+        Self {
+            modeles: atelier.modeles.len(),
+            clients: atelier
+                .clients
+                .iter()
+                .filter(|c| c.connected)
+                .map(|c| agentd::preparation::model_label(&format!("driver:{}", c.driver)))
+                .collect(),
+            clients_installes: atelier.clients.iter().filter(|c| c.present).count(),
+            isolation: scene.isolation.niveau_max,
+            code,
+            journal: journal.cloned(),
+        }
+    }
+}
+
+/// Une ligne de l'état de la machine : sa pastille, ce qu'elle nomme, ce qu'elle dit ; toute la
+/// ligne mène à la page qui en dit plus. Rend vrai au clic.
+fn ligne_d_etat(
+    ui: &mut egui::Ui,
+    id: &str,
+    nom: &str,
+    valeur: &str,
+    couleur: Color32,
+    accent: &Accent,
+) -> bool {
+    let largeur = ui.available_width();
+    let (_, rect) = ui.allocate_space(vec2(largeur, 44.0));
+    let reponse = ui
+        .interact(rect, egui::Id::new(id), egui::Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let decrit = format!("{nom} : {valeur}");
+    reponse.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &decrit));
+    let p = ui.painter();
+    if reponse.hovered() {
+        p.rect_filled(rect, 6, VERRE_HAUT);
+    }
+    p.line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        Stroke::new(1.0, hud::voile(accent.vif, 26)),
+    );
+    p.circle_filled(pos2(rect.left() + 10.0, rect.center().y), 3.5, couleur);
+    p.text(
+        pos2(rect.left() + 26.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        nom,
+        FontId::proportional(14.0),
+        ENCRE,
+    );
+    let fleche = p.text(
+        pos2(rect.right() - 8.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        "↗",
+        FontId::proportional(13.0),
+        if reponse.hovered() {
+            accent.vif
+        } else {
+            EFFACE
+        },
+    );
+    // La valeur se range à droite, et se coupe plutôt que de passer sous le nom.
+    let place = (fleche.left() - 12.0) - (rect.left() + 26.0 + 130.0);
+    let galerie =
+        ui.painter()
+            .layout_no_wrap(valeur.to_owned(), FontId::proportional(13.0), DISCRET);
+    let texte = if galerie.size().x > place && place > 20.0 {
+        let mut coupe: String = valeur.to_owned();
+        while !coupe.is_empty()
+            && ui
+                .painter()
+                .layout_no_wrap(format!("{coupe}…"), FontId::proportional(13.0), DISCRET)
+                .size()
+                .x
+                > place
+        {
+            coupe.pop();
+        }
+        format!("{}…", coupe.trim_end())
+    } else {
+        valeur.to_owned()
+    };
+    ui.painter().text(
+        pos2(fleche.left() - 12.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        texte,
+        FontId::proportional(13.0),
+        if couleur == ATTENTE { ATTENTE } else { DISCRET },
+    );
+    reponse.clicked()
+}
+
+/// L'état de la machine pour ses agents : moteur local, clients officiels, isolation,
+/// approbations, journal. Rend la page que l'humain veut voir, s'il clique une ligne.
+fn machine_pour_les_agents(
+    ui: &mut egui::Ui,
+    machine: &MachinePourLesAgents,
+    accent: &Accent,
+) -> Option<Page> {
+    let mut aller = None;
+    plaque(ui, 28, |ui| {
+        ui.set_width(ui.available_width());
+        etiquette(ui, "CE QUE VOS AGENTS TROUVENT ICI");
+        ui.add_space(6.0);
+        let pret = machine.modeles > 0 || !machine.clients.is_empty();
+        ui.label(titre(
+            if pret {
+                "Prêts à travailler."
+            } else {
+                "Aucun modèle pour l'instant."
+            },
+            24.0,
+        ));
+        ui.add_space(12.0);
+        let ok = accent.vif;
+        let neutre = DISCRET;
+        let pluriel = |n: usize| if n > 1 { "s" } else { "" };
+        let (valeur, couleur) = match machine.modeles {
+            0 => ("aucun modèle servi".to_owned(), ATTENTE),
+            n => (format!("{n} modèle{} servi{}", pluriel(n), pluriel(n)), ok),
+        };
+        if ligne_d_etat(
+            ui,
+            "accueil-etat-modeles",
+            "Moteur local",
+            &valeur,
+            couleur,
+            accent,
+        ) {
+            aller = Some(Page::Modeles);
+        }
+        let (valeur, couleur) = match (machine.clients.len(), machine.clients_installes) {
+            (0, 0) => ("aucun installé".to_owned(), neutre),
+            (0, _) => ("aucun connecté".to_owned(), neutre),
+            (n, _) => (
+                format!("{} connecté{}", machine.clients.join(" · "), pluriel(n)),
+                ok,
+            ),
+        };
+        if ligne_d_etat(
+            ui,
+            "accueil-etat-clients",
+            "Clients officiels",
+            &valeur,
+            couleur,
+            accent,
+        ) {
+            aller = Some(Page::Modeles);
+        }
+        let valeur = format!("niveau {} sur 2", machine.isolation);
+        let couleur = if machine.isolation == 2 { ok } else { neutre };
+        if ligne_d_etat(
+            ui,
+            "accueil-etat-isolation",
+            "Isolation",
+            &valeur,
+            couleur,
+            accent,
+        ) {
+            aller = Some(Page::Activite);
+        }
+        let (valeur, couleur) = match machine.code {
+            Some(crate::presence::EtatDuCode {
+                verrou_s: Some(_), ..
+            }) => ("verrouillées un moment".to_owned(), ATTENTE),
+            Some(crate::presence::EtatDuCode { defini: true, .. }) => {
+                ("code défini".to_owned(), ok)
+            }
+            Some(_) => ("code à choisir".to_owned(), ATTENTE),
+            None => ("capd ne répond pas".to_owned(), neutre),
+        };
+        if ligne_d_etat(
+            ui,
+            "accueil-etat-approbations",
+            "Approbations",
+            &valeur,
+            couleur,
+            accent,
+        ) {
+            aller = Some(Page::Activite);
+        }
+        let (valeur, couleur) = match &machine.journal {
+            Some(a) if a.nombre == 0 => ("à jour".to_owned(), ok),
+            Some(a) => (format!("{} en attente", a.nombre), ATTENTE),
+            None => ("agentd ne répond pas".to_owned(), neutre),
+        };
+        if ligne_d_etat(
+            ui,
+            "accueil-etat-journal",
+            "Journal",
+            &valeur,
+            couleur,
+            accent,
+        ) {
+            aller = Some(Page::Activite);
+        }
+        ui.add_space(12.0);
+        petit(
+            ui,
+            "Chaque mission se prépare, s'examine et se lance d'ici ; rien ne part sans votre accord.",
+        );
+    });
+    aller
+}
+
 /// Le code d'approbation de cette machine, tel que capd le dit (ADR 0057) : défini, verrouillé
 /// ou à choisir. Rend vrai quand l'humain demande à le choisir maintenant.
 fn approbations(ui: &mut egui::Ui, code: crate::presence::EtatDuCode, accent: &Accent) -> bool {

@@ -1287,6 +1287,110 @@ fn touche(key: egui::Key, modifiers: Modifiers) -> Vec<Event> {
     }]
 }
 
+/// L'accueil vide dit ce que les agents trouvent sur la machine — moteur local, clients
+/// officiels, isolation, approbations, journal — et chaque ligne mène à sa page ; à côté de la
+/// plaque sur un grand écran, dessous sur un écran moyen, absent en fenêtre étroite.
+#[test]
+#[ignore = "needs_gpu: rendu wgpu hors écran"]
+fn l_accueil_dit_ce_que_les_agents_trouvent_ici() {
+    let context = Contexte::hors_ecran().unwrap();
+    for (largeur, hauteur) in [(1440, 1000), (1920, 1080), (1100, 1300), (640, 900)] {
+        let target = Cible::nouvelle(&context, largeur, hauteur);
+        let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+        bureau.figer_transitions();
+        bureau.atelier.modeles = vec!["qwen3-8b-q4".into()];
+        bureau.atelier.clients = vec![
+            surface::atelier::ClientCard {
+                driver: "codex".into(),
+                present: true,
+                version: Some("0.40.0".into()),
+                connection: "connecté".into(),
+                connected: true,
+            },
+            surface::atelier::ClientCard {
+                driver: "claude-code".into(),
+                present: true,
+                version: Some("2.0.0".into()),
+                connection: "connexion requise".into(),
+                connected: false,
+            },
+        ];
+        bureau.code = Some(surface::presence::EtatDuCode {
+            defini: false,
+            verrou_s: None,
+        });
+        bureau.journal = Some(surface::scene::AttenteDuJournal {
+            nombre: 0,
+            depuis: None,
+        });
+        let mut textes = String::new();
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(largeur as f32, hauteur as f32),
+                )),
+                time: Some(8.0),
+                focused: true,
+                ..Default::default()
+            };
+            let (mut sortie, _) = bureau.composer(input, &scene());
+            textes = sortie
+                .shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            bureau.rendre(&context, &target, &mut sortie);
+        }
+        capture(&context, &target, "accueil-etat");
+        if largeur < 850 {
+            assert!(
+                !textes.contains("CE QUE VOS AGENTS TROUVENT ICI"),
+                "une fenêtre étroite garde l'objectif seul : {textes}"
+            );
+            continue;
+        }
+        for attendu in [
+            "CE QUE VOS AGENTS TROUVENT ICI",
+            "1 modèle servi",
+            "Codex (ChatGPT) connecté",
+            "niveau 0 sur 2",
+            "code à choisir",
+            "à jour",
+        ] {
+            assert!(
+                textes.contains(attendu),
+                "« {attendu} » à {largeur} px : {textes}"
+            );
+        }
+        let plaque = bureau.plaque("espace-vide").expect("espace vide dessiné");
+        let modeles = bureau
+            .ctx
+            .read_response(egui::Id::new("accueil-etat-modeles"))
+            .expect("la ligne du moteur local")
+            .rect;
+        if largeur >= 1180 {
+            assert!(
+                modeles.left() >= plaque.right(),
+                "à côté de la plaque à {largeur} px : {modeles:?} / {plaque:?}"
+            );
+        } else {
+            assert!(
+                modeles.top() >= plaque.bottom(),
+                "sous la plaque à {largeur} px : {modeles:?} / {plaque:?}"
+            );
+        }
+        assert!(modeles.right() <= largeur as f32, "{modeles:?} déborde");
+        let clic = click_widget(&bureau, "accueil-etat-modeles");
+        frame(&mut bureau, &context, &target, clic);
+        assert_eq!(bureau.atelier.page, Page::Modeles, "à {largeur} px");
+    }
+}
+
 #[test]
 #[ignore = "needs_gpu"]
 fn l_espace_vide_recoit_l_objectif_et_ouvre_sa_preparation() {
