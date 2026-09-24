@@ -35,7 +35,7 @@
 | `task.delegate` | task.spawn contexte | non | non | sous-mission à droits ⊆, autre contexte ou modèle, résultat rendu (ADR 0029) |
 | `approval.request` | task courante | non | non | |
 | `approval.wait` | task courante | non | non | |
-| `ledger.query` | ledger.read (ou read_all) | non | non | |
+| `ledger.query` | ledger.read (ou read_all) | non | non | les derniers événements de la tâche (50 par défaut, 500 au plus, `limit`), filtrables par type (`kinds`) et à partir d'un numéro (`since_seq`), avec leur nombre total (`count`, `truncated`) |
 | `ledger.replay_summary` | ledger.read | non | non | |
 | `memory.remember` | memory.write espace | non | non | |
 | `memory.search` | memory.read espace | non | non | |

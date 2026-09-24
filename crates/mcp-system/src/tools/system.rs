@@ -364,6 +364,13 @@ impl Tool for WaitApproval {
     }
 }
 
+/// Événements rendus par défaut à un agent qui relit son journal.
+const EVENEMENTS_PAR_DEFAUT: usize = 50;
+
+/// Événements rendus au plus : une longue mission en compte des milliers (egress inscrit
+/// chaque connexion), et tout rendre remplirait le contexte du modèle.
+const EVENEMENTS_AU_PLUS: usize = 500;
+
 /// Lecture du journal de la tâche.
 #[derive(Debug)]
 pub struct LedgerQuery;
@@ -372,12 +379,26 @@ impl Tool for LedgerQuery {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "ledger.query".into(),
-            description: "Lit les événements du journal de cette tâche : ce qui a été fait, refusé, approuvé. Utile pour comprendre un échec sans le reproduire.".into(),
+            description: "Lit les événements du journal de cette tâche : ce qui a été fait, refusé, approuvé, ce qui est sorti sur le réseau. Rend les derniers (50 par défaut, 500 au plus) dans l'ordre du journal, et leur nombre total. Utile pour comprendre un échec sans le reproduire.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "kinds": {"type": "array", "items": {"type": "string"}},
-                    "limit": {"type": "integer"}
+                    "kinds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Types d'événements retenus, par exemple tool.call, policy.deny, net.deny."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": EVENEMENTS_AU_PLUS,
+                        "description": "Nombre d'événements rendus, les plus récents."
+                    },
+                    "since_seq": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Ne rendre que les événements à partir de ce numéro du journal."
+                    }
                 },
                 "additionalProperties": false
             }),
@@ -396,17 +417,41 @@ impl Tool for LedgerQuery {
         Some(context.task.clone())
     }
 
-    fn call(&self, _args: &Value, context: &ToolContext) -> CallResult {
+    fn call(&self, args: &Value, context: &ToolContext) -> CallResult {
+        let kinds: Vec<ledger::EventKind> = match args.get("kinds") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(liste) => match serde_json::from_value(liste.clone()) {
+                Ok(kinds) => kinds,
+                Err(erreur) => {
+                    return CallResult::error(
+                        ErrorCode::Invalid,
+                        format!("type d'événement inconnu : {erreur}"),
+                    );
+                }
+            },
+        };
+        let limite = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .map_or(EVENEMENTS_PAR_DEFAUT, |n| {
+                usize::try_from(n)
+                    .unwrap_or(EVENEMENTS_AU_PLUS)
+                    .clamp(1, EVENEMENTS_AU_PLUS)
+            });
         let racine = std::path::Path::new(&context.home).join(".prophet/ledger");
         let Ok(store) = ledger::Store::open(&racine) else {
             return CallResult::error(ErrorCode::NotFound, "aucun journal sur cette machine");
         };
         match store.query(&ledger::Filter {
             task: Some(context.task.clone()),
+            kinds,
+            since_seq: args.get("since_seq").and_then(Value::as_u64),
             ..ledger::Filter::default()
         }) {
             Ok(events) => {
-                let resume: Vec<Value> = events
+                // Les derniers : c'est ce qui vient de se passer que l'agent cherche à comprendre.
+                let debut = events.len().saturating_sub(limite);
+                let resume: Vec<Value> = events[debut..]
                     .iter()
                     .map(|e| {
                         json!({
@@ -417,7 +462,9 @@ impl Tool for LedgerQuery {
                         })
                     })
                     .collect();
-                CallResult::structured(json!({"events": resume, "count": events.len()}))
+                CallResult::structured(
+                    json!({"events": resume, "count": events.len(), "truncated": debut > 0}),
+                )
             }
             Err(erreur) => CallResult::error(ErrorCode::Internal, erreur.to_string()),
         }
@@ -922,5 +969,112 @@ mod tests {
             Some("task:01"),
             "lire le journal d'une autre tâche exige ledger.read_all"
         );
+    }
+    /// Un agent qui relit son journal le fait pour comprendre ce qui vient de se passer : il
+    /// reçoit les derniers événements, filtrés par type s'il le demande, et le compte total —
+    /// jamais tout le journal d'une longue mission (egress y inscrit chaque connexion) dans son
+    /// contexte.
+    #[test]
+    fn le_journal_rend_les_derniers_evenements_du_type_demande_et_leur_compte() {
+        let home = tempfile::tempdir().unwrap();
+        let mut store = ledger::Store::open(home.path().join(".prophet/ledger")).unwrap();
+        for n in 0..60_u32 {
+            for (kind, payload) in [
+                (
+                    ledger::EventKind::ToolCall,
+                    json!({"tool": "fs.read", "target": format!("/maison/{n}.txt")}),
+                ),
+                (
+                    ledger::EventKind::NetRequest,
+                    json!({"host": "api.anthropic.com", "method": "CONNECT", "status": 200}),
+                ),
+            ] {
+                store
+                    .append(
+                        ledger::Draft::new(
+                            time::OffsetDateTime::now_utc(),
+                            ledger::Actor::system(),
+                            kind,
+                            payload,
+                        )
+                        .task("task:01"),
+                    )
+                    .unwrap();
+            }
+        }
+        store
+            .append(
+                ledger::Draft::new(
+                    time::OffsetDateTime::now_utc(),
+                    ledger::Actor::system(),
+                    ledger::EventKind::ToolCall,
+                    json!({"tool": "fs.read"}),
+                )
+                .task("task:02"),
+            )
+            .unwrap();
+        drop(store);
+        let mut contexte = contexte_de("task:01");
+        contexte.home = home.path().display().to_string();
+
+        let tout = LedgerQuery.call(&json!({}), &contexte).structured.unwrap();
+        assert_eq!(tout["count"], json!(120));
+        let rendus = tout["events"].as_array().unwrap();
+        assert_eq!(rendus.len(), 50, "cinquante par défaut");
+        assert_eq!(tout["truncated"], json!(true));
+        assert!(
+            rendus
+                .windows(2)
+                .all(|p| p[0]["seq"].as_u64() < p[1]["seq"].as_u64()),
+            "dans l'ordre du journal"
+        );
+        assert_eq!(
+            rendus.last().unwrap()["kind"],
+            json!("net.request"),
+            "les derniers"
+        );
+
+        let appels = LedgerQuery
+            .call(&json!({"kinds": ["tool.call"], "limit": 3}), &contexte)
+            .structured
+            .unwrap();
+        assert_eq!(appels["count"], json!(60));
+        let cibles: Vec<_> = appels["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["payload"]["target"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(
+            cibles,
+            ["/maison/57.txt", "/maison/58.txt", "/maison/59.txt"]
+        );
+
+        let inconnu = LedgerQuery.call(&json!({"kinds": ["pas.un.type"]}), &contexte);
+        assert!(inconnu.is_error);
+        assert_eq!(inconnu.structured.unwrap()["code"], json!("Invalid"));
+    }
+
+    fn contexte_de(task: &str) -> ToolContext {
+        ToolContext {
+            token: prophet_types::cap::Token {
+                v: 0,
+                iss: "x".into(),
+                sub: task.into(),
+                agent: "a".into(),
+                user: "u".into(),
+                parent: None,
+                grants: Vec::new(),
+                iat: time::OffsetDateTime::UNIX_EPOCH,
+                exp: time::OffsetDateTime::UNIX_EPOCH,
+                nonce: String::new(),
+                sig: None,
+            },
+            task: task.into(),
+            home: "/tmp".into(),
+            workdir: "/tmp".into(),
+            sandbox_level: 1,
+            step: 1,
+        }
     }
 }
