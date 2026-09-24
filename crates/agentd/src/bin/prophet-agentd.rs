@@ -1710,7 +1710,11 @@ impl Agents {
         if brouillons.is_empty() {
             return;
         }
-        let Ok(client) = Client::connect(&self.ledger).await else {
+        // Borné : un journal qui ne répond plus ne doit pas retenir les commandes qui attendent
+        // ce verrou. L'envoi reprendra au prochain essai.
+        const DELAI: std::time::Duration = std::time::Duration::from_secs(5);
+        let Ok(Ok(client)) = tokio::time::timeout(DELAI, Client::connect(&self.ledger)).await
+        else {
             tracing::warn!(
                 nombre = brouillons.len(),
                 "journal injoignable : les événements attendent, gardés dans l'état du service"
@@ -1730,7 +1734,15 @@ impl Agents {
                 "payload": brouillon.payload,
                 "idem": idem,
             });
-            match client.call("ledger.append", params).await {
+            let envoi = tokio::time::timeout(DELAI, client.call("ledger.append", params))
+                .await
+                .unwrap_or_else(|_| {
+                    Err(Error::new(
+                        ErrorCode::InternalError,
+                        "le journal ne répond pas dans le délai",
+                    ))
+                });
+            match envoi {
                 Ok(_) => {}
                 Err(erreur) if erreur.code == ErrorCode::InvalidParams => {
                     tracing::error!(
