@@ -1171,6 +1171,71 @@ fn le_parcours_montre_les_sorties_reseau_de_la_mission() {
     capture(&context, &etroite, "sorties-reseau");
 }
 
+/// Le parcours suit une longue mission jusqu'à son dernier événement. Le journal rend ses
+/// événements par pages, des plus anciens aux plus récents : lire une seule page de quatre cents
+/// figeait la frise et le dernier geste sur le début d'une mission, ce qu'un client officiel
+/// atteint vite (egress inscrit chacune de ses connexions). La surface relit donc à partir du
+/// dernier événement lu, et ce qui s'inscrit ensuite arrive à la relecture suivante.
+#[test]
+fn le_parcours_suit_une_longue_mission_jusqu_a_son_dernier_evenement() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = dir.path().join("ledger.sock");
+    let ledger = Daemon::lancer(
+        binaire_voisin("prophet-ledger").to_str().unwrap(),
+        &journal,
+        &dir.path().join("ledger-state"),
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let client = runtime.block_on(ledger.joindre());
+    let ecrire = |debut: u32, fin: u32| {
+        runtime.block_on(async {
+            for etape in debut..fin {
+                client
+                    .call(
+                        "ledger.append",
+                        json!({"kind":"tool.call","task":"longue","actor":"agentd","step":etape,
+                               "payload":{"tool":"fs.read","target":format!("/maison/{etape}.txt")}}),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+    };
+    let attendre = |missions: &mut Missions, attendus: usize| {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            missions.update();
+            if missions.trail().len() == attendus {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{} gestes sur {attendus}",
+                missions.trail().len()
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    ecrire(0, 1_000);
+    let mut missions = Missions::default();
+    missions.brancher_journal(journal);
+    missions.select(Some("longue"));
+    attendre(&mut missions, 1_000);
+    assert_eq!(
+        missions.trail().last().unwrap().target.as_deref(),
+        Some("/maison/999.txt")
+    );
+    ecrire(1_000, 1_005);
+    attendre(&mut missions, 1_005);
+    assert_eq!(
+        missions.trail().last().unwrap().target.as_deref(),
+        Some("/maison/1004.txt")
+    );
+}
+
 /// Un moteur scripté : il rend ses réponses dans l'ordre, une par requête de complétion, et le
 /// catalogue de modèles à qui le demande ; la réponse de rang `retenue` attend que le test la
 /// libère, pour qu'il observe la mission en cours.

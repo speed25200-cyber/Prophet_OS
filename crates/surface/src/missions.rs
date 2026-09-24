@@ -1,6 +1,6 @@
 //! Lecture et commandes des missions, sans attente réseau dans la boucle de rendu.
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -23,7 +23,8 @@ pub enum Action {
 enum Reply {
     Inspect(u64, Result<Box<Inspection>, String>),
     Action(String, Action, Result<Value, String>),
-    Trail(u64, Result<Vec<TrailEntry>, String>),
+    /// Les événements lus depuis la relecture précédente, et s'il en reste à lire.
+    Trail(u64, Result<(Vec<Value>, bool), String>),
 }
 
 /// L'issue d'un appel d'outil, telle que le journal la raconte.
@@ -73,10 +74,51 @@ struct Cumul {
 /// Reconstruit le parcours à partir des événements du journal, dans l'ordre.
 #[must_use]
 pub fn trail_from(events: &[Value]) -> Vec<TrailEntry> {
-    let mut trail: Vec<TrailEntry> = Vec::new();
-    // La sortie relayée que porte la dernière ligne, pour y ajouter les suivantes.
-    let mut cumul: Option<Cumul> = None;
-    for event in events {
+    let mut parcours = Parcours::default();
+    parcours.ajouter(events);
+    parcours.gestes
+}
+
+/// Le parcours d'une mission, construit événement par événement : chaque relecture du journal
+/// y ajoute ce qui s'est inscrit depuis la précédente, sans relire le début de la mission.
+#[derive(Default)]
+pub(crate) struct Parcours {
+    gestes: Vec<TrailEntry>,
+    /// La sortie relayée que porte la dernière ligne, pour y ajouter les suivantes.
+    cumul: Option<Cumul>,
+    /// Le dernier événement lu.
+    dernier: Option<u64>,
+}
+
+impl Parcours {
+    pub(crate) fn gestes(&self) -> &[TrailEntry] {
+        &self.gestes
+    }
+
+    /// Le premier numéro du journal qui reste à lire.
+    pub(crate) fn suivant(&self) -> u64 {
+        self.dernier.map_or(0, |d| d + 1)
+    }
+
+    /// Ajoute des événements lus dans l'ordre du journal ; un événement déjà lu est passé.
+    pub(crate) fn ajouter(&mut self, events: &[Value]) {
+        for event in events {
+            if let Some(seq) = event["seq"].as_u64() {
+                if self.dernier.is_some_and(|d| seq <= d) {
+                    continue;
+                }
+                self.dernier = Some(seq);
+            }
+            self.ajouter_un(event);
+        }
+    }
+
+    fn ajouter_un(&mut self, event: &Value) {
+        let Self {
+            gestes: trail,
+            cumul,
+            ..
+        } = self;
         let avant = trail.len();
         let seq = event["seq"].as_u64().unwrap_or(0);
         let step = event["step"].as_u64().and_then(|s| u32::try_from(s).ok());
@@ -189,7 +231,7 @@ pub fn trail_from(events: &[Value]) -> Vec<TrailEntry> {
                         outcome,
                         fois: 1,
                     });
-                    cumul = Some(Cumul {
+                    *cumul = Some(Cumul {
                         hote,
                         methode,
                         sortis,
@@ -242,10 +284,44 @@ pub fn trail_from(events: &[Value]) -> Vec<TrailEntry> {
         }
         // Une autre ligne s'est posée : la sortie cumulée n'est plus la dernière.
         if trail.len() != avant && !matches!(event["kind"].as_str(), Some("net.request")) {
-            cumul = None;
+            *cumul = None;
         }
     }
-    trail
+}
+
+/// Taille d'une page de lecture du journal.
+const PAGE_DU_JOURNAL: usize = 400;
+
+/// Pages lues au plus par relecture : une longue mission se rattrape en quelques relectures
+/// rapprochées, sans qu'une seule retienne longtemps le fil de lecture.
+const PAGES_PAR_RELECTURE: usize = 10;
+
+/// Lit les événements d'une mission à partir du numéro `depuis`, page par page, dans l'ordre
+/// du journal : le journal rend les plus anciens d'abord, et une seule page de quatre cents
+/// laissait la fin d'une longue mission hors de vue. Dit aussi s'il en reste à lire.
+fn lire_la_suite(ledger: &Path, id: &str, mut depuis: u64) -> Result<(Vec<Value>, bool), String> {
+    let mut lus = Vec::new();
+    for _ in 0..PAGES_PAR_RELECTURE {
+        let page = rpc(
+            ledger.to_path_buf(),
+            "ledger.query",
+            json!({"task": id, "since_seq": depuis, "limit": PAGE_DU_JOURNAL}),
+        )?;
+        let page = page
+            .as_array()
+            .ok_or_else(|| "Journal illisible.".to_owned())?;
+        let pleine = page.len() == PAGE_DU_JOURNAL;
+        match page.last().and_then(|e| e["seq"].as_u64()) {
+            Some(seq) => depuis = seq + 1,
+            // Une page sans numéro ne permet pas d'avancer : on s'arrête là.
+            None => return Ok((lus, false)),
+        }
+        lus.extend(page.iter().cloned());
+        if !pleine {
+            return Ok((lus, false));
+        }
+    }
+    Ok((lus, true))
 }
 
 /// Une sortie réseau en une ligne : « api.exemple.fr — CONNECT, 12,4 Ko envoyés, 48 Ko reçus »,
@@ -290,7 +366,7 @@ pub struct Missions {
     pub(crate) files: crate::file_review::Review,
     socket: Option<PathBuf>,
     ledger: Option<PathBuf>,
-    trail: Vec<TrailEntry>,
+    parcours: Parcours,
     trail_reading: bool,
     trail_next: Instant,
     selected: Option<String>,
@@ -321,7 +397,7 @@ impl Default for Missions {
             files: crate::file_review::Review::default(),
             socket: None,
             ledger: None,
-            trail: Vec::new(),
+            parcours: Parcours::default(),
             trail_reading: false,
             trail_next: Instant::now(),
             selected: None,
@@ -362,7 +438,7 @@ impl Missions {
     /// Le parcours réel de la mission sélectionnée, tel que le journal le raconte.
     #[must_use]
     pub fn trail(&self) -> &[TrailEntry] {
-        &self.trail
+        self.parcours.gestes()
     }
 
     /// Observe une sélection. Les réponses d'une ancienne sélection ne remplacent pas la vue.
@@ -372,7 +448,7 @@ impl Missions {
             self.revision = self.revision.wrapping_add(1);
             self.selected = id.map(str::to_owned);
             self.snapshot = None;
-            self.trail.clear();
+            self.parcours = Parcours::default();
             self.error = None;
             self.next_read = Instant::now();
             self.trail_next = Instant::now();
@@ -427,9 +503,13 @@ impl Missions {
                 Reply::Trail(revision, result) => {
                     self.trail_reading = false;
                     if revision == self.revision
-                        && let Ok(trail) = result
+                        && let Ok((evenements, reste)) = result
                     {
-                        self.trail = trail;
+                        self.parcours.ajouter(&evenements);
+                        // Une longue mission se rattrape sans attendre la relecture suivante.
+                        if reste {
+                            self.trail_next = Instant::now();
+                        }
                     }
                 }
                 Reply::Action(id, action, result) => {
@@ -509,13 +589,9 @@ impl Missions {
             self.trail_next = Instant::now() + Duration::from_secs(2);
             let tx = self.tx.clone();
             let revision = self.revision;
+            let depuis = self.parcours.suivant();
             std::thread::spawn(move || {
-                let result = rpc(ledger, "ledger.query", json!({"task": id, "limit": 400}))
-                    .and_then(|v| {
-                        v.as_array()
-                            .map(|events| trail_from(events))
-                            .ok_or_else(|| "Journal illisible.".to_owned())
-                    });
+                let result = lire_la_suite(&ledger, &id, depuis);
                 let _ = tx.send(Reply::Trail(revision, result));
             });
         }

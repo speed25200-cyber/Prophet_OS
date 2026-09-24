@@ -1008,6 +1008,9 @@ fn dernier_geste(trail: &[crate::missions::TrailEntry]) -> Option<&crate::missio
         .find(|g| !(matches!(nature(g), Nature::Sortie) && g.outcome == Outcome::Ok))
 }
 
+/// Gestes montrés au plus dans le parcours : les derniers.
+const MONTRES: usize = 200;
+
 /// Gestes montrés en direct pendant l'exécution.
 const DIRECT: usize = 5;
 
@@ -1022,8 +1025,20 @@ fn touches(ui: &mut egui::Ui, trail: &[crate::missions::TrailEntry], accent: &Ac
         );
         return;
     }
-    let shown = trail.len().min(200);
-    for (index, entry) in trail.iter().take(200).enumerate() {
+    // Une longue mission garde ses derniers gestes à l'écran : c'est la fin qu'on suit.
+    let debut = trail.len().saturating_sub(MONTRES);
+    if debut > 0 {
+        small(
+            ui,
+            format!(
+                "Les {MONTRES} derniers gestes sur {}. Le journal complet se lit avec `prophet log tail`.",
+                trail.len()
+            ),
+        );
+        ui.add_space(6.0);
+    }
+    let shown = trail.len() - debut;
+    for (index, entry) in trail[debut..].iter().enumerate() {
         let (mark, color, note) = issue(&entry.outcome);
         let kind = nature(entry);
         let (outil, couleur_outil) = libelle(entry, accent);
@@ -1113,15 +1128,6 @@ fn touches(ui: &mut egui::Ui, trail: &[crate::missions::TrailEntry], accent: &Ac
             issue_en_mots(&entry.outcome)
         );
         row.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &decrit));
-    }
-    if trail.len() > 200 {
-        small(
-            ui,
-            format!(
-                "200 appels affichés sur {}. Le journal complet se lit avec `prophet log tail`.",
-                trail.len()
-            ),
-        );
     }
 }
 
