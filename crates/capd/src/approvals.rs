@@ -5,6 +5,9 @@
 //! créée est révocable.
 
 use std::collections::HashMap;
+use std::io::Write as _;
+use std::os::unix::fs::OpenOptionsExt as _;
+use std::path::Path;
 
 use prophet_types::ids::{Id, Kind};
 use serde::{Deserialize, Serialize};
@@ -137,7 +140,11 @@ pub const RESOLVED_TTL_HOURS: i64 = 1;
 pub const REASON_MAX_CHARS: usize = 400;
 
 /// File d'approbations et règles permanentes.
-#[derive(Debug, Default)]
+///
+/// Elle se garde dans l'état du service ([`Approvals::sauver`]) : une demande en attente reste
+/// devant l'humain, et une règle « pour toute la mission » ne s'oublie pas, quand capd repart.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Approvals {
     pending: HashMap<String, Approval>,
     rules: Vec<StandingRule>,
@@ -168,6 +175,44 @@ pub struct Request {
 }
 
 impl Approvals {
+    /// Relit la file gardée ; absente, elle est vide.
+    ///
+    /// # Errors
+    /// Fichier illisible ou abîmé : capd ne devine pas ce que l'humain a décidé.
+    pub fn charger(fichier: &Path) -> Result<Self, String> {
+        match std::fs::read(fichier) {
+            Ok(octets) => serde_json::from_slice(&octets)
+                .map_err(|e| format!("{} abîmé : {e}", fichier.display())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(e) => Err(format!("{} illisible : {e}", fichier.display())),
+        }
+    }
+
+    /// Garde la file entière, d'un coup : écrite à côté, synchronisée, puis renommée. Une
+    /// coupure laisse l'ancienne ou la nouvelle, jamais un mélange.
+    ///
+    /// # Errors
+    /// Écriture, synchronisation ou renommage impossibles.
+    pub fn sauver(&self, fichier: &Path) -> std::io::Result<()> {
+        let octets = serde_json::to_vec(self).map_err(std::io::Error::other)?;
+        let provisoire = fichier.with_extension("tmp");
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&provisoire)?;
+            f.write_all(&octets)?;
+            f.sync_all()?;
+        }
+        std::fs::rename(&provisoire, fichier)?;
+        if let Some(dossier) = fichier.parent() {
+            std::fs::File::open(dossier)?.sync_all()?;
+        }
+        Ok(())
+    }
+
     /// File vide.
     #[must_use]
     pub fn new() -> Self {

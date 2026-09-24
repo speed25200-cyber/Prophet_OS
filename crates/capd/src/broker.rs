@@ -179,6 +179,11 @@ impl Broker {
         &mut self.approvals
     }
 
+    /// Reprend la file d'approbations gardée avant un redémarrage.
+    pub fn restore_approvals(&mut self, approvals: Approvals) {
+        self.approvals = approvals;
+    }
+
     /// Accès en lecture à la file d'approbations.
     #[must_use]
     pub const fn approvals(&self) -> &Approvals {

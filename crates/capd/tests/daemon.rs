@@ -276,3 +276,89 @@ async fn une_revocation_survit_au_redemarrage() {
         & 0o777;
     assert_eq!(mode, 0o600);
 }
+
+/// Les demandes en attente et les règles que l'humain a posées survivent au redémarrage : une
+/// règle « pour toute la mission » ne s'oublie pas parce que le service est reparti, et une
+/// demande en attente reste devant l'humain.
+#[tokio::test]
+async fn les_approbations_et_les_regles_survivent_au_redemarrage() {
+    let temp = tempfile::tempdir().expect("répertoire temporaire");
+    let socket = temp.path().join("capd.sock");
+    let etat = temp.path().join("etat");
+    let manifeste = json!({
+        "agent": {
+            "id": "org.essai.approbations",
+            "version": "1.0.0",
+            "name": "Essai des approbations",
+            "publisher_key": "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "model": { "preferred": ["local:qwen3-8b"] },
+        "capabilities": { "max": { "net.egress": ["*.example.com"] } }
+    });
+    let demander = |jeton: &serde_json::Value, cible: &str| {
+        json!({ "token": jeton, "res": "net", "act": "egress", "target": cible,
+                "external": true, "summary": format!("Sortir vers {cible}") })
+    };
+    let (premiere, seconde) = {
+        let daemon = lancer(&socket, &etat);
+        let client = daemon.joindre().await;
+        let jeton = client
+            .call(
+                "cap.mint",
+                json!({
+                    "manifest": manifeste,
+                    "grants": [{ "res": "net", "act": "egress", "match": "*.example.com" }],
+                    "task": "task:approbations",
+                    "user": "prophet",
+                    "ttl_seconds": 3600
+                }),
+            )
+            .await
+            .expect("jeton émis");
+        let premiere = client
+            .call("approval.request", demander(&jeton, "a.example.com"))
+            .await
+            .expect("demande posée");
+        let seconde = client
+            .call("approval.request", demander(&jeton, "b.example.com"))
+            .await
+            .expect("seconde demande posée");
+        client
+            .call(
+                "approval.resolve",
+                json!({ "id": premiere["id"], "decision": "allow", "scope": "task" }),
+            )
+            .await
+            .expect("tranchée pour toute la mission");
+        (premiere, seconde)
+    };
+
+    let daemon = lancer(&socket, &etat);
+    let client = daemon.joindre().await;
+    let attente = client.call("approval.pending", json!({})).await.unwrap();
+    let ids: Vec<&str> = attente
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|a| a["id"].as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        [seconde["id"].as_str().unwrap()],
+        "la demande en attente reste devant l'humain : {attente}"
+    );
+    let regles = client.call("approval.rules", json!({})).await.unwrap();
+    assert_eq!(
+        regles.as_array().map(Vec::len),
+        Some(1),
+        "la règle pour toute la mission ne s'oublie pas : {regles}"
+    );
+    let statut = client
+        .call("approval.status", json!({ "id": premiere["id"] }))
+        .await
+        .expect("la décision récente se lit encore");
+    assert!(
+        statut.to_string().contains("allow"),
+        "la décision se lit après le redémarrage : {statut}"
+    );
+}

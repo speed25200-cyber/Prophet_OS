@@ -26,6 +26,18 @@ struct Capd {
     presence: Mutex<capd::presence::Presence>,
     /// Le registre des révocations, relu au démarrage.
     revocations: capd::revocations::Revocations,
+    /// Où la file d'approbations et les règles de l'humain sont gardées entre deux démarrages.
+    approbations: std::path::PathBuf,
+}
+
+impl Capd {
+    /// Garde la file d'approbations après un changement. Un échec se journalise sans refuser
+    /// l'appel : la décision vaut, elle ne survivrait simplement pas à un redémarrage.
+    fn garder(&self, broker: &Broker) {
+        if let Err(e) = broker.approvals().sauver(&self.approbations) {
+            tracing::error!(erreur = %e, "file d'approbations non gardée");
+        }
+    }
 }
 
 impl Handler for Capd {
@@ -86,6 +98,7 @@ impl Handler for Capd {
                 let resume = commun::texte(&params, "summary")?;
                 let mut broker = self.broker.lock().await;
                 let approbation = broker.request_approval(&jeton, &demande, resume, maintenant);
+                self.garder(&broker);
                 tracing::info!(id = %approbation.id, "approbation demandée");
                 commun::repondre(&approbation)
             }
@@ -149,6 +162,7 @@ impl Handler for Capd {
                         "demande inconnue ou déjà tranchée, ou motif vide",
                     )
                 })?;
+                self.garder(&broker);
                 commun::repondre(&demande)
             }
             // Celui qui attend une décision la lit ici, sans rien pouvoir trancher.
@@ -194,6 +208,7 @@ impl Handler for Capd {
                     .ok_or_else(|| {
                         Error::new(ErrorCode::NotFound, "demande inconnue ou déjà tranchée")
                     })?;
+                self.garder(&broker);
                 tracing::info!(%id, ?decision, "approbation tranchée");
                 commun::repondre(&tranchee)
             }
@@ -240,6 +255,9 @@ impl Handler for Capd {
             "approval.expire" => {
                 let mut broker = self.broker.lock().await;
                 let perimees = broker.approvals_mut().expire(maintenant);
+                if !perimees.is_empty() {
+                    self.garder(&broker);
+                }
                 Ok(json!({ "expired": perimees.len() }))
             }
 
@@ -250,6 +268,8 @@ impl Handler for Capd {
                 let mut broker = self.broker.lock().await;
                 let nouveau = !broker.is_revoked(&sujet);
                 broker.revoke(&sujet);
+                // La révocation retire aussi les règles de la tâche.
+                self.garder(&broker);
                 if nouveau {
                     self.revocations
                         .inscrire(&sujet, maintenant)
@@ -449,6 +469,9 @@ async fn main() -> anyhow::Result<()> {
         broker.revoke(sujet);
     }
     tracing::info!(nombre = revoques.len(), "révocations relues");
+    // Les demandes en attente et les règles de l'humain : relues avant le premier appel.
+    let approbations = etat.join("approbations.json");
+    broker.restore_approvals(capd::Approvals::charger(&approbations).map_err(anyhow::Error::msg)?);
 
     let serveur = Server::bind(&socket)?;
     tracing::info!(socket = %socket.display(), "capd écoute");
@@ -462,6 +485,7 @@ async fn main() -> anyhow::Result<()> {
             pairs: commun::Pairs::detecter()?,
             presence: Mutex::new(presence),
             revocations,
+            approbations,
         }))
         .await?;
     Ok(())
