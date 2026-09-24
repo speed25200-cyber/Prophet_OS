@@ -34,6 +34,9 @@ use crate::scene::{Isolation, Scene};
 /// chose.
 const PERIODE: Duration = Duration::from_millis(250);
 
+/// Ce qui change rarement — code d'approbation, file du journal — se relit un tour sur tant.
+const TOURS_PAR_RELECTURE_LENTE: u32 = 8;
+
 /// Ce que le fil de fond dépose pour la boucle de rendu.
 #[derive(Debug, Default)]
 struct Partage {
@@ -497,10 +500,16 @@ fn interroger(sockets: &Sockets, partage: &Weak<Mutex<Partage>>) {
     };
 
     execution.block_on(async {
+        let mut tour: u32 = 0;
         loop {
             if partage.strong_count() == 0 {
                 break;
             }
+            // Le code d'approbation et la file du journal changent rarement : relus un tour sur
+            // huit (deux secondes), pour ne pas réveiller capd et agentd quatre fois par seconde
+            // devant un écran au repos.
+            let lent = tour.is_multiple_of(TOURS_PAR_RELECTURE_LENTE);
+            tour = tour.wrapping_add(1);
             let (taches, approbations, capacites, code, journal) = tokio::join!(
                 appeler(&sockets.agentd, "task.list", serde_json::json!({})),
                 appeler(&sockets.capd, "approval.pending", serde_json::json!({})),
@@ -509,8 +518,26 @@ fn interroger(sockets: &Sockets, partage: &Weak<Mutex<Partage>>) {
                     "sandbox.capabilities",
                     serde_json::json!({})
                 ),
-                appeler(&sockets.capd, "approval.code_status", serde_json::json!({})),
-                appeler(&sockets.agentd, "journal.pending", serde_json::json!({})),
+                async {
+                    if lent {
+                        Some(
+                            appeler(&sockets.capd, "approval.code_status", serde_json::json!({}))
+                                .await,
+                        )
+                    } else {
+                        None
+                    }
+                },
+                async {
+                    if lent {
+                        Some(
+                            appeler(&sockets.agentd, "journal.pending", serde_json::json!({}))
+                                .await,
+                        )
+                    } else {
+                        None
+                    }
+                },
             );
 
             let mut panne = None;
@@ -533,13 +560,17 @@ fn interroger(sockets: &Sockets, partage: &Weak<Mutex<Partage>>) {
                     manque: manque_pour_monter(&valeur),
                     reserve: reserve_de(&valeur),
                 });
-                etat.code = code.ok().and_then(|valeur| {
-                    Some(crate::presence::EtatDuCode {
-                        defini: valeur["defined"].as_bool()?,
-                        verrou_s: valeur["locked_s"].as_i64(),
-                    })
-                });
-                etat.journal = journal.ok().as_ref().and_then(attente_du_journal);
+                if let Some(code) = code {
+                    etat.code = code.ok().and_then(|valeur| {
+                        Some(crate::presence::EtatDuCode {
+                            defini: valeur["defined"].as_bool()?,
+                            verrou_s: valeur["locked_s"].as_i64(),
+                        })
+                    });
+                }
+                if let Some(journal) = journal {
+                    etat.journal = journal.ok().as_ref().and_then(attente_du_journal);
+                }
                 etat.panne = panne;
             }
             drop(partage);
