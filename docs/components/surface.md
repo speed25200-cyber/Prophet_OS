@@ -107,7 +107,9 @@ décision s'ouvre sur « PREUVE DE PRÉSENCE », un champ masqué et « Accorder
 au moins rendent actif (Entrée confirme). La première fois, le même champ fait choisir le code
 (« Définir et accorder »). Un code juste rend un ticket que la surface garde dix minutes en
 mémoire, et ne se retape pas d'ici là ; un code faux, un verrou, s'y disent. Refuser ne demande
-jamais de code.
+jamais de code. La page Système dit où en est le code (« APPROBATIONS » : à choisir, défini,
+verrouillé) et, s'il n'est pas choisi, « Définir maintenant » ouvre le même champ sans décision
+en attente (« Définir », « Plus tard »).
 Une erreur de transmission d'approbation est encore journalisée ; son acquittement visible dans
 l'interface reste à intégrer.
 

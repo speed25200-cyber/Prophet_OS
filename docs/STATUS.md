@@ -1860,7 +1860,12 @@ donne le détail.
   décision (champ masqué, ticket gardé en mémoire), la CLI au terminal sans écho,
   `prophet cap code` le définit. Essais : logique de l'empreinte, du verrou et des tickets
   (capd), dialogue de la surface avec un faux capd, rendu de la fenêtre à 1280 et 640 px,
-  refus sans code sous le compte de l'humain dans l'essai NixOS des services.
+  refus sans code sous le compte de l'humain dans l'essai NixOS des services. La page Système
+  dit où en est le code (à choisir, défini, verrouillé) et le fait choisir sans décision en
+  attente (« Définir maintenant », « Plus tard »), pour qu'aucun programme de la session ne le
+  définisse avant l'humain. La CI de `8477b88` a d'abord rougi sur « Les sept services » : le
+  contrôle des droits repasse après un redémarrage de capd, où le code est déjà défini ; il le
+  vérifie désormais (le code survit au redémarrage, toujours exigé).
 - Un conflit de publication n'est plus une impasse (ADR 0058, FRONTIER durabilité) : une
   publication arrêtée sur un fichier que l'humain a changé ne pouvait ni reprendre, ni être
   annulée. `task.resolve` la tranche — garder sa version et poursuivre (l'édition emportée par
@@ -1871,7 +1876,7 @@ donne le détail.
   PUBLICATION » dans la surface (rendu à 900 et 420 px), `prophet task resolve`,
   `prophet task undo --keep-changes`. Essais : six de la bibliothèque, un du service, un de
   l'inspection, un du contrôleur, un de rendu.
-- `just check` : **991 réussis, 0 échec, 74 ignorés** (conflits de publication ; code d'approbation ; sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
+- `just check` : **992 réussis, 0 échec, 75 ignorés** (code à choisir depuis Système ; conflits de publication ; code d'approbation ; sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   6 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
