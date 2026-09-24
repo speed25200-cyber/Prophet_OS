@@ -297,3 +297,11 @@ de capd borné aux hôtes de son éditeur (phase 2) ; éprouvé par des clients 
 sondent la cage, lisent une page par le vrai egress et mènent pourtant leur mission. Le critère
 n'est pas coché : aucune session réelle de Claude Code ou de Codex n'a été exercée en cage, et
 la liste des hôtes de chaque éditeur reste à confirmer avec elle.
+
+Le 24 septembre, ce qui sort se voit : egress inscrit chaque sortie, chaque refus et chaque
+blocage au journal de la mission, l'onglet Parcours les montre (réunis par hôte quand ils se
+suivent), et « Plan & accès » dit avant le lancement vers quels hôtes le client pourra sortir.
+Une mission longue ne fige plus la frise, le journal ne ralentit plus au fil de la journée
+(100 écritures en 0,5 ms au lieu de 153 ms à 15 000 événements), et ce que les outils rendent
+aux agents est borné (journal, mémoire, arbre d'une page, changements). Le coureur d'isolation
+a aussi révélé qu'une mission de client annulée pouvait finir en échec : corrigé et éprouvé.
