@@ -462,6 +462,9 @@ fn ligne(ui: &mut egui::Ui, c: &Courant, r: Rect, selected: bool, accent: &Accen
         r.width() - 56. - 70.,
     );
     job.wrap.max_rows = 1;
+    // Couper au caractère et non au mot : « Indexer la docum… » dit encore la mission, là où
+    // « Indexer la … » perdait tout le mot qui la nomme.
+    job.wrap.break_anywhere = true;
     let galley = p.layout_job(job);
     p.galley(pos2(text_left, r.top() + 15.), galley, ENCRE);
     hud::etiquette_peinte(
