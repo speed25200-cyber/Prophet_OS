@@ -1806,7 +1806,9 @@ donne le détail.
   par son hôte, sa méthode et son statut, chaque refus par son hôte et son motif (`4828dc3`).
   Le journal lui-même : chaque écriture recomptait le fichier du jour et chaque relecture
   `since_seq` analysait tout le journal ; à 15 000 événements dans la journée, 100 écritures
-  passent de 153 ms à 0,5 ms et relire les 10 derniers de 18 ms à 2 ms (`f0b5e3b`).
+  passent de 153 ms à 0,5 ms et relire les 10 derniers de 18 ms à 2 ms (`f0b5e3b`), puis à 14 µs,
+  constants, en sautant à l'octet (`d790bc1`) ; la première lecture d'une tâche part de son premier
+  événement : 74 µs au lieu de 166 ms parmi 100 000 événements (`9c14100`).
 - Ce que les outils rendent aux agents (24 septembre) : un audit des outils de mcp-system a
   relevé des sorties sans borne et des paramètres annoncés mais ignorés. L'arbre d'une page web
   (`web.open`, `web.tree`, `web.act`) est borné comme celui du bureau — 500 nœuds, 4 000

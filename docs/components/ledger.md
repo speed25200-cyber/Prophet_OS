@@ -28,9 +28,12 @@ encore écrite signerait une chaîne qui n'existe pas.
 `ledger.query` rend les événements dans l'ordre du journal, les plus anciens d'abord ; `limit`
 coupe par le début. Pour suivre une tâche, on relit donc à partir du dernier numéro lu
 (`since_seq`) : cette lecture ne touche que les fichiers et les lignes que l'index désigne, sans
-relire les jours précédents. Une écriture sait où elle tombe sans relire le fichier du jour — egress
-inscrit chaque connexion, et l'écriture ne doit pas ralentir au fil des heures (15 000 événements
-dans la journée : 100 écritures en 0,5 ms, les 10 derniers relus en 2 ms).
+relire les jours précédents : l'index retient l'octet où commence chaque ligne, et la lecture y
+saute. Le journal d'une tâche se lit à partir de son premier événement, que le journal retient.
+Une écriture sait où elle tombe sans relire le fichier du jour — egress inscrit chaque connexion,
+et l'écriture ne doit pas ralentir au fil des heures. Mesuré en release : 100 écritures en 0,5 ms
+à 15 000 événements dans la journée ; les 10 derniers relus en 14 µs, à 15 000 comme à 60 000 ;
+une tâche récente lue en entier en 74 µs parmi 100 000 événements.
 
 ## Ce qu'il refuse
 
