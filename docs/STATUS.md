@@ -1840,7 +1840,11 @@ donne le détail.
   surface, parole, isolation sur matériel réel (cage des clients et leur réseau), mission réelle
   Qwen3 sous NixOS, sept services, système installé (UEFI et BIOS), ISO et installeur. Banc Qwen3
   4B : **Prophet 11/15, boucle nue 10/15**.
-- `just check` : **973 réussis, 0 échec, 71 ignorés** (sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
+- Nouveau tour visuel (24 septembre, captures régénérées) : la carte d'un client répétait son
+  état et prenait une sonde incertaine pour une connexion requise (`8627cb3`) ; sous ~1 300
+  points, les raccourcis de la barre d'état passaient sur son texte (`a656a58`). Corrigés et
+  capturés à plusieurs largeurs ; voir l'[audit visuel](reports/audit-visuel-2026-09-23.md).
+- `just check` : **975 réussis, 0 échec, 71 ignorés** (sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   6 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.

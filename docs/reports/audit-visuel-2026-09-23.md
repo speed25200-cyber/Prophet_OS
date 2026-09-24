@@ -19,6 +19,8 @@ et des parcours `crates/surface/tests/{bureau,missions}.rs` (`PROPHET_CAPTURE_DI
 | En 640 points, le cadre de la décision touchait presque les bords (5 points) | décision humaine | largeur bornée pour garder 16 points de gouttière | `f4cc89f` |
 | 24 septembre — en 640 points, la suite d'un geste qui passait à la ligne repartait sous le rail de la frise | Parcours d'une mission (sorties réseau, cibles longues) | le texte s'enroule dans sa colonne ; nœud et numéro sur sa première ligne | `b3f94fc` |
 | 24 septembre — « Mouvement réduit » laissait le défilement animé, et le décocher ne rendait pas les transitions | toute la surface | le réglage s'applique au changement, défilement animé compris | `9a0b998` |
+| 24 septembre — la carte d'un client répétait son état (« connexion requise » deux fois) et disait « connexion requise » pour une sonde incertaine ; le conseil ajouté passait sous « Ouvrir » | Modèles | état exact, conseil enroulé à côté du bouton | `8627cb3` |
+| 24 septembre — sous ~1 300 points, les raccourcis de la barre d'état passaient sur son texte de gauche | toute la surface | la version qui tient, mesurée : complète, réduite, ou rien | `a656a58` |
 
 ![Modèles en 640 points : cartes sur deux colonnes, adresse et « Actualiser » alignés](../images/audit-modeles-640.png)
 
@@ -29,6 +31,10 @@ et des parcours `crates/surface/tests/{bureau,missions}.rs` (`PROPHET_CAPTURE_DI
 ![Le parcours en 640 points : trois connexions réunies sur une ligne, un refus répété, leur texte enroulé dans sa colonne](../images/audit-sorties-reseau-640.png)
 
 ![« Plan & accès » d'une mission menée par Codex : le réseau du client, borné aux hôtes de son éditeur](../images/audit-plan-reseau-du-client.png)
+
+![Les cartes des clients officiels : état exact, conseil à côté du bouton](../images/audit-cartes-clients.png)
+
+![La barre d'état à 1000, 1100, 1280 et 1440 points : les raccourcis qui tiennent](../images/audit-barre-raccourcis.png)
 
 ## Ce qui a été vérifié sans défaut
 
