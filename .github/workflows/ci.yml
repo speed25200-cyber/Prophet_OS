@@ -405,8 +405,10 @@ jobs:
       # essais en même temps se ralentissent jusqu'à dépasser l'attente du service simulé.
       - name: Une phrase dite devient une mission ; « Prophète, … » la déclenche
         run: cargo test -p prophet-cli --test task_service -- --ignored --nocapture --test-threads=1
+      # L'essai de l'écoute permanente seulement : les autres essais ignorés de la surface
+      # demandent un rastériseur, que le travail « Surface d'observation » apporte et exerce.
       - name: L'atelier écoute « Prophète » sans bouton
-        run: cargo test -p surface --lib -- --ignored --nocapture --test-threads=1
+        run: cargo test -p surface --lib l_ecoute_permanente -- --ignored --nocapture --test-threads=1
 
   isolation:
     name: Niveaux d'isolation (matériel réel)
