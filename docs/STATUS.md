@@ -1845,6 +1845,9 @@ donne le détail.
   points, les raccourcis de la barre d'état passaient sur son texte (`a656a58`) ; à 1100, les
   intitulés de la liste coupés au mot ne disaient plus rien (`3decc50`). Corrigés et
   capturés à plusieurs largeurs ; voir l'[audit visuel](reports/audit-visuel-2026-09-23.md).
+- CI de `4e82542` (journal à l'octet et par tâche, cartes des clients, barre d'état, intitulés) :
+  **verte des deux côtés**, tous travaux compris. Banc Qwen3 4B : Prophet 11/15, boucle nue 11/15
+  (médiane 35,4 s contre 31,9 s).
 - `just check` : **975 réussis, 0 échec, 71 ignorés** (sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
