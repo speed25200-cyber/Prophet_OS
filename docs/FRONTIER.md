@@ -308,3 +308,17 @@ Une mission longue ne fige plus la frise, le journal ne ralentit plus au fil de 
 (100 écritures en 0,5 ms au lieu de 153 ms à 15 000 événements), et ce que les outils rendent
 aux agents est borné (journal, mémoire, arbre d'une page, changements). Le coureur d'isolation
 a aussi révélé qu'une mission de client annulée pouvait finir en échec : corrigé et éprouvé.
+
+Toujours le 24 septembre, les critères de permissions et de durabilité avancent, chacun
+éprouvé par un essai rouge avant la correction. Accorder une approbation exige le code
+d'approbation de l'humain ([ADR 0057](adr/0057-accorder-exige-le-code-d-approbation.md)) : un
+programme de sa session ne peut plus accorder à sa place, ce que l'essai NixOS des services
+vérifie sous son compte, redémarrage de capd compris. Une révocation, la file d'approbations
+et les règles « pour toute la mission » survivent au redémarrage de capd ; un jeton racine
+révoqué redevenait valide jusque-là. Un conflit de publication se tranche — garder sa
+version et poursuivre, ou tout annuler — et l'annulation peut laisser à l'humain les fichiers
+qu'il a changés depuis ([ADR 0058](adr/0058-un-conflit-de-publication-se-tranche-fichier-par-fichier.md)).
+Les événements d'agentd ne se perdent plus quand le journal est injoignable, et un événement
+renvoyé ne s'écrit qu'une fois ([ADR 0059](adr/0059-le-journal-ne-perd-plus-les-evenements-du-service.md)).
+Aucun de ces critères n'est coché : l'écrivain sous l'identité humaine, la matrice matérielle et
+les sessions réelles des clients restent ouverts.
