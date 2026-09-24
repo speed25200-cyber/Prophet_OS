@@ -280,6 +280,12 @@ impl Broker {
         self.approvals.clear_task_rules(subject);
     }
 
+    /// Vrai si ce sujet est déjà révoqué.
+    #[must_use]
+    pub fn is_revoked(&self, subject: &str) -> bool {
+        self.revoked.contains(subject)
+    }
+
     /// Vrai si un ancêtre du jeton est révoqué.
     fn has_revoked_ancestor(&self, token: &Token) -> bool {
         if self.revoked.contains(&token.sub) {

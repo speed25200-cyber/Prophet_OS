@@ -201,3 +201,78 @@ async fn un_controle_sans_jeton_ne_passe_pas_pour_un_refus_ordinaire() {
         .expect_err("sans jeton, il n'y a rien à contrôler");
     assert_eq!(erreur.code, prophet_ipc::ErrorCode::InvalidParams);
 }
+
+/// Une révocation survit au redémarrage de capd : sans cela, le jeton racine d'une mission
+/// révoquée redevenait valide jusqu'à son expiration dès que le service repartait.
+#[tokio::test]
+async fn une_revocation_survit_au_redemarrage() {
+    let temp = tempfile::tempdir().expect("répertoire temporaire");
+    let socket = temp.path().join("capd.sock");
+    let etat = temp.path().join("etat");
+    let manifeste = json!({
+        "agent": {
+            "id": "org.essai.revocation",
+            "version": "1.0.0",
+            "name": "Essai de révocation",
+            "publisher_key": "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "model": { "preferred": ["local:qwen3-8b"] },
+        "capabilities": { "max": { "net.egress": ["127.0.0.1"] } }
+    });
+    let controle = |jeton: &serde_json::Value| json!({ "token": jeton, "res": "net", "act": "egress", "target": "127.0.0.1" });
+    let (jeton, temoin) = {
+        let daemon = lancer(&socket, &etat);
+        let client = daemon.joindre().await;
+        let emettre = |tache: &str| {
+            client.call(
+                "cap.mint",
+                json!({
+                    "manifest": manifeste,
+                    "grants": [{ "res": "net", "act": "egress", "match": "127.0.0.1" }],
+                    "task": tache,
+                    "user": "prophet",
+                    "ttl_seconds": 3600
+                }),
+            )
+        };
+        let jeton = emettre("task:revoquee").await.expect("jeton émis");
+        let temoin = emettre("task:temoin").await.expect("jeton témoin émis");
+        let permis = client.call("cap.check", controle(&jeton)).await.unwrap();
+        assert_eq!(permis["decision"], "allow", "{permis}");
+        client
+            .call("cap.revoke", json!({ "subject": "task:revoquee" }))
+            .await
+            .expect("révoqué");
+        // Révoquer deux fois ne dédouble rien et ne se refuse pas.
+        client
+            .call("cap.revoke", json!({ "subject": "task:revoquee" }))
+            .await
+            .expect("révoqué une seconde fois");
+        let refus = client.call("cap.check", controle(&jeton)).await.unwrap();
+        assert_eq!(refus["decision"], "deny", "{refus}");
+        (jeton, temoin)
+    };
+
+    let daemon = lancer(&socket, &etat);
+    let client = daemon.joindre().await;
+    let refus = client.call("cap.check", controle(&jeton)).await.unwrap();
+    assert_eq!(
+        refus["decision"], "deny",
+        "le jeton d'une mission révoquée ne revit pas au redémarrage : {refus}"
+    );
+    let permis = client.call("cap.check", controle(&temoin)).await.unwrap();
+    assert_eq!(
+        permis["decision"], "allow",
+        "un jeton non révoqué reste valide après le redémarrage : {permis}"
+    );
+    let inscrites = std::fs::read_to_string(etat.join("revocations.jsonl"))
+        .expect("les révocations sont inscrites dans l'état du service");
+    assert_eq!(inscrites.lines().count(), 1, "{inscrites}");
+    use std::os::unix::fs::PermissionsExt as _;
+    let mode = std::fs::metadata(etat.join("revocations.jsonl"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
+}

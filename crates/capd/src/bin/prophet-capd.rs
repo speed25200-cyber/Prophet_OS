@@ -24,6 +24,8 @@ struct Capd {
     pairs: commun::Pairs,
     /// Le code d'approbation de l'humain et les tickets de présence (ADR 0057).
     presence: Mutex<capd::presence::Presence>,
+    /// Le registre des révocations, relu au démarrage.
+    revocations: capd::revocations::Revocations,
 }
 
 impl Handler for Capd {
@@ -241,10 +243,26 @@ impl Handler for Capd {
                 Ok(json!({ "expired": perimees.len() }))
             }
 
+            // La révocation vaut aussitôt, puis s'inscrit dans l'état du service : elle survit au
+            // redémarrage. Une inscription impossible se dit, au lieu de promettre la durée.
             "cap.revoke" => {
                 let sujet = commun::texte(&params, "subject")?;
                 let mut broker = self.broker.lock().await;
+                let nouveau = !broker.is_revoked(&sujet);
                 broker.revoke(&sujet);
+                if nouveau {
+                    self.revocations
+                        .inscrire(&sujet, maintenant)
+                        .map_err(|e| {
+                            tracing::error!(%sujet, erreur = %e, "révocation non inscrite");
+                            Error::new(
+                                ErrorCode::InternalError,
+                                format!(
+                                    "sujet révoqué jusqu'au redémarrage seulement : son inscription a échoué ({e})"
+                                ),
+                            )
+                        })?;
+                }
                 tracing::info!(%sujet, "sujet révoqué");
                 Ok(json!({ "revoked": sujet }))
             }
@@ -421,8 +439,16 @@ async fn main() -> anyhow::Result<()> {
     let repertoire_politiques =
         std::env::var("PROPHET_POLICIES").unwrap_or_else(|_| "/etc/prophet/policies".to_owned());
 
-    let broker = Broker::new(commun::clef(&etat, "signing.key")?, "capd", maison)?
+    let mut broker = Broker::new(commun::clef(&etat, "signing.key")?, "capd", maison)?
         .with_policy(politiques(Path::new(&repertoire_politiques))?);
+    // Ce qui a été révoqué avant l'arrêt le reste : relu avant d'accepter le premier appel.
+    let (revocations, revoques) =
+        capd::revocations::Revocations::ouvrir(etat.join("revocations.jsonl"))
+            .map_err(anyhow::Error::msg)?;
+    for sujet in &revoques {
+        broker.revoke(sujet);
+    }
+    tracing::info!(nombre = revoques.len(), "révocations relues");
 
     let serveur = Server::bind(&socket)?;
     tracing::info!(socket = %socket.display(), "capd écoute");
@@ -435,6 +461,7 @@ async fn main() -> anyhow::Result<()> {
             broker: Mutex::new(broker),
             pairs: commun::Pairs::detecter()?,
             presence: Mutex::new(presence),
+            revocations,
         }))
         .await?;
     Ok(())
