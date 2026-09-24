@@ -799,9 +799,12 @@ async fn appeler_agentd(
     params: Value,
 ) -> Result<Value, String> {
     tokio::time::timeout(Duration::from_secs(5), async {
-        let client = prophet_ipc::Client::connect(socket)
-            .await
-            .map_err(|e| format!("agentd injoignable : {e}"))?;
+        let client = prophet_ipc::Client::connect(socket).await.map_err(|e| {
+            format!(
+                "agentd injoignable : {}",
+                prophet_ipc::motif_de_connexion(&e)
+            )
+        })?;
         client.call(methode, params).await.map_err(|e| e.message)
     })
     .await

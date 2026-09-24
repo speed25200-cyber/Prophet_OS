@@ -842,7 +842,7 @@ pub(crate) fn rpc_dans(
         tokio::time::timeout(delai, async {
             let client = prophet_ipc::Client::connect(socket)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| prophet_ipc::motif_de_connexion(&e))?;
             client.call(method, params).await.map_err(|e| e.message)
         })
         .await

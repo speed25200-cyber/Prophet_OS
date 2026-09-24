@@ -15,7 +15,7 @@ mod client;
 mod codec;
 mod server;
 
-pub use client::Client;
+pub use client::{Client, motif_de_connexion};
 pub use codec::{Error, ErrorCode, Notification, Request, Response, extract_auth};
 pub use server::{Handler, PeerIdentity, Server, publish};
 

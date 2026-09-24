@@ -726,9 +726,9 @@ fn capd_appel(
 ) -> anyhow::Result<Result<serde_json::Value, prophet_ipc::Error>> {
     sous_delai_de(
         async {
-            let client = prophet_ipc::Client::connect(socket)
-                .await
-                .map_err(|e| format!("capd indisponible : {e}"))?;
+            let client = prophet_ipc::Client::connect(socket).await.map_err(|e| {
+                format!("capd injoignable : {}", prophet_ipc::motif_de_connexion(&e))
+            })?;
             Ok(client.call(method, params).await)
         },
         DELAI_DE_SONDE,
@@ -1331,9 +1331,12 @@ fn arret_en_mots(result: &serde_json::Value) -> String {
 
 fn freeze(socket: &std::path::Path, as_json: bool) -> anyhow::Result<String> {
     let result = sous_delai(async {
-        let client = prophet_ipc::Client::connect(socket)
-            .await
-            .map_err(|e| format!("gel non effectué : sandboxd injoignable ({e})"))?;
+        let client = prophet_ipc::Client::connect(socket).await.map_err(|e| {
+            format!(
+                "gel non effectué : sandboxd injoignable ({})",
+                prophet_ipc::motif_de_connexion(&e)
+            )
+        })?;
         client
             .call("sandbox.freeze_all", serde_json::json!({}))
             .await
@@ -1510,7 +1513,11 @@ fn appel_au_journal(
     execution.block_on(async {
         let travail = async {
             let client = prophet_ipc::Client::connect(socket).await.map_err(|e| {
-                anyhow::anyhow!("journal injoignable sur {} : {e}", socket.display())
+                anyhow::anyhow!(
+                    "journal injoignable sur {} : {}",
+                    socket.display(),
+                    prophet_ipc::motif_de_connexion(&e)
+                )
             })?;
             client
                 .call(methode, params)
@@ -3215,9 +3222,12 @@ fn task_rpc_sous(
 ) -> anyhow::Result<serde_json::Value> {
     sous_delai_de(
         async {
-            let client = prophet_ipc::Client::connect(socket)
-                .await
-                .map_err(|e| format!("agentd indisponible : {e}"))?;
+            let client = prophet_ipc::Client::connect(socket).await.map_err(|e| {
+                format!(
+                    "agentd injoignable : {}",
+                    prophet_ipc::motif_de_connexion(&e)
+                )
+            })?;
             client.call(method, params).await.map_err(|e| e.message)
         },
         delai,
@@ -3238,7 +3248,7 @@ fn options_du_service(socket: &std::path::Path) -> Option<agentd::preparation::O
     sous_delai(async {
         let client = prophet_ipc::Client::connect(socket)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| prophet_ipc::motif_de_connexion(&e))?;
         let options = client
             .call("task.options", serde_json::json!({}))
             .await
@@ -3260,7 +3270,7 @@ fn capacites_du_bac(socket: &std::path::Path) -> Option<serde_json::Value> {
     sous_delai(async {
         let client = prophet_ipc::Client::connect(socket)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| prophet_ipc::motif_de_connexion(&e))?;
         client
             .call("sandbox.capabilities", serde_json::json!({}))
             .await

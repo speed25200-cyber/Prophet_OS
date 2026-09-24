@@ -393,7 +393,7 @@ async fn appeler_brut(
     match tokio::time::timeout(Duration::from_secs(5), async {
         let client = prophet_ipc::Client::connect(socket)
             .await
-            .map_err(|e| interne(e.to_string()))?;
+            .map_err(|e| interne(prophet_ipc::motif_de_connexion(&e)))?;
         client.call(methode, params).await
     })
     .await
@@ -600,7 +600,7 @@ async fn appeler(
     tokio::time::timeout(Duration::from_secs(5), async {
         let client = prophet_ipc::Client::connect(socket)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| prophet_ipc::motif_de_connexion(&e))?;
         client.call(methode, params).await.map_err(|e| e.message)
     })
     .await

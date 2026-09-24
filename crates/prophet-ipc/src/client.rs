@@ -26,6 +26,22 @@ struct Connection {
     writer: WriteHalf<UnixStream>,
 }
 
+/// Pourquoi un daemon n'a pas pu être joint, dit à l'humain : le texte du système (« No such
+/// file or directory (os error 2) ») ne lui apprend rien, ce qu'il signifie ici, si.
+#[must_use]
+pub fn motif_de_connexion(erreur: &std::io::Error) -> String {
+    use std::io::ErrorKind as K;
+    match erreur.kind() {
+        K::NotFound => "son socket est absent : le service n'est pas démarré".to_owned(),
+        K::ConnectionRefused => {
+            "il refuse la connexion : le service s'est arrêté ou redémarre".to_owned()
+        }
+        K::PermissionDenied => "accès refusé à son socket pour ce compte".to_owned(),
+        K::TimedOut => "il ne répond pas dans le délai".to_owned(),
+        _ => erreur.to_string(),
+    }
+}
+
 impl Client {
     /// Se connecte à un daemon.
     ///
@@ -116,5 +132,22 @@ impl Client {
             return Err(error);
         }
         Ok(response.result.unwrap_or(Value::Null))
+    }
+}
+
+#[cfg(test)]
+mod motif {
+    #[tokio::test]
+    async fn un_service_absent_se_dit_en_francais() {
+        let dir = tempfile::tempdir().unwrap();
+        let Err(erreur) = super::Client::connect(dir.path().join("absent.sock")).await else {
+            panic!("aucun socket ici");
+        };
+        assert_eq!(
+            super::motif_de_connexion(&erreur),
+            "son socket est absent : le service n'est pas démarré"
+        );
+        let refus = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        assert!(super::motif_de_connexion(&refus).contains("refuse la connexion"));
     }
 }
