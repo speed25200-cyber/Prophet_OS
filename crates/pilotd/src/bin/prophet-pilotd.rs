@@ -204,6 +204,8 @@ async fn main() {
         lecture_seule: std::env::var_os("PROPHET_PILOT_READ_ONLY")
             .map(|v| std::env::split_paths(&v).collect())
             .unwrap_or_default(),
+        egress_socket: std::env::var_os("PROPHET_EGRESS_SOCKET")
+            .map_or_else(|| prophet_ipc::socket_path("egress"), PathBuf::from),
     };
     let server = match Server::bind(&socket) {
         Ok(s) => s,

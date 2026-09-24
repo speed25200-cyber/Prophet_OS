@@ -7,9 +7,12 @@
 //! enfants et rend son code de sortie ; tuer le groupe de la cage tue tout ce qu'elle contient.
 //!
 //! La description vient de `PROPHET_SANDBOX_SPEC`, comme pour l'amorçage des sandboxes : même
-//! format, mêmes montages, mêmes règles Landlock. Le réseau de l'hôte reste (phase 1 de l'ADR
-//! 0056) ; aucun filtre d'appels système n'est posé, pour que le client garde ses propres
-//! sandboxes (Codex confine ses commandes avec les espaces de noms).
+//! format, mêmes montages, mêmes règles Landlock. La cage a son propre espace réseau, réduit à sa
+//! boucle locale : si la description porte un socket de sortie, un relais y écoute sur
+//! `127.0.0.1:3128` et recopie chaque connexion vers ce socket, que le lanceur relie à egress ;
+//! c'est le proxy du client, et sa seule issue. Aucun filtre d'appels système n'est posé, pour
+//! que le client garde ses propres sandboxes (Codex confine ses commandes avec les espaces de
+//! noms).
 
 use std::os::unix::process::CommandExt as _;
 use std::process::{Command, ExitCode};
@@ -63,10 +66,21 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
 /// enfants jusqu'à sa fin.
 fn init(spec: &SandboxSpec, racine: &std::path::Path) -> Result<u8, Box<dyn std::error::Error>> {
     confine::pivot_to_minimal_root(spec, racine)?;
+    confine::activer_la_boucle_locale()?;
     if !confine::apply_landlock(spec)? {
         eprintln!(
             "prophet-pilot-cage : Landlock indisponible, restriction assurée par la racine minimale seule"
         );
+    }
+    if let Some(sortie) = &spec.egress_socket {
+        // L'écoute est posée avant que le client démarre : sa première requête la trouve.
+        let ecoute = std::net::TcpListener::bind(("127.0.0.1", pilotd::cage::PORT_DU_RELAIS))?;
+        // SAFETY: un seul fil ; l'enfant devient le relais et ne revient jamais ici.
+        if let ForkResult::Child = unsafe { fork() }? {
+            relayer(&ecoute, std::path::Path::new(sortie));
+            std::process::exit(0);
+        }
+        drop(ecoute);
     }
     // SAFETY: toujours un seul fil ; l'enfant ne fait que passer la main au client.
     match unsafe { fork() }? {
@@ -88,6 +102,33 @@ fn init(spec: &SandboxSpec, racine: &std::path::Path) -> Result<u8, Box<dyn std:
                 Err(erreur) => return Err(Box::new(erreur)),
             }
         },
+    }
+}
+
+/// Le relais de la cage : chaque connexion TCP du client vers le proxy est recopiée, dans les
+/// deux sens, vers le socket de sortie monté dans la cage. Il ne lit ni n'ajoute rien : c'est le
+/// lanceur, dehors, qui pose le jeton de la mission.
+fn relayer(ecoute: &std::net::TcpListener, sortie: &std::path::Path) {
+    for flux in ecoute.incoming().flatten() {
+        let sortie = sortie.to_path_buf();
+        std::thread::spawn(move || {
+            let Ok(amont) = std::os::unix::net::UnixStream::connect(&sortie) else {
+                return;
+            };
+            let (Ok(mut vers_amont), Ok(mut depuis_amont), Ok(mut vers_client)) =
+                (amont.try_clone(), amont.try_clone(), flux.try_clone())
+            else {
+                return;
+            };
+            let mut depuis_client = flux;
+            let descendant = std::thread::spawn(move || {
+                let _ = std::io::copy(&mut depuis_amont, &mut vers_client);
+                let _ = vers_client.shutdown(std::net::Shutdown::Write);
+            });
+            let _ = std::io::copy(&mut depuis_client, &mut vers_amont);
+            let _ = vers_amont.shutdown(std::net::Shutdown::Write);
+            let _ = descendant.join();
+        });
     }
 }
 

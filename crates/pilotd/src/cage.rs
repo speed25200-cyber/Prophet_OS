@@ -24,9 +24,10 @@ use prophet_ipc::ErrorCode;
 use sandboxd::spec::SandboxSpec;
 use serde_json::{Value, json};
 
-/// Variables de la session transmises au client : langue, fuseau, identité, autorités de
-/// certification et proxy choisis par l'humain. Aucune autre ne passe — en particulier ni
-/// `DBUS_SESSION_BUS_ADDRESS`, ni `SWAYSOCK`, ni `WAYLAND_DISPLAY`, ni `XDG_RUNTIME_DIR`.
+/// Variables de la session transmises au client : langue, fuseau, identité et autorités de
+/// certification. Aucune autre ne passe — ni `DBUS_SESSION_BUS_ADDRESS`, ni `SWAYSOCK`, ni
+/// `WAYLAND_DISPLAY`, ni `XDG_RUNTIME_DIR`, ni les proxys de la session : dans la cage, le seul
+/// proxy est le relais vers egress.
 pub const ENV_TRANSMIS: &[&str] = &[
     "PATH",
     "LANG",
@@ -41,12 +42,20 @@ pub const ENV_TRANSMIS: &[&str] = &[
     "SSL_CERT_DIR",
     "NIX_SSL_CERT_FILE",
     "NODE_EXTRA_CA_CERTS",
+];
+
+/// Port du relais vers egress dans la cage, sur sa boucle locale : l'espace réseau est propre à
+/// la cage, rien d'autre n'y écoute.
+pub const PORT_DU_RELAIS: u16 = 3128;
+
+/// Variables qui désignent le proxy au client, dans les deux casses que les clients lisent.
+const PROXYS: &[&str] = &[
     "HTTPS_PROXY",
     "HTTP_PROXY",
-    "NO_PROXY",
+    "ALL_PROXY",
     "https_proxy",
     "http_proxy",
-    "no_proxy",
+    "all_proxy",
 ];
 
 /// Les méthodes d'agentd qu'un client en mission peut appeler : sa séance d'outils, rien d'autre.
@@ -139,6 +148,9 @@ pub struct Plan<'a> {
     pub pont: &'a Path,
     /// Chemins supplémentaires en lecture seule (un client installé hors du système).
     pub lecture_seule: &'a [PathBuf],
+    /// Socket du relais vers egress, s'il y a un jeton de sortie : la seule issue réseau de la
+    /// cage. Sans lui, la cage n'a aucun réseau.
+    pub sortie: Option<&'a Path>,
 }
 
 /// La description que la cage reçoit : ce que le client voit, ce qu'il peut écrire, ce qu'il
@@ -166,6 +178,13 @@ pub fn description(plan: &Plan<'_>, session: impl Fn(&str) -> Option<String>) ->
         .env("TERM", session("TERM").unwrap_or_else(|| "dumb".to_owned()));
     for (cle, valeur) in plan.env {
         spec = spec.env(cle.clone(), valeur.clone());
+    }
+    if let Some(sortie) = plan.sortie {
+        let proxy = format!("http://127.0.0.1:{PORT_DU_RELAIS}");
+        for cle in PROXYS {
+            spec = spec.env(*cle, proxy.clone());
+        }
+        spec.egress_socket = Some(sortie.display().to_string());
     }
     let mut lecture: Vec<String> = spec.read_only_mounts.clone();
     for chemin in SYSTEME {
@@ -225,21 +244,48 @@ pub fn admise(methode: &str, params: &Value, task: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Le socket filtré d'une mission : il écoute pour le client, ne relaie vers agentd que sa
-/// séance d'outils, et se ferme avec la mission.
-#[derive(Debug)]
+/// Un socket du lanceur pour une mission : il écoute pour le client, traite chaque connexion
+/// dans son fil, et se ferme avec la mission.
 pub struct Relais {
     chemin: PathBuf,
     arret: Arc<AtomicBool>,
     fil: Option<std::thread::JoinHandle<()>>,
 }
 
+impl std::fmt::Debug for Relais {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Relais")
+            .field("chemin", &self.chemin)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Relais {
-    /// Ouvre le socket `chemin` (en 0600), relié à `amont` pour la mission `task`.
+    /// Le socket de séance (en 0600) : relié à agentd par `amont`, il ne laisse passer que la
+    /// séance d'outils de la mission `task`.
     ///
     /// # Errors
     /// Socket impossible à ouvrir.
     pub fn ouvrir(chemin: &Path, amont: &Path, task: &str) -> std::io::Result<Self> {
+        let (amont, task) = (amont.to_path_buf(), task.to_owned());
+        Self::servir(chemin, move |flux| relayer(flux, &amont, &task))
+    }
+
+    /// Le socket de sortie (en 0600) : chaque requête de proxy du client reçoit l'en-tête du
+    /// jeton de la mission, puis part vers egress par `egress`, qui demande à capd. Le jeton ne
+    /// franchit jamais la cage.
+    ///
+    /// # Errors
+    /// Socket impossible à ouvrir.
+    pub fn sortie(chemin: &Path, egress: &Path, jeton: &str) -> std::io::Result<Self> {
+        let (egress, jeton) = (egress.to_path_buf(), jeton.to_owned());
+        Self::servir(chemin, move |flux| sortir(flux, &egress, &jeton))
+    }
+
+    fn servir(
+        chemin: &Path,
+        gestionnaire: impl Fn(UnixStream) + Send + Sync + 'static,
+    ) -> std::io::Result<Self> {
         use std::os::unix::fs::PermissionsExt as _;
         if let Some(parent) = chemin.parent() {
             std::fs::create_dir_all(parent)?;
@@ -249,17 +295,18 @@ impl Relais {
         std::fs::set_permissions(chemin, std::fs::Permissions::from_mode(0o600))?;
         ecoute.set_nonblocking(true)?;
         let arret = Arc::new(AtomicBool::new(false));
-        let (fin, amont, task) = (arret.clone(), amont.to_path_buf(), task.to_owned());
+        let fin = arret.clone();
+        let gestionnaire = Arc::new(gestionnaire);
         let fil = std::thread::Builder::new()
-            .name(format!("relais-{task}"))
+            .name("relais".into())
             .spawn(move || {
                 while !fin.load(Ordering::Acquire) {
                     match ecoute.accept() {
                         Ok((flux, _)) => {
-                            let (amont, task) = (amont.clone(), task.clone());
+                            let gestionnaire = gestionnaire.clone();
                             let _ = std::thread::Builder::new()
                                 .name("relais-connexion".into())
-                                .spawn(move || relayer(flux, &amont, &task));
+                                .spawn(move || gestionnaire(flux));
                         }
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             std::thread::sleep(Duration::from_millis(20));
@@ -381,6 +428,72 @@ fn relayer(client: UnixStream, amont: &Path, task: &str) {
     }
 }
 
+/// Taille maximale de la tête d'une requête de proxy, comme egress l'accepte.
+const TETE_MAX: usize = 64 * 1024;
+
+/// Relaie une connexion de proxy vers egress : la tête reçoit l'en-tête du jeton (celui qu'aurait
+/// posé le client est retiré), puis les deux sens sont recopiés tels quels — un tunnel `CONNECT`
+/// reste chiffré de bout en bout.
+fn sortir(client: UnixStream, egress: &Path, jeton: &str) {
+    let _ = client.set_nonblocking(false);
+    let Ok(lecture) = client.try_clone() else {
+        return;
+    };
+    let mut lecteur = BufReader::new(lecture);
+    let mut tete = Vec::new();
+    let mut premiere = true;
+    loop {
+        let mut ligne = Vec::new();
+        match (&mut lecteur)
+            .take((TETE_MAX + 1) as u64)
+            .read_until(b'\n', &mut ligne)
+        {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
+        }
+        if tete.len() + ligne.len() > TETE_MAX {
+            return;
+        }
+        let fin = ligne == b"\r\n" || ligne == b"\n";
+        // Le nom d'en-tête, sans espaces ni casse : `Proxy-Authorization :` ou une ligne de
+        // continuation ne font pas passer un jeton du client.
+        let texte = String::from_utf8_lossy(&ligne);
+        let jeton_du_client = texte
+            .split_once(':')
+            .is_some_and(|(nom, _)| nom.trim().eq_ignore_ascii_case("proxy-authorization"));
+        if !jeton_du_client {
+            tete.extend_from_slice(&ligne);
+        }
+        if std::mem::take(&mut premiere) {
+            tete.extend_from_slice(format!("Proxy-Authorization: Prophet {jeton}\r\n").as_bytes());
+        }
+        if fin {
+            break;
+        }
+    }
+    let Ok(mut amont) = UnixStream::connect(egress) else {
+        let mut client = client;
+        let _ = client
+            .write_all(b"HTTP/1.1 503 Prophet\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return;
+    };
+    if amont.write_all(&tete).is_err() {
+        return;
+    }
+    let (Ok(mut amont_lecture), Ok(mut client_ecriture)) = (amont.try_clone(), client.try_clone())
+    else {
+        return;
+    };
+    let descendant = std::thread::spawn(move || {
+        let _ = std::io::copy(&mut amont_lecture, &mut client_ecriture);
+        let _ = client_ecriture.shutdown(std::net::Shutdown::Write);
+    });
+    // Ce que le lecteur a déjà lu au-delà de la tête part d'abord, puis le reste du flux.
+    let _ = std::io::copy(&mut lecteur, &mut amont);
+    let _ = amont.shutdown(std::net::Shutdown::Write);
+    let _ = descendant.join();
+}
+
 fn repondre_erreur(
     client: &mut UnixStream,
     id: &Value,
@@ -430,6 +543,52 @@ mod tests {
     }
 
     #[test]
+    fn la_sortie_porte_le_jeton_de_la_mission_et_jamais_celui_du_client() {
+        use std::io::{BufRead as _, Read as _, Write as _};
+        let dir = tempfile::tempdir().unwrap();
+        let egress = dir.path().join("egress.sock");
+        let ecoute = UnixListener::bind(&egress).unwrap();
+        let serveur = std::thread::spawn(move || {
+            let (flux, _) = ecoute.accept().unwrap();
+            let mut lecteur = BufReader::new(flux.try_clone().unwrap());
+            let mut tete = String::new();
+            loop {
+                let mut ligne = String::new();
+                if lecteur.read_line(&mut ligne).unwrap() == 0 || ligne == "\r\n" {
+                    break;
+                }
+                tete.push_str(&ligne);
+            }
+            let mut flux = flux;
+            flux.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                .unwrap();
+            tete
+        });
+        let sortie = dir.path().join("sortie.sock");
+        let _relais = Relais::sortie(&sortie, &egress, "JETON").unwrap();
+        let mut client = UnixStream::connect(&sortie).unwrap();
+        client
+            .write_all(
+                b"CONNECT api.exemple.fr:443 HTTP/1.1\r\nHost: api.exemple.fr\r\n\
+                  Proxy-Authorization: Prophet VOLE\r\nproxy-authorization : Prophet VOLE2\r\n\r\n",
+            )
+            .unwrap();
+        let mut reponse = String::new();
+        client.read_to_string(&mut reponse).unwrap();
+        assert!(reponse.ends_with("ok"), "{reponse}");
+        let tete = serveur.join().unwrap();
+        assert!(
+            tete.starts_with("CONNECT api.exemple.fr:443 HTTP/1.1\r\n"),
+            "{tete}"
+        );
+        assert!(
+            tete.contains("Proxy-Authorization: Prophet JETON\r\n"),
+            "{tete}"
+        );
+        assert!(!tete.contains("VOLE"), "{tete}");
+    }
+
+    #[test]
     fn un_identifiant_de_mission_ne_sort_pas_de_la_racine() {
         let racine = Path::new("/etat");
         assert!(Lieux::de(racine, "../x").is_err());
@@ -458,6 +617,7 @@ mod tests {
             socket: Path::new("/run/u/prophet-pilot/m-1.sock"),
             pont: Path::new("/nix/store/x-prophet/bin/prophet-mcp"),
             lecture_seule: &lecture,
+            sortie: None,
         };
         let session = |cle: &str| match cle {
             "PATH" => Some("/run/current-system/sw/bin".to_owned()),

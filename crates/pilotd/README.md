@@ -22,10 +22,12 @@ ils restent dans son profil privé (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GEMINI_C
 | `PROPHET_PILOT_CLIENTS` | Clients de remplacement, JSON `{"codex": {"program": "…", "args": ["{intent}"]}}` (essais) |
 | `PROPHET_PILOT_CAGE` | La cage des clients (`prophet-pilot-cage`, voisine du lanceur par défaut) |
 | `PROPHET_PILOT_READ_ONLY` | Chemins supplémentaires visibles en lecture seule dans la cage, séparés par `:` (un client installé hors du système) |
+| `PROPHET_EGRESS_SOCKET` | Le proxy de sortie par lequel passe le réseau des clients (`/run/prophet/egress.sock` par défaut) |
 
 Chaque client tourne dans une cage (ADR 0056) : il ne voit que le système en lecture seule,
 son profil privé, les lieux de sa mission et un socket qui ne mène qu'à la séance de sa
-mission. Sans espaces de noms utilisateur, la cage ne se pose pas et aucun client n'est lancé.
+mission. Son réseau ne sort que par egress, sous le jeton de sa mission que le lanceur pose sur
+chaque requête. Sans espaces de noms utilisateur, la cage ne se pose pas et aucun client n'est lancé.
 
 Les clients sont sondés par leurs propres commandes (`claude auth status`, `codex login
 status`) ; un client absent ou non connecté n'est pas lancé, et `task.options` ne propose pas

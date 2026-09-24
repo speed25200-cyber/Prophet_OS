@@ -34,6 +34,7 @@ fn launcher(dir: &Path, overrides: &str) -> Launcher {
         arrets: Arrets::default(),
         cage: PathBuf::from(CAGE),
         lecture_seule: Vec::new(),
+        egress_socket: dir.join("egress.sock"),
     }
 }
 
@@ -44,6 +45,7 @@ fn requete(driver: &str, intent: &str, wall_time_s: u64) -> RunRequest {
         intent: intent.into(),
         wall_time_s,
         model: None,
+        egress_token: None,
     }
 }
 
@@ -157,7 +159,8 @@ fn le_client_ne_voit_ni_la_maison_ni_les_services_et_n_ecrit_que_dans_sa_cage() 
         touch "$TMPDIR/note" && r="$r temporaire:ecrit"
         touch "$GEMINI_CONFIG_DIR/session" && r="$r profil:ecrit"
         touch /intrus 2>/dev/null && r="$r racine:ecrite" || r="$r racine:refusee"
-        echo "$r processus:$(ls /proc | grep -c '^[0-9]')"
+        [ -z "$HTTPS_PROXY" ] && r="$r proxy:aucun" || r="$r proxy:$HTTPS_PROXY"
+        echo "$r processus:$(ls /proc | grep -c '^[0-9]') interfaces:$(grep -c ':' /proc/net/dev)"
         "#,
         secret = maison.join("secret.txt").display(),
         maison = maison.display(),
@@ -178,6 +181,10 @@ fn le_client_ne_voit_ni_la_maison_ni_les_services_et_n_ecrit_que_dans_sa_cage() 
         "temporaire:ecrit",
         "profil:ecrit",
         "racine:refusee",
+        // Sans jeton de sortie, la cage n'a aucun réseau : ni proxy, ni autre interface que sa
+        // boucle locale.
+        "proxy:aucun",
+        "interfaces:1",
     ] {
         assert!(texte.contains(attendu), "{attendu} attendu dans :\n{texte}");
     }
@@ -207,4 +214,71 @@ fn sans_cage_aucun_client_n_est_lance() {
     launcher.cage = dir.path().join("absente");
     let erreur = launcher.run(&requete("codex", "écrire", 5)).unwrap_err();
     assert!(matches!(erreur, Error::Cage { .. }), "{erreur}");
+}
+
+/// Avec un jeton de sortie, le réseau de la cage ne mène qu'à egress : le client joint un hôte
+/// par son proxy, le lanceur y pose le jeton de la mission — jamais celui que le client
+/// prétendrait porter —, et une connexion directe ne mène nulle part.
+#[test]
+fn le_reseau_du_client_ne_sort_que_par_egress_avec_le_jeton_de_la_mission() {
+    use std::io::{BufRead as _, Write as _};
+    if !cage_disponible() {
+        return;
+    }
+    if !Path::new("/usr/bin/curl").exists() {
+        eprintln!("curl absent : essai du réseau de la cage non joué");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    // Un egress de remplacement : il note la tête reçue et répond.
+    let ecoute = std::os::unix::net::UnixListener::bind(dir.path().join("egress.sock")).unwrap();
+    let egress = std::thread::spawn(move || {
+        let (flux, _) = ecoute.accept().unwrap();
+        let mut lecteur = std::io::BufReader::new(flux.try_clone().unwrap());
+        let mut tete = String::new();
+        loop {
+            let mut ligne = String::new();
+            lecteur.read_line(&mut ligne).unwrap();
+            let fin = ligne == "\r\n";
+            tete.push_str(&ligne);
+            if fin {
+                break;
+            }
+        }
+        let mut flux = flux;
+        flux.write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nvia-sort",
+        )
+        .unwrap();
+        tete
+    });
+    let sonde = r#"
+        a=$(curl -s --max-time 5 -H 'Proxy-Authorization: Prophet VOLE' http://exemple.test/x) || a=echec
+        curl -s --max-time 2 --noproxy '*' http://1.1.1.1/ >/dev/null 2>&1 && d=direct:ouvert || d=direct:ferme
+        echo "reponse:$a $d"
+    "#;
+    let overrides = serde_json::json!({
+        "gemini": {"program": "/bin/sh", "args": ["-c", sonde]}
+    })
+    .to_string();
+    let launcher = launcher(dir.path(), &overrides);
+    let mut requete = requete("gemini", "joindre", 20);
+    requete.egress_token = Some("JETON-DE-LA-MISSION".into());
+    let result = launcher.run(&requete).unwrap();
+    assert!(result.text.contains("reponse:via-sort"), "{}", result.text);
+    assert!(result.text.contains("direct:ferme"), "{}", result.text);
+    let tete = egress.join().unwrap();
+    assert!(
+        tete.starts_with("GET http://exemple.test/x HTTP/1.1\r\n"),
+        "{tete}"
+    );
+    assert!(
+        tete.contains("Proxy-Authorization: Prophet JETON-DE-LA-MISSION\r\n"),
+        "{tete}"
+    );
+    assert!(
+        !tete.contains("VOLE"),
+        "le jeton du client ne passe pas :\n{tete}"
+    );
+    assert!(!dir.path().join("run/m-1.egress.sock").exists());
 }

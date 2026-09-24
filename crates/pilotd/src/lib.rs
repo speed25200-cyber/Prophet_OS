@@ -188,6 +188,11 @@ pub struct RunRequest {
     /// (ADR 0040).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Jeton de sortie de la mission, tel que l'en-tête `Proxy-Authorization` le porte vers
+    /// egress : émis par capd pour les seuls hôtes de l'éditeur du client (ADR 0056). Sans lui,
+    /// la cage n'a aucun réseau.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub egress_token: Option<String>,
 }
 
 /// Réponse de `pilot.run`.
@@ -248,6 +253,8 @@ pub struct Launcher {
     /// Chemins supplémentaires visibles, en lecture seule, dans la cage : un client installé
     /// hors du système, ou les binaires d'un essai.
     pub lecture_seule: Vec<PathBuf>,
+    /// Socket d'egress, par lequel sort le réseau d'un client en mission.
+    pub egress_socket: PathBuf,
 }
 
 impl Launcher {
@@ -355,6 +362,15 @@ impl Launcher {
             ),
             ("PROPHET_MCP_CONFIG".to_owned(), config.clone()),
         ];
+        let mut env = env;
+        if profile.driver == "claude-code" {
+            // Réglage documenté de Claude Code : ni télémétrie, ni rapport d'erreur, ni mise à
+            // jour automatique. En mission, il ne joint que ce qu'il lui faut pour travailler.
+            env.push((
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_owned(),
+                "1".to_owned(),
+            ));
+        }
         if let Some(over) = self.overrides.get(&request.driver) {
             let mut args: Vec<String> = over
                 .args
@@ -469,6 +485,7 @@ impl Launcher {
         let mut menage = Menage {
             configuration: mcp_config.clone(),
             relais: None,
+            sortie: None,
             lieux: lieux.clone(),
             racine: racine.clone(),
         };
@@ -477,6 +494,14 @@ impl Launcher {
         menage.relais = Some(
             cage::Relais::ouvrir(&socket, &self.agentd_socket, &request.task).map_err(lancement)?,
         );
+        // La seule issue réseau de la cage, s'il y a un jeton : le relais vers egress.
+        let sortie = self
+            .runtime_dir
+            .join(format!("{}.egress.sock", request.task));
+        if let Some(jeton) = &request.egress_token {
+            menage.sortie =
+                Some(cage::Relais::sortie(&sortie, &self.egress_socket, jeton).map_err(lancement)?);
+        }
         let profile = ClientProfile::all()
             .into_iter()
             .find(|p| p.driver == request.driver)
@@ -494,6 +519,7 @@ impl Launcher {
                 socket: &socket,
                 pont: &self.bridge,
                 lecture_seule: &self.lecture_seule,
+                sortie: menage.sortie.as_ref().map(|_| sortie.as_path()),
             },
             |cle| std::env::var(cle).ok(),
         );
@@ -601,6 +627,7 @@ const CAGE_IMPOSSIBLE: i32 = 125;
 struct Menage {
     configuration: PathBuf,
     relais: Option<cage::Relais>,
+    sortie: Option<cage::Relais>,
     lieux: cage::Lieux,
     /// Point de montage de la racine minimale, vide une fois la cage partie.
     racine: PathBuf,
@@ -610,6 +637,7 @@ impl Drop for Menage {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.configuration);
         self.relais.take();
+        self.sortie.take();
         self.lieux.retirer();
         let _ = std::fs::remove_dir(&self.racine);
     }
@@ -744,6 +772,7 @@ mod tests {
             arrets: Arrets::default(),
             cage: dir.join("prophet-pilot-cage"),
             lecture_seule: Vec::new(),
+            egress_socket: dir.join("egress.sock"),
         }
     }
 
@@ -790,6 +819,7 @@ mod tests {
                     intent: "Écris".into(),
                     wall_time_s: 10,
                     model: None,
+                    egress_token: None,
                 },
                 &config,
                 &socket,
@@ -819,6 +849,7 @@ mod tests {
                     intent: "Code".into(),
                     wall_time_s: 10,
                     model: None,
+                    egress_token: None,
                 },
                 &config,
                 &socket,
@@ -841,6 +872,7 @@ mod tests {
                     intent: "?".into(),
                     wall_time_s: 1,
                     model: None,
+                    egress_token: None,
                 },
                 &config,
                 &socket
@@ -861,6 +893,7 @@ mod tests {
             intent: "Écris".into(),
             wall_time_s: 10,
             model: Some("opus".into()),
+            egress_token: None,
         };
         let claude = launcher
             .command(&requete("claude-code"), &config, &socket)
