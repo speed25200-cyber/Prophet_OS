@@ -1404,12 +1404,15 @@ fn rendre_tail(events: &[prophet_types::ledger::Event], number: usize) -> String
     }
     let mut out = String::new();
     for event in derniers {
-        out.push_str(&format!(
-            "{:>8}  {:<22} {}\n",
+        let ligne = format!(
+            "{:>8}  {:<22} {:<24} {}",
             event.seq,
             shell::kind_label(event.kind),
-            event.task.clone().unwrap_or_default()
-        ));
+            event.task.clone().unwrap_or_default(),
+            shell::summarize(event)
+        );
+        out.push_str(ligne.trim_end());
+        out.push('\n');
     }
     out
 }

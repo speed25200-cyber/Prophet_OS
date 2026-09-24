@@ -147,7 +147,9 @@ pub const fn kind_label(kind: EventKind) -> &'static str {
     }
 }
 
-fn summarize(event: &Event) -> String {
+/// Ce qu'un événement dit en quelques mots : l'outil, l'hôte, le motif. Jamais un contenu.
+#[must_use]
+pub fn summarize(event: &Event) -> String {
     let p = &event.payload;
     let texte = |clef: &str| p.get(clef).and_then(Value::as_str).unwrap_or("");
     match event.kind {
@@ -164,8 +166,17 @@ fn summarize(event: &Event) -> String {
         EventKind::PolicyDeny => format!("{} {}", texte("tool"), texte("reason")),
         EventKind::ApprovalRequested => texte("action").to_owned(),
         EventKind::ProviderStarted | EventKind::ProviderStopped => texte("driver").to_owned(),
-        EventKind::NetRequest | EventKind::NetDeny | EventKind::NetExfilSuspected => {
-            texte("host").to_owned()
+        // Une sortie : l'hôte, la méthode et le statut rendu par l'amont.
+        EventKind::NetRequest => {
+            let statut = p
+                .get("status")
+                .and_then(Value::as_u64)
+                .map_or_else(|| "sans réponse".to_owned(), |s| s.to_string());
+            format!("{} {} {statut}", texte("host"), texte("method"))
+        }
+        // Un refus ou un blocage : l'hôte et le motif d'egress.
+        EventKind::NetDeny | EventKind::NetExfilSuspected => {
+            format!("{} {}", texte("host"), texte("reason"))
         }
         EventKind::TaskDone | EventKind::TaskFailed => p
             .get("stats")
@@ -440,6 +451,22 @@ mod tests {
         assert!(rendu.contains("étape 2"), "{rendu}");
         assert!(rendu.contains("appel d'outil"), "{rendu}");
         assert!(rendu.contains("fs.read ok"), "{rendu}");
+    }
+
+    #[test]
+    fn une_sortie_reseau_dit_son_hote_sa_methode_et_son_issue() {
+        let sortie = evenement(
+            EventKind::NetRequest,
+            json!({"host": "api.anthropic.com", "method": "CONNECT", "status": 200}),
+            1,
+        );
+        assert_eq!(summarize(&sortie), "api.anthropic.com CONNECT 200");
+        let refus = evenement(
+            EventKind::NetDeny,
+            json!({"host": "collecte.exemple", "reason": "no_grant"}),
+            1,
+        );
+        assert_eq!(summarize(&refus), "collecte.exemple no_grant");
     }
 
     #[test]
