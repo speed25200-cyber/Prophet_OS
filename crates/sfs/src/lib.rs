@@ -20,5 +20,6 @@ mod workspace;
 pub use backend::{Backend, BackendKind, detect_backend};
 pub use diff::{Change, ChangeKind, Diff};
 pub use provenance::{Provenance, read_provenance, write_provenance};
+pub use publication::{PublicationStatus, Resolution};
 pub use review::{FilePreview, FileReview, PreviewContent, ReviewIndex};
 pub use workspace::{SfsError, Workspace, WorkspaceState};

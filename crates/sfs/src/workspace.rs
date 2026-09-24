@@ -445,12 +445,67 @@ impl Workspace {
                 state: self.meta.state,
             });
         }
-        let result = crate::publication::undo(&self.home, &self.meta.task);
+        let result = crate::publication::undo(&self.home, &self.meta.task, false);
         self.refresh_publication()?;
         if result.is_ok() {
             self.save()?;
         }
         result.map_err(Into::into)
+    }
+
+    /// Annule une publication en laissant à l'humain les fichiers qu'il a changés depuis ; le
+    /// reste retrouve ses versions initiales (ADR 0058).
+    ///
+    /// # Errors
+    /// État incompatible, tous les fichiers changés, sauvegarde altérée ou entrée-sortie.
+    pub fn undo_keeping_changes(&mut self) -> Result<Diff, SfsError> {
+        self.refresh_publication()?;
+        if self.meta.state != WorkspaceState::Committed {
+            return Err(SfsError::BadState {
+                state: self.meta.state,
+            });
+        }
+        let result = crate::publication::undo(&self.home, &self.meta.task, true);
+        self.refresh_publication()?;
+        if result.is_ok() {
+            self.save()?;
+        }
+        result.map_err(Into::into)
+    }
+
+    /// Tranche une publication arrêtée sur un conflit : garder la version de l'humain et
+    /// poursuivre, ou rétablir ce qui a déjà été publié (ADR 0058). Un autre conflit plus loin
+    /// arrête de nouveau le lot, sur ce fichier-là.
+    ///
+    /// # Errors
+    /// Aucun conflit en attente, annulation qu'on voudrait annuler, conflit suivant ou
+    /// entrée-sortie.
+    pub fn resolve_conflict(
+        &mut self,
+        choice: crate::publication::Resolution,
+    ) -> Result<Diff, SfsError> {
+        self.refresh_publication()?;
+        if self.meta.state != WorkspaceState::Conflict {
+            return Err(SfsError::BadState {
+                state: self.meta.state,
+            });
+        }
+        let result = crate::publication::resolve(&self.home, &self.meta.task, choice);
+        self.refresh_publication()?;
+        if result.is_ok() {
+            self.save()?;
+        }
+        result.map_err(Into::into)
+    }
+
+    /// Où en est la publication de cet espace : absente s'il n'a jamais été publié.
+    ///
+    /// # Errors
+    /// Journal illisible ou altéré.
+    pub fn publication_status(
+        &self,
+    ) -> Result<Option<crate::publication::PublicationStatus>, SfsError> {
+        crate::publication::status(&self.home, &self.meta.task).map_err(Into::into)
     }
 
     /// Reprend explicitement l'intention enregistrée après interruption, sans nouvel index.

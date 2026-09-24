@@ -21,6 +21,13 @@ humaines sont conservées, dont les attributs, ACL, UID, GID et date de modifica
 et `list` lisent son état, y compris `applying`, `undoing` et `conflict`. Une reprise déjà terminée
 ne réécrit pas les documents. Les anciennes publications sans journal vérifiable ne sont pas annulées.
 
+Une publication arrêtée sur un conflit se tranche par `resolve_conflict(Resolution::KeepMine)`
+— le fichier est laissé à l'humain, son édition ramenée si l'échange l'avait emportée, et le lot
+continue — ou `Resolution::RollBack` — ce qui a été publié est rétabli, rien de ce qui est à lui
+n'est touché. `undo_keeping_changes()` annule en laissant les fichiers changés depuis ;
+`publication_status()` dit le fichier en conflit, le sens du lot et les fichiers laissés
+(ADR 0058).
+
 Ces méthodes ne délivrent aucune autorisation. Le consentement, l'identité de l'appelant et les
 droits doivent être contrôlés avant publication. Le raccordement installé à agentd et aux commandes
 graphiques reste à faire sous l'identité humaine. Aucun droit d'écriture supplémentaire n'est accordé
