@@ -420,6 +420,105 @@ fn avec_scene(
     (output, decision)
 }
 
+/// capd demande le code d'approbation pour accorder (ADR 0057) : la surface ouvre un champ
+/// masqué, n'accepte pas un code trop court, rend le code tapé à la source, et « Renoncer »
+/// ferme sans rien accorder. Sans code défini, elle propose d'en choisir un.
+#[test]
+#[ignore = "needs_gpu: la preuve de présence dans la surface"]
+fn accorder_demande_le_code_d_approbation_dans_un_champ_masque() {
+    use surface::fenetre::Reponse;
+    let context = Contexte::hors_ecran().unwrap();
+    for (largeur, hauteur) in [(1280, 800), (640, 900)] {
+        let target = Cible::nouvelle(&context, largeur, hauteur);
+        let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+        bureau.figer_transitions();
+        let scene = scene();
+        bureau.presence = Some(surface::presence::Demande {
+            id: "apr-1".into(),
+            portee: "once".into(),
+            message: "code d'approbation faux ; 4 essai(s) avant le verrou".into(),
+            definir: false,
+        });
+        for _ in 0..3 {
+            avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+        }
+        capture(&context, &target, &format!("code-approbation-{largeur}"));
+        let champ = bureau
+            .ctx
+            .read_response(egui::Id::new("code-approbation"))
+            .expect("le champ du code");
+        assert!(champ.has_focus(), "le champ reçoit le clavier d'emblée");
+        // Trop court : « Accorder » ne rend rien.
+        avec_scene(
+            &mut bureau,
+            &context,
+            &target,
+            &scene,
+            vec![Event::Text("pivo".into())],
+        );
+        let clic = click_widget(&bureau, "code-confirmer");
+
+        let (_, reponse) = avec_scene(&mut bureau, &context, &target, &scene, clic);
+        assert_eq!(reponse, None, "un code trop court ne part pas");
+        avec_scene(
+            &mut bureau,
+            &context,
+            &target,
+            &scene,
+            vec![Event::Text("ine-42".into())],
+        );
+        let mut rendu = None;
+        for _ in 0..2 {
+            let clic = click_widget(&bureau, "code-confirmer");
+
+            let (_, reponse) = avec_scene(&mut bureau, &context, &target, &scene, clic);
+            if reponse.is_some() {
+                rendu = reponse;
+                break;
+            }
+        }
+        assert_eq!(rendu, Some(Reponse::Code("pivoine-42".into())));
+        // Renoncer ferme sans accorder.
+        let clic = click_widget(&bureau, "code-renoncer");
+
+        let (_, reponse) = avec_scene(&mut bureau, &context, &target, &scene, clic);
+        assert_eq!(reponse, Some(Reponse::RenoncerAuCode));
+    }
+    // Sans code défini, la surface propose d'en choisir un et le rend comme tel.
+    let target = Cible::nouvelle(&context, 1280, 800);
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), false);
+    bureau.figer_transitions();
+    let scene = scene();
+    bureau.presence = Some(surface::presence::Demande {
+        id: "apr-1".into(),
+        portee: "task".into(),
+        message: String::new(),
+        definir: true,
+    });
+    for _ in 0..3 {
+        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+    }
+    capture(&context, &target, "code-approbation-definir-1280");
+    avec_scene(
+        &mut bureau,
+        &context,
+        &target,
+        &scene,
+        vec![Event::Text("glycine-7".into())],
+    );
+    let mut rendu = None;
+    for _ in 0..2 {
+        let clic = click_widget(&bureau, "code-confirmer");
+
+        let (_, reponse) = avec_scene(&mut bureau, &context, &target, &scene, clic);
+        if reponse.is_some() {
+            rendu = reponse;
+            break;
+        }
+    }
+    assert_eq!(rendu, Some(Reponse::DefinirCode("glycine-7".into())));
+}
+
 #[test]
 #[ignore = "needs_gpu"]
 fn la_decision_exige_un_examen_puis_un_choix_explicite_aux_trois_tailles() {

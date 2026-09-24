@@ -38,6 +38,10 @@ pub(crate) struct Supervision {
     /// Le réglage « Mouvement réduit » tel qu'il a été appliqué au style, pour ne toucher au
     /// style qu'au changement.
     mouvement_applique: Option<bool>,
+    /// La demande de code d'approbation que la source transmet (ADR 0057).
+    pub(crate) presence: Option<crate::presence::Demande>,
+    /// Le code en cours de saisie ; vidé dès qu'il part.
+    code_saisi: String,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -389,6 +393,11 @@ impl Supervision {
         }
         if self.arret.confirmation() {
             self.confirmer_l_arret(&ctx, scene);
+        }
+        if self.presence.is_some() {
+            self.code_d_approbation(&ctx, reponse);
+        } else {
+            self.code_saisi.clear();
         }
         self.focus_precedent = ctx.memory(|m| m.focused().is_some());
     }
@@ -967,6 +976,117 @@ impl Supervision {
             Some(true) => self.arret.confirmer(),
             Some(false) => self.arret.renoncer(),
             None if reponse.should_close() => self.arret.renoncer(),
+            None => {}
+        }
+    }
+
+    /// capd demande le code d'approbation pour accorder (ADR 0057) : l'humain le tape ici, ou le
+    /// choisit s'il n'en a pas encore. Rien ne s'accorde sans lui ; renoncer laisse la demande
+    /// en attente.
+    fn code_d_approbation(&mut self, ctx: &egui::Context, reponse: &mut Option<Reponse>) {
+        let Some(demande) = self.presence.clone() else {
+            return;
+        };
+        let id = egui::Id::new("preuve-de-presence");
+        let choix = egui::Modal::new(id)
+            .area(egui::Modal::default_area(id).fade_in(false))
+            .backdrop_color(VOILE)
+            .frame(
+                Frame::new()
+                    .fill(Color32::from_rgb(10, 12, 16))
+                    .stroke(Stroke::new(1.0, hud::voile(ATTENTE, 160)))
+                    .corner_radius(4)
+                    .inner_margin(32),
+            )
+            .show(ctx, |ui| {
+                let largeur =
+                    (ctx.content_rect().width() - 2.0 * (16.0 + 32.0)).clamp(260.0, 520.0);
+                ui.set_max_width(largeur);
+                ui.horizontal(|ui| {
+                    let (dot, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
+                    ui.painter().circle_filled(dot.center(), 3.0, ATTENTE);
+                    hud::etiquette(ui, "PREUVE DE PRÉSENCE", ATTENTE);
+                });
+                ui.add_space(14.0);
+                ui.label(titre(
+                    if demande.definir {
+                        "Choisissez votre code d'approbation"
+                    } else {
+                        "Votre code d'approbation"
+                    },
+                    28.0,
+                ));
+                ui.add_space(12.0);
+                ui.label(
+                    RichText::new(if demande.definir {
+                        "Il sera demandé pour accorder une action : aucun programme de votre \
+                         session ne pourra accorder sans lui. Six caractères au moins."
+                    } else {
+                        "Accorder depuis votre session demande votre code : aucun programme ne \
+                         peut accorder à votre place. Il vaut ensuite dix minutes dans cette \
+                         fenêtre."
+                    })
+                    .size(14.0)
+                    .color(ENCRE),
+                );
+                if !demande.message.is_empty() {
+                    ui.add_space(8.0);
+                    ui.label(RichText::new(&demande.message).size(13.0).color(ATTENTE));
+                }
+                ui.add_space(16.0);
+                let champ = ui.add(
+                    egui::TextEdit::singleline(&mut self.code_saisi)
+                        .id(egui::Id::new("code-approbation"))
+                        .password(true)
+                        .hint_text("Code d'approbation")
+                        .font(egui::FontId::proportional(17.0))
+                        .margin(egui::Margin::symmetric(14, 10))
+                        .desired_width(f32::INFINITY),
+                );
+                if !champ.has_focus() && !ctx.memory(|m| m.focused().is_some()) {
+                    champ.request_focus();
+                }
+                let pret = self.code_saisi.chars().count() >= crate::presence::LONGUEUR_MIN;
+                let entree = champ.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                ui.add_space(20.0);
+                let mut choix = None;
+                hud::rangee(ui, |ui| {
+                    if bouton(ui, "code-renoncer", "Renoncer", false).clicked() {
+                        choix = Some(false);
+                    }
+                    let libelle = if demande.definir {
+                        "Définir et accorder"
+                    } else {
+                        "Accorder"
+                    };
+                    if ui
+                        .add_enabled_ui(pret, |ui| action(ui, "code-confirmer", libelle))
+                        .inner
+                        .clicked()
+                        || (entree && pret)
+                    {
+                        choix = Some(true);
+                    }
+                });
+                choix
+            });
+        match choix.inner {
+            Some(true) => {
+                let code = std::mem::take(&mut self.code_saisi);
+                *reponse = Some(if demande.definir {
+                    Reponse::DefinirCode(code)
+                } else {
+                    Reponse::Code(code)
+                });
+            }
+            Some(false) => {
+                self.code_saisi.clear();
+                *reponse = Some(Reponse::RenoncerAuCode);
+            }
+            None if choix.should_close() => {
+                self.code_saisi.clear();
+                *reponse = Some(Reponse::RenoncerAuCode);
+            }
             None => {}
         }
     }

@@ -20,6 +20,8 @@ pub struct Bureau {
     champ: Champ,
     logiciel: bool,
     supervision: Supervision,
+    /// La demande de code d'approbation que la source transmet, s'il y en a une (ADR 0057).
+    pub presence: Option<crate::presence::Demande>,
     /// La voix de l'OS, si Piper et une voix sont configurés : les fins de mission se disent.
     voix: Option<voice::Tools>,
     /// Instant du dernier geste de l'humain (pointeur, clavier, défilement, toucher).
@@ -101,6 +103,7 @@ impl Bureau {
             ctx,
             atelier: Atelier::nouveau(endpoint, demonstration),
             supervision: Supervision::default(),
+            presence: None,
             voix: voice::Tools::from_env()
                 .ok()
                 .filter(voice::Tools::can_speak),
@@ -244,6 +247,7 @@ impl Bureau {
         let veille = en_veille(self.logiciel, sans_geste);
         let temps_du_champ = self.horloge.instant(temps, veille);
         let mut decision = None;
+        self.supervision.presence.clone_from(&self.presence);
         let atelier = &mut self.atelier;
         let supervision = &mut self.supervision;
         let output = self.ctx.run_ui(input, |root| {

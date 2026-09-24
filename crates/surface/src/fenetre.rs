@@ -15,7 +15,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::window::{Window, WindowId};
 
 /// Réponse humaine à l'action précise montrée par la surface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reponse {
     /// Autorisation, cette fois seulement.
     Accepte,
@@ -23,6 +23,12 @@ pub enum Reponse {
     AccepteMission,
     /// Refus.
     Refuse,
+    /// Le code d'approbation que capd demande pour accorder (ADR 0057).
+    Code(String),
+    /// Le premier code d'approbation de cette machine, choisi par l'humain.
+    DefinirCode(String),
+    /// L'humain renonce à donner son code : l'accord n'est pas fait.
+    RenoncerAuCode,
 }
 
 /// Source des tâches, de l'isolation et des décisions du système.
@@ -31,6 +37,10 @@ pub trait Source {
     fn scene(&mut self) -> Scene;
     /// Décision explicite sur l'action montrée.
     fn repond(&mut self, reponse: Reponse);
+    /// La demande de code d'approbation en cours, s'il y en a une (ADR 0057).
+    fn presence(&self) -> Option<crate::presence::Demande> {
+        None
+    }
 }
 
 /// Configuration de la fenêtre et de son moteur local.
@@ -98,6 +108,7 @@ pub fn tenir_avec(source: Box<dyn Source>, options: Options) -> Result<(), Erreu
         prochain: Instant::now(),
         repeindre: true,
         empreinte: None,
+        presence: None,
         erreur: None,
         proxy: boucle.create_proxy(),
     };
@@ -137,6 +148,8 @@ struct Application {
     repeindre: bool,
     /// L'empreinte de la dernière scène dessinée : un écran inchangé n'est pas redessiné.
     empreinte: Option<u64>,
+    /// La demande de code d'approbation montrée à la dernière image (ADR 0057).
+    presence: Option<crate::presence::Demande>,
     erreur: Option<ErreurFenetre>,
     proxy: EventLoopProxy<Evenement>,
 }
@@ -215,6 +228,8 @@ impl ApplicationHandler<Evenement> for Application {
                 scene.ordonner();
                 self.empreinte = Some(scene.empreinte());
                 self.repeindre = false;
+                self.presence = self.source.presence();
+                etat.bureau.presence.clone_from(&self.presence);
                 if let Some(reponse) = dessiner(etat, &scene) {
                     self.source.repond(reponse);
                 }
@@ -231,8 +246,10 @@ impl ApplicationHandler<Evenement> for Application {
                     maintenant + Duration::from_millis(if etat.cachee { 1000 } else { 250 });
                 // Un écran au repos n'est pas redessiné : on relit les services, et si rien
                 // de visible n'a changé et que l'interface ne demande rien, le GPU dort.
+                // Une demande de code d'approbation qui paraît, change ou se clôt se redessine.
                 if !etat.cachee
-                    && doit_redessiner(self.repeindre, self.empreinte, &self.source.scene())
+                    && (doit_redessiner(self.repeindre, self.empreinte, &self.source.scene())
+                        || self.source.presence() != self.presence)
                 {
                     etat.fenetre.request_redraw();
                 }

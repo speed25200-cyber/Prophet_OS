@@ -98,6 +98,12 @@ interruption. Les réponses partielles restent marquées comme telles. La nouvel
 écarte les événements tardifs de la précédente. Les décisions capd ont des boutons explicites :
 refuser, autoriser cette fois, autoriser pour toute la mission (portée `task` de l'ADR 0041 :
 la même action ne redemandera pas).
+Accorder demande le code d'approbation de l'humain (ADR 0057) : sans ticket de présence, la
+décision s'ouvre sur « PREUVE DE PRÉSENCE », un champ masqué et « Accorder », que six caractères
+au moins rendent actif (Entrée confirme). La première fois, le même champ fait choisir le code
+(« Définir et accorder »). Un code juste rend un ticket que la surface garde dix minutes en
+mémoire, et ne se retape pas d'ici là ; un code faux, un verrou, s'y disent. Refuser ne demande
+jamais de code.
 Une erreur de transmission d'approbation est encore journalisée ; son acquittement visible dans
 l'interface reste à intégrer.
 

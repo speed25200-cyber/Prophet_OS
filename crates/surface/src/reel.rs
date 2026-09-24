@@ -18,7 +18,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use agentd::task::Task;
 use capd::Approval;
@@ -81,6 +81,16 @@ pub struct Reel {
     sockets: Sockets,
     /// La décision montrée en ce moment, pour savoir laquelle trancher quand on répond.
     montree: Option<String>,
+    /// Le ticket de présence et la demande de code en cours (ADR 0057).
+    presence: Arc<Mutex<EtatDePresence>>,
+}
+
+/// Ce que la surface sait de la preuve de présence : le ticket que capd a rendu contre le code,
+/// gardé en mémoire de ce processus seulement, et la demande de code en cours.
+#[derive(Debug, Default)]
+struct EtatDePresence {
+    ticket: Option<(String, Instant)>,
+    demande: Option<crate::presence::Demande>,
 }
 
 impl std::fmt::Debug for Reel {
@@ -105,6 +115,7 @@ impl Reel {
             partage,
             sockets,
             montree: None,
+            presence: Arc::new(Mutex::new(EtatDePresence::default())),
         }
     }
 }
@@ -153,16 +164,32 @@ impl Source for Reel {
     }
 
     fn repond(&mut self, reponse: Reponse) {
-        let Some(id) = self.montree.clone() else {
-            return;
-        };
         let socket = self.sockets.capd.clone();
-        // La portée suit la réponse : « cette fois » ou « toute la mission » (ADR 0041).
+        let etat = Arc::clone(&self.presence);
         let (decision, portee) = match reponse {
+            // La portée suit la réponse : « cette fois » ou « toute la mission » (ADR 0041).
             Reponse::Accepte => ("allow", "once"),
             Reponse::AccepteMission => ("allow", "task"),
             Reponse::Refuse => ("deny", "once"),
+            Reponse::RenoncerAuCode => {
+                if let Ok(mut etat) = etat.lock() {
+                    etat.demande = None;
+                }
+                return;
+            }
+            Reponse::Code(code) => {
+                prouver_puis_accorder(socket, etat, code, false);
+                return;
+            }
+            Reponse::DefinirCode(code) => {
+                prouver_puis_accorder(socket, etat, code, true);
+                return;
+            }
         };
+        let Some(id) = self.montree.clone() else {
+            return;
+        };
+        let portee = portee.to_owned();
         // La réponse part sur un fil à part : trancher ne doit pas retenir l'image suivante, et un
         // `capd` lent ne doit pas geler l'écran de quelqu'un qui vient d'appuyer sur une touche.
         std::thread::spawn(move || {
@@ -172,23 +199,174 @@ impl Source for Reel {
             else {
                 return;
             };
-            execution.block_on(async {
-                match appeler(
+            execution.block_on(trancher(&socket, &etat, &id, decision, &portee));
+        });
+    }
+
+    fn presence(&self) -> Option<crate::presence::Demande> {
+        self.presence
+            .lock()
+            .ok()
+            .and_then(|etat| etat.demande.clone())
+    }
+}
+
+/// Tranche une demande. Accorder porte le ticket de présence s'il en reste un ; si capd exige
+/// la preuve (ADR 0057), la demande de code est posée pour la surface, qui la montrera.
+async fn trancher(
+    socket: &std::path::Path,
+    etat: &Mutex<EtatDePresence>,
+    id: &str,
+    decision: &str,
+    portee: &str,
+) {
+    let mut params = serde_json::json!({ "id": id, "decision": decision, "scope": portee });
+    if decision == "allow"
+        && let Some(ticket) = etat
+            .lock()
+            .ok()
+            .and_then(|e| e.ticket.clone())
+            .filter(|(_, fin)| *fin > Instant::now())
+            .map(|(ticket, _)| ticket)
+    {
+        params["ticket"] = ticket.into();
+    }
+    match appeler_brut(socket, "approval.resolve", params).await {
+        Ok(_) => {
+            tracing::info!(%id, %decision, "décision transmise à capd");
+            if let Ok(mut etat) = etat.lock()
+                && etat.demande.as_ref().is_some_and(|d| d.id == id)
+            {
+                etat.demande = None;
+            }
+        }
+        Err(erreur) => match presence_demandee(&erreur) {
+            Some(genre) => {
+                tracing::info!(%id, genre, "capd demande le code d'approbation");
+                if let Ok(mut etat) = etat.lock() {
+                    // Un ticket refusé est périmé ou révoqué : il ne resservira pas.
+                    if genre == "required" {
+                        etat.ticket = None;
+                    }
+                    etat.demande = Some(crate::presence::Demande {
+                        id: id.to_owned(),
+                        portee: portee.to_owned(),
+                        message: if genre == "required" {
+                            String::new()
+                        } else {
+                            erreur.message.clone()
+                        },
+                        definir: genre == "undefined",
+                    });
+                }
+            }
+            // Le dire fort : une décision humaine perdue est exactement ce qu'un système
+            // d'approbation ne doit jamais faire en silence.
+            None => {
+                tracing::error!(%id, %decision, erreur = %erreur.message, "décision NON transmise");
+                if let Ok(mut etat) = etat.lock()
+                    && etat.demande.as_ref().is_some_and(|d| d.id == id)
+                {
+                    etat.demande = None;
+                }
+            }
+        },
+    }
+}
+
+/// Le genre de preuve que capd demande, si c'est la raison du refus : `required`,
+/// `undefined`, `wrong` ou `locked`.
+fn presence_demandee(erreur: &prophet_ipc::Error) -> Option<&str> {
+    erreur
+        .data
+        .as_ref()
+        .and_then(|d| d["presence"].as_str())
+        .filter(|g| matches!(*g, "required" | "undefined" | "wrong" | "locked"))
+}
+
+/// Donne le code à capd (après l'avoir défini, s'il le faut), garde le ticket rendu, puis refait
+/// l'accord en attente. Un code faux ou un verrou reste dit dans la demande.
+fn prouver_puis_accorder(
+    socket: PathBuf,
+    etat: Arc<Mutex<EtatDePresence>>,
+    code: String,
+    definir: bool,
+) {
+    let Some(demande) = etat.lock().ok().and_then(|e| e.demande.clone()) else {
+        return;
+    };
+    std::thread::spawn(move || {
+        let Ok(execution) = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        else {
+            return;
+        };
+        execution.block_on(async {
+            let dire = |message: String, definir: bool| {
+                if let Ok(mut etat) = etat.lock()
+                    && let Some(d) = etat.demande.as_mut()
+                {
+                    d.message = message;
+                    d.definir = definir;
+                }
+            };
+            if definir
+                && let Err(erreur) = appeler_brut(
                     &socket,
-                    "approval.resolve",
-                    serde_json::json!({ "id": id, "decision": decision, "scope": portee }),
+                    "approval.set_code",
+                    serde_json::json!({ "code": code }),
                 )
                 .await
-                {
-                    Ok(_) => tracing::info!(%id, %decision, "décision transmise à capd"),
-                    // Le dire fort : une décision humaine perdue est exactement ce qu'un système
-                    // d'approbation ne doit jamais faire en silence.
-                    Err(erreur) => {
-                        tracing::error!(%id, %decision, %erreur, "décision NON transmise");
+            {
+                dire(erreur.message, true);
+                return;
+            }
+            match appeler_brut(
+                &socket,
+                "approval.presence",
+                serde_json::json!({ "code": code }),
+            )
+            .await
+            {
+                Ok(preuve) => {
+                    let secondes = preuve["expires_in_s"].as_u64().unwrap_or(0);
+                    if let (Some(ticket), Ok(mut etat)) = (preuve["ticket"].as_str(), etat.lock()) {
+                        etat.ticket = Some((
+                            ticket.to_owned(),
+                            Instant::now() + Duration::from_secs(secondes),
+                        ));
                     }
+                    trancher(&socket, &etat, &demande.id, "allow", &demande.portee).await;
                 }
-            });
+                Err(erreur) => {
+                    let non_defini = presence_demandee(&erreur) == Some("undefined");
+                    dire(erreur.message, non_defini);
+                }
+            }
         });
+    });
+}
+
+/// Un appel à capd qui garde l'erreur du service entière : la preuve de présence se lit dans
+/// ses données (ADR 0057).
+async fn appeler_brut(
+    socket: &std::path::Path,
+    methode: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, prophet_ipc::Error> {
+    let interne =
+        |message: String| prophet_ipc::Error::new(prophet_ipc::ErrorCode::InternalError, message);
+    match tokio::time::timeout(Duration::from_secs(5), async {
+        let client = prophet_ipc::Client::connect(socket)
+            .await
+            .map_err(|e| interne(e.to_string()))?;
+        client.call(methode, params).await
+    })
+    .await
+    {
+        Ok(reponse) => reponse,
+        Err(_) => Err(interne("délai de réponse dépassé".to_owned())),
     }
 }
 
@@ -430,6 +608,120 @@ mod tests {
             "la ligne d'isolation doit dire ce qui manque, obtenu : {:?}",
             scene.isolation.manque
         );
+    }
+
+    /// Un faux capd qui exige la preuve de présence (ADR 0057) : accorder sans ticket est
+    /// refusé, le code « pivoine-42 » rend le ticket « T1 », et un accord qui le porte passe.
+    fn faux_capd(dir: &std::path::Path) -> (PathBuf, Arc<Mutex<Vec<serde_json::Value>>>) {
+        use std::io::{BufRead as _, Write as _};
+        let chemin = dir.join("capd.sock");
+        let ecoute = std::os::unix::net::UnixListener::bind(&chemin).unwrap();
+        let recus = Arc::new(Mutex::new(Vec::new()));
+        let journal = Arc::clone(&recus);
+        std::thread::spawn(move || {
+            for flux in ecoute.incoming().flatten() {
+                let mut lecteur = std::io::BufReader::new(flux.try_clone().unwrap());
+                let mut ligne = String::new();
+                if lecteur.read_line(&mut ligne).unwrap_or(0) == 0 {
+                    continue;
+                }
+                let requete: serde_json::Value = serde_json::from_str(&ligne).unwrap();
+                let params = requete["params"].clone();
+                let methode = requete["method"].as_str().unwrap_or_default().to_owned();
+                if methode.starts_with("approval.resolve") || methode == "approval.presence" {
+                    journal
+                        .lock()
+                        .unwrap()
+                        .push(serde_json::json!({"method": methode, "params": params}));
+                }
+                let refus = |genre: &str, message: &str| serde_json::json!({"code": -32001, "message": message, "data": {"presence": genre}});
+                let reponse = match methode.as_str() {
+                    "approval.pending" => serde_json::json!({"result": []}),
+                    "approval.presence" if params["code"] == "pivoine-42" => {
+                        serde_json::json!({"result": {"ticket": "T1", "expires_in_s": 600}})
+                    }
+                    "approval.presence" => {
+                        serde_json::json!({"error": refus("wrong", "code d'approbation faux ; 4 essai(s) avant le verrou")})
+                    }
+                    "approval.resolve"
+                        if params["decision"] == "allow" && params["ticket"] != "T1" =>
+                    {
+                        serde_json::json!({"error": refus("required", "présence non prouvée")})
+                    }
+                    "approval.resolve" => serde_json::json!({"result": {"id": params["id"]}}),
+                    _ => serde_json::json!({"error": {"code": -32601, "message": "inconnue"}}),
+                };
+                let mut sortie = flux;
+                let mut corps = reponse;
+                corps["jsonrpc"] = "2.0".into();
+                corps["id"] = requete["id"].clone();
+                let _ = writeln!(sortie, "{corps}");
+            }
+        });
+        (chemin, recus)
+    }
+
+    fn attendre(condition: impl Fn() -> bool) {
+        let limite = std::time::Instant::now() + Duration::from_secs(10);
+        while !condition() {
+            assert!(
+                std::time::Instant::now() < limite,
+                "condition jamais atteinte"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn accorder_demande_le_code_puis_garde_le_ticket_dix_minutes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (capd, recus) = faux_capd(dir.path());
+        let mut source = Reel::demarrer(Sockets {
+            agentd: PathBuf::from("/nulle/part/agentd.sock"),
+            capd,
+            sandboxd: PathBuf::from("/nulle/part/sandboxd.sock"),
+        });
+        source.montree = Some("apr-1".into());
+        source.repond(Reponse::Accepte);
+        attendre(|| source.presence().is_some());
+        let demande = source.presence().unwrap();
+        assert_eq!(demande.id, "apr-1");
+        assert!(!demande.definir);
+        source.repond(Reponse::Code("faux-faux".into()));
+        attendre(|| {
+            source
+                .presence()
+                .is_some_and(|d| d.message.contains("faux"))
+        });
+        source.repond(Reponse::Code("pivoine-42".into()));
+        attendre(|| source.presence().is_none());
+        let accordee = |recus: &[serde_json::Value]| {
+            recus
+                .iter()
+                .filter(|r| r["method"] == "approval.resolve" && r["params"]["ticket"] == "T1")
+                .count()
+        };
+        assert_eq!(
+            accordee(&recus.lock().unwrap()),
+            1,
+            "{:?}",
+            recus.lock().unwrap()
+        );
+        // Le ticket resert : l'accord suivant passe sans redemander le code.
+        source.montree = Some("apr-2".into());
+        source.repond(Reponse::AccepteMission);
+        attendre(|| accordee(&recus.lock().unwrap()) == 2);
+        assert!(source.presence().is_none());
+        // Refuser ne porte ni code ni ticket.
+        source.montree = Some("apr-3".into());
+        source.repond(Reponse::Refuse);
+        attendre(|| {
+            recus
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|r| r["params"]["id"] == "apr-3" && r["params"].get("ticket").is_none())
+        });
     }
 
     #[test]
