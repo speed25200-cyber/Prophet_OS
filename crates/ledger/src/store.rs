@@ -98,6 +98,9 @@ pub struct Store {
     last_hash: String,
     /// Index `seq -> (fichier, offset de ligne)`, reconstruit au démarrage.
     index: BTreeMap<u64, (PathBuf, usize)>,
+    /// Lignes de chaque fichier du jour, vides comprises : une écriture sait où elle tombe sans
+    /// relire le fichier. Ce service est le seul à écrire son journal.
+    lignes: BTreeMap<PathBuf, usize>,
     since_last_seal: u64,
     sealer: Option<Sealer>,
 }
@@ -115,6 +118,7 @@ impl Store {
             next_seq: 0,
             last_hash: GENESIS.to_owned(),
             index: BTreeMap::new(),
+            lignes: BTreeMap::new(),
             since_last_seal: 0,
             sealer: None,
         };
@@ -156,6 +160,7 @@ impl Store {
             let file = File::open(&path)?;
             for (line_number, line) in BufReader::new(file).lines().enumerate() {
                 let line = line?;
+                self.lignes.insert(path.clone(), line_number + 1);
                 if line.trim().is_empty() {
                     continue;
                 }
@@ -204,16 +209,19 @@ impl Store {
 
     fn write_line(&mut self, event: &Event, ts: OffsetDateTime) -> Result<(), LedgerError> {
         let path = self.path_for(ts);
-        let existing_lines = if path.exists() {
-            BufReader::new(File::open(&path)?).lines().count()
-        } else {
-            0
+        // Recompter le fichier à chaque écriture coûtait une relecture de la journée entière :
+        // egress inscrit chaque connexion, et l'écriture ralentissait au fil des heures.
+        let existing_lines = match self.lignes.get(&path) {
+            Some(&lignes) => lignes,
+            None if path.exists() => BufReader::new(File::open(&path)?).lines().count(),
+            None => 0,
         };
         let file = OpenOptions::new().create(true).append(true).open(&path)?;
         let mut writer = BufWriter::new(file);
         serde_json::to_writer(&mut writer, event)?;
         writer.write_all(b"\n")?;
         writer.flush()?;
+        self.lignes.insert(path.clone(), existing_lines + 1);
         self.index.insert(event.seq, (path, existing_lines));
         Ok(())
     }
@@ -263,20 +271,33 @@ impl Store {
     pub fn read_all(&self) -> Result<Vec<Event>, LedgerError> {
         let mut events = Vec::with_capacity(self.index.len());
         for path in self.day_files()? {
-            let file = File::open(&path)?;
-            for (line_number, line) in BufReader::new(file).lines().enumerate() {
-                let line = line?;
-                if line.trim().is_empty() {
-                    continue;
-                }
-                events.push(serde_json::from_str(&line).map_err(|source| {
-                    LedgerError::BadLine {
-                        file: path.display().to_string(),
-                        line: line_number + 1,
-                        source,
-                    }
-                })?);
+            events.extend(lire_depuis(&path, 0)?);
+        }
+        events.sort_by_key(|e: &Event| e.seq);
+        Ok(events)
+    }
+
+    /// Les événements de numéro `depuis` et au-delà, sans relire le début du journal : l'index
+    /// dit dans quels fichiers ils se trouvent et à partir de quelle ligne. C'est ce que relit la
+    /// surface toutes les deux secondes pour suivre une mission.
+    fn read_since(&self, depuis: u64) -> Result<Vec<Event>, LedgerError> {
+        // Par fichier, la première ligne à lire et le numéro qu'elle doit porter. Une horloge
+        // qui recule peut écrire la suite dans le fichier de la veille : on les prend tous.
+        let mut debuts: BTreeMap<&Path, (usize, u64)> = BTreeMap::new();
+        for (&seq, (fichier, ligne)) in self.index.range(depuis..) {
+            let debut = debuts.entry(fichier.as_path()).or_insert((*ligne, seq));
+            if *ligne < debut.0 {
+                *debut = (*ligne, seq);
             }
+        }
+        let mut events = Vec::new();
+        for (fichier, (debut, attendu)) in debuts {
+            let mut lus = lire_depuis(fichier, debut)?;
+            // L'index et le fichier doivent s'accorder ; sinon, le fichier est relu en entier.
+            if lus.first().map(|e| e.seq) != Some(attendu) {
+                lus = lire_depuis(fichier, 0)?;
+            }
+            events.extend(lus.into_iter().filter(|e| e.seq >= depuis));
         }
         events.sort_by_key(|e: &Event| e.seq);
         Ok(events)
@@ -287,11 +308,11 @@ impl Store {
     /// # Erreurs
     /// Comme [`Store::read_all`].
     pub fn query(&self, filter: &Filter) -> Result<Vec<Event>, LedgerError> {
-        let mut out: Vec<Event> = self
-            .read_all()?
-            .into_iter()
-            .filter(|e| filter.accepts(e))
-            .collect();
+        let lus = match filter.since_seq {
+            Some(depuis) => self.read_since(depuis)?,
+            None => self.read_all()?,
+        };
+        let mut out: Vec<Event> = lus.into_iter().filter(|e| filter.accepts(e)).collect();
         if let Some(limit) = filter.limit {
             out.truncate(limit);
         }
@@ -403,6 +424,27 @@ fn summarize(event: &Event) -> String {
         }
         _ => String::new(),
     }
+}
+
+/// Les événements d'un fichier du jour à partir de la ligne `debut` (comptée depuis zéro, vides
+/// comprises) ; les lignes d'avant sont passées sans être analysées.
+fn lire_depuis(path: &Path, debut: usize) -> Result<Vec<Event>, LedgerError> {
+    let file = File::open(path)?;
+    let mut events = Vec::new();
+    for (line_number, line) in BufReader::new(file).lines().enumerate().skip(debut) {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        events.push(
+            serde_json::from_str(&line).map_err(|source| LedgerError::BadLine {
+                file: path.display().to_string(),
+                line: line_number + 1,
+                source,
+            })?,
+        );
+    }
+    Ok(events)
 }
 
 #[cfg(test)]
@@ -542,6 +584,75 @@ mod tests {
         assert!(texte.contains("tool.call"), "{texte}");
         assert!(texte.contains("fs.read"), "{texte}");
         assert!(store.replay("task:99").unwrap().contains("aucun événement"));
+    }
+
+    /// Un journal sur trois jours, rouvert en cours de route, avec une horloge qui recule d'un
+    /// jour : l'événement suivant s'écrit dans le fichier de la veille.
+    fn journal_sur_trois_jours(dir: &Path) -> Store {
+        {
+            let mut store = Store::open(dir).unwrap();
+            for i in 0..30 {
+                store.append(draft(i, "task:01")).unwrap();
+            }
+            for i in 0..30 {
+                store
+                    .append(draft(
+                        86_400 + i,
+                        if i % 2 == 0 { "task:01" } else { "task:02" },
+                    ))
+                    .unwrap();
+            }
+        }
+        let mut store = Store::open(dir).unwrap();
+        store.append(draft(5, "task:01")).unwrap();
+        for i in 0..30 {
+            store.append(draft(2 * 86_400 + i, "task:02")).unwrap();
+        }
+        store
+    }
+
+    #[test]
+    fn l_index_designe_la_bonne_ligne_apres_reouverture_et_ajouts() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = journal_sur_trois_jours(dir.path());
+        assert_eq!(store.day_files().unwrap().len(), 3);
+        for (&seq, (fichier, ligne)) in &store.index {
+            let texte = BufReader::new(File::open(fichier).unwrap())
+                .lines()
+                .nth(*ligne)
+                .unwrap()
+                .unwrap();
+            let event: Event = serde_json::from_str(&texte).unwrap();
+            assert_eq!(event.seq, seq, "{} ligne {ligne}", fichier.display());
+        }
+    }
+
+    #[test]
+    fn la_lecture_depuis_un_numero_rend_exactement_la_suite() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = journal_sur_trois_jours(dir.path());
+        let tout = store.read_all().unwrap();
+        for depuis in 0..=store.next_seq() + 1 {
+            for task in [None, Some("task:02")] {
+                let filtre = Filter {
+                    task: task.map(str::to_owned),
+                    since_seq: Some(depuis),
+                    ..Filter::default()
+                };
+                let attendu: Vec<u64> = tout
+                    .iter()
+                    .filter(|e| filtre.accepts(e))
+                    .map(|e| e.seq)
+                    .collect();
+                let lu: Vec<u64> = store
+                    .query(&filtre)
+                    .unwrap()
+                    .iter()
+                    .map(|e| e.seq)
+                    .collect();
+                assert_eq!(lu, attendu, "depuis {depuis}, tâche {task:?}");
+            }
+        }
     }
 
     #[test]
