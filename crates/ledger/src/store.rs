@@ -96,8 +96,9 @@ pub struct Store {
     root: PathBuf,
     next_seq: u64,
     last_hash: String,
-    /// Index `seq -> (fichier, offset de ligne)`, reconstruit au démarrage.
-    index: BTreeMap<u64, (PathBuf, usize)>,
+    /// Index `seq -> (fichier, numéro de ligne, octet où la ligne commence)`, reconstruit au
+    /// démarrage : une relecture de la suite va droit à l'octet, sans lire ce qui précède.
+    index: BTreeMap<u64, (PathBuf, usize, u64)>,
     /// Lignes de chaque fichier du jour, vides comprises : une écriture sait où elle tombe sans
     /// relire le fichier. Ce service est le seul à écrire son journal.
     lignes: BTreeMap<PathBuf, usize>,
@@ -157,9 +158,17 @@ impl Store {
 
     fn rebuild_index(&mut self) -> Result<(), LedgerError> {
         for path in self.day_files()? {
-            let file = File::open(&path)?;
-            for (line_number, line) in BufReader::new(file).lines().enumerate() {
-                let line = line?;
+            let mut lecteur = BufReader::new(File::open(&path)?);
+            let mut octet = 0_u64;
+            let mut line = String::new();
+            for line_number in 0.. {
+                line.clear();
+                let lus = lecteur.read_line(&mut line)?;
+                if lus == 0 {
+                    break;
+                }
+                let debut = octet;
+                octet += lus as u64;
                 self.lignes.insert(path.clone(), line_number + 1);
                 if line.trim().is_empty() {
                     continue;
@@ -170,7 +179,8 @@ impl Store {
                         line: line_number + 1,
                         source,
                     })?;
-                self.index.insert(event.seq, (path.clone(), line_number));
+                self.index
+                    .insert(event.seq, (path.clone(), line_number, debut));
                 self.next_seq = event.seq + 1;
                 self.last_hash = event.hash.clone().unwrap_or_else(|| GENESIS.to_owned());
                 if event.kind == EventKind::LedgerSeal {
@@ -217,12 +227,14 @@ impl Store {
             None => 0,
         };
         let file = OpenOptions::new().create(true).append(true).open(&path)?;
+        // La ligne commence là où le fichier finit.
+        let octet = file.metadata()?.len();
         let mut writer = BufWriter::new(file);
         serde_json::to_writer(&mut writer, event)?;
         writer.write_all(b"\n")?;
         writer.flush()?;
         self.lignes.insert(path.clone(), existing_lines + 1);
-        self.index.insert(event.seq, (path, existing_lines));
+        self.index.insert(event.seq, (path, existing_lines, octet));
         Ok(())
     }
 
@@ -271,7 +283,7 @@ impl Store {
     pub fn read_all(&self) -> Result<Vec<Event>, LedgerError> {
         let mut events = Vec::with_capacity(self.index.len());
         for path in self.day_files()? {
-            events.extend(lire_depuis(&path, 0)?);
+            events.extend(lire_depuis(&path, 0, 0)?);
         }
         events.sort_by_key(|e: &Event| e.seq);
         Ok(events)
@@ -281,21 +293,24 @@ impl Store {
     /// dit dans quels fichiers ils se trouvent et à partir de quelle ligne. C'est ce que relit la
     /// surface toutes les deux secondes pour suivre une mission.
     fn read_since(&self, depuis: u64) -> Result<Vec<Event>, LedgerError> {
-        // Par fichier, la première ligne à lire et le numéro qu'elle doit porter. Une horloge
-        // qui recule peut écrire la suite dans le fichier de la veille : on les prend tous.
-        let mut debuts: BTreeMap<&Path, (usize, u64)> = BTreeMap::new();
-        for (&seq, (fichier, ligne)) in self.index.range(depuis..) {
-            let debut = debuts.entry(fichier.as_path()).or_insert((*ligne, seq));
+        // Par fichier, la première ligne à lire, l'octet où elle commence et le numéro qu'elle
+        // doit porter. Une horloge qui recule peut écrire la suite dans le fichier de la veille :
+        // on les prend tous.
+        let mut debuts: BTreeMap<&Path, (usize, u64, u64)> = BTreeMap::new();
+        for (&seq, (fichier, ligne, octet)) in self.index.range(depuis..) {
+            let debut = debuts
+                .entry(fichier.as_path())
+                .or_insert((*ligne, *octet, seq));
             if *ligne < debut.0 {
-                *debut = (*ligne, seq);
+                *debut = (*ligne, *octet, seq);
             }
         }
         let mut events = Vec::new();
-        for (fichier, (debut, attendu)) in debuts {
-            let mut lus = lire_depuis(fichier, debut)?;
+        for (fichier, (ligne, octet, attendu)) in debuts {
+            let mut lus = lire_depuis(fichier, octet, ligne)?;
             // L'index et le fichier doivent s'accorder ; sinon, le fichier est relu en entier.
             if lus.first().map(|e| e.seq) != Some(attendu) {
-                lus = lire_depuis(fichier, 0)?;
+                lus = lire_depuis(fichier, 0, 0)?;
             }
             events.extend(lus.into_iter().filter(|e| e.seq >= depuis));
         }
@@ -426,12 +441,15 @@ fn summarize(event: &Event) -> String {
     }
 }
 
-/// Les événements d'un fichier du jour à partir de la ligne `debut` (comptée depuis zéro, vides
-/// comprises) ; les lignes d'avant sont passées sans être analysées.
-fn lire_depuis(path: &Path, debut: usize) -> Result<Vec<Event>, LedgerError> {
-    let file = File::open(path)?;
+/// Les événements d'un fichier du jour à partir de l'octet `octet`, où commence la ligne
+/// `premiere` (comptée depuis zéro, vides comprises) : ce qui précède n'est pas lu.
+fn lire_depuis(path: &Path, octet: u64, premiere: usize) -> Result<Vec<Event>, LedgerError> {
+    use std::io::{Seek as _, SeekFrom};
+    let mut file = File::open(path)?;
+    file.seek(SeekFrom::Start(octet))?;
     let mut events = Vec::new();
-    for (line_number, line) in BufReader::new(file).lines().enumerate().skip(debut) {
+    for (rang, line) in BufReader::new(file).lines().enumerate() {
+        let line_number = premiere + rang;
         let line = line?;
         if line.trim().is_empty() {
             continue;
@@ -616,7 +634,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = journal_sur_trois_jours(dir.path());
         assert_eq!(store.day_files().unwrap().len(), 3);
-        for (&seq, (fichier, ligne)) in &store.index {
+        for (&seq, (fichier, ligne, octet)) in &store.index {
             let texte = BufReader::new(File::open(fichier).unwrap())
                 .lines()
                 .nth(*ligne)
@@ -624,6 +642,13 @@ mod tests {
                 .unwrap();
             let event: Event = serde_json::from_str(&texte).unwrap();
             assert_eq!(event.seq, seq, "{} ligne {ligne}", fichier.display());
+            let depuis_l_octet = lire_depuis(fichier, *octet, *ligne).unwrap();
+            assert_eq!(
+                depuis_l_octet.first().map(|e| e.seq),
+                Some(seq),
+                "{} octet {octet}",
+                fichier.display()
+            );
         }
     }
 
