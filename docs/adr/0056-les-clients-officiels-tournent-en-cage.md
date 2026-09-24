@@ -61,6 +61,9 @@ réseau du client ne sort que par egress :
   prétendrait porter est retiré) et relaie vers `egress.sock` ; egress demande à capd, hôte par
   hôte. Un tunnel `CONNECT` reste chiffré de bout en bout ; le jeton ne franchit jamais la cage ;
 - sans jeton (un client sans hôte connu), la cage n'a aucun réseau ;
+- egress inscrit chaque décision au journal de la mission (`net.request` : hôte, méthode,
+  octets, statut ; `net.deny` et `net.exfil_suspected` : hôte et motif), et l'onglet Parcours
+  de la surface les montre dans la frise des gestes : l'humain voit où son client est sorti ;
 - Claude Code reçoit son réglage documenté `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` : ni
   télémétrie, ni rapport d'erreur, ni mise à jour automatique en mission.
 
@@ -93,5 +96,5 @@ Les proxys de la session de l'humain ne passent plus : dans la cage, le seul pro
 - À vérifier avec un client connecté (`needs_codex_login`, `needs_claude_login`) : que Claude
   Code et Codex trouvent tout ce qu'il leur faut dans la cage (profil, certificats) et que la
   liste des hôtes de chaque éditeur suffit. Un hôte manquant se voit (refus d'egress au journal
-  de la mission) et s'ajoute par `PROPHET_CLIENT_HOSTS`, sans reconstruire.
+  de la mission, losange rouge « sortie réseau » dans le parcours) et s'ajoute par `PROPHET_CLIENT_HOSTS`, sans reconstruire.
 - Un proxy d'entreprise en amont d'egress n'est pas pris en charge : egress sort directement.

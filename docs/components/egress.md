@@ -61,6 +61,28 @@ besoin de secret.
 on ne sort pas sur un « je ne sais pas ». Le défaut inverse — laisser passer en cas de doute —
 ouvrirait la machine entière au moment précis où elle ne doit pas l'être.
 
+## Le journal de la mission
+
+Chaque décision s'inscrit au journal (`ledger.append`, acteur `egress`), sous la mission sujet
+du jeton — egress est un service, membre principal de `prophet-system`, et le journal ne prend
+d'écriture que des services (ADR 0044) :
+
+| Événement | Quand | Contenu |
+|---|---|---|
+| `net.request` | la sortie a été relayée | `host`, `port`, `method`, `bytes_out`, `bytes_in`, `status` |
+| `net.deny` | capd a refusé | `host`, `reason` (le motif de capd) |
+| `net.exfil_suspected` | le détecteur a bloqué | `host`, `reason` (l'explication) |
+
+Ni chemin complet, ni en-tête, ni corps : le journal dit **où** la mission est sortie et ce qui
+a transité, pas **quoi**. Dans un tunnel `CONNECT`, `status` est celui du tunnel et les octets
+sont ceux du flux chiffré. Un jeton dont capd n'a pas pu vérifier la signature n'écrit rien : son
+sujet n'est pas établi, et l'inscrire laisserait n'importe qui écrire au journal d'une autre
+mission. L'écriture ne retient pas la requête ; une panne du journal se lit dans le journal du
+service (`décision de sortie non journalisée`).
+
+C'est ce qui rend visible, dans le parcours de la mission sur la surface, chaque hôte joint par
+un client officiel en cage (ADR 0056) — et chaque hôte qui lui manque, refusé.
+
 ## La substitution de secrets
 
 Un en-tête qui porte `prophet-secret:<nom>` est complété par le coffre **au tout dernier moment**,

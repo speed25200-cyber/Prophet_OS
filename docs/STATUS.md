@@ -1776,10 +1776,20 @@ donne le détail.
   côtés** ; le coureur d'isolation exige et réussit les essais de la cage et de son réseau
   (« Clients officiels en cage », lanceur et missions de bout en bout). Douzième passage du banc :
   **Prophet 20/45, boucle nue 13/45** (Qwen3 1.7B), 11/15 des deux côtés (Qwen3 4B).
-- `just check` : **957 réussis, 0 échec, 69 ignorés** (cage des clients et leur réseau par egress, ADR 0056), format, clippy, contrôles
+- Sorties réseau au journal de la mission (24 septembre, `2e7af1e`, `9e6f964`, `ce97d69`) : le
+  contrat d'egress disait « connexion journalisée » et l'ADR 0056 que ce qui sort d'un client en
+  cage s'inscrit au journal de sa mission — rien ne l'écrivait. egress y inscrit désormais, sous la
+  mission sujet du jeton, `net.request` (hôte, port, méthode, octets, statut), `net.deny` et
+  `net.exfil_suspected` (hôte, motif) ; un jeton à la signature invalide n'écrit rien. L'onglet
+  Parcours de la surface les montre dans la frise des gestes (« sortie réseau », point vif ou
+  losange rouge avec le motif en mots) et une pastille les compte. Éprouvé avec les vrais
+  services : egress (chaque décision au journal, jeton forgé exclu), la frise rendue avec une
+  sortie acceptée et une refusée, et le client en cage de bout en bout (`net.request` de sa
+  mission, acteur `egress`, statut 200).
+- `just check` : **959 réussis, 0 échec, 70 ignorés** (sorties réseau au journal de la mission et dans le parcours), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
-  5 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
+  6 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
 
 **Bloqué.** Rien n'est vérifiable ici sous Nix, en VM ou sur matériel : pas de KVM (les essais
 de la réserve de microVM tournent sur le coureur KVM de la CI, qui les a verdis), pas de carte
