@@ -153,3 +153,54 @@ async fn un_type_d_evenement_invente_est_refuse() {
         .expect_err("le vocabulaire du journal est fermé");
     assert_eq!(erreur.code, prophet_ipc::ErrorCode::InvalidParams);
 }
+
+/// Un émetteur qui renvoie un événement après une coupure — la réponse perdue, l'écriture
+/// faite — ne le fait pas écrire deux fois : la clé d'idempotence rend le même (ADR 0059).
+#[tokio::test]
+async fn un_evenement_renvoye_avec_sa_cle_n_est_ecrit_qu_une_fois() {
+    let temp = tempfile::tempdir().expect("répertoire temporaire");
+    let socket = temp.path().join("ledger.sock");
+    let etat = temp.path().join("etat");
+    let evenement = json!({
+        "kind": "task.created",
+        "task": "task:renvoi",
+        "actor": "daemon:agentd",
+        "payload": { "intent": "renvoyer sans doubler" },
+        "idem": "agentd:01J0000000000000000000000"
+    });
+    let premier = {
+        let daemon = Daemon::lancer(PROGRAMME, &socket, &etat);
+        let client = daemon.joindre().await;
+        let premier = client
+            .call("ledger.append", evenement.clone())
+            .await
+            .unwrap();
+        let encore = client
+            .call("ledger.append", evenement.clone())
+            .await
+            .unwrap();
+        assert_eq!(encore, premier, "le même événement, pas un second");
+        let refus = client
+            .call(
+                "ledger.append",
+                json!({ "kind": "task.created", "idem": "" }),
+            )
+            .await
+            .expect_err("une clé vide ne vaut rien");
+        assert_eq!(refus.code, prophet_ipc::ErrorCode::InvalidParams);
+        premier
+    };
+    // Après redémarrage du journal, la clé est toujours connue.
+    let daemon = Daemon::lancer(PROGRAMME, &socket, &etat);
+    let client = daemon.joindre().await;
+    let apres = client.call("ledger.append", evenement).await.unwrap();
+    assert_eq!(apres, premier);
+    let relu = client
+        .call("ledger.query", json!({ "task": "task:renvoi" }))
+        .await
+        .unwrap();
+    assert_eq!(relu.as_array().map(Vec::len), Some(1), "{relu}");
+    let verifie = client.call("ledger.verify", json!({})).await.unwrap();
+    assert_eq!(verifie["ok"], true, "{verifie}");
+    assert_eq!(verifie["checked"], 1, "{verifie}");
+}

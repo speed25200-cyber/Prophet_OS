@@ -199,6 +199,10 @@ pub struct Event {
     pub kind: EventKind,
     /// Charge utile, spécifique au type.
     pub payload: Value,
+    /// Clé d'idempotence donnée par l'émetteur : le journal n'écrit pas deux fois la même
+    /// (ADR 0059). Absente des événements antérieurs, dont l'empreinte reste la même.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idem: Option<String>,
     /// Empreinte de l'événement (calculée sur tout sauf ce champ).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hash: Option<String>,
@@ -241,9 +245,12 @@ const FORBIDDEN_PAYLOAD_FIELDS: &[&str] = &[
 ];
 
 /// Brouillon d'événement : tout sauf `seq`, `prev` et `hash`, attribués par le journal.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Il se sérialise : un émetteur garde ceux que le journal n'a pas encore reçus (ADR 0059).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Draft {
     /// Horodatage.
+    #[serde(with = "time::serde::rfc3339")]
     pub ts: OffsetDateTime,
     /// Tâche concernée.
     pub task: Option<String>,
@@ -255,6 +262,15 @@ pub struct Draft {
     pub kind: EventKind,
     /// Charge utile.
     pub payload: Value,
+    /// Clé d'idempotence : renvoyé après une coupure, le brouillon n'est écrit qu'une fois.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idem: Option<String>,
+}
+
+/// Une clé d'idempotence neuve pour un émetteur : `agentd:01J…`, unique et ordonnée dans le temps.
+#[must_use]
+pub fn nouvelle_cle(emetteur: &str) -> String {
+    format!("{emetteur}:{}", ulid::Ulid::new())
 }
 
 impl Draft {
@@ -268,7 +284,15 @@ impl Draft {
             actor,
             kind,
             payload,
+            idem: None,
         }
+    }
+
+    /// Donne au brouillon sa clé d'idempotence.
+    #[must_use]
+    pub fn idem(mut self, cle: impl Into<String>) -> Self {
+        self.idem = Some(cle.into());
+        self
     }
 
     /// Rattache le brouillon à une tâche.
@@ -303,6 +327,7 @@ impl Event {
             actor: draft.actor,
             kind: draft.kind,
             payload: draft.payload,
+            idem: draft.idem,
             hash: None,
         };
         event.hash = Some(event.compute_hash()?);

@@ -63,7 +63,15 @@ impl Handler for Journal {
             "ledger.append" => {
                 let brouillon = brouillon(&params)?;
                 let mut store = self.store.lock().await;
+                let deja = brouillon
+                    .idem
+                    .as_deref()
+                    .is_some_and(|cle| store.contains_idem(cle));
                 let evenement = store.append(brouillon).map_err(interne)?;
+                // Déjà écrit : l'émetteur renvoie après une coupure. Rien de neuf à diffuser.
+                if deja {
+                    return commun::repondre(&evenement);
+                }
                 // Le scellement suit l'écriture, jamais l'inverse : sceller une tête qu'on n'a pas
                 // encore écrite signerait une chaîne qui n'existe pas.
                 let scelle = store
@@ -129,8 +137,9 @@ impl Handler for Journal {
 
 /// Construit un brouillon d'événement à partir des paramètres.
 ///
-/// `Draft` n'est pas désérialisable, et c'est tant mieux : les champs `seq`, `prev` et `hash`
-/// appartiennent au journal. Un appelant qui pourrait les poser pourrait réécrire l'histoire.
+/// Le brouillon n'est pas lu tel quel dans les paramètres : l'heure, et plus loin `seq`, `prev`
+/// et `hash`, appartiennent au journal. Un appelant qui pourrait les poser pourrait réécrire
+/// l'histoire.
 fn brouillon(params: &Value) -> Result<Draft, Error> {
     let kind: EventKind = params
         .get("kind")
@@ -161,6 +170,20 @@ fn brouillon(params: &Value) -> Result<Draft, Error> {
     if let Some(etape) = params.get("step").and_then(Value::as_u64) {
         brouillon = brouillon.step(u32::try_from(etape).unwrap_or(u32::MAX));
     }
+    // La clé d'idempotence de l'émetteur : renvoyé après une coupure, l'événement n'est écrit
+    // qu'une fois (ADR 0059).
+    if let Some(cle) = params.get("idem") {
+        let cle = cle
+            .as_str()
+            .filter(|c| !c.is_empty() && c.len() <= 128)
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorCode::InvalidParams,
+                    "« idem » : une chaîne de 1 à 128 caractères",
+                )
+            })?;
+        brouillon = brouillon.idem(cle);
+    }
     Ok(brouillon)
 }
 
@@ -189,8 +212,16 @@ fn filtre(params: &Value) -> Result<Filter, Error> {
     })
 }
 
+/// Une erreur du magasin. Un événement refusé pour lui-même — un champ interdit dans sa charge
+/// utile — est une faute de l'appelant, définitive : `-32602`, pour qu'un émetteur qui garde ses
+/// envois ne le renvoie pas sans fin (ADR 0059). Le reste est une panne du service.
 fn interne(erreur: ledger::LedgerError) -> Error {
-    Error::new(ErrorCode::InternalError, erreur.to_string())
+    match erreur {
+        ledger::LedgerError::Event(
+            refus @ prophet_types::ledger::EventError::ForbiddenField(_),
+        ) => Error::new(ErrorCode::InvalidParams, refus.to_string()),
+        autre => Error::new(ErrorCode::InternalError, autre.to_string()),
+    }
 }
 
 #[tokio::main]

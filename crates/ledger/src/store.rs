@@ -105,6 +105,9 @@ pub struct Store {
     /// Le premier numéro de chaque tâche : lire le journal d'une tâche part de là, sans relire
     /// l'historique de la machine qui la précède.
     premiers: std::collections::HashMap<String, u64>,
+    /// Les clés d'idempotence déjà écrites et leur numéro : un émetteur qui renvoie après une
+    /// coupure ne fait pas écrire deux fois le même événement (ADR 0059).
+    idems: std::collections::HashMap<String, u64>,
     since_last_seal: u64,
     sealer: Option<Sealer>,
 }
@@ -124,6 +127,7 @@ impl Store {
             index: BTreeMap::new(),
             lignes: BTreeMap::new(),
             premiers: std::collections::HashMap::new(),
+            idems: std::collections::HashMap::new(),
             since_last_seal: 0,
             sealer: None,
         };
@@ -188,6 +192,9 @@ impl Store {
                 if let Some(tache) = &event.task {
                     self.premiers.entry(tache.clone()).or_insert(event.seq);
                 }
+                if let Some(cle) = &event.idem {
+                    self.idems.insert(cle.clone(), event.seq);
+                }
                 self.next_seq = event.seq + 1;
                 self.last_hash = event.hash.clone().unwrap_or_else(|| GENESIS.to_owned());
                 if event.kind == EventKind::LedgerSeal {
@@ -214,7 +221,15 @@ impl Store {
     ///
     /// # Erreurs
     /// Si la charge utile est refusée ou si l'écriture échoue.
+    ///
+    /// Un brouillon dont la clé d'idempotence est déjà écrite n'est pas réécrit : l'événement
+    /// existant est rendu tel quel ([`Store::contains_idem`] le dit avant).
     pub fn append(&mut self, draft: Draft) -> Result<Event, LedgerError> {
+        if let Some(&seq) = draft.idem.as_ref().and_then(|cle| self.idems.get(cle))
+            && let Some(event) = self.event_at(seq)?
+        {
+            return Ok(event);
+        }
         let ts = draft.ts;
         let event = Event::seal(draft, self.next_seq, &self.last_hash)?;
         self.write_line(&event, ts)?;
@@ -245,7 +260,34 @@ impl Store {
         if let Some(tache) = &event.task {
             self.premiers.entry(tache.clone()).or_insert(event.seq);
         }
+        if let Some(cle) = &event.idem {
+            self.idems.insert(cle.clone(), event.seq);
+        }
         Ok(())
+    }
+
+    /// Vrai si un événement porte déjà cette clé d'idempotence.
+    #[must_use]
+    pub fn contains_idem(&self, cle: &str) -> bool {
+        self.idems.contains_key(cle)
+    }
+
+    /// L'événement de ce numéro, lu droit à son octet.
+    fn event_at(&self, seq: u64) -> Result<Option<Event>, LedgerError> {
+        use std::io::{Seek as _, SeekFrom};
+        let Some((path, ligne, octet)) = self.index.get(&seq) else {
+            return Ok(None);
+        };
+        let mut file = File::open(path)?;
+        file.seek(SeekFrom::Start(*octet))?;
+        let mut line = String::new();
+        BufReader::new(file).read_line(&mut line)?;
+        let event: Event = serde_json::from_str(&line).map_err(|source| LedgerError::BadLine {
+            file: path.display().to_string(),
+            line: ligne + 1,
+            source,
+        })?;
+        Ok((event.seq == seq).then_some(event))
     }
 
     /// Écrit un lot d'événements.
@@ -501,6 +543,31 @@ mod tests {
             json!({"tool": "fs.read", "args_digest": "blake3:aa"}),
         )
         .task(task)
+    }
+
+    /// Un émetteur qui renvoie après une coupure ne fait pas écrire deux fois : la clé
+    /// d'idempotence rend l'événement déjà écrit, y compris après réouverture (ADR 0059).
+    #[test]
+    fn une_cle_d_idempotence_n_ecrit_qu_une_fois_meme_apres_reouverture() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        let premier = store.append(draft(0, "task:a").idem("agentd:01")).unwrap();
+        assert!(store.contains_idem("agentd:01"));
+        let encore = store.append(draft(1, "task:a").idem("agentd:01")).unwrap();
+        assert_eq!(encore, premier, "le même événement, pas un second");
+        store.append(draft(2, "task:a")).unwrap();
+        drop(store);
+        let mut store = Store::open(dir.path()).unwrap();
+        assert!(store.contains_idem("agentd:01"));
+        let apres = store.append(draft(3, "task:a").idem("agentd:01")).unwrap();
+        assert_eq!(apres, premier);
+        let tous = store.read_all().unwrap();
+        assert_eq!(tous.len(), 2, "{tous:?}");
+        store.verify().unwrap();
+        // Sans clé, rien ne change : deux écritures, deux événements.
+        let a = store.append(draft(4, "task:b")).unwrap();
+        let b = store.append(draft(4, "task:b")).unwrap();
+        assert_ne!(a.seq, b.seq);
     }
 
     #[test]
