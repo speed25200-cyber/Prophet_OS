@@ -39,6 +39,8 @@ struct Agents {
     local_endpoint: Option<String>,
     profiles: Vec<agentd::preparation::Profile>,
     preparing: Mutex<()>,
+    /// Un seul envoi vers le journal à la fois (ADR 0059).
+    envoi_du_journal: Mutex<()>,
     reviews: Arc<tokio::sync::Semaphore>,
     /// Une seule publication ou annulation à la fois : SFS verrouille le home, et un second
     /// appel doit recevoir une réponse claire plutôt qu'un refus de verrou.
@@ -1694,36 +1696,65 @@ impl Agents {
         })
     }
 
-    /// Pousse les événements accumulés vers le journal.
+    /// Pousse vers le journal les événements qu'il n'a pas encore reçus (ADR 0059).
     ///
-    /// Un échec ici n'annule pas ce qui a été fait — la tâche existe — mais il est bruyant : un
-    /// système qui agit sans laisser de trace a perdu ce qui permet de revenir en arrière.
+    /// Chacun part avec sa clé d'idempotence et ne quitte la file qu'une fois reçu ; un journal
+    /// injoignable ou une erreur passagère arrête l'envoi, dans l'ordre, jusqu'au prochain essai
+    /// — la file est gardée dans l'état du service. Renvoyé après une réponse perdue, un
+    /// événement n'est pas écrit deux fois. Seul un refus définitif du journal (charge utile
+    /// refusée) retire l'événement, bruyamment : il bloquerait sinon tous les suivants.
     async fn vider_le_journal(&self) {
-        let brouillons = {
-            let mut runtime = self.runtime.lock().await;
-            runtime.retirer_le_journal()
-        };
+        // Un envoi à la fois : deux envois concurrents mêleraient l'ordre.
+        let _envoi = self.envoi_du_journal.lock().await;
+        let brouillons = self.runtime.lock().await.journal_a_envoyer();
         if brouillons.is_empty() {
             return;
         }
         let Ok(client) = Client::connect(&self.ledger).await else {
-            tracing::error!(
+            tracing::warn!(
                 nombre = brouillons.len(),
-                "journal injoignable : des événements ne sont pas écrits"
+                "journal injoignable : les événements attendent, gardés dans l'état du service"
             );
             return;
         };
-        for brouillon in brouillons {
+        let mut recus = 0_usize;
+        for brouillon in &brouillons {
+            let Some(idem) = brouillon.idem.as_deref() else {
+                continue;
+            };
             let params = json!({
                 "kind": brouillon.kind,
                 "task": brouillon.task,
                 "step": brouillon.step,
                 "actor": brouillon.actor.0,
                 "payload": brouillon.payload,
+                "idem": idem,
             });
-            if let Err(erreur) = client.call("ledger.append", params).await {
-                tracing::error!(motif = %erreur.message, "un événement n'a pas été journalisé");
+            match client.call("ledger.append", params).await {
+                Ok(_) => {}
+                Err(erreur) if erreur.code == ErrorCode::InvalidParams => {
+                    tracing::error!(
+                        motif = %erreur.message,
+                        kind = ?brouillon.kind,
+                        "le journal refuse définitivement un événement : il est abandonné"
+                    );
+                }
+                Err(erreur) => {
+                    tracing::warn!(
+                        motif = %erreur.message,
+                        restants = brouillons.len() - recus,
+                        "journal indisponible : l'envoi reprendra"
+                    );
+                    break;
+                }
             }
+            self.runtime.lock().await.journal_recu(idem);
+            recus += 1;
+        }
+        if recus > 0
+            && let Err(erreur) = self.enregistrer().await
+        {
+            tracing::error!(motif = %erreur.message, "file du journal non enregistrée");
         }
     }
 }
@@ -2733,35 +2764,44 @@ async fn main() -> anyhow::Result<()> {
         "agentd écoute ; les jetons viennent de capd, le journal part vers ledger"
     );
 
-    serveur
-        .serve(Arc::new(Agents {
-            runtime: Arc::new(Mutex::new(runtime)),
-            jobs: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
-            local_endpoint: std::env::var("PROPHET_LOCAL_ENDPOINT").ok(),
-            profiles,
-            preparing: Mutex::new(()),
-            reviews: Arc::new(tokio::sync::Semaphore::new(2)),
-            publications: Arc::new(tokio::sync::Semaphore::new(1)),
-            capd,
-            ledger,
-            egress,
-            browser,
-            browser_state,
-            browser_root,
-            sup_socket,
-            pilot,
-            sandboxd,
-            seances: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
-            jev,
-            etat: fichier_etat,
-            pulls: agentd::poids::Pulls::new(providers::catalogue::pulled_dir()),
-            hotes_des_clients: agentd::reseau::supplement(
-                std::env::var(agentd::reseau::HOTES_ENV).ok().as_deref(),
-            )
-            .map_err(anyhow::Error::msg)?,
-            pairs: commun::Pairs::detecter()?,
-        }))
-        .await?;
+    let agents = Arc::new(Agents {
+        runtime: Arc::new(Mutex::new(runtime)),
+        jobs: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
+        local_endpoint: std::env::var("PROPHET_LOCAL_ENDPOINT").ok(),
+        profiles,
+        preparing: Mutex::new(()),
+        reviews: Arc::new(tokio::sync::Semaphore::new(2)),
+        publications: Arc::new(tokio::sync::Semaphore::new(1)),
+        capd,
+        ledger,
+        egress,
+        browser,
+        browser_state,
+        browser_root,
+        sup_socket,
+        pilot,
+        sandboxd,
+        seances: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
+        jev,
+        etat: fichier_etat,
+        pulls: agentd::poids::Pulls::new(providers::catalogue::pulled_dir()),
+        hotes_des_clients: agentd::reseau::supplement(
+            std::env::var(agentd::reseau::HOTES_ENV).ok().as_deref(),
+        )
+        .map_err(anyhow::Error::msg)?,
+        pairs: commun::Pairs::detecter()?,
+        envoi_du_journal: Mutex::new(()),
+    });
+    // Ce qui attend le journal — depuis l'arrêt précédent, ou pendant une panne — repart de
+    // soi-même, sans attendre la prochaine commande (ADR 0059).
+    let relance = Arc::clone(&agents);
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            relance.vider_le_journal().await;
+        }
+    });
+    serveur.serve(agents).await?;
     Ok(())
 }
 

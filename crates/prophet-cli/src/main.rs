@@ -3990,6 +3990,7 @@ mod journal {
             step: None,
             payload: serde_json::Value::Null,
             prev: String::new(),
+            idem: None,
             hash: None,
         }
     }

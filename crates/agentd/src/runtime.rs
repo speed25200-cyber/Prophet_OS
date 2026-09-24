@@ -373,7 +373,14 @@ pub struct EtatPersistant {
     /// Manifestes des missions, pour émettre un jeton lié à l'index exact au moment de publier.
     #[serde(default)]
     pub manifests: BTreeMap<String, Manifest>,
+    /// Les événements que le journal n'a pas encore reçus, dans l'ordre, chacun avec sa clé
+    /// d'idempotence : un journal injoignable ou un redémarrage ne les perd plus (ADR 0059).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub journal: Vec<Draft>,
 }
+
+/// Combien d'événements attendent le journal au plus (ADR 0059).
+pub const JOURNAL_EN_ATTENTE_MAX: usize = 10_000;
 
 /// Le runtime.
 pub struct Runtime {
@@ -462,6 +469,7 @@ impl Runtime {
             results: self.results.clone(),
             owners: self.owners.clone(),
             manifests: self.manifests.clone(),
+            journal: self.journal.clone(),
         }
     }
 
@@ -479,6 +487,10 @@ impl Runtime {
         self.results.extend(etat.results);
         self.owners.extend(etat.owners);
         self.manifests.extend(etat.manifests);
+        // Ce qui attendait le journal avant l'arrêt part avant ce qui s'est passé depuis.
+        let mut en_attente = etat.journal;
+        en_attente.append(&mut self.journal);
+        self.journal = en_attente;
     }
 
     /// Événements journalisés.
@@ -487,13 +499,16 @@ impl Runtime {
         &self.journal
     }
 
-    /// Retire les événements accumulés et les rend.
-    ///
-    /// `prophet-agentd` les pousse vers `prophet-ledger` puis n'a plus à s'en soucier. Sans ce
-    /// retrait, chaque envoi rejouerait tout l'historique : le journal se remplirait de doublons,
-    /// et un journal qui raconte deux fois la même chose ne raconte plus rien de fiable.
-    pub fn retirer_le_journal(&mut self) -> Vec<Draft> {
-        std::mem::take(&mut self.journal)
+    /// Les événements que le journal n'a pas encore reçus, dans l'ordre : on les envoie sans les
+    /// retirer, chacun ne part de la file qu'une fois reçu ([`Runtime::journal_recu`]).
+    #[must_use]
+    pub fn journal_a_envoyer(&self) -> Vec<Draft> {
+        self.journal.clone()
+    }
+
+    /// Le journal a reçu cet événement : il quitte la file.
+    pub fn journal_recu(&mut self, idem: &str) {
+        self.journal.retain(|d| d.idem.as_deref() != Some(idem));
     }
 
     /// Tâches connues.
@@ -973,8 +988,21 @@ impl Runtime {
         payload: serde_json::Value,
         now: OffsetDateTime,
     ) {
-        self.journal
-            .push(Draft::new(now, actor, kind, payload).task(task));
+        // Borné : un journal injoignable pendant des jours ne fait pas grossir l'état sans fin.
+        // Le plus ancien part, et le service le dit.
+        if self.journal.len() >= JOURNAL_EN_ATTENTE_MAX {
+            let perdu = self.journal.remove(0);
+            tracing::error!(
+                kind = ?perdu.kind,
+                task = perdu.task.as_deref().unwrap_or(""),
+                "journal injoignable trop longtemps : l'événement le plus ancien est abandonné"
+            );
+        }
+        self.journal.push(
+            Draft::new(now, actor, kind, payload)
+                .task(task)
+                .idem(prophet_types::ledger::nouvelle_cle("agentd")),
+        );
     }
 
     /// Crée et planifie une tâche.

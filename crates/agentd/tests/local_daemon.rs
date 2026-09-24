@@ -1095,6 +1095,69 @@ async fn annuler_en_gardant_ses_modifications_laisse_le_document_repris() {
     assert_eq!(undo["payload"]["kept"], json!(["docs/note.txt"]), "{undo}");
 }
 
+/// Le journal injoignable ne fait plus perdre les événements du service : ils attendent,
+/// gardés dans son état, survivent à son redémarrage, et arrivent une seule fois quand le
+/// journal revient (ADR 0059).
+#[tokio::test]
+async fn les_evenements_attendent_le_journal_et_n_y_arrivent_qu_une_fois() {
+    let model = controlled_model().await;
+    let mut chain = Chain::new(&model.endpoint).await;
+    drop(chain._ledger.take());
+    chain.plan("controlled", "Écris une note").await;
+    // agentd redémarre pendant la panne : la file est dans son état, pas dans sa mémoire.
+    restart(&mut chain).await;
+    let etat = std::fs::read_to_string(chain.dir.path().join("agent-state/taches.json")).unwrap();
+    assert!(
+        etat.contains("\"idem\""),
+        "la file attend dans l'état : {etat}"
+    );
+
+    // Le journal revient, sur le même état.
+    let ledger = Daemon::lancer(
+        binaire_voisin("prophet-ledger").to_str().unwrap(),
+        &chain.dir.path().join("ledger.sock"),
+        &chain.dir.path().join("ledger-state"),
+    );
+    chain.journal = ledger.joindre().await;
+    chain._ledger = Some(ledger);
+    let crees = |events: &serde_json::Value| {
+        events
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["kind"] == "task.created")
+            .count()
+    };
+    let limite = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        let events = chain
+            .journal
+            .call("ledger.query", json!({"task":"local-test"}))
+            .await
+            .unwrap();
+        if crees(&events) > 0 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < limite,
+            "les événements n'arrivent pas : {events}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    // Quelques cycles de plus, un redémarrage d'agentd : toujours un seul événement.
+    restart(&mut chain).await;
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    let events = chain
+        .journal
+        .call("ledger.query", json!({"task":"local-test"}))
+        .await
+        .unwrap();
+    assert_eq!(crees(&events), 1, "{events}");
+    let etat = std::fs::read_to_string(chain.dir.path().join("agent-state/taches.json")).unwrap();
+    assert!(!etat.contains("\"idem\""), "la file s'est vidée : {etat}");
+    model.worker.abort();
+}
+
 #[tokio::test]
 async fn la_cli_publie_et_annule_par_le_service() {
     let model = controlled_model().await;
