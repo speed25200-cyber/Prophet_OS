@@ -645,6 +645,16 @@ async fn une_mission_demarre_directement_sur_le_client_officiel_connecte() {
         .await
         .unwrap();
     assert_eq!(plan["choice"]["reference"], "driver:codex", "{plan}");
+    // L'humain voit, avant de lancer, vers quels hôtes le réseau du client pourra sortir : ceux
+    // de son éditeur et ceux que l'administrateur ajoute (ADR 0056).
+    let info = chain
+        .client
+        .call("task.inspect", json!({"id":"direct-codex-prefixe"}))
+        .await
+        .unwrap();
+    let hotes = info["client_hosts"].as_array().expect("hôtes du client");
+    assert!(hotes.contains(&json!("chatgpt.com")), "{info}");
+    assert!(hotes.contains(&json!("127.0.0.1")), "{info}");
     let plan = chain
         .client
         .call(

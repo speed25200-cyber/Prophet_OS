@@ -464,6 +464,7 @@ fn inspection() -> Value {
         can_apply: false,
         can_undo: false,
         browsing: None,
+        client_hosts: None,
     })
 }
 

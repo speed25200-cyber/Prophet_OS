@@ -604,6 +604,18 @@ impl Handler for Agents {
                 .map_err(|e| Error::new(ErrorCode::InternalError, e.to_string()))?;
                 let mut inspection = inspection.with_publication(owner, publication);
                 inspection.browsing = browsing;
+                // Une mission menée par un client officiel : les hôtes que son jeton réseau
+                // permettra, lus avant le lancement comme après (ADR 0056).
+                inspection.client_hosts = inspection
+                    .task
+                    .driver
+                    .clone()
+                    .or_else(|| inspection.plan.as_ref().map(|p| p.choice.reference.clone()))
+                    .and_then(|pilote| {
+                        let client = palier_de(pilote.strip_prefix("driver:")?).0.to_owned();
+                        Some(agentd::reseau::hotes(&client, &self.hotes_des_clients))
+                    })
+                    .filter(|hotes| !hotes.is_empty());
                 commun::repondre(&inspection)
             }
 

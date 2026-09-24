@@ -172,6 +172,10 @@ pub struct Inspection {
     /// Où l'agent navigue en ce moment : adresse, titre et taille de la page, jamais son contenu.
     #[serde(default)]
     pub browsing: Option<serde_json::Value>,
+    /// Les hôtes vers lesquels le réseau d'un client officiel peut sortir, par egress et sous le
+    /// jeton de la mission (ADR 0056) ; absent pour une mission qu'aucun client ne mène.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_hosts: Option<Vec<String>>,
 }
 
 impl Inspection {
@@ -632,6 +636,7 @@ impl Runtime {
             can_apply: false,
             can_undo: false,
             browsing: None,
+            client_hosts: None,
         })
     }
 
