@@ -1834,6 +1834,10 @@ donne le détail.
   de Vulkan ; « Surface d'observation », qui a le rastériseur, l'a réussi sur la même révision.
   L'étape ne joue plus que l'essai d'écoute (`36c99f1`), symétrique du `--skip` de l'autre travail.
   Isolation sur matériel réel verte sur `8899511` avec la correction `9b2ae68`.
+- CI de `36c99f1` (et amorçage sur `41cb14d`, même code) : **verte des deux côtés** — `check`,
+  surface, parole, isolation sur matériel réel (cage des clients et leur réseau), mission réelle
+  Qwen3 sous NixOS, sept services, système installé (UEFI et BIOS), ISO et installeur. Banc Qwen3
+  4B : **Prophet 11/15, boucle nue 10/15**.
 - `just check` : **973 réussis, 0 échec, 71 ignorés** (sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
