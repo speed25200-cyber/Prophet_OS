@@ -109,7 +109,9 @@ au moins rendent actif (Entrée confirme). La première fois, le même champ fai
 mémoire, et ne se retape pas d'ici là ; un code faux, un verrou, s'y disent. Refuser ne demande
 jamais de code. La page Système dit où en est le code (« APPROBATIONS » : à choisir, défini,
 verrouillé) et, s'il n'est pas choisi, « Définir maintenant » ouvre le même champ sans décision
-en attente (« Définir », « Plus tard »).
+en attente (« Définir », « Plus tard »). En dessous, « JOURNAL DU SERVICE » dit si chaque
+événement d'agentd est au journal, ou combien l'attendent et depuis quand (`journal.pending`,
+ADR 0059).
 Une erreur de transmission d'approbation est encore journalisée ; son acquittement visible dans
 l'interface reste à intégrer.
 

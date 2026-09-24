@@ -1875,7 +1875,7 @@ donne le détail.
   (doublon, réouverture), daemon du journal, service (journal arrêté, agentd redémarré pendant
   la panne, journal relancé : l'événement arrive une fois). `journal.pending` et
   `prophet status` (« Journal du service ») disent combien d'événements attendent, et depuis
-  quand.
+  quand ; la page Système de la surface aussi (« JOURNAL DU SERVICE », rendu éprouvé).
 - Révocation persistante (FRONTIER, permissions ; ADR 0013 la laissait à construire) : un
   jeton racine révoqué redevenait valide dès que capd redémarrait. `cap.revoke` inscrit
   désormais le sujet dans l'état du service (ligne ajoutée, synchronisée, `0600`) avant de
@@ -1895,7 +1895,7 @@ donne le détail.
   PUBLICATION » dans la surface (rendu à 900 et 420 px), `prophet task resolve`,
   `prophet task undo --keep-changes`. Essais : six de la bibliothèque, un du service, un de
   l'inspection, un du contrôleur, un de rendu.
-- `just check` : **1000 réussis, 0 échec, 75 ignorés** (journal sans perte ni doublon ; révocation et approbations persistantes ; code à choisir depuis Système ; conflits de publication ; code d'approbation ; sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
+- `just check` : **1001 réussis, 0 échec, 75 ignorés** (journal sans perte ni doublon ; révocation et approbations persistantes ; code à choisir depuis Système ; conflits de publication ; code d'approbation ; sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   6 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.

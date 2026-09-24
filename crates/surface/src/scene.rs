@@ -62,6 +62,15 @@ pub struct Decision {
     pub irreversible: bool,
 }
 
+/// Ce qui attend le journal parmi les événements du service (`journal.pending`, ADR 0059).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttenteDuJournal {
+    /// Combien d'événements attendent.
+    pub nombre: u64,
+    /// L'heure du plus ancien, RFC 3339.
+    pub depuis: Option<String>,
+}
+
 /// L'isolation réellement disponible, telle que `sandboxd` la sonde.
 #[derive(Debug, Clone)]
 pub struct Isolation {

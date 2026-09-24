@@ -44,6 +44,8 @@ struct Partage {
     panne: Option<String>,
     /// Ce que capd dit du code d'approbation ; absent s'il ne répond pas (ADR 0057).
     code: Option<crate::presence::EtatDuCode>,
+    /// Ce qui attend le journal parmi les événements d'agentd ; absent s'il ne répond pas.
+    journal: Option<crate::scene::AttenteDuJournal>,
 }
 
 /// Où joindre les daemons.
@@ -223,6 +225,10 @@ impl Source for Reel {
 
     fn code_d_approbation(&self) -> Option<crate::presence::EtatDuCode> {
         self.partage.lock().ok().and_then(|p| p.code)
+    }
+
+    fn journal_en_attente(&self) -> Option<crate::scene::AttenteDuJournal> {
+        self.partage.lock().ok().and_then(|p| p.journal.clone())
     }
 }
 
@@ -462,6 +468,14 @@ fn manque_pour_monter(capacites: &serde_json::Value) -> Option<String> {
     Some(format!("{} et {dernier}", manques.join(", ")))
 }
 
+/// Ce qu'agentd dit de sa file vers le journal (`journal.pending`, ADR 0059).
+fn attente_du_journal(valeur: &serde_json::Value) -> Option<crate::scene::AttenteDuJournal> {
+    Some(crate::scene::AttenteDuJournal {
+        nombre: valeur["pending"].as_u64()?,
+        depuis: valeur["oldest"].as_str().map(str::to_owned),
+    })
+}
+
 /// La réserve de microVM que `sandboxd` dit tenir (ADR 0045), s'il en tient une.
 fn reserve_de(capacites: &serde_json::Value) -> Option<crate::scene::Reserve> {
     let reserve = capacites.get("reserve").filter(|r| r.is_object())?;
@@ -487,7 +501,7 @@ fn interroger(sockets: &Sockets, partage: &Weak<Mutex<Partage>>) {
             if partage.strong_count() == 0 {
                 break;
             }
-            let (taches, approbations, capacites, code) = tokio::join!(
+            let (taches, approbations, capacites, code, journal) = tokio::join!(
                 appeler(&sockets.agentd, "task.list", serde_json::json!({})),
                 appeler(&sockets.capd, "approval.pending", serde_json::json!({})),
                 appeler(
@@ -496,6 +510,7 @@ fn interroger(sockets: &Sockets, partage: &Weak<Mutex<Partage>>) {
                     serde_json::json!({})
                 ),
                 appeler(&sockets.capd, "approval.code_status", serde_json::json!({})),
+                appeler(&sockets.agentd, "journal.pending", serde_json::json!({})),
             );
 
             let mut panne = None;
@@ -524,6 +539,7 @@ fn interroger(sockets: &Sockets, partage: &Weak<Mutex<Partage>>) {
                         verrou_s: valeur["locked_s"].as_i64(),
                     })
                 });
+                etat.journal = journal.ok().as_ref().and_then(attente_du_journal);
                 etat.panne = panne;
             }
             drop(partage);
@@ -801,6 +817,24 @@ mod tests {
                 .any(|r| r["params"]["id"] == "apr-9" && r["params"]["ticket"] == "T1")
         });
         assert!(source.presence().is_none(), "le ticket évite de redemander");
+    }
+
+    #[test]
+    fn la_file_du_journal_se_lit_telle_qu_agentd_la_dit() {
+        let attente = attente_du_journal(
+            &serde_json::json!({"pending": 3, "oldest": "2026-09-24T07:05:00Z"}),
+        )
+        .unwrap();
+        assert_eq!(attente.nombre, 3);
+        assert_eq!(attente.depuis.as_deref(), Some("2026-09-24T07:05:00Z"));
+        assert_eq!(
+            attente_du_journal(&serde_json::json!({"pending": 0, "oldest": null})),
+            Some(crate::scene::AttenteDuJournal {
+                nombre: 0,
+                depuis: None
+            })
+        );
+        assert_eq!(attente_du_journal(&serde_json::json!({})), None);
     }
 
     #[test]

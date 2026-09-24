@@ -24,6 +24,8 @@ pub struct Bureau {
     pub presence: Option<crate::presence::Demande>,
     /// Ce que capd dit du code d'approbation, pour la page Système.
     pub code: Option<crate::presence::EtatDuCode>,
+    /// Ce qui attend le journal parmi les événements du service, pour la page Système.
+    pub journal: Option<crate::scene::AttenteDuJournal>,
     /// La voix de l'OS, si Piper et une voix sont configurés : les fins de mission se disent.
     voix: Option<voice::Tools>,
     /// Instant du dernier geste de l'humain (pointeur, clavier, défilement, toucher).
@@ -107,6 +109,7 @@ impl Bureau {
             supervision: Supervision::default(),
             presence: None,
             code: None,
+            journal: None,
             voix: voice::Tools::from_env()
                 .ok()
                 .filter(voice::Tools::can_speak),
@@ -252,6 +255,7 @@ impl Bureau {
         let mut decision = None;
         self.supervision.presence.clone_from(&self.presence);
         self.supervision.code = self.code;
+        self.supervision.journal.clone_from(&self.journal);
         let atelier = &mut self.atelier;
         let supervision = &mut self.supervision;
         let output = self.ctx.run_ui(input, |root| {

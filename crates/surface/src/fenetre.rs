@@ -47,6 +47,10 @@ pub trait Source {
     fn code_d_approbation(&self) -> Option<crate::presence::EtatDuCode> {
         None
     }
+    /// Ce qui attend le journal parmi les événements du service, si agentd a répondu.
+    fn journal_en_attente(&self) -> Option<crate::scene::AttenteDuJournal> {
+        None
+    }
 }
 
 /// Configuration de la fenêtre et de son moteur local.
@@ -116,6 +120,7 @@ pub fn tenir_avec(source: Box<dyn Source>, options: Options) -> Result<(), Erreu
         empreinte: None,
         presence: None,
         code: None,
+        journal: None,
         erreur: None,
         proxy: boucle.create_proxy(),
     };
@@ -159,6 +164,8 @@ struct Application {
     presence: Option<crate::presence::Demande>,
     /// L'état du code d'approbation montré à la dernière image.
     code: Option<crate::presence::EtatDuCode>,
+    /// Ce qui attendait le journal à la dernière image.
+    journal: Option<crate::scene::AttenteDuJournal>,
     erreur: Option<ErreurFenetre>,
     proxy: EventLoopProxy<Evenement>,
 }
@@ -241,6 +248,8 @@ impl ApplicationHandler<Evenement> for Application {
                 etat.bureau.presence.clone_from(&self.presence);
                 self.code = self.source.code_d_approbation();
                 etat.bureau.code = self.code;
+                self.journal = self.source.journal_en_attente();
+                etat.bureau.journal.clone_from(&self.journal);
                 if let Some(reponse) = dessiner(etat, &scene) {
                     self.source.repond(reponse);
                 }
@@ -261,7 +270,8 @@ impl ApplicationHandler<Evenement> for Application {
                 if !etat.cachee
                     && (doit_redessiner(self.repeindre, self.empreinte, &self.source.scene())
                         || self.source.presence() != self.presence
-                        || self.source.code_d_approbation() != self.code)
+                        || self.source.code_d_approbation() != self.code
+                        || self.source.journal_en_attente() != self.journal)
                 {
                     etat.fenetre.request_redraw();
                 }

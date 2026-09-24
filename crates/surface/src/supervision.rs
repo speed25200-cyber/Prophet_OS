@@ -46,6 +46,8 @@ pub(crate) struct Supervision {
     pub(crate) code: Option<crate::presence::EtatDuCode>,
     /// La page Système demande à choisir le code : la réponse part à la fin de l'image.
     demander_le_code: bool,
+    /// Ce qui attend le journal parmi les événements du service (ADR 0059).
+    pub(crate) journal: Option<crate::scene::AttenteDuJournal>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -1255,6 +1257,13 @@ impl Supervision {
                     });
                     ui.add_space(22.0);
                 }
+                if let Some(attente) = &self.journal {
+                    plaque(ui, 28, |ui| {
+                        ui.set_width(ui.available_width());
+                        journal_du_service(ui, attente, &accent);
+                    });
+                    ui.add_space(22.0);
+                }
                 plaque(ui, 28, |ui| {
                     ui.set_width(ui.available_width());
                     etiquette(ui, "MACHINE, VUE PAR L'INSTALLEUR");
@@ -2372,6 +2381,50 @@ fn approbations(ui: &mut egui::Ui, code: crate::presence::EtatDuCode, accent: &A
         demande = action(ui, "code-definir-maintenant", "Définir maintenant").clicked();
     }
     demande
+}
+
+/// Le journal du service (ADR 0059) : à jour, ou combien d'événements l'attendent et depuis
+/// quand. Aucun n'est perdu pendant l'attente ; la page le dit.
+fn journal_du_service(
+    ui: &mut egui::Ui,
+    attente: &crate::scene::AttenteDuJournal,
+    accent: &Accent,
+) {
+    etiquette(ui, "JOURNAL DU SERVICE");
+    ui.add_space(4.0);
+    let depuis = attente
+        .depuis
+        .as_deref()
+        .and_then(|t| {
+            time::OffsetDateTime::parse(t, &time::format_description::well_known::Rfc3339).ok()
+        })
+        .map(|t| format!(" depuis {:02}:{:02} UTC", t.hour(), t.minute()))
+        .unwrap_or_default();
+    let (texte, couleur) = match attente.nombre {
+        0 => (
+            "Chaque événement du service est au journal.".to_owned(),
+            accent.vif,
+        ),
+        1 => (format!("Un événement attend le journal{depuis}."), ATTENTE),
+        n => (
+            format!("{n} événements attendent le journal{depuis}."),
+            ATTENTE,
+        ),
+    };
+    ui.horizontal_wrapped(|ui| {
+        let (dot, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
+        ui.painter().circle_filled(dot.center(), 3.0, couleur);
+        ui.label(titre(&texte, 22.0));
+    });
+    ui.add_space(6.0);
+    petit(
+        ui,
+        if attente.nombre == 0 {
+            "Création, plan, fin, publication : tout ce qui arrive aux missions y est écrit, une seule fois."
+        } else {
+            "Le journal ne répond pas. Rien n'est perdu : ces événements attendent dans l'état du service et partiront, une seule fois, dès qu'il répondra."
+        },
+    );
 }
 
 fn reserve_en_mots(reserve: &crate::scene::Reserve) -> String {

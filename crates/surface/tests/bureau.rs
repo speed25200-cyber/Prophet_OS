@@ -593,10 +593,45 @@ fn la_page_systeme_dit_le_code_d_approbation_et_le_fait_choisir() {
         defini: true,
         verrou_s: Some(240),
     });
+    // Le journal du service ne répond plus : trois événements attendent (ADR 0059).
+    bureau.journal = Some(surface::scene::AttenteDuJournal {
+        nombre: 3,
+        depuis: Some("2026-09-24T07:05:00Z".into()),
+    });
+    let mut textes = String::new();
     for _ in 0..3 {
-        avec_scene(&mut bureau, &context, &target, &scene, vec![]);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(target.largeur as f32, target.hauteur as f32),
+            )),
+            time: Some(8.0),
+            focused: true,
+            ..Default::default()
+        };
+        let (mut sortie, _) = bureau.composer(input, &scene);
+        textes = sortie
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        bureau.rendre(&context, &target, &mut sortie);
     }
     capture(&context, &target, "systeme-code-verrouille");
+    assert!(
+        textes.contains("Verrouillé après trop de codes faux : encore 4 min."),
+        "{textes}"
+    );
+    assert!(textes.contains("JOURNAL DU SERVICE"), "{textes}");
+    assert!(
+        textes.contains("3 événements attendent le journal depuis 07:05 UTC."),
+        "{textes}"
+    );
+    assert!(textes.contains("Rien n'est perdu"), "{textes}");
 }
 
 #[test]
