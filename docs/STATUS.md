@@ -1786,7 +1786,15 @@ donne le détail.
   services : egress (chaque décision au journal, jeton forgé exclu), la frise rendue avec une
   sortie acceptée et une refusée, et le client en cage de bout en bout (`net.request` de sa
   mission, acteur `egress`, statut 200).
-- `just check` : **959 réussis, 0 échec, 70 ignorés** (sorties réseau au journal de la mission et dans le parcours), format, clippy, contrôles
+- Surface, deux défauts vus en éprouvant la frise à 640 points (24 septembre) : la suite d'un
+  geste qui passait à la ligne repartait sous le rail — le texte s'enroule maintenant dans sa
+  colonne, nœud et numéro sur sa première ligne (`b3f94fc`) ; « Mouvement réduit » laissait le
+  défilement animé et le décocher ne rendait pas les transitions — le réglage s'applique au
+  changement (`9a0b998`). Les sorties successives vers un même hôte, avec la même issue, se
+  réunissent sur une ligne qui les compte, et les pastilles comptent chaque sortie et chaque
+  refus (`d4e67e7`) ; le « dernier geste » de l'en-tête passe les sorties relayées sans histoire
+  mais montre un refus réseau (`b574d11`). Voir l'[audit visuel](reports/audit-visuel-2026-09-23.md).
+- `just check` : **962 réussis, 0 échec, 70 ignorés** (sorties réseau au journal et dans le parcours, réunies ; mouvement réduit), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   6 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.

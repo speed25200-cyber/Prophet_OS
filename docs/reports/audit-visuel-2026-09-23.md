@@ -17,12 +17,16 @@ et des parcours `crates/surface/tests/{bureau,missions}.rs` (`PROPHET_CAPTURE_DI
 | En 640 points, les trois cartes des clients officiels restaient côte à côte ; « Ouvrir » recouvrait « connexion requise » | Modèles | trois, deux ou une colonne selon la largeur | `2c5e98c` |
 | Libellés six à huit points au-dessus du milieu des boutons voisins | en-tête de mission, changements préparés, « Sur le web », bandeau de décision, « Mission en focale », adresse du moteur, accueil vide, dictée | `hud::rangee` : la rangée part de la hauteur d'un bouton (32 points) au lieu de 20 | `7894c9f`, `f4cc89f` |
 | En 640 points, le cadre de la décision touchait presque les bords (5 points) | décision humaine | largeur bornée pour garder 16 points de gouttière | `f4cc89f` |
+| 24 septembre — en 640 points, la suite d'un geste qui passait à la ligne repartait sous le rail de la frise | Parcours d'une mission (sorties réseau, cibles longues) | le texte s'enroule dans sa colonne ; nœud et numéro sur sa première ligne | `b3f94fc` |
+| 24 septembre — « Mouvement réduit » laissait le défilement animé, et le décocher ne rendait pas les transitions | toute la surface | le réglage s'applique au changement, défilement animé compris | `9a0b998` |
 
 ![Modèles en 640 points : cartes sur deux colonnes, adresse et « Actualiser » alignés](../images/audit-modeles-640.png)
 
 ![Trois rangées réalignées : « Mission en focale », bandeau de décision, adresse du moteur](../images/audit-rangees-alignees.png)
 
 ![La décision en 640 points, avec sa gouttière ; « Autoriser cette action » seul pour une action irréversible](../images/audit-decision-640.png)
+
+![Le parcours en 640 points : trois connexions réunies sur une ligne, un refus répété, leur texte enroulé dans sa colonne](../images/audit-sorties-reseau-640.png)
 
 ## Ce qui a été vérifié sans défaut
 
