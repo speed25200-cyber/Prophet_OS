@@ -85,11 +85,19 @@ impl Diff {
     /// Rendu lisible, destiné à l'humain qui valide.
     #[must_use]
     pub fn render(&self) -> String {
+        self.render_limited(usize::MAX)
+    }
+
+    /// Rendu lisible borné à `max` changements, suivis du compte de ceux qui ne sont pas
+    /// montrés : ce qu'on rend à un modèle doit tenir dans son contexte, quelle que soit la
+    /// taille du travail.
+    #[must_use]
+    pub fn render_limited(&self, max: usize) -> String {
         if self.is_empty() {
             return "aucun changement\n".to_owned();
         }
         let mut out = String::new();
-        for change in &self.changes {
+        for change in self.changes.iter().take(max) {
             let marque = match change.kind {
                 ChangeKind::Added => "+",
                 ChangeKind::Modified => "~",
@@ -102,6 +110,10 @@ impl Diff {
                 (None, None) => String::new(),
             };
             out.push_str(&format!("{marque} {}  {taille}\n", change.path.display()));
+        }
+        let reste = self.changes.len().saturating_sub(max);
+        if reste > 0 {
+            out.push_str(&format!("… et {reste} autre(s) changement(s)\n"));
         }
         let (a, m, d) = self.counts();
         out.push_str(&format!(
@@ -283,6 +295,29 @@ mod tests {
         assert!(rendu.contains("+ rapport.pdf"), "{rendu}");
         assert!(rendu.contains("1 ajouté"), "{rendu}");
         assert_eq!(Diff::default().render(), "aucun changement\n");
+    }
+
+    #[test]
+    fn un_rendu_borne_montre_les_premiers_et_compte_le_reste() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let base = fingerprint_tree(root).unwrap();
+        for n in 0..5 {
+            ecrire(root, &format!("f{n}.txt"), "contenu");
+        }
+        let diff = compute(&base, root).unwrap();
+        let rendu = diff.render_limited(2);
+        assert_eq!(
+            rendu.lines().filter(|l| l.starts_with("+ ")).count(),
+            2,
+            "{rendu}"
+        );
+        assert!(rendu.contains("… et 3 autre(s) changement(s)"), "{rendu}");
+        assert!(
+            rendu.contains("5 ajouté(s)"),
+            "le compte reste entier : {rendu}"
+        );
+        assert!(!diff.render().contains('…'));
     }
 
     #[test]
