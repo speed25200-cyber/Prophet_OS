@@ -259,13 +259,32 @@ fn detail_of(args: &Value) -> Result<Detail, CallResult> {
     }
 }
 
+/// Nœuds rendus au plus d'une page, et caractères au plus d'un nom ou d'une valeur : les bornes
+/// de l'accessibilité du bureau (supd). Une page démesurée ne remplit pas le contexte du modèle.
+const WEB_NOEUDS_MAX: usize = 500;
+const WEB_TEXTE_MAX: usize = 4_000;
+
+/// L'arbre tel qu'on le rend au modèle, borné, et le nombre de nœuds laissés de côté.
+fn borne(tree: &sup::tree::Tree) -> (sup::tree::Tree, usize) {
+    let (root, laisses) = tree.root.borner(WEB_NOEUDS_MAX, WEB_TEXTE_MAX);
+    (
+        sup::tree::Tree {
+            root,
+            ..tree.clone()
+        },
+        laisses,
+    )
+}
+
 fn observation(url: &str, tree: &sup::tree::Tree, detail: Detail) -> CallResult {
+    let (rendu, laisses) = borne(tree);
     CallResult::structured(json!({
         "url": url,
         "title": tree.title,
         "nodes": tree.root.count(),
-        "observation_bytes": tree.observation_size(detail),
-        "tree": tree,
+        "observation_bytes": rendu.observation_size(detail),
+        "truncated": laisses,
+        "tree": rendu,
     }))
 }
 
@@ -454,11 +473,13 @@ impl Tool for Act {
         match result {
             Ok((outcome, url, tree)) if outcome.ok => {
                 self.0.record(&context.task, &url, &tree);
+                let (rendu, laisses) = borne(&tree);
                 CallResult::structured(json!({
                     "ok": true,
                     "url": url,
                     "title": tree.title,
-                    "tree": tree,
+                    "truncated": laisses,
+                    "tree": rendu,
                 }))
             }
             Ok((outcome, _, _)) => CallResult::error(
@@ -474,5 +495,35 @@ impl Tool for Act {
             ),
             Err(e) => CallResult::error(ErrorCode::SandboxError, e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sup::tree::{Node, Role, Tree};
+
+    #[test]
+    fn une_page_demesuree_est_rendue_bornee_avec_le_compte_de_ce_qui_manque() {
+        let liens: Vec<Node> = (0..1_999)
+            .map(|n| Node::new(format!("l{n}"), Role::Link, format!("lien {n}")).actionable())
+            .collect();
+        let page = Tree::new(
+            "prophet.browser",
+            "https://exemple.fr/",
+            "Mille liens",
+            Node::new("root", Role::Group, "").children(liens),
+        );
+        let rendu = observation("https://exemple.fr/", &page, Detail::Full)
+            .structured
+            .unwrap();
+        assert_eq!(
+            rendu["nodes"],
+            json!(2_000),
+            "le compte de la page reste entier"
+        );
+        assert_eq!(rendu["truncated"], json!(1_500));
+        let arbre: Tree = serde_json::from_value(rendu["tree"].clone()).unwrap();
+        assert_eq!(arbre.root.count(), WEB_NOEUDS_MAX);
     }
 }
