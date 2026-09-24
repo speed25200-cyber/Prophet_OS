@@ -356,7 +356,10 @@ impl Chain {
                 binaire_voisin("prophet-egress").to_str().unwrap(),
                 &egress_socket,
                 &dir.path().join("egress-state"),
-                &[("PROPHET_CAPD_SOCKET", caps.to_str().unwrap())],
+                &[
+                    ("PROPHET_CAPD_SOCKET", caps.to_str().unwrap()),
+                    ("PROPHET_LEDGER_SOCKET", logs.to_str().unwrap()),
+                ],
             );
             egress
                 .attendre_reponse(
@@ -1060,6 +1063,33 @@ async fn le_reseau_du_client_passe_par_egress_sous_le_jeton_de_la_mission() {
     assert!(texte.contains("direct:ferme"), "{info}");
     let requete = temoin.join().unwrap();
     assert!(requete.starts_with("GET /temoin HTTP/1.1"), "{requete}");
+    // Ce qui est sorti s'inscrit au journal de la mission, par egress.
+    let journal = Client::connect(chain.dir.path().join("ledger.sock"))
+        .await
+        .unwrap();
+    let mut sorties = Vec::new();
+    for _ in 0..50 {
+        sorties = journal
+            .call("ledger.query", json!({"task": "reseau"}))
+            .await
+            .unwrap()
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| e["kind"] == "net.request")
+            .collect();
+        if !sorties.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let sortie = sorties
+        .first()
+        .expect("une sortie au journal de la mission");
+    assert_eq!(sortie["payload"]["host"], "127.0.0.1", "{sortie}");
+    assert_eq!(sortie["payload"]["status"], 200, "{sortie}");
+    assert_eq!(sortie["actor"], "egress", "{sortie}");
 }
 
 /// Le vrai client, sur une machine où l'humain s'est connecté : le lanceur le dit connecté, une
