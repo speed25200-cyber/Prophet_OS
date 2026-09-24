@@ -256,7 +256,7 @@ pub(crate) fn draw(
         }
         // Le dernier geste de l'agent, relu dans le journal : ce qu'il fait se voit sans ouvrir
         // le parcours. La cible est celle que capd a contrôlée ; le contenu n'y est jamais.
-        if !reviewing && let Some(geste) = missions.trail().last() {
+        if !reviewing && let Some(geste) = dernier_geste(missions.trail()) {
             ui.add_space(4.0);
             let (marque, couleur, note) = issue(&geste.outcome);
             let (outil, couleur_outil) = libelle(geste, &accent);
@@ -998,6 +998,16 @@ fn etats(ui: &mut egui::Ui, info: &Inspection, accent: &Accent) {
     }
 }
 
+/// Le geste que l'en-tête montre : le dernier du parcours, sauf une sortie réseau relayée sans
+/// histoire — un client officiel parle sans cesse à son éditeur, et ce n'est pas un geste. Un
+/// refus ou une erreur réseau, eux, se montrent.
+fn dernier_geste(trail: &[crate::missions::TrailEntry]) -> Option<&crate::missions::TrailEntry> {
+    trail
+        .iter()
+        .rev()
+        .find(|g| !(matches!(nature(g), Nature::Sortie) && g.outcome == Outcome::Ok))
+}
+
 /// Gestes montrés en direct pendant l'exécution.
 const DIRECT: usize = 5;
 
@@ -1232,6 +1242,26 @@ pub(crate) fn confiees(ui: &mut egui::Ui, c: &Courant, courants: &[Courant]) {
 mod tests {
     use super::*;
     use crate::scene::Etat;
+
+    #[test]
+    fn le_dernier_geste_passe_les_sorties_relayees_mais_pas_un_refus() {
+        let geste = |tool: &str, outcome: Outcome| crate::missions::TrailEntry {
+            seq: 0,
+            step: None,
+            tool: tool.into(),
+            target: None,
+            outcome,
+            fois: 1,
+        };
+        let mut trail = vec![geste("fs.write", Outcome::Ok), geste("sortie", Outcome::Ok)];
+        assert_eq!(dernier_geste(&trail).unwrap().tool, "fs.write");
+        trail.push(geste("sortie", Outcome::Denied("no_grant".into())));
+        assert_eq!(
+            dernier_geste(&trail).unwrap().outcome,
+            Outcome::Denied("no_grant".into())
+        );
+        assert!(dernier_geste(&[geste("sortie", Outcome::Ok)]).is_none());
+    }
 
     #[test]
     fn la_duree_d_une_mission_se_dit_comme_on_la_dit() {
