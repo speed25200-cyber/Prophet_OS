@@ -1866,6 +1866,14 @@ donne le détail.
   définisse avant l'humain. La CI de `8477b88` a d'abord rougi sur « Les sept services » : le
   contrôle des droits repasse après un redémarrage de capd, où le code est déjà défini ; il le
   vérifie désormais (le code survit au redémarrage, toujours exigé).
+- Le journal ne perd plus les événements du service (ADR 0059, FRONTIER journalisation
+  durable ; ADR 0013 laissait « une outbox durable » à construire) : agentd jetait ses
+  événements si `ledger` était injoignable, et un redémarrage perdait ceux qui n'étaient pas
+  partis. Chacun porte maintenant une clé d'idempotence, attend dans l'état d'agentd et part
+  dans l'ordre (après chaque commande, toutes les deux secondes) ; `ledger.append` accepte
+  `idem` et n'écrit pas deux fois la même clé, index relu à l'ouverture. Essais : magasin
+  (doublon, réouverture), daemon du journal, service (journal arrêté, agentd redémarré pendant
+  la panne, journal relancé : l'événement arrive une fois).
 - Révocation persistante (FRONTIER, permissions ; ADR 0013 la laissait à construire) : un
   jeton racine révoqué redevenait valide dès que capd redémarrait. `cap.revoke` inscrit
   désormais le sujet dans l'état du service (ligne ajoutée, synchronisée, `0600`) avant de
@@ -1885,7 +1893,7 @@ donne le détail.
   PUBLICATION » dans la surface (rendu à 900 et 420 px), `prophet task resolve`,
   `prophet task undo --keep-changes`. Essais : six de la bibliothèque, un du service, un de
   l'inspection, un du contrôleur, un de rendu.
-- `just check` : **996 réussis, 0 échec, 75 ignorés** (révocation et approbations persistantes ; code à choisir depuis Système ; conflits de publication ; code d'approbation ; sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
+- `just check` : **999 réussis, 0 échec, 75 ignorés** (journal sans perte ni doublon ; révocation et approbations persistantes ; code à choisir depuis Système ; conflits de publication ; code d'approbation ; sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   6 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.

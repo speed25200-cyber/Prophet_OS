@@ -12,7 +12,7 @@ la condition pour que le chaînage prouve quelque chose : une seule séquence de
 
 | Méthode | Ce qu'elle fait |
 |---|---|
-| `ledger.append` | Ajoute un événement ; le journal attribue `seq`, `prev` et `hash` |
+| `ledger.append` | Ajoute un événement ; le journal attribue `seq`, `prev` et `hash`. Avec `idem` (clé d'idempotence, 1 à 128 caractères), une clé déjà écrite rend l'événement existant sans rien écrire (ADR 0059) ; une charge utile refusée est `-32602` |
 | `ledger.query` | Filtre par tâche, types, bornes de séquence, limite |
 | `ledger.verify` | Vérifie la chaîne et les sceaux, et dit où elle rompt |
 | `ledger.seal` | Scelle immédiatement la tête de chaîne |

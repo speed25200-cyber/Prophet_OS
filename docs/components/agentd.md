@@ -153,9 +153,12 @@ changements. Une fin normale n'est pas une vérification sémantique de l'object
 
 Le registre confirme les événements auprès du vrai ledger. Un échec de journal arrête les
 outils ; une écriture peut déjà avoir eu lieu si sa confirmation finale a échoué. Aucun
-rejeu automatique n'est tenté. La file ancienne des événements de planification reste
-distincte et peut perdre des événements lors d'une panne de journal : la reprise durable
-de bout en bout n'est donc pas livrée.
+rejeu automatique n'est tenté pour les outils. Les événements du service (création, plan,
+lancement, fin, publication) ne se perdent plus lors d'une panne de journal (ADR 0059) :
+chacun porte une clé d'idempotence, attend dans l'état persistant (`journal` de
+`taches.json`) jusqu'à ce que le journal l'ait reçu, et part dans l'ordre après chaque
+commande et toutes les deux secondes ; renvoyé après une réponse perdue ou un redémarrage, il
+n'est écrit qu'une fois. La file est bornée à 10 000 événements.
 
 ## Persistance et reprise
 
