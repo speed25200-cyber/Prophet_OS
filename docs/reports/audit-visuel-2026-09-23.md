@@ -28,6 +28,8 @@ et des parcours `crates/surface/tests/{bureau,missions}.rs` (`PROPHET_CAPTURE_DI
 
 ![Le parcours en 640 points : trois connexions réunies sur une ligne, un refus répété, leur texte enroulé dans sa colonne](../images/audit-sorties-reseau-640.png)
 
+![« Plan & accès » d'une mission menée par Codex : le réseau du client, borné aux hôtes de son éditeur](../images/audit-plan-reseau-du-client.png)
+
 ## Ce qui a été vérifié sans défaut
 
 - **Missions** : liste et Focale en 1280 ; en 640, la liste seule, puis l'espace de mission avec

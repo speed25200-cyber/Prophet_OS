@@ -1266,6 +1266,83 @@ mod tests {
     use super::*;
     use crate::scene::Etat;
 
+    /// Le plan d'une mission menée par Codex, dessiné pour de vrai : le bloc « Réseau du client »
+    /// dit les hôtes du jeton. Les essais de rendu avec les services n'ont pas de lanceur de
+    /// pilotes ; l'inspection est donc celle qu'agentd rend, écrite ici.
+    #[test]
+    #[ignore = "needs_gpu: rendu wgpu hors écran du plan d'une mission menée par un client"]
+    fn le_plan_d_une_mission_de_client_dit_ou_son_reseau_peut_sortir() {
+        let info: Inspection = serde_json::from_value(serde_json::json!({
+            "task": {"id":"codex-1","intent":"Écris ~/docs/code.txt","agent":"org.prophet.atelier",
+                "user":"uid:1000","depth":0,"state":"planned",
+                "budget":{"limits":{"tokens":20000,"wall_time_s":90,"steps":200,"approvals":3,"cost_eur":0.0},
+                          "spent":{"tokens":0,"wall_time_s":0,"steps":0,"approvals":0,"cost_eur":0.0,"quota_pct":0.0}},
+                "sandbox_level":0,"created":"2026-09-24T01:51:07Z","history":["pending","planned"]},
+            "plan": {"task":"codex-1","intent":"Écris ~/docs/code.txt",
+                "choice":{"reference":"driver:codex","reason":"abonnement codex connecté et quota disponible"},
+                "sandbox_level":0,"grants":["fs.read sur ~/docs/**","fs.write sur ~/docs/**","tool.call sur fs.write"],
+                "limits":{"tokens":20000,"wall_time_s":90,"steps":200,"approvals":3,"cost_eur":0.0},
+                "scopes":["~/docs"],"profile":"atelier"},
+            "result": null, "can_start": true, "can_cancel": true, "start_reason": null,
+            "client_hosts": ["chatgpt.com","auth.openai.com","api.openai.com"]
+        }))
+        .unwrap();
+        let contexte = crate::gpu::Contexte::hors_ecran().unwrap();
+        let mut bureau =
+            crate::bureau::Bureau::nouveau(&contexte, "http://127.0.0.1:1/v1".into(), false);
+        bureau.figer_transitions();
+        let cible = crate::gpu::Cible::nouvelle(&contexte, 900, 560);
+        let mut textes = String::new();
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 560.0),
+                )),
+                time: Some(8.0),
+                focused: true,
+                ..Default::default()
+            };
+            let mut output = bureau.ctx.clone().run_ui(input, |root| {
+                egui::Frame::new().inner_margin(24).show(root, |ui| {
+                    sheet(ui).inner_margin(20).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        plan(ui, &info, false, &mut None);
+                    });
+                });
+            });
+            textes = output
+                .shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            bureau.rendre(&contexte, &cible, &mut output);
+        }
+        assert!(textes.contains("RÉSEAU DU CLIENT"), "{textes}");
+        assert!(
+            textes.contains("chatgpt.com, auth.openai.com, api.openai.com"),
+            "{textes}"
+        );
+        if let Ok(dir) = std::env::var("PROPHET_CAPTURE_DIR") {
+            std::fs::create_dir_all(&dir).unwrap();
+            let fichier = std::fs::File::create(
+                std::path::Path::new(&dir).join("surface-plan-reseau-du-client-900.png"),
+            )
+            .unwrap();
+            let mut png = png::Encoder::new(fichier, 900, 560);
+            png.set_color(png::ColorType::Rgba);
+            png.set_depth(png::BitDepth::Eight);
+            png.write_header()
+                .unwrap()
+                .write_image_data(&cible.pixels(&contexte).unwrap())
+                .unwrap();
+        }
+    }
+
     #[test]
     fn le_dernier_geste_passe_les_sorties_relayees_mais_pas_un_refus() {
         let geste = |tool: &str, outcome: Outcome| crate::missions::TrailEntry {
