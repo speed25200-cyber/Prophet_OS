@@ -78,6 +78,14 @@ Le travail propre de l'interface (composition, tessellation, soumission) reste *
 résolution (23,8 ms pour 1 Mpx, 26,0 pour 3,7 Mpx) et suit leur nombre. Le champ allégé, que
 reçoit par défaut un rastériseur logiciel, tient 77 images/s. Mémoire résidente : 153 à 165 Mio.
 
+**Contre-mesure du 24 septembre**, après l'accueil « Ce que vos agents trouvent ici », l'en-tête
+en verre, la fenêtre du code d'approbation et le panneau des conflits : même commande, Missions
+en 1920 × 1080, 200 images, trois passages sur une même machine à quatre cœurs (llvmpipe). Le
+commit de cet audit (`73f2031`) y donne 0,68 à 0,69 ms de processeur (médiane), `0440bb0` 0,64
+à 0,68 ms : **pas de régression** ; l'écart avec les 0,58 ms du tableau vient de la machine.
+Images complètes : 26,2 à 27,3 ms (médiane) en 1920 × 1080 et 2560 × 1440, mémoire résidente
+158 à 167 Mio.
+
 ## Consommation au repos
 
 `prophet-surface --repos 150 --demonstration` (1920 × 1080, trois missions actives, champ
