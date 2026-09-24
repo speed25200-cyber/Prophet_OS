@@ -2013,3 +2013,88 @@ fn l_arret_d_urgence_demande_une_confirmation_avant_tout() {
         capture(&context, &target, "arret-issue");
     }
 }
+
+/// Ce que la surface peint — les cartes des clients, les relevés de l'en-tête, les cadrans d'une
+/// mission, l'échelle d'isolation — un lecteur d'écran doit pouvoir le lire : l'arbre
+/// d'accessibilité (AccessKit) le dit en phrases, page par page.
+#[test]
+#[ignore = "needs_gpu: arbre d'accessibilité des pages rendues"]
+fn l_arbre_d_accessibilite_dit_ce_que_la_surface_peint() {
+    let context = Contexte::hors_ecran().unwrap();
+    let mut bureau = Bureau::nouveau(&context, "http://127.0.0.1:1/v1".into(), true);
+    bureau.figer_transitions();
+    bureau.ctx.enable_accesskit();
+    let cible = Cible::nouvelle(&context, 1440, 1000);
+    let mut s = scene();
+    s.courants = vec![surface::scene::Courant {
+        tache: "t-1".into(),
+        intitule: "Relire les changements du dépôt".into(),
+        agent: "claude-code".into(),
+        etat: surface::scene::Etat::Court,
+        debit: 3.0,
+        budget_consomme: 0.4,
+        etapes: 12,
+        task_state: None,
+        task_revision: 0,
+    }];
+    let lire = |bureau: &mut Bureau, page: Page| {
+        bureau.atelier.page = page;
+        let mut labels = Vec::new();
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 1000.0),
+                )),
+                time: Some(8.0),
+                focused: true,
+                ..Default::default()
+            };
+            let (mut output, _) = bureau.composer(input, &s);
+            let maj = output.platform_output.accesskit_update.take();
+            bureau.rendre(&context, &cible, &mut output);
+            if let Some(update) = maj {
+                labels = update
+                    .nodes
+                    .iter()
+                    .filter_map(|(_, n)| n.label().or_else(|| n.value()).map(str::to_owned))
+                    .collect();
+            }
+        }
+        labels.join("\n")
+    };
+    let missions = lire(&mut bureau, Page::Accueil);
+    for attendu in [
+        "1 mission active, 0 à examiner, isolation jusqu'au niveau 0",
+        "12:30, samedi, UTC",
+        "12 étapes",
+        "% du budget consommé",
+    ] {
+        assert!(
+            missions.contains(attendu),
+            "« {attendu} » absent :\n{missions}"
+        );
+    }
+    let modeles = lire(&mut bureau, Page::Modeles);
+    for attendu in [
+        "claude-code, version exemple : Session ouverte.",
+        "codex, version exemple : Installé, connexion requise. Connectez-vous dans sa fenêtre.",
+        "gemini, version inconnue : Absent de cette machine.",
+    ] {
+        assert!(
+            modeles.contains(attendu),
+            "« {attendu} » absent :\n{modeles}"
+        );
+    }
+    let systeme = lire(&mut bureau, Page::Activite);
+    for attendu in [
+        "Isolation : niveau 0, Confiné : disponible",
+        "niveau 1, Noyau utilisateur : indisponible, il manque : services absents dans ce test",
+        "niveau 2, MicroVM : indisponible",
+    ] {
+        assert!(
+            systeme.contains(attendu),
+            "« {attendu} » absent :\n{systeme}"
+        );
+    }
+}

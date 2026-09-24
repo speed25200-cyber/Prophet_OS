@@ -105,7 +105,14 @@ pub(crate) fn tableau(
     let width = ui.available_width();
     let radius = if compact { 17.0 } else { 52.0 };
     let height = radius * 2.0 + 10.0;
-    let (row, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
+    let (row, zone) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
+    // Les cadrans sont peints : un lecteur d'écran les lit en une phrase.
+    let decrit = format!(
+        "{steps} étape{}, {rate_per_minute:.0} par minute, {:.0} % du budget consommé",
+        if steps > 1 { "s" } else { "" },
+        budget_fraction.clamp(0.0, 1.0) * 100.0
+    );
+    zone.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &decrit));
     let painter = ui.painter();
     // Les étapes n'ont pas de plafond naturel : la couronne se remplit par centaine, et le
     // chiffre dit le vrai compte. L'activité sature à douze étapes par minute, au-delà de
@@ -166,7 +173,7 @@ pub(crate) fn echelle_isolation(ui: &mut egui::Ui, niveau_max: u8, manque: Optio
     let gap = 12.0;
     let tile_width = ((width - 2.0 * gap) / 3.0).max(140.0);
     let height = 112.0;
-    let (row, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
+    let (row, zone) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
     let painter = ui.painter();
     let niveaux = [
         (
@@ -185,6 +192,34 @@ pub(crate) fn echelle_isolation(ui: &mut egui::Ui, niveau_max: u8, manque: Optio
             "Firecracker sur KVM. Toute exécution de code arbitraire.",
         ),
     ];
+    // L'échelle est peinte : un lecteur d'écran la lit niveau par niveau, avec ce qui manque.
+    let decrit = niveaux
+        .iter()
+        .enumerate()
+        .map(|(i, (_, name, _))| {
+            let atteint = i as u8 <= niveau_max;
+            let mut phrase = format!(
+                "niveau {i}, {name} : {}",
+                if atteint {
+                    "disponible"
+                } else {
+                    "indisponible"
+                }
+            );
+            if let Some(manque) = manque.filter(|_| !atteint && i as u8 == niveau_max + 1) {
+                phrase.push_str(&format!(", il manque : {manque}"));
+            }
+            phrase
+        })
+        .collect::<Vec<_>>()
+        .join(" ; ");
+    zone.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            true,
+            format!("Isolation : {decrit}."),
+        )
+    });
     let accent = Accent::de(ui.ctx()).vif;
     for (i, (label, name, detail)) in niveaux.iter().enumerate() {
         let reached = i as u8 <= niveau_max;

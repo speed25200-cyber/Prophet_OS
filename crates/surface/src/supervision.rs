@@ -856,7 +856,16 @@ impl Supervision {
                 },
             );
             if wide {
-                let (r, _) = ui.allocate_exact_size(vec2(cadran * 2.0 + 24.0, cadran * 2.0 + 84.0), egui::Sense::hover());
+                let (r, zone) = ui.allocate_exact_size(vec2(cadran * 2.0 + 24.0, cadran * 2.0 + 84.0), egui::Sense::hover());
+                // Le cadran est peint : un lecteur d'écran le lit en une phrase.
+                let decrit = format!(
+                    "{} étape{}, {:.0} par minute, {:.0} % du budget consommé",
+                    c.etapes,
+                    if c.etapes > 1 { "s" } else { "" },
+                    c.debit,
+                    c.budget_consomme.clamp(0.0, 1.0) * 100.0
+                );
+                zone.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &decrit));
                 let centre = pos2(r.center().x + 12.0, r.top() + cadran + 8.0);
                 hud::cadran(ui.painter(), centre, cadran, c.etapes, c.budget_consomme, color, &accent);
                 // Le cadran dit déjà étapes et budget : la cadence, seule, se relève dessous.
@@ -1533,7 +1542,7 @@ fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(gap, gap);
         for card in &atelier.clients {
-            let (rect, _) = ui.allocate_exact_size(vec2(tile, 118.0), egui::Sense::hover());
+            let (rect, carte) = ui.allocate_exact_size(vec2(tile, 118.0), egui::Sense::hover());
             let p = ui.painter();
             p.rect_filled(rect, 14, VERRE_HAUT);
             crate::instruments::monogramme(p, rect.min + vec2(30.0, 30.0), &card.driver, 24.0);
@@ -1554,6 +1563,15 @@ fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
                 DISCRET,
             );
             let (etat, label, conseil) = etat_du_client(card);
+            // La carte est peinte : un lecteur d'écran la lit en une phrase.
+            let decrit = format!(
+                "{}, {} : {label}. {conseil}",
+                card.driver,
+                card.version
+                    .as_deref()
+                    .map_or_else(|| "version inconnue".to_owned(), |v| format!("version {v}")),
+            );
+            carte.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &decrit));
             let dot = match etat {
                 EtatDuClient::Pret => ACCOMPLI,
                 EtatDuClient::AConnecter => ATTENTE,

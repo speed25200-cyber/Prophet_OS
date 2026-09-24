@@ -221,6 +221,7 @@ pub(crate) fn chrome(root: &mut egui::Ui, atelier: &mut Atelier, scene: &Scene, 
                         if actives > 0 { accent.vif } else { DISCRET },
                     ),
                 ];
+                let droite = r.right();
                 for (label, value, color) in readouts {
                     let rect = hud::releve(
                         p,
@@ -239,6 +240,32 @@ pub(crate) fn chrome(root: &mut egui::Ui, atelier: &mut Atelier, scene: &Scene, 
                         Stroke::new(1., TRAIT),
                     );
                 }
+                // Les relevés et l'heure sont peints : un lecteur d'écran les lit en phrases.
+                let decrit = format!(
+                    "{actives} mission{} active{}, {reclament} à examiner, isolation jusqu'au niveau {}, {}",
+                    if actives > 1 { "s" } else { "" },
+                    if actives > 1 { "s" } else { "" },
+                    scene.isolation.niveau_max,
+                    if atelier.demonstration {
+                        "modèles non lus dans une scène d'exemple".to_owned()
+                    } else {
+                        format!(
+                            "{} modèle{} servi{}",
+                            atelier.modeles.len(),
+                            if atelier.modeles.len() > 1 { "s" } else { "" },
+                            if atelier.modeles.len() > 1 { "s" } else { "" }
+                        )
+                    }
+                );
+                ui.interact(
+                    Rect::from_min_max(pos2(x + 13., r.top()), pos2(droite, r.bottom())),
+                    egui::Id::new("releves-en-tete"),
+                    egui::Sense::hover(),
+                )
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &decrit));
+                let heure = format!("{}, {}, UTC", scene.heure, scene.date);
+                ui.interact(clock, egui::Id::new("heure-en-tete"), egui::Sense::hover())
+                    .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &heure));
                 if atelier.demonstration {
                     hud::texte_espace(
                         p,
