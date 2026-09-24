@@ -21,6 +21,7 @@ et des parcours `crates/surface/tests/{bureau,missions}.rs` (`PROPHET_CAPTURE_DI
 | 24 septembre — « Mouvement réduit » laissait le défilement animé, et le décocher ne rendait pas les transitions | toute la surface | le réglage s'applique au changement, défilement animé compris | `9a0b998` |
 | 24 septembre — la carte d'un client répétait son état (« connexion requise » deux fois) et disait « connexion requise » pour une sonde incertaine ; le conseil ajouté passait sous « Ouvrir » | Modèles | état exact, conseil enroulé à côté du bouton | `8627cb3` |
 | 24 septembre — sous ~1 300 points, les raccourcis de la barre d'état passaient sur son texte de gauche | toute la surface | la version qui tient, mesurée : complète, réduite, ou rien | `a656a58` |
+| 24 septembre — à 1100 points, les intitulés de la liste coupés au mot ne disaient plus rien (« Indexer la … ») | Missions | coupe au caractère (« Indexer la documentat… »), intitulé entier au survol | `3decc50` |
 
 ![Modèles en 640 points : cartes sur deux colonnes, adresse et « Actualiser » alignés](../images/audit-modeles-640.png)
 
@@ -35,6 +36,8 @@ et des parcours `crates/surface/tests/{bureau,missions}.rs` (`PROPHET_CAPTURE_DI
 ![Les cartes des clients officiels : état exact, conseil à côté du bouton](../images/audit-cartes-clients.png)
 
 ![La barre d'état à 1000, 1100, 1280 et 1440 points : les raccourcis qui tiennent](../images/audit-barre-raccourcis.png)
+
+![La liste des missions à 1100 points : des intitulés coupés au caractère](../images/audit-liste-1100.png)
 
 ## Ce qui a été vérifié sans défaut
 

@@ -1842,7 +1842,8 @@ donne le détail.
   4B : **Prophet 11/15, boucle nue 10/15**.
 - Nouveau tour visuel (24 septembre, captures régénérées) : la carte d'un client répétait son
   état et prenait une sonde incertaine pour une connexion requise (`8627cb3`) ; sous ~1 300
-  points, les raccourcis de la barre d'état passaient sur son texte (`a656a58`). Corrigés et
+  points, les raccourcis de la barre d'état passaient sur son texte (`a656a58`) ; à 1100, les
+  intitulés de la liste coupés au mot ne disaient plus rien (`3decc50`). Corrigés et
   capturés à plusieurs largeurs ; voir l'[audit visuel](reports/audit-visuel-2026-09-23.md).
 - `just check` : **975 réussis, 0 échec, 71 ignorés** (sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
