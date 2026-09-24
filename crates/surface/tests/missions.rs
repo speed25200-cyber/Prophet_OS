@@ -1124,6 +1124,42 @@ fn le_parcours_montre_les_sorties_reseau_de_la_mission() {
     }));
     assert!(trail.iter().any(|e| e.tool == "sortie"
         && matches!(&e.outcome, surface::missions::Outcome::Denied(m) if m == "no_grant")));
+    // En largeur étroite, la frise passe sous les états et chaque sortie tient dans la colonne.
+    let etroite = Cible::nouvelle(&context, 640, 1000);
+    for id in [format!("mission-{ID}"), "mission-history-tab".to_owned()] {
+        for _ in 0..3 {
+            frame(&mut bureau, &mut source, &context, &etroite, vec![]);
+        }
+        let events = click(&bureau, &etroite, &id);
+        frame(&mut bureau, &mut source, &context, &etroite, events);
+    }
+    // La frise des gestes est sous les états : la page défile jusqu'à elle, d'un geste de pavé
+    // tactile, qu'egui applique sans lissage (le lissage de la molette suit une horloge que
+    // l'essai tient figée).
+    let geste = |phase, dy| Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, dy),
+        phase,
+        modifiers: Modifiers::default(),
+    };
+    // Le pointeur survole la page une image avant le geste : egui choisit la zone qui défile
+    // d'après ce qu'il survolait.
+    frame(
+        &mut bureau,
+        &mut source,
+        &context,
+        &etroite,
+        vec![Event::PointerMoved(egui::pos2(320.0, 700.0))],
+    );
+    let molette = vec![
+        geste(egui::TouchPhase::Start, 0.0),
+        geste(egui::TouchPhase::Move, -420.0),
+    ];
+    frame(&mut bureau, &mut source, &context, &etroite, molette);
+    for _ in 0..3 {
+        frame(&mut bureau, &mut source, &context, &etroite, vec![]);
+    }
+    capture(&context, &etroite, "sorties-reseau");
 }
 
 /// Un moteur scripté : il rend ses réponses dans l'ordre, une par requête de complétion, et le

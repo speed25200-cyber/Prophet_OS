@@ -906,9 +906,13 @@ fn pastille(ui: &mut egui::Ui, text: &str, color: Color32) {
 }
 
 /// Le rail et le nœud d'une ligne de frise, peints dans la gouttière réservée à sa gauche.
+///
+/// Le nœud se tient à la hauteur `y` : celle de la première ligne, quand le texte s'enroule.
+#[allow(clippy::too_many_arguments)]
 fn noeud(
     ui: &egui::Ui,
     rect: egui::Rect,
+    y: f32,
     first: bool,
     last: bool,
     fill: Option<Color32>,
@@ -917,7 +921,6 @@ fn noeud(
 ) {
     let painter = ui.painter();
     let x = rect.left() + RAIL;
-    let y = rect.center().y;
     let rail = Stroke::new(1.0, LINE);
     if !first {
         painter.line_segment(
@@ -982,6 +985,7 @@ fn etats(ui: &mut egui::Ui, info: &Inspection, accent: &Accent) {
         noeud(
             ui,
             row.rect,
+            row.rect.center().y,
             n == 0,
             last,
             last.then_some(color),
@@ -1010,16 +1014,22 @@ fn touches(ui: &mut egui::Ui, trail: &[crate::missions::TrailEntry], accent: &Ac
         let (mark, color, note) = issue(&entry.outcome);
         let kind = nature(entry);
         let (outil, couleur_outil) = libelle(entry, accent);
-        let row = ui
-            .horizontal_wrapped(|ui| {
+        // La gouttière d'abord, puis le texte, qui s'enroule dans sa propre colonne : une ligne
+        // suivante repart sous le nom de l'outil, jamais sous le rail.
+        let ligne = ui.horizontal(|ui| {
+            ui.add_space(GOUTTIERE);
+            ui.horizontal_wrapped(|ui| {
                 ui.set_min_height(30.0);
-                ui.add_space(GOUTTIERE);
-                ui.label(
-                    RichText::new(&outil)
-                        .size(13.0)
-                        .monospace()
-                        .color(couleur_outil),
-                );
+                let tete = ui
+                    .label(
+                        RichText::new(&outil)
+                            .size(13.0)
+                            .monospace()
+                            .color(couleur_outil),
+                    )
+                    .rect
+                    .center()
+                    .y;
                 if let Some(target) = &entry.target {
                     ui.label(
                         RichText::new(limited(&cible_lisible(target), 120))
@@ -1043,11 +1053,14 @@ fn touches(ui: &mut egui::Ui, trail: &[crate::missions::TrailEntry], accent: &Ac
                 if !note.is_empty() {
                     ui.label(RichText::new(limited(&note, 80)).size(12.0).color(RED));
                 }
+                tete
             })
-            .response;
+            .inner
+        });
+        let (row, tete) = (ligne.response, ligne.inner);
         if let Some(step) = entry.step {
             ui.painter().text(
-                egui::pos2(row.rect.left(), row.rect.center().y),
+                egui::pos2(row.rect.left(), tete),
                 egui::Align2::LEFT_CENTER,
                 format!("{step:02}"),
                 egui::FontId::monospace(11.0),
@@ -1065,6 +1078,7 @@ fn touches(ui: &mut egui::Ui, trail: &[crate::missions::TrailEntry], accent: &Ac
         noeud(
             ui,
             row.rect,
+            tete,
             index == 0,
             index + 1 == shown,
             fill,
@@ -1101,8 +1115,6 @@ fn issue(outcome: &Outcome) -> (&'static str, Color32, String) {
     }
 }
 
-/// Une cible lisible : un chemin du dossier de l'humain s'écrit à partir de `~`, comme il
-/// l'écrirait lui-même ; toute autre cible reste telle que capd l'a contrôlée.
 /// La durée qu'une mission a tenue, dite comme on la dit : « moins d'une seconde », « 42 s »,
 /// « 3 min 05 s », « 1 h 12 min ».
 fn duree_observee(secondes: u64) -> String {
@@ -1114,6 +1126,8 @@ fn duree_observee(secondes: u64) -> String {
     }
 }
 
+/// Une cible lisible : un chemin du dossier de l'humain s'écrit à partir de `~`, comme il
+/// l'écrirait lui-même ; toute autre cible reste telle que capd l'a contrôlée.
 fn cible_lisible(cible: &str) -> String {
     cible_depuis(cible, &std::env::var("HOME").unwrap_or_default())
 }
