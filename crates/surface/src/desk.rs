@@ -134,7 +134,9 @@ pub(crate) fn chrome(root: &mut egui::Ui, atelier: &mut Atelier, scene: &Scene, 
         .exact_size(if compact { 52. } else { 64. })
         .frame(
             Frame::new()
-                .fill(Color32::TRANSPARENT)
+                // Un verre, pas un vide : le champ passe dessous sans brouiller l'heure et les
+                // relevés quand mille missions le traversent.
+                .fill(Color32::from_rgba_unmultiplied(5, 7, 10, 210))
                 .inner_margin(egui::Margin::symmetric(if compact { 16 } else { 28 }, 0)),
         )
         .show(root, |ui| {
