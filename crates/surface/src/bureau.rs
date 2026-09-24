@@ -114,7 +114,10 @@ impl Bureau {
 
     /// Fige les transitions d'apparition pour les captures à un instant constant.
     pub fn figer_transitions(&self) {
-        self.ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        self.ctx.all_styles_mut(|style| {
+            style.animation_time = 0.0;
+            style.scroll_animation = egui::style::ScrollAnimation::none();
+        });
     }
 
     /// Change l'accent de cette session sans le conserver.

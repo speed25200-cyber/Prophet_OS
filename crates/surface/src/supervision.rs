@@ -35,6 +35,9 @@ pub(crate) struct Supervision {
     /// Un widget avait le focus à l'image précédente : egui le retire dès qu'Échap arrive,
     /// avant que les raccourcis ne soient lus.
     focus_precedent: bool,
+    /// Le réglage « Mouvement réduit » tel qu'il a été appliqué au style, pour ne toucher au
+    /// style qu'au changement.
+    mouvement_applique: Option<bool>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -277,9 +280,7 @@ impl Supervision {
         }
         let compact = root.available_width() < 900.0;
         self.raccourcis(&ctx, atelier);
-        if atelier.mouvement_reduit {
-            ctx.all_styles_mut(|s| s.animation_time = 0.0);
-        }
+        appliquer_le_mouvement(&ctx, atelier.mouvement_reduit, &mut self.mouvement_applique);
         crate::desk::chrome(root, atelier, scene, compact);
         if scene.decision.is_some() {
             egui::Panel::top("attention-globale")
@@ -2269,9 +2270,54 @@ fn modeles(ui: &mut egui::Ui, atelier: &mut Atelier) {
         });
 }
 
+/// Applique « Mouvement réduit » au style, au changement seulement : réduit, ni transition ni
+/// défilement animé — la molette et le clavier déplacent la page d'un coup ; rétabli, les
+/// durées d'egui reviennent. Au premier appel sans réduction, le style reste tel qu'il est (un
+/// essai qui a figé les transitions les garde figées).
+fn appliquer_le_mouvement(ctx: &egui::Context, reduit: bool, applique: &mut Option<bool>) {
+    if *applique == Some(reduit) {
+        return;
+    }
+    let premier = applique.is_none();
+    *applique = Some(reduit);
+    if reduit {
+        ctx.all_styles_mut(|s| {
+            s.animation_time = 0.0;
+            s.scroll_animation = egui::style::ScrollAnimation::none();
+        });
+    } else if !premier {
+        let defaut = egui::Style::default();
+        ctx.all_styles_mut(|s| {
+            s.animation_time = defaut.animation_time;
+            s.scroll_animation = defaut.scroll_animation;
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn le_mouvement_reduit_coupe_transitions_et_defilement_puis_les_rend() {
+        let ctx = egui::Context::default();
+        let defaut = egui::Style::default();
+        let mut applique = None;
+        appliquer_le_mouvement(&ctx, true, &mut applique);
+        let style = ctx.style_of(egui::Theme::Dark);
+        assert!(style.animation_time.abs() < f32::EPSILON);
+        assert_eq!(style.scroll_animation, egui::style::ScrollAnimation::none());
+        appliquer_le_mouvement(&ctx, false, &mut applique);
+        let style = ctx.style_of(egui::Theme::Dark);
+        assert!((style.animation_time - defaut.animation_time).abs() < f32::EPSILON);
+        assert_eq!(style.scroll_animation, defaut.scroll_animation);
+        // Sans réduction dès le départ, le style n'est pas touché.
+        let fige = egui::Context::default();
+        fige.all_styles_mut(|s| s.animation_time = 0.0);
+        let mut applique = None;
+        appliquer_le_mouvement(&fige, false, &mut applique);
+        assert!(fige.style_of(egui::Theme::Dark).animation_time.abs() < f32::EPSILON);
+    }
 
     #[test]
     fn un_grand_nombre_se_lit_par_groupes_de_trois() {
