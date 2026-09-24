@@ -1829,6 +1829,11 @@ donne le détail.
   que le jeton réseau du client permettra (`554f11b`), et « Plan & accès » les montre sous
   « Réseau du client » (`6f76f4e`) ; un essai de rendu du plan d'une mission Codex le vérifie
   et le capture.
+- CI de `41cb14d` : « Parole » rouge. Son étape d'écoute jouait tous les essais ignorés de la
+  bibliothèque de la surface, et le nouvel essai de rendu du plan (`needs_gpu`) y est tombé faute
+  de Vulkan ; « Surface d'observation », qui a le rastériseur, l'a réussi sur la même révision.
+  L'étape ne joue plus que l'essai d'écoute (`36c99f1`), symétrique du `--skip` de l'autre travail.
+  Isolation sur matériel réel verte sur `8899511` avec la correction `9b2ae68`.
 - `just check` : **973 réussis, 0 échec, 71 ignorés** (sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
