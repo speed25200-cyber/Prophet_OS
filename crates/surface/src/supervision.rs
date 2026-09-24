@@ -2,7 +2,7 @@
 
 use egui::{Align2, Color32, FontId, Frame, RichText, Stroke, pos2, vec2};
 
-use crate::atelier::{Atelier, CommandeDePoids, EntreeCatalogue, Page};
+use crate::atelier::{Atelier, ClientCard, CommandeDePoids, EntreeCatalogue, Page};
 use crate::fenetre::Reponse;
 use crate::hud;
 use crate::scene::{Courant, Etat, Scene};
@@ -1553,12 +1553,11 @@ fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
                 FontId::proportional(11.0),
                 DISCRET,
             );
-            let (dot, label) = if card.connected {
-                (ACCOMPLI, "Session ouverte")
-            } else if card.present {
-                (ATTENTE, "Installé, connexion requise")
-            } else {
-                (DISCRET, "Absent de cette machine")
+            let (etat, label, conseil) = etat_du_client(card);
+            let dot = match etat {
+                EtatDuClient::Pret => ACCOMPLI,
+                EtatDuClient::AConnecter => ATTENTE,
+                EtatDuClient::Incertain | EtatDuClient::Absent => DISCRET,
             };
             p.circle_filled(rect.min + vec2(24.0, 70.0), 3.0, dot);
             p.text(
@@ -1568,14 +1567,17 @@ fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
                 FontId::proportional(12.0),
                 dot,
             );
-            p.text(
-                rect.min + vec2(20.0, 92.0),
-                Align2::LEFT_CENTER,
-                &card.connection,
+            // Le conseil s'enroule dans la place que le bouton « Ouvrir » lui laisse.
+            let bouton = card.present && matches!(card.driver.as_str(), "claude-code" | "codex");
+            let largeur = rect.width() - 20.0 - if bouton { 94.0 } else { 20.0 };
+            let conseil = p.layout(
+                conseil.to_owned(),
                 FontId::proportional(11.0),
                 DISCRET,
+                largeur,
             );
-            if card.present && matches!(card.driver.as_str(), "claude-code" | "codex") {
+            p.galley(rect.min + vec2(20.0, 85.0), conseil, DISCRET);
+            if bouton {
                 let button = egui::Rect::from_min_size(
                     pos2(rect.right() - 82.0, rect.bottom() - 40.0),
                     vec2(66.0, 26.0),
@@ -1632,6 +1634,52 @@ fn clients_officiels(ui: &mut egui::Ui, atelier: &Atelier) {
             }
         }
     });
+}
+
+/// Où en est un client officiel, pour la couleur de sa pastille.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EtatDuClient {
+    Pret,
+    AConnecter,
+    Incertain,
+    Absent,
+}
+
+/// L'état d'un client officiel en mots, et ce que l'humain peut y faire : la seconde ligne
+/// de la carte ne répète pas la première. Une sonde incertaine ou en échec se dit comme telle,
+/// et non comme une connexion requise.
+fn etat_du_client(card: &ClientCard) -> (EtatDuClient, String, &'static str) {
+    if !card.present {
+        return (
+            EtatDuClient::Absent,
+            "Absent de cette machine".to_owned(),
+            "Installez-le pour lui confier des missions.",
+        );
+    }
+    if card.connected {
+        return (
+            EtatDuClient::Pret,
+            "Session ouverte".to_owned(),
+            "Prêt à mener des missions, dans sa cage.",
+        );
+    }
+    if card.connection == providers::official::ConnectionState::LoginRequired.label() {
+        return (
+            EtatDuClient::AConnecter,
+            "Installé, connexion requise".to_owned(),
+            "Connectez-vous dans sa fenêtre.",
+        );
+    }
+    let label = if card.connection == providers::official::ConnectionState::Unknown.label() {
+        "Installé, session non vérifiée".to_owned()
+    } else {
+        format!("Installé, {}", card.connection)
+    };
+    (
+        EtatDuClient::Incertain,
+        label,
+        "Ouvrez-le pour vérifier sa session.",
+    )
 }
 
 /// Octets en mégaoctets ou gigaoctets, pour l'humain.
@@ -2317,6 +2365,36 @@ mod tests {
         let mut applique = None;
         appliquer_le_mouvement(&fige, false, &mut applique);
         assert!(fige.style_of(egui::Theme::Dark).animation_time.abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn la_carte_d_un_client_ne_repete_pas_son_etat_et_dit_une_sonde_incertaine() {
+        use providers::official::ConnectionState;
+        let carte = |present: bool, etat: ConnectionState| ClientCard {
+            driver: "codex".into(),
+            present,
+            version: None,
+            connection: etat.label().to_owned(),
+            connected: etat == ConnectionState::Connected,
+        };
+        let (etat, label, conseil) = etat_du_client(&carte(true, ConnectionState::LoginRequired));
+        assert_eq!(etat, EtatDuClient::AConnecter);
+        assert_eq!(label, "Installé, connexion requise");
+        assert!(!conseil.contains("connexion requise"), "{conseil}");
+        let (etat, label, _) = etat_du_client(&carte(true, ConnectionState::Unknown));
+        assert_eq!(etat, EtatDuClient::Incertain);
+        assert_eq!(label, "Installé, session non vérifiée");
+        let (etat, label, _) = etat_du_client(&carte(true, ConnectionState::ProbeFailed));
+        assert_eq!(etat, EtatDuClient::Incertain);
+        assert_eq!(label, "Installé, diagnostic en échec");
+        assert_eq!(
+            etat_du_client(&carte(true, ConnectionState::Connected)).0,
+            EtatDuClient::Pret
+        );
+        assert_eq!(
+            etat_du_client(&carte(false, ConnectionState::ClientMissing)).0,
+            EtatDuClient::Absent
+        );
     }
 
     #[test]
