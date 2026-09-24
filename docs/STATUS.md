@@ -1871,7 +1871,10 @@ donne le détail.
   désormais le sujet dans l'état du service (ligne ajoutée, synchronisée, `0600`) avant de
   répondre, et capd le relit au démarrage ; une fin de ligne interrompue est retirée, une ligne
   abîmée arrête le démarrage. Essai du daemon rouge avant (le jeton révoqué repassait `allow`
-  après redémarrage), vert après.
+  après redémarrage), vert après. De même pour la file d'approbations : les demandes en
+  attente, les décisions récentes et les règles « pour toute la mission » disparaissaient au
+  redémarrage ; elles sont gardées (`approbations.json`, écrit d'un coup) et relues. Essai du
+  daemon rouge avant, vert après.
 - Un conflit de publication n'est plus une impasse (ADR 0058, FRONTIER durabilité) : une
   publication arrêtée sur un fichier que l'humain a changé ne pouvait ni reprendre, ni être
   annulée. `task.resolve` la tranche — garder sa version et poursuivre (l'édition emportée par
@@ -1882,7 +1885,7 @@ donne le détail.
   PUBLICATION » dans la surface (rendu à 900 et 420 px), `prophet task resolve`,
   `prophet task undo --keep-changes`. Essais : six de la bibliothèque, un du service, un de
   l'inspection, un du contrôleur, un de rendu.
-- `just check` : **995 réussis, 0 échec, 75 ignorés** (révocation persistante ; code à choisir depuis Système ; conflits de publication ; code d'approbation ; sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
+- `just check` : **996 réussis, 0 échec, 75 ignorés** (révocation et approbations persistantes ; code à choisir depuis Système ; conflits de publication ; code d'approbation ; sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   6 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.

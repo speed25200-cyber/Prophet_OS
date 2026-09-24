@@ -51,7 +51,11 @@ un appel malformé pour une politique appliquée.
 
 ## Ce qui survit au redémarrage
 
-La clé de signature, le code d'approbation et les **révocations** : `cap.revoke` inscrit le
+La clé de signature, le code d'approbation, la **file d'approbations** et les
+**révocations**. La file — demandes en attente, décisions récentes, règles « pour toute la
+mission » ou « pour cet agent » — est gardée entière dans `approbations.json` après chaque
+changement (écrite à côté, synchronisée, renommée, `0600`) et relue au démarrage : une demande
+reste devant l'humain, une règle ne s'oublie pas. Elle ne contient aucun jeton. `cap.revoke` inscrit le
 sujet dans `/var/lib/prophet/capd/revocations.jsonl` (une ligne par sujet, ajoutée puis
 synchronisée, `0600`) avant de répondre, et capd relit ce registre avant d'accepter son premier
 appel. Sans lui, le jeton racine d'une mission révoquée redevenait valide jusqu'à son
