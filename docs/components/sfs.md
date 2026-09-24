@@ -14,7 +14,9 @@ La bibliothèque possède maintenant une publication de l'index exact, une annul
 refuse les modifications humaines ultérieures et un journal de reprise. Les versions et
 métadonnées sont conservées avant chaque échange ; les publications coopérantes sont exclues
 par verrou. L'[ADR 0022](../adr/0022-publication-et-conflits.md) décrit les limites, notamment
-les lots partiellement visibles et les conflits tardifs. Le parcours approuvé relie maintenant
+les lots partiellement visibles et les conflits tardifs ; l'[ADR 0058](../adr/0058-un-conflit-de-publication-se-tranche-fichier-par-fichier.md)
+comment un conflit se tranche — garder sa version et poursuivre, ou tout annuler — et
+l'annulation qui laisse à l'humain les fichiers changés depuis. Le parcours approuvé relie maintenant
 l'index examiné et le créateur constaté ; les droits capd liés à l'index et un écrivain sous
 l'identité humaine restent à livrer. Les captures privées d'agentd et son ACL de lecture sur
 les documents ne deviennent pas des droits de publication.

@@ -26,7 +26,8 @@
 | `task.cancel` | Demande l'arrêt d'une mission active ou annule un plan non lancé |
 | `task.halt` | Arrêt d'urgence, sans paramètre : chaque mission en main s'arrête comme par `task.cancel` (travailleur prié de s'arrêter, séance conclue, client officiel tué par le lanceur, plan annulé) ; rend `cancel_requested`, `cancelled`, `unattended` (non finies mais menées par rien) et `errors` ; rien n'est publié ni défait. Une mission qui attend une décision humaine (`approval.wait`) s'arrête à la fin de son attente, 45 s au plus |
 | `task.apply` | Publie dans le home l'index exact examiné, pour le créateur d'une mission `done` |
-| `task.undo` | Annule cette publication si les documents n'ont pas changé depuis |
+| `task.undo` | Annule cette publication si les documents n'ont pas changé depuis ; avec `keep_changes`, laisse à l'humain ceux qu'il a changés et rétablit le reste (ADR 0058) |
+| `task.resolve` | Tranche une publication arrêtée sur un conflit (`{id, choice}`) : `keep_mine` garde la version de l'humain et poursuit, `roll_back` rétablit ce qui a été publié (ADR 0058) |
 | `task.attach` | Ouvre pour le créateur une séance d'outils sur une mission préparée : jeton, travail SFS, registre, journal, sans modèle (`{id, client?}`) |
 | `task.tools` | Rend les outils que le jeton de la séance couvre |
 | `task.call` | Exécute un outil de la séance, compté comme une étape (`{id, name, arguments}`) |
@@ -55,8 +56,12 @@ séance la conclut en `cancelled`. `task.apply` et `task.undo` exigent le même 
 bibliothèque SFS relit l'index et les originaux avant la première mutation et refuse un
 document retouché ; le service n'ajoute que l'identité, la sérialisation (une publication à la
 fois) et le journal : `fs.commit`, ou `fs.undo` puis `task.rolled_back`, sous l'acteur `user`.
-Une intention interrompue (`applying`, `undoing`) se reprend par la même commande. `task.inspect`
-rend l'état SFS dans `publication`, `can_apply` / `can_undo` au seul créateur, et dans
+Une intention interrompue (`applying`, `undoing`) se reprend par la même commande ; une
+publication arrêtée sur un conflit attend `task.resolve` du même créateur, et poursuivre la
+publication repasse par capd. `task.inspect`
+rend l'état SFS dans `publication`, `can_apply` / `can_undo` / `can_resolve` au seul créateur,
+le fichier en conflit dans `conflict` (`conflict_in_undo` pour une annulation), les fichiers
+laissés à l'humain dans `kept`, et dans
 `browsing` l'adresse, le titre et la taille de la page où l'agent navigue, déposés par les
 outils web, jamais l'arbre. Avant de
 publier, le service conserve le manifeste de la mission, demande à capd un jeton de deux minutes

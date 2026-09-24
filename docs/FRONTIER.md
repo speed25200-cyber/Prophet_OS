@@ -135,8 +135,11 @@ Cette intégration ne coche pas le critère des clients authentifiés ni celui d
 La [publication journalisée](reports/publication-2026-09-13.md) ajoute les contrôles des
 versions exactes, les conflits d'application et d'annulation, la conservation des métadonnées
 et la reprise après 18 interruptions réelles de processus. La bibliothèque ne délivre aucune
-approbation ; l'intégration interservices sous l'identité humaine et la résolution graphique
-des conflits restent ouvertes. Cette preuve partielle ne coche pas le critère de durabilité complète.
+approbation ; l'intégration interservices sous l'identité humaine reste ouverte. Depuis
+l'[ADR 0058](adr/0058-un-conflit-de-publication-se-tranche-fichier-par-fichier.md), un conflit
+se tranche dans la surface et à la CLI (garder sa version et poursuivre, ou tout annuler), et
+l'annulation peut laisser à l'humain les fichiers qu'il a changés depuis. Cette preuve partielle
+ne coche pas le critère de durabilité complète.
 
 L'[approbation depuis le service](reports/approbation-2026-09-13.md) relie ensuite cet index
 au créateur constaté : `task.apply` et `task.undo` dans agentd, `prophet task apply` / `undo`

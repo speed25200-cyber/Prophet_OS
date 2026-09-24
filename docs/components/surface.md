@@ -98,6 +98,10 @@ interruption. Les réponses partielles restent marquées comme telles. La nouvel
 écarte les événements tardifs de la précédente. Les décisions capd ont des boutons explicites :
 refuser, autoriser cette fois, autoriser pour toute la mission (portée `task` de l'ADR 0041 :
 la même action ne redemandera pas).
+Une publication arrêtée sur un conflit se montre dans la mission (« CONFLIT DE PUBLICATION ») :
+le fichier, ce qui est sûr, « Garder ma version et poursuivre » et « Tout annuler » (ADR 0058).
+Une annulation refusée parce que des documents ont changé depuis propose « Annuler en gardant
+mes changements » ; les fichiers laissés à l'humain se lisent sous l'état de publication.
 Accorder demande le code d'approbation de l'humain (ADR 0057) : sans ticket de présence, la
 décision s'ouvre sur « PREUVE DE PRÉSENCE », un champ masqué et « Accorder », que six caractères
 au moins rendent actif (Entrée confirme). La première fois, le même champ fait choisir le code

@@ -44,6 +44,8 @@ un petit curseur de progression muni d'une somme de contrôle. Le curseur est r�
 étape sans recopier tout l'index. Ces empreintes détectent une altération ; elles n'authentifient
 pas l'auteur. Les états `applying`, `undoing` et `conflict` restent consultables après redémarrage.
 Une reprise terminée est idempotente et ne retouche pas les documents modifiés ensuite.
+Un conflit se tranche depuis l'[ADR 0058](0058-un-conflit-de-publication-se-tranche-fichier-par-fichier.md) :
+garder sa version et poursuivre, ou tout annuler, sans jamais écraser ce qui est à l'humain.
 
 Les fichiers remplacés gardent leur UID, GID et attributs humains, notamment les ACL POSIX et
 la provenance antérieure. L'annulation restaure aussi la date de modification. Les attributs
