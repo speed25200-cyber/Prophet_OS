@@ -251,7 +251,9 @@ async fn trancher(
                     etat.demande = Some(crate::presence::Demande {
                         id: id.to_owned(),
                         portee: portee.to_owned(),
-                        message: if genre == "required" {
+                        // Demander ou faire choisir le code, la fenêtre le dit d'elle-même ;
+                        // seuls un code faux ou un verrou ont quelque chose à ajouter.
+                        message: if matches!(genre, "required" | "undefined") {
                             String::new()
                         } else {
                             erreur.message.clone()
@@ -641,7 +643,7 @@ mod tests {
                         serde_json::json!({"result": {"ticket": "T1", "expires_in_s": 600}})
                     }
                     "approval.presence" => {
-                        serde_json::json!({"error": refus("wrong", "code d'approbation faux ; 4 essai(s) avant le verrou")})
+                        serde_json::json!({"error": refus("wrong", "code d'approbation faux ; encore 4 essais avant le verrou")})
                     }
                     "approval.resolve"
                         if params["decision"] == "allow" && params["ticket"] != "T1" =>

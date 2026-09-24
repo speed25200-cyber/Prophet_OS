@@ -64,12 +64,23 @@ impl std::fmt::Display for Refus {
                 f,
                 "aucun code d'approbation n'est défini : définissez-le (prophet cap code) avant d'accorder"
             ),
+            Self::Verrouille { secondes } if *secondes >= 60 => write!(
+                f,
+                "trop de codes faux : réessayez dans {} min",
+                (secondes + 59) / 60
+            ),
             Self::Verrouille { secondes } => {
                 write!(f, "trop de codes faux : réessayez dans {secondes} s")
             }
+            Self::Faux { restants: 1 } => {
+                write!(
+                    f,
+                    "code d'approbation faux ; encore un essai avant le verrou"
+                )
+            }
             Self::Faux { restants } => write!(
                 f,
-                "code d'approbation faux ; {restants} essai(s) avant le verrou"
+                "code d'approbation faux ; encore {restants} essais avant le verrou"
             ),
             Self::TicketInvalide => {
                 write!(f, "présence non prouvée : donnez votre code d'approbation")
@@ -346,6 +357,30 @@ mod tests {
                 .unwrap_err(),
             Refus::TicketInvalide,
             "périmé"
+        );
+    }
+
+    #[test]
+    fn les_refus_se_disent_en_francais_correct() {
+        assert_eq!(
+            Refus::Faux { restants: 4 }.to_string(),
+            "code d'approbation faux ; encore 4 essais avant le verrou"
+        );
+        assert_eq!(
+            Refus::Faux { restants: 1 }.to_string(),
+            "code d'approbation faux ; encore un essai avant le verrou"
+        );
+        assert_eq!(
+            Refus::Verrouille { secondes: 300 }.to_string(),
+            "trop de codes faux : réessayez dans 5 min"
+        );
+        assert_eq!(
+            Refus::Verrouille { secondes: 61 }.to_string(),
+            "trop de codes faux : réessayez dans 2 min"
+        );
+        assert_eq!(
+            Refus::Verrouille { secondes: 42 }.to_string(),
+            "trop de codes faux : réessayez dans 42 s"
         );
     }
 

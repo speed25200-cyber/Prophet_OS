@@ -436,7 +436,7 @@ fn accorder_demande_le_code_d_approbation_dans_un_champ_masque() {
         bureau.presence = Some(surface::presence::Demande {
             id: "apr-1".into(),
             portee: "once".into(),
-            message: "code d'approbation faux ; 4 essai(s) avant le verrou".into(),
+            message: "code d'approbation faux ; encore 4 essais avant le verrou".into(),
             definir: false,
         });
         for _ in 0..3 {
