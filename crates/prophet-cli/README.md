@@ -33,6 +33,14 @@ Validation : `nix develop --command cargo test -p prophet-cli`. Les tests de pro
 `task_service` reproduisent une consultation avec captures inaccessibles. Les vrais comptes
 et services sont exercés par `nix build .#checks.x86_64-linux.services`.
 
+## Les décisions
+
+`prophet cap approvals` liste ce qui attend une décision ; `prophet cap deny <id>` refuse ;
+`prophet cap approve <id> [--scope task]` accorde, et capd exige alors le code d'approbation de
+l'humain (ADR 0057) : la CLI le demande au terminal, sans écho, et le renvoie avec la décision.
+`prophet cap code` le choisit la première fois, puis le change en demandant l'ancien ;
+`sudo prophet cap code --remplacer` remplace un code oublié.
+
 ## Un client MCP dans une mission
 
 `prophet task options` liste les contextes du service, leurs modèles disponibles et l'état du

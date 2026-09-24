@@ -250,6 +250,7 @@ prophet task inspect <id>                              # son avancement, puis so
 prophet task cancel <id>                               # coupe : la séance est conclue, le client tué
 prophet task halt                                      # arrêt d'urgence : toutes les missions en main, clients compris
 prophet cap approvals                                  # ce qui attend votre décision, avec le motif du modèle (ADR 0041)
+prophet cap code                                       # choisir votre code d'approbation, demandé pour accorder (ADR 0057)
 prophet cap approve <id> --scope task                  # accorder, pour toute la mission — une action irréversible, une fois seulement (ADR 0054) ; `prophet cap deny <id>` refuse
 ```
 

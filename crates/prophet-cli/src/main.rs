@@ -350,6 +350,12 @@ enum CapAction {
         /// Identifiant de la demande.
         id: String,
     },
+    /// Définit ou change le code d'approbation, demandé au terminal (ADR 0057).
+    Code {
+        /// Remplacer le code sans l'ancien : réservé à l'administrateur (root).
+        #[arg(long)]
+        remplacer: bool,
+    },
     /// Règles d'approbation permanentes.
     Rules,
     /// Révoque une tâche et tous ses descendants.
@@ -574,9 +580,8 @@ fn cap(action: &CapAction, as_json: bool) -> anyhow::Result<String> {
                 matches!(scope.as_str(), "once" | "task" | "agent"),
                 "portée inconnue : {scope} (attendu once, task ou agent)"
             );
-            let tranchee = capd_rpc(
+            let tranchee = accorder(
                 &socket,
-                "approval.resolve",
                 serde_json::json!({"id": id, "decision": "allow", "scope": scope}),
             )?;
             if as_json {
@@ -605,6 +610,36 @@ fn cap(action: &CapAction, as_json: bool) -> anyhow::Result<String> {
                 "Refusé : {}.\n",
                 tranchee["summary"].as_str().unwrap_or(id)
             ))
+        }
+        CapAction::Code { remplacer } => {
+            let etat = capd_rpc(&socket, "approval.code_status", serde_json::json!({}))?;
+            let defini = etat["defined"].as_bool().unwrap_or(false);
+            let mut params = serde_json::Map::new();
+            if defini && !remplacer {
+                params.insert(
+                    "current".into(),
+                    lire_au_terminal("Code d'approbation actuel : ")?.into(),
+                );
+            }
+            let nouveau =
+                lire_au_terminal("Nouveau code d'approbation (6 caractères au moins) : ")?;
+            anyhow::ensure!(
+                lire_au_terminal("Le même, encore : ")? == nouveau,
+                "les deux saisies diffèrent : rien n'a changé"
+            );
+            params.insert("code".into(), nouveau.into());
+            match capd_appel(
+                &socket,
+                "approval.set_code",
+                serde_json::Value::Object(params),
+            )? {
+                Ok(_) => Ok(if defini {
+                    "Code d'approbation changé.\n".to_owned()
+                } else {
+                    "Code d'approbation défini : il sera demandé pour accorder.\n".to_owned()
+                }),
+                Err(e) => anyhow::bail!("{}", e.message),
+            }
         }
         CapAction::Rules => {
             let regles = capd_rpc(&socket, "approval.rules", serde_json::json!({}))?;
@@ -659,6 +694,85 @@ fn capd_rpc(
             "les approbations exigent capd en service ({e}).              Lancez `prophet status` pour voir ce qui est disponible sur cette machine."
         )
     })
+}
+
+/// Un appel à capd qui garde l'erreur du service entière : la preuve de présence se lit dans
+/// ses données (ADR 0057).
+fn capd_appel(
+    socket: &std::path::Path,
+    method: &str,
+    params: serde_json::Value,
+) -> anyhow::Result<Result<serde_json::Value, prophet_ipc::Error>> {
+    sous_delai_de(
+        async {
+            let client = prophet_ipc::Client::connect(socket)
+                .await
+                .map_err(|e| format!("capd indisponible : {e}"))?;
+            Ok(client.call(method, params).await)
+        },
+        DELAI_DE_SONDE,
+    )
+    .map_err(anyhow::Error::msg)
+}
+
+/// Accorde une approbation. Depuis la session de l'humain, capd exige son code (ADR 0057) : il
+/// est alors demandé au terminal, sans écho, et l'appel refait avec lui.
+fn accorder(
+    socket: &std::path::Path,
+    params: serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    match capd_appel(socket, "approval.resolve", params.clone())? {
+        Ok(tranchee) => Ok(tranchee),
+        Err(e) => {
+            let presence = e
+                .data
+                .as_ref()
+                .and_then(|d| d["presence"].as_str())
+                .unwrap_or_default()
+                .to_owned();
+            match presence.as_str() {
+                "required" => {
+                    let code = lire_au_terminal("Code d'approbation : ")?;
+                    let mut params = params;
+                    params["code"] = code.into();
+                    capd_appel(socket, "approval.resolve", params)?
+                        .map_err(|e| anyhow::anyhow!("{}", e.message))
+                }
+                "undefined" => anyhow::bail!("{} ; `prophet cap code` le définit.", e.message),
+                _ => anyhow::bail!("{}", e.message),
+            }
+        }
+    }
+}
+
+/// Lit une ligne au terminal de l'humain, sans l'afficher : un code ne s'écrit pas à l'écran.
+/// Hors d'un terminal, rien n'est lu — un code ne se passe pas en argument ni par un tube.
+fn lire_au_terminal(invite: &str) -> anyhow::Result<String> {
+    use std::io::{BufRead as _, Write as _};
+    let tty = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .map_err(|_| anyhow::anyhow!("le code d'approbation se tape dans un terminal"))?;
+    let stty = |arg: &str| {
+        std::process::Command::new("stty")
+            .arg(arg)
+            .stdin(
+                tty.try_clone()
+                    .map_or_else(|_| std::process::Stdio::null(), std::process::Stdio::from),
+            )
+            .status()
+    };
+    let mut sortie = tty.try_clone()?;
+    sortie.write_all(invite.as_bytes())?;
+    sortie.flush()?;
+    let _ = stty("-echo");
+    let mut ligne = String::new();
+    let lu = std::io::BufReader::new(tty.try_clone()?).read_line(&mut ligne);
+    let _ = stty("echo");
+    sortie.write_all(b"\n")?;
+    lu?;
+    Ok(ligne.trim_end_matches(['\n', '\r']).to_owned())
 }
 
 fn socket_capd() -> std::path::PathBuf {
@@ -911,15 +1025,17 @@ fn trancher_par_la_voix(
         .as_str()
         .unwrap_or("cette action")
         .to_owned();
-    let tranchee = capd_rpc(
-        &socket,
-        "approval.resolve",
-        serde_json::json!({
-            "id": id,
-            "decision": if accorder { "allow" } else { "deny" },
-            "scope": "once"
-        }),
-    )?;
+    let params = serde_json::json!({
+        "id": id,
+        "decision": if accorder { "allow" } else { "deny" },
+        "scope": "once"
+    });
+    // Accorder exige la preuve de présence de l'humain (ADR 0057) ; refuser non.
+    let tranchee = if accorder {
+        self::accorder(&socket, params)?
+    } else {
+        capd_rpc(&socket, "approval.resolve", params)?
+    };
     let phrase = if accorder {
         format!("Accordé : {resume}.")
     } else {
@@ -3637,6 +3753,8 @@ mod tests {
             vec!["prophet", "cap", "approvals"],
             vec!["prophet", "cap", "approve", "apr:01", "--scope", "task"],
             vec!["prophet", "cap", "deny", "apr:01"],
+            vec!["prophet", "cap", "code"],
+            vec!["prophet", "cap", "code", "--remplacer"],
             vec!["prophet", "cap", "revoke", "task:01"],
             vec!["prophet", "provider", "ls"],
             vec!["prophet", "provider", "login", "claude-code"],
