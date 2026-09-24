@@ -105,6 +105,11 @@ fn faux_codex(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathBu
                echo '{{\"item\":{{\"type\":\"agent_message\",\"text\":\"joint\"}}}}'\n\
                exit 0 ;;\n\
              esac\n\
+             case \"$1\" in *sans-retrait*)\n\
+               \"$P\" task call \"$PROPHET_TASK\" fs.write '{{\"path\":\"~/docs/code.txt\",\"content\":\"fn main() {{}}\"}}' >/dev/null\n\
+               echo '{{\"item\":{{\"type\":\"agent_message\",\"text\":\"parti sans se retirer\"}}}}'\n\
+               exit 0 ;;\n\
+             esac\n\
              case \"$1\" in *sonde*)\n\
                \"$P\" --json task ls >/dev/null 2>&1 && r=liste:permise || r=liste:refusee\n\
                \"$P\" task cancel autre >/dev/null 2>&1 && r=\"$r annulation:permise\" || r=\"$r annulation:refusee\"\n\
@@ -867,6 +872,40 @@ async fn un_modele_nomme_dans_une_delegation_peut_etre_un_client_officiel() {
         .await
         .unwrap_err();
     assert_eq!(refus.code, ErrorCode::NotFound, "{refus:?}");
+}
+
+/// Un client qui rejoint sa mission puis s'en va sans se retirer : le lanceur conclut la séance
+/// avec son texte, et la mission finit. Cette conclusion écrit au journal par les services
+/// synchrones, qui refusent de tourner sur un fil du runtime : conclue depuis un
+/// `spawn_blocking`, la mission finissait en échec (« journal final non confirmé ») — vu en CI
+/// quand une annulation perdait la course et devenait un échec.
+#[tokio::test]
+async fn un_client_parti_sans_se_retirer_voit_sa_mission_conclue_par_le_lanceur() {
+    if !cage_disponible() {
+        return;
+    }
+    let chain = Chain::new(vec![], true).await;
+    chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"partie","intent":"Écris ~/docs/code.txt sans-retrait","profile":"atelier","model":"codex"}),
+        )
+        .await
+        .unwrap();
+    chain
+        .client
+        .call("task.start", json!({"id":"partie"}))
+        .await
+        .unwrap();
+    let info = chain.attendre("partie").await;
+    assert_eq!(info["task"]["state"], "done", "{info}");
+    assert!(
+        info["result"]["text"]
+            .as_str()
+            .is_some_and(|t| t.contains("parti sans se retirer")),
+        "{info}"
+    );
 }
 
 /// L'humain annule une mission menée par un client : la séance est conclue et le client est

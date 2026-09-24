@@ -1337,32 +1337,48 @@ impl Agents {
         let jobs = self.jobs.clone();
         let mission = id.clone();
         let pilote = driver.clone();
-        tokio::task::spawn_blocking(move || {
-            use mcp_system::protocol::ErrorCode as Code;
-            let run = bloquer(async {
-                let client = Client::connect(&pilot_socket).await.map_err(|e| {
-                    (
-                        Code::SandboxError,
-                        format!("lanceur de pilotes injoignable : {e}"),
-                    )
-                })?;
-                let brut = client
-                    .call(
-                        pilotd::METHOD_RUN,
-                        serde_json::to_value(&requete).unwrap_or_default(),
-                    )
-                    .await
-                    .map_err(|e| (Code::SandboxError, format!("{pilote} : {}", e.message)))?;
-                serde_json::from_value::<pilotd::RunResult>(brut).map_err(|e| {
-                    (
-                        Code::SandboxError,
-                        format!("réponse illisible du lanceur : {e}"),
-                    )
+        let jobs_en_echec = self.jobs.clone();
+        // Un fil à lui, et non `spawn_blocking` : conclure la séance d'un client parti sans se
+        // retirer écrit au journal par les services synchrones, qui refusent un fil du runtime.
+        // Conclue de là, la mission finissait en échec (« journal final non confirmé »).
+        let lance = std::thread::Builder::new()
+            .name(format!("pilote-{id}"))
+            .spawn(move || {
+                use mcp_system::protocol::ErrorCode as Code;
+                let run = bloquer(async {
+                    let client = Client::connect(&pilot_socket).await.map_err(|e| {
+                        (
+                            Code::SandboxError,
+                            format!("lanceur de pilotes injoignable : {e}"),
+                        )
+                    })?;
+                    let brut = client
+                        .call(
+                            pilotd::METHOD_RUN,
+                            serde_json::to_value(&requete).unwrap_or_default(),
+                        )
+                        .await
+                        .map_err(|e| (Code::SandboxError, format!("{pilote} : {}", e.message)))?;
+                    serde_json::from_value::<pilotd::RunResult>(brut).map_err(|e| {
+                        (
+                            Code::SandboxError,
+                            format!("réponse illisible du lanceur : {e}"),
+                        )
+                    })
                 })
-            })
-            .map_err(|(_, message)| message);
-            conclure_pilote(&runtime, &etat, &seances, &jobs, &mission, &pilote, run);
-        });
+                .map_err(|(_, message)| message);
+                conclure_pilote(&runtime, &etat, &seances, &jobs, &mission, &pilote, run);
+            });
+        if let Err(erreur) = lance {
+            if let Ok(mut jobs) = jobs_en_echec.lock() {
+                jobs.remove(&id);
+                jobs.remove(&cle_de_pilote(&id));
+            }
+            return Err(Error::new(
+                ErrorCode::InternalError,
+                format!("fil du pilote impossible à lancer : {erreur}"),
+            ));
+        }
         Ok(
             json!({"id": id, "state": "planned", "driver": format!("driver:{driver}"), "launched": true}),
         )
