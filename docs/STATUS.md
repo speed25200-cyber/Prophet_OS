@@ -1825,6 +1825,9 @@ donne le détail.
   (`9b2ae68`) ; un essai rend la course déterministe (rouge avant, vert après), et la suite
   `pilot` passe 65 fois d'affilée, dont 15 sous charge. Un échec isolé, juste avant cette série,
   n'a pas pu être reproduit ni lu : à surveiller.
+- Réseau d'un client visible avant le lancement : `task.inspect` rend `client_hosts`, les hôtes
+  que le jeton réseau du client permettra (`554f11b`), et « Plan & accès » les montre sous
+  « Réseau du client » (`6f76f4e`, sans capture : les essais de rendu n'ont pas de lanceur).
 - `just check` : **973 réussis, 0 échec, 70 ignorés** (sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,

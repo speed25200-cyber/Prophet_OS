@@ -64,6 +64,8 @@ réseau du client ne sort que par egress :
 - egress inscrit chaque décision au journal de la mission (`net.request` : hôte, méthode,
   octets, statut ; `net.deny` et `net.exfil_suspected` : hôte et motif), et l'onglet Parcours
   de la surface les montre dans la frise des gestes : l'humain voit où son client est sorti ;
+  avant même le lancement, `task.inspect` rend les hôtes du jeton (`client_hosts`), que l'onglet
+  « Plan & accès » montre ;
 - Claude Code reçoit son réglage documenté `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` : ni
   télémétrie, ni rapport d'erreur, ni mise à jour automatique en mission.
 

@@ -20,7 +20,7 @@
 | `task.start` | Lance en arrière-plan une mission de niveau 0 : sur le moteur local du service, ou, si le plan désigne un client officiel, par le lanceur de pilotes de la session (le client rejoint la mission par le pont, la réponse revient aussitôt, la mission se suit par `task.inspect`) |
 | `task.list` | Rend les tâches et leurs budgets observés |
 | `task.status` | Rend une tâche par identifiant |
-| `task.inspect` | Rend tâche, plan, résultat et commandes possibles, sans jeton |
+| `task.inspect` | Rend tâche, plan, résultat et commandes possibles, sans jeton ; pour une mission menée par un client officiel, `client_hosts` : les hôtes vers lesquels son réseau pourra sortir par egress (ADR 0056) |
 | `task.result` | Rend le résultat conservé ; erreur tant qu'il n'est pas disponible |
 | `task.change` | Rend les versions vérifiées d'un fichier au créateur de la mission terminée |
 | `task.cancel` | Demande l'arrêt d'une mission active ou annule un plan non lancé |
