@@ -548,6 +548,23 @@ fn plan(ui: &mut egui::Ui, info: &Inspection, busy: bool, command: &mut Option<A
         ui.add_space(10.0);
         grants(ui);
     }
+    // Le réseau d'un client officiel : son jeton ne le laisse sortir, par egress, que vers ces
+    // hôtes (ADR 0056), et chaque sortie s'inscrit au parcours.
+    if let Some(hotes) = &info.client_hosts {
+        ui.add_space(12.0);
+        label(ui, "RÉSEAU DU CLIENT");
+        ui.label(
+            RichText::new(format!(
+                "Sort seulement par egress, vers : {}",
+                limited(&hotes.join(", "), 600)
+            ))
+            .size(13.0),
+        );
+        small(
+            ui,
+            "Toute autre destination est refusée ; chaque sortie et chaque refus paraissent dans le parcours.",
+        );
+    }
     ui.add_space(14.0);
     ui.separator();
     ui.add_space(12.0);
