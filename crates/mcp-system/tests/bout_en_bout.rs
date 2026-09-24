@@ -268,6 +268,18 @@ fn l_agent_peut_connaitre_ses_propres_droits() {
     assert_eq!(structured["task"], json!("task:01"));
     assert_eq!(structured["sandbox_level"], json!(1));
     assert_eq!(structured["grants"].as_array().unwrap().len(), 6);
+    // La fin de validité du jeton, pour qu'un agent finisse avant qu'elle n'arrive.
+    assert_eq!(
+        structured["token_expires_at"],
+        json!(
+            m.context
+                .token
+                .exp
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap()
+        )
+    );
+    assert!(structured["token_expires_in_s"].as_i64().unwrap() >= 0);
 }
 
 #[test]

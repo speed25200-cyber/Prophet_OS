@@ -109,7 +109,8 @@ réseau, aucun programme choisi par l'agent. Voir l'[ADR 0028](../adr/0028-lectu
 
 Dans une mission d'agentd, comme dans la séance d'outils d'un client de l'humain,
 `task.status {}` rend la tâche, l'agent, l'étape, le niveau d'isolation, le dossier de travail,
-les capacités accordées et le budget : `limits`, `spent` et `remaining` en étapes, tokens et
+les capacités accordées, la fin de validité du jeton (`token_expires_at`, RFC 3339, et
+`token_expires_in_s`) et le budget : `limits`, `spent` et `remaining` en étapes, tokens et
 secondes. `task.diff {}` rend les fichiers ajoutés, modifiés et supprimés dans le travail de la
 tâche, et leur rendu, sans rien appliquer. Tous deux exigent `tool.call` sur leur nom, ne lisent
 que la mission elle-même et ne changent rien : un agent qui sait ce qu'il lui reste et ce qu'il
