@@ -1772,6 +1772,10 @@ donne le détail.
   réelle Qwen3 sous NixOS, sept services, système installé (UEFI et BIOS), ISO et installeur.
   Onzième passage du banc, sans changement du chemin des outils : **Prophet 18/45, boucle nue
   11/45** (Qwen3 1.7B), 11/15 contre 12/15 (Qwen3 4B) — le bruit de l'échantillonnage.
+- CI de `def90b3` (clients officiels en cage, réseau par egress, ADR 0056) : **verte des deux
+  côtés** ; le coureur d'isolation exige et réussit les essais de la cage et de son réseau
+  (« Clients officiels en cage », lanceur et missions de bout en bout). Douzième passage du banc :
+  **Prophet 20/45, boucle nue 13/45** (Qwen3 1.7B), 11/15 des deux côtés (Qwen3 4B).
 - `just check` : **957 réussis, 0 échec, 69 ignorés** (cage des clients et leur réseau par egress, ADR 0056), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
