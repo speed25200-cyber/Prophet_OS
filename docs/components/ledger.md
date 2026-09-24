@@ -25,6 +25,13 @@ paramètres sont ignorés : le journal les calcule. Sans cela, le chaînage ne p
 Le scellement a lieu tous les 256 événements, **après** l'écriture. Sceller une tête qu'on n'a pas
 encore écrite signerait une chaîne qui n'existe pas.
 
+`ledger.query` rend les événements dans l'ordre du journal, les plus anciens d'abord ; `limit`
+coupe par le début. Pour suivre une tâche, on relit donc à partir du dernier numéro lu
+(`since_seq`) : cette lecture ne touche que les fichiers et les lignes que l'index désigne, sans
+relire les jours précédents. Une écriture sait où elle tombe sans relire le fichier du jour — egress
+inscrit chaque connexion, et l'écriture ne doit pas ralentir au fil des heures (15 000 événements
+dans la journée : 100 écritures en 0,5 ms, les 10 derniers relus en 2 ms).
+
 ## Ce qu'il refuse
 
 - Un type d'événement hors du vocabulaire de `docs/specs/ledger-event.md`.

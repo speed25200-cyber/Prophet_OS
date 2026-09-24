@@ -1794,7 +1794,38 @@ donne le détail.
   réunissent sur une ligne qui les compte, et les pastilles comptent chaque sortie et chaque
   refus (`d4e67e7`) ; le « dernier geste » de l'en-tête passe les sorties relayées sans histoire
   mais montre un refus réseau (`b574d11`). Voir l'[audit visuel](reports/audit-visuel-2026-09-23.md).
-- `just check` : **962 réussis, 0 échec, 70 ignorés** (sorties réseau au journal et dans le parcours, réunies ; mouvement réduit), format, clippy, contrôles
+- Longues missions (24 septembre) : `ledger.query` rend les événements les plus anciens d'abord,
+  et la surface n'en lisait qu'une page de quatre cents — passé ce nombre, que les sorties réseau
+  d'un client officiel atteignent vite, la frise et le dernier geste se figeaient sur le début de
+  la mission. La surface relit maintenant à partir du dernier événement lu, par pages, et construit
+  le parcours par ajouts ; la frise montre les deux cents derniers gestes (`bd73d02`, éprouvé avec
+  le vrai journal sur mille gestes, rouge avant). L'outil `ledger.query` des agents annonçait
+  `kinds` et `limit` sans les appliquer et rendait tout le journal au modèle : il rend désormais
+  les derniers événements (50 par défaut, 500 au plus), filtrés par type, avec leur compte
+  (`5e14383`). En ligne de commande, `prophet log tail` et `log replay` résument chaque sortie
+  par son hôte, sa méthode et son statut, chaque refus par son hôte et son motif (`4828dc3`).
+  Le journal lui-même : chaque écriture recomptait le fichier du jour et chaque relecture
+  `since_seq` analysait tout le journal ; à 15 000 événements dans la journée, 100 écritures
+  passent de 153 ms à 0,5 ms et relire les 10 derniers de 18 ms à 2 ms (`f0b5e3b`).
+- Ce que les outils rendent aux agents (24 septembre) : un audit des outils de mcp-system a
+  relevé des sorties sans borne et des paramètres annoncés mais ignorés. L'arbre d'une page web
+  (`web.open`, `web.tree`, `web.act`) est borné comme celui du bureau — 500 nœuds, 4 000
+  caractères par texte, `truncated` dit ce qui manque (`e378cb1`, `6a5b5d5`) ;
+  `memory.search` rend 50 entrées au plus ; `memory.remember` refuse un texte de plus de 4 000
+  caractères et retient enfin ses `tags` ; `notify.human` valide et rend son urgence ; `task.diff`
+  s'arrête à 200 changements, comptes entiers (`ccceaea`, `45a992f`). Reste relevé : le résultat
+  d'une sous-mission (`task.delegate`) remonte entier, et le moteur local envoie le dernier
+  résultat d'outil entier tant qu'il ne connaît pas sa fenêtre (il l'apprend au premier refus).
+- CI de `fb8737a` : le coureur d'isolation a vu une mission annulée finir en **échec**
+  (« journal final non confirmé : les services synchrones exigent un thread de travail »). Vraie
+  cause, pas un aléa : le travail d'un client officiel tournait dans un `spawn_blocking`, qui
+  porte le contexte du runtime ; quand il concluait lui-même la séance (client parti sans se
+  retirer, ou annulation qui perd la course), l'écriture finale au journal était refusée et la
+  mission passait de « done » ou « cancelled » à « failed ». Il tourne sur un fil à lui
+  (`9b2ae68`) ; un essai rend la course déterministe (rouge avant, vert après), et la suite
+  `pilot` passe 65 fois d'affilée, dont 15 sous charge. Un échec isolé, juste avant cette série,
+  n'a pas pu être reproduit ni lu : à surveiller.
+- `just check` : **973 réussis, 0 échec, 70 ignorés** (sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   6 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.

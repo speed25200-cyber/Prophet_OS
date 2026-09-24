@@ -143,7 +143,9 @@ pour 502, `SandboxError` sinon). Sans socket configuré, l'outil échoue sans é
 
 Les outils `web.*` s'adossent au pont CDP (`browser-bridge`) et n'existent que si le service
 nomme un programme de navigateur. `web.open {url, detail?}` exige `net.egress` sur l'hôte et
-rend l'arbre SUP de la page ; `web.tree {detail?}` exige `ui.read browser` ; `web.act {action,
+rend l'arbre SUP de la page, borné comme celui du bureau (500 nœuds dans l'ordre du document,
+4 000 caractères par texte ; `nodes` compte la page entière, `truncated` ce qui manque) ;
+`web.tree {detail?}` exige `ui.read browser` ; `web.act {action,
 node?, value?}` exige `ui.act browser`, avec `click`, `set_field` et `submit` ; seul `submit`
 est externe et demande une décision. Le profil du navigateur est propre à la tâche, dans l'état
 privé du service, où les outils déposent aussi l'observation courante (adresse, titre, nombre
