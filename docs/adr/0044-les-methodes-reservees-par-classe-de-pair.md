@@ -76,6 +76,10 @@ le pourrait donc s'il exécutait un programme qui appelle `approval.resolve` ; d
 surface d'un autre programme du même compte demande un chemin de confiance que l'OS n'a pas
 encore, ou le confinement du client que l'ADR 0026 laisse ouvert. agentd garde ses contrôles
 propres (créateur constaté pour publier, annuler, examiner).
+**Tranché le 24 septembre 2026 avec l'utilisateur** : `task.spawn` reste tel quel ; accorder une
+approbation exige désormais le code d'approbation de l'humain, que capd vérifie, et un
+programme de sa session ne peut plus accorder à sa place
+([ADR 0057](0057-accorder-exige-le-code-d-approbation.md)).
 L'essai NixOS des services vérifie, sous le compte de l'humain, la lecture permise, les refus
 de `cap.mint`, `ledger.append` et `sandbox.run`, qu'il ne peut ni retirer ni renommer
 `capd.sock`, ni le remplacer pendant que capd est arrêté, et que capd repart sur son nom.

@@ -18,6 +18,7 @@ mod approvals;
 mod broker;
 pub mod enforce;
 mod policy;
+pub mod presence;
 
 pub use approvals::{
     Approval, ApprovalScope, ApprovalState, Approvals, Decision as ApprovalDecision,

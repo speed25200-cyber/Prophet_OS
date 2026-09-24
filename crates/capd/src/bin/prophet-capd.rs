@@ -22,6 +22,8 @@ use tokio::sync::Mutex;
 struct Capd {
     broker: Mutex<Broker>,
     pairs: commun::Pairs,
+    /// Le code d'approbation de l'humain et les tickets de présence (ADR 0057).
+    presence: Mutex<capd::presence::Presence>,
 }
 
 impl Handler for Capd {
@@ -161,6 +163,28 @@ impl Handler for Capd {
                 let id = commun::texte(&params, "id")?;
                 let decision = decision(&commun::texte(&params, "decision")?)?;
                 let portee = portee(&params)?;
+                // Accorder depuis la session de l'humain exige la preuve de sa présence : un
+                // ticket, ou son code (ADR 0057). Refuser reste ouvert : cela ne fait que bloquer.
+                if decision == capd::ApprovalDecision::Allow
+                    && self.pairs.classe(pair) == Some(commun::Classe::Humain)
+                {
+                    let mut presence = self.presence.lock().await;
+                    let preuve = match (
+                        params.get("ticket").and_then(Value::as_str),
+                        params.get("code").and_then(Value::as_str),
+                    ) {
+                        (Some(ticket), _) => presence.valider(pair.uid, ticket, maintenant),
+                        (None, Some(code)) => {
+                            presence.prouver(pair.uid, code, maintenant).map(|_| ())
+                        }
+                        (None, None) if !presence.defini() => Err(capd::presence::Refus::NonDefini),
+                        (None, None) => Err(capd::presence::Refus::TicketInvalide),
+                    };
+                    if let Err(refus) = preuve {
+                        tracing::warn!(uid = pair.uid, %id, %refus, "accord sans preuve de présence");
+                        return Err(refus_de_presence(&refus));
+                    }
+                }
                 let mut broker = self.broker.lock().await;
                 let tranchee = broker
                     .approvals_mut()
@@ -170,6 +194,43 @@ impl Handler for Capd {
                     })?;
                 tracing::info!(%id, ?decision, "approbation tranchée");
                 commun::repondre(&tranchee)
+            }
+
+            // La preuve de présence : un code juste rend un ticket de dix minutes pour ce compte,
+            // que la surface garde en mémoire (ADR 0057).
+            "approval.presence" => {
+                let code = commun::texte(&params, "code")?;
+                let mut presence = self.presence.lock().await;
+                let (ticket, fin) = presence
+                    .prouver(pair.uid, &code, maintenant)
+                    .map_err(|refus| refus_de_presence(&refus))?;
+                Ok(json!({
+                    "ticket": ticket,
+                    "expires_in_s": (fin - maintenant).whole_seconds(),
+                }))
+            }
+
+            // Définir le code une première fois, ou le changer en donnant l'ancien ; root le
+            // remplace sans l'ancien, pour un humain qui l'aurait oublié.
+            "approval.set_code" => {
+                let code = commun::texte(&params, "code")?;
+                let ancien = params.get("current").and_then(Value::as_str);
+                let administrateur = self.pairs.classe(pair) == Some(commun::Classe::Soi);
+                let mut presence = self.presence.lock().await;
+                presence
+                    .definir(&code, ancien, administrateur, maintenant)
+                    .map_err(|refus| refus_de_presence(&refus))?;
+                tracing::info!(uid = pair.uid, administrateur, "code d'approbation défini");
+                Ok(json!({ "defined": true }))
+            }
+
+            // Ce que la surface et la CLI doivent savoir avant de demander le code.
+            "approval.code_status" => {
+                let presence = self.presence.lock().await;
+                Ok(json!({
+                    "defined": presence.defini(),
+                    "locked_s": presence.verrou_restant(maintenant),
+                }))
             }
 
             // Les demandes périmées cessent d'attendre. Une approbation qu'on ne peut plus
@@ -204,9 +265,27 @@ fn acces(methode: &str) -> commun::Acces {
     match methode {
         "cap.mint" | "cap.delegate" | "cap.check" | "approval.request" | "approval.explain"
         | "approval.expire" => commun::Acces::Services,
-        "approval.resolve" => commun::Acces::Humains,
+        "approval.resolve" | "approval.presence" | "approval.set_code" => commun::Acces::Humains,
         _ => commun::Acces::Tous,
     }
+}
+
+/// Un refus de la preuve de présence, avec de quoi réagir : `presence` dit lequel (`undefined`,
+/// `required`, `wrong`, `locked`, `too_short`, `current_required`), et les nombres utiles.
+fn refus_de_presence(refus: &capd::presence::Refus) -> Error {
+    use capd::presence::Refus;
+    let donnees = match refus {
+        Refus::NonDefini => json!({"presence": "undefined"}),
+        Refus::TicketInvalide => json!({"presence": "required"}),
+        Refus::Faux { restants } => json!({"presence": "wrong", "remaining": restants}),
+        Refus::Verrouille { secondes } => json!({"presence": "locked", "seconds": secondes}),
+        Refus::TropCourt => json!({"presence": "too_short"}),
+        Refus::AncienRequis => json!({"presence": "current_required"}),
+        Refus::Stockage(_) => {
+            return Error::new(ErrorCode::InternalError, refus.to_string());
+        }
+    };
+    Error::with_data(ErrorCode::Unauthorized, refus.to_string(), donnees)
 }
 
 /// Le jeton présenté par l'appelant.
@@ -348,10 +427,14 @@ async fn main() -> anyhow::Result<()> {
     let serveur = Server::bind(&socket)?;
     tracing::info!(socket = %socket.display(), "capd écoute");
 
+    // Le code d'approbation vit dans l'état du service, que la session de l'humain ne lit pas.
+    let presence = capd::presence::Presence::ouvrir(etat.join("code-approbation"))?;
+
     serveur
         .serve(Arc::new(Capd {
             broker: Mutex::new(broker),
             pairs: commun::Pairs::detecter()?,
+            presence: Mutex::new(presence),
         }))
         .await?;
     Ok(())
@@ -393,6 +476,9 @@ mod tests {
             assert_eq!(acces(methode), Services, "{methode}");
         }
         assert_eq!(acces("approval.resolve"), Humains);
+        assert_eq!(acces("approval.presence"), Humains);
+        assert_eq!(acces("approval.set_code"), Humains);
+        assert_eq!(acces("approval.code_status"), Tous);
         for methode in [
             "cap.public_key",
             "cap.revoke",

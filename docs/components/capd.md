@@ -21,7 +21,10 @@ politique Cedar qui l'autorise : les deux doivent dire oui.
 | `approval.status` | L'état d'une demande, en attente ou tranchée depuis moins d'une heure (ADR 0041) |
 | `approval.explain` | Joint à une demande en attente le motif du modèle (`reason`, une phrase, 400 caractères au plus) |
 | `approval.rules` | Les règles permanentes issues des décisions de portée `task` ou `agent` |
-| `approval.resolve` | Tranche une demande ; portée `once` (défaut), `task` ou `agent` |
+| `approval.resolve` | Tranche une demande ; portée `once` (défaut), `task` ou `agent`. Accorder exige, sous le compte de l'humain, un `ticket` de présence ou le `code` (ADR 0057) |
+| `approval.presence` | Échange le code d'approbation contre un ticket de présence, valable dix minutes pour ce compte |
+| `approval.set_code` | Définit le code d'approbation, puis le change en donnant l'ancien (`current`) ; `root` le remplace sans |
+| `approval.code_status` | Dit si le code est défini, et le verrou qui reste après cinq codes faux (`defined`, `locked_s`) |
 | `approval.expire` | Retire les demandes périmées |
 
 Un **refus est une réponse**, pas une erreur de protocole : `cap.check` rend une décision avec son
@@ -37,8 +40,22 @@ un appel malformé pour une politique appliquée.
   expirer une approbation : ces méthodes reviennent aux services (groupe principal
   `prophet-system`). Un service qui voudrait trancher une approbation : cela revient à l'humain.
   Voir l'[ADR 0044](../adr/0044-les-methodes-reservees-par-classe-de-pair.md).
+- Un humain qui voudrait **accorder** sans preuve de présence : sans `ticket` valide ni `code`
+  juste, l'erreur `-32001` porte `presence` — `undefined` (aucun code encore choisi),
+  `required`, `wrong` (avec les essais restants) ou `locked` (avec les secondes restantes). Un
+  programme de sa session ne connaît pas le code et ne peut plus accorder à sa place ;
+  **refuser** reste ouvert sans code, pour que la voix « refuse » coupe toujours. Voir
+  l'[ADR 0057](../adr/0057-accorder-exige-le-code-d-approbation.md).
 - Un jeton signé par une autre clé — motif `bad_signature`.
 - Une portée d'approbation inconnue ; le défaut est la plus étroite, jamais la plus large.
+
+## Le code d'approbation
+
+capd n'en garde que l'empreinte (sel aléatoire, dérivation blake3 répétée) dans
+`/var/lib/prophet/capd/code-approbation`, en `0600` : la session de l'humain ne la lit pas. Six
+caractères au moins. Cinq codes faux verrouillent la preuve cinq minutes ; les tickets de
+présence vivent en mémoire et meurent avec le service. `prophet cap code` le définit ou le
+change ; un code oublié se remplace par l'administrateur (`sudo prophet cap code --remplacer`).
 
 ## Quand il n'est pas là
 
