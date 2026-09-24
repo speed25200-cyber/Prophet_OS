@@ -94,7 +94,34 @@ let
         refus = code("/run/prophet/sandboxd.sock", "sandbox.run", {})
         assert refus == -32001, f"sandbox.run accepté sous le compte de l'humain : {refus}"
         assert code("/run/prophet/sandboxd.sock", "sandbox.capabilities", {}) is None
-        print("droits : lecture permise ; émission et écriture du journal refusées")
+        # Accorder exige le code d'approbation de l'humain (ADR 0057). La preuve passe avant la
+        # demande : sans elle, même une demande inconnue est refusée pour ce motif.
+        def erreur(chemin, methode, params):
+            s = socket.socket(socket.AF_UNIX)
+            s.connect(chemin)
+            s.sendall((json.dumps({
+                "jsonrpc": "2.0", "id": 1, "method": methode, "params": params
+            }) + "\n").encode())
+            return json.loads(s.makefile().readline()).get("error") or {}
+        capd = "/run/prophet/capd.sock"
+        accord = {"id": "apr-inconnue", "decision": "allow", "scope": "once"}
+        e = erreur(capd, "approval.resolve", accord)
+        assert e.get("code") == -32001 and e.get("data", {}).get("presence") == "undefined", e
+        # Refuser reste ouvert : la demande inconnue est seulement dite introuvable.
+        e = erreur(capd, "approval.resolve", {**accord, "decision": "deny"})
+        assert e and e.get("code") != -32001, e
+        assert erreur(capd, "approval.set_code", {"code": "pivoine-42"}) == {}
+        e = erreur(capd, "approval.set_code", {"code": "glycine-7"})
+        assert e.get("data", {}).get("presence") == "current_required", e
+        e = erreur(capd, "approval.resolve", {**accord, "code": "faux-faux"})
+        assert e.get("data", {}).get("presence") == "wrong", e
+        e = erreur(capd, "approval.resolve", {**accord, "ticket": "invente"})
+        assert e.get("data", {}).get("presence") == "required", e
+        ticket = appeler(capd, "approval.presence", {"code": "pivoine-42"})["ticket"]
+        e = erreur(capd, "approval.resolve", {**accord, "ticket": ticket})
+        assert e and e.get("code") != -32001, e
+        print("droits : lecture permise ; émission et écriture du journal refusées ; "
+              "accorder exige le code d'approbation")
         raise SystemExit(0)
 
     if len(sys.argv) > 1 and sys.argv[1] == "options":

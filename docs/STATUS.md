@@ -1852,7 +1852,16 @@ donne le détail.
   surface peint restait muet pour un lecteur d'écran — état des clients officiels, relevés et
   heure de l'en-tête, cadrans d'une mission, échelle d'isolation. Chacun porte une phrase, et un
   essai l'exige sur les pages Missions, Modèles et Système (`88e0c6b`, rouge avant).
-- `just check` : **975 réussis, 0 échec, 72 ignorés** (sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
+- Décisions de l'utilisateur (24 septembre 2026) : `task.spawn` reste tel quel ; **accorder une
+  approbation exige le code d'approbation de l'humain** (ADR 0057). capd n'en garde que
+  l'empreinte (blake3 répétée, salée, `0600` dans son état) ; `approval.presence` rend un ticket
+  de dix minutes, `approval.resolve` avec `allow` l'exige sous le compte de l'humain, refuser
+  reste ouvert ; cinq codes faux verrouillent cinq minutes. La surface demande le code dans la
+  décision (champ masqué, ticket gardé en mémoire), la CLI au terminal sans écho,
+  `prophet cap code` le définit. Essais : logique de l'empreinte, du verrou et des tickets
+  (capd), dialogue de la surface avec un faux capd, rendu de la fenêtre à 1280 et 640 px,
+  refus sans code sous le compte de l'humain dans l'essai NixOS des services.
+- `just check` : **980 réussis, 0 échec, 73 ignorés** (code d'approbation ; sorties réseau au journal et dans le parcours ; longues missions ; journal rapide ; outils bornés ; conclusion des clients hors du runtime), format, clippy, contrôles
   du dépôt et secrets (repli) ; les 19 parcours de rendu du bureau passent avec
   `--include-ignored`. Parcours de la surface avec `--include-ignored` : 15 du bureau, 6 de rendu,
   6 de missions avec vrais services, 2 de branchement, 1 de préparation, tous réussis.
@@ -1861,13 +1870,11 @@ donne le détail.
 de la réserve de microVM tournent sur le coureur KVM de la CI, qui les a verdis), pas de carte
 graphique (fluidité et consommation réelles à mesurer avec `prophet-surface --mesure` et
 `--repos`). Le premier appel réel de Jev
-attend une clé. Aucun compte Claude, ChatGPT ou Codex n'est connecté. `task.spawn` d'agentd
-accepte toujours un manifeste brut du compte de l'humain (c'est ce que fait `prophet task new`) :
-depuis l'ADR 0056, un client officiel en mission ne l'atteint plus (son seul socket ne mène qu'à
-sa séance), si bien que cette voie n'est plus ouverte qu'aux programmes que l'humain lance
-lui-même ; la réserver aux profils du catalogue reste un choix à faire avec lui. De même pour
-`approval.resolve` (ADR 0044) : la cage retire `capd.sock` aux clients, et seul un programme de
-l'humain hors de toute mission peut encore trancher à sa place.
+attend une clé. Aucun compte Claude, ChatGPT ou Codex n'est connecté. Les deux décisions
+laissées à l'utilisateur sont prises (ADR 0057) : `task.spawn` reste tel quel, accorder exige
+le code d'approbation. Un programme de la session peut encore **refuser** à la place de
+l'humain (un blocage, jamais une élévation) ; la preuve sous le compte de l'humain n'est
+éprouvée qu'en VM, par la CI.
 
 **Écart relevé, résorbé.** M8-T4 à M8-T6 étaient cochés pour la ligne de commande,
 l'environnement et la détection de session, alors que `prophet-pilotd` lançait les clients sans
@@ -1884,10 +1891,9 @@ avec un client connecté.
 carte graphique : mesurer la surface avec les mêmes commandes que l'audit du 23 septembre
 (`prophet-surface --mesure 120 --champ-complet`, `--repos 150`) et la mémoire et la VRAM des
 poids, où l'estimation de l'ADR 0047 vaudra pour les couches déchargées. Avec l'utilisateur :
-décider du confinement des clients officiels (M8-T4) ; trancher le sort de `task.spawn` pour le
-compte de l'humain, et le chemin de confiance qui distinguerait la surface d'un autre programme
-du compte pour `approval.resolve` (ADR 0044) ; faire le premier appel réel de Jev avec une clé
-déposée. Côté banc, Prophet plafonne avec Qwen3 1.7B (18 à 21 sur 45) : le prochain gain viendra
+confirmer les listes d'hôtes des clients officiels avec un client connecté, et choisir le code
+d'approbation sur la machine réelle (`prophet cap code`) ; faire le premier appel réel de Jev
+avec une clé déposée. Côté banc, Prophet plafonne avec Qwen3 1.7B (18 à 21 sur 45) : le prochain gain viendra
 d'un modèle plus grand servi par défaut, ou d'une suite élargie aux tâches avec navigateur.
 
 ### 15 septembre 2026, nuit et matin : l'ISO installée dans une machine virtuelle, deux fautes
@@ -2089,10 +2095,10 @@ Les pilotes de clients officiels sont testés jusqu'à la limite de ce qui est v
 session, la surface). Émettre, déléguer ou vérifier un droit, demander une approbation, écrire ou
 sceller le journal, lancer un programme sous sandboxd reviennent aux services ; trancher une
 approbation revient à l'humain ; `/run/prophet` est collant, pour qu'aucun membre ne retire le
-socket d'un autre. Reste ouvert : un processus du compte de l'humain — un client officiel lancé par `prophet-pilotd`
-compris — peut encore trancher une approbation comme l'humain lui-même, et faire planifier par
-`task.spawn` une mission sous un manifeste de sa main (visible, journalisée, lancée à part) ;
-réserver l'humain aux profils du catalogue est à décider avec l'utilisateur. memoryd réserve
+socket d'un autre. Accorder exige en plus le code d'approbation de l'humain (ADR 0057) : un
+processus de son compte ne peut plus accorder à sa place, et un client officiel en mission ne
+voit plus capd (ADR 0056). `task.spawn` accepte toujours un manifeste de sa main (visible,
+journalisé, lancé à part) : l'utilisateur a choisi de le garder. memoryd réserve
 l'écriture d'un souvenir aux services ; vault et egress gardent leurs contrôles propres, qui
 suffisent.
 
