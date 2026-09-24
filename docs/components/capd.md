@@ -14,7 +14,7 @@ politique Cedar qui l'autorise : les deux doivent dire oui.
 |---|---|
 | `cap.mint` | Émet le jeton racine d'une tâche : l'intersection de ce qu'elle demande et de ce que son manifeste plafonne |
 | `cap.check` | Contrôle d'accès complet — signature, chaîne de parents, expiration, politique, grant, classe d'action |
-| `cap.revoke` | Révoque un sujet ; ses jetons et leurs enfants cessent d'être valides |
+| `cap.revoke` | Révoque un sujet ; ses jetons et leurs enfants cessent d'être valides, y compris après un redémarrage |
 | `cap.public_key` | La clé publique, pour vérifier un jeton sans repasser par ici |
 | `approval.request` | Soumet à un humain une action refusée faute de décision |
 | `approval.pending` | Les demandes en attente, les plus anciennes d'abord |
@@ -48,6 +48,17 @@ un appel malformé pour une politique appliquée.
   l'[ADR 0057](../adr/0057-accorder-exige-le-code-d-approbation.md).
 - Un jeton signé par une autre clé — motif `bad_signature`.
 - Une portée d'approbation inconnue ; le défaut est la plus étroite, jamais la plus large.
+
+## Ce qui survit au redémarrage
+
+La clé de signature, le code d'approbation et les **révocations** : `cap.revoke` inscrit le
+sujet dans `/var/lib/prophet/capd/revocations.jsonl` (une ligne par sujet, ajoutée puis
+synchronisée, `0600`) avant de répondre, et capd relit ce registre avant d'accepter son premier
+appel. Sans lui, le jeton racine d'une mission révoquée redevenait valide jusqu'à son
+expiration. Une dernière ligne interrompue (révocation jamais confirmée) est retirée ; toute
+autre ligne illisible empêche le démarrage : capd ne devine pas ce qu'il a révoqué. Les jetons
+délégués avant un redémarrage cessent de valoir, leurs parents n'étant plus au registre des
+jetons émis : c'est le sens sûr.
 
 ## Le code d'approbation
 
