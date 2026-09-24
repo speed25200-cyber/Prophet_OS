@@ -18,6 +18,7 @@ pub mod local;
 pub mod poids;
 pub mod preparation;
 pub mod relay;
+pub mod reseau;
 pub mod runtime;
 pub mod task;
 

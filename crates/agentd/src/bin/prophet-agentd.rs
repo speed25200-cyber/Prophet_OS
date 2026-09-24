@@ -67,6 +67,8 @@ struct Agents {
     etat: std::path::PathBuf,
     /// Les téléchargements de poids du catalogue du système (ADR 0046).
     pulls: agentd::poids::Pulls,
+    /// Hôtes que l'administrateur ajoute à ceux de l'éditeur de chaque client (ADR 0056).
+    hotes_des_clients: BTreeMap<String, Vec<String>>,
     pairs: commun::Pairs,
 }
 
@@ -1300,12 +1302,34 @@ impl Agents {
             jobs.insert(cle, Arc::new(AtomicBool::new(false)));
         }
         let (client, palier) = palier_de(&driver);
+        // Le réseau du client : un jeton de capd borné aux hôtes de son éditeur, que le lanceur
+        // pose sur chaque requête de la cage vers egress (ADR 0056). Sans hôte, pas de réseau.
+        let hotes = agentd::reseau::hotes(client, &self.hotes_des_clients);
+        let egress_token = match jeton_de_sortie(
+            &self.capd,
+            client,
+            &id,
+            &format!("uid:{uid}"),
+            &hotes,
+            wall_time_s,
+        )
+        .await
+        {
+            Ok(jeton) => jeton,
+            Err(erreur) => {
+                if let Ok(mut jobs) = self.jobs.lock() {
+                    jobs.remove(&cle_de_pilote(&id));
+                }
+                return Err(Error::new(ErrorCode::SandboxError, erreur));
+            }
+        };
         let requete = pilotd::RunRequest {
             task: id.clone(),
             driver: client.to_owned(),
             model: palier.map(str::to_owned),
             intent,
             wall_time_s,
+            egress_token,
         };
         let runtime = self.runtime.clone();
         let etat = self.etat.clone();
@@ -1636,6 +1660,7 @@ impl Agents {
             sandboxd: self.sandboxd.clone(),
             jobs: self.jobs.clone(),
             seances: self.seances.clone(),
+            hotes_des_clients: self.hotes_des_clients.clone(),
         }))
     }
 }
@@ -1658,6 +1683,47 @@ struct DelegationContext {
     jobs: Arc<std::sync::Mutex<BTreeMap<String, Arc<AtomicBool>>>>,
     /// Les séances ouvertes : une sous-mission confiée à un client officiel y a la sienne.
     seances: Seances,
+    /// Hôtes ajoutés à ceux de l'éditeur de chaque client (ADR 0056).
+    hotes_des_clients: BTreeMap<String, Vec<String>>,
+}
+
+/// Le jeton de sortie d'un client en mission (ADR 0056) : `net.egress` vers les seuls hôtes de
+/// son éditeur, émis par capd pour la mission, et mis en forme pour l'en-tête que le lanceur
+/// pose sur chaque requête de la cage vers egress. `None` sans hôte : la cage n'a alors aucun
+/// réseau.
+async fn jeton_de_sortie(
+    capd: &std::path::Path,
+    client: &str,
+    mission: &str,
+    utilisateur: &str,
+    hotes: &[String],
+    duree_s: u64,
+) -> Result<Option<String>, String> {
+    if hotes.is_empty() {
+        return Ok(None);
+    }
+    let manifeste = agentd::reseau::manifeste(client, hotes)?;
+    let capd = Client::connect(capd)
+        .await
+        .map_err(|e| format!("capd injoignable ({e}) : le client n'aurait pas de réseau"))?;
+    let brut = capd
+        .call(
+            "cap.mint",
+            json!({
+                "manifest": manifeste,
+                "grants": agentd::reseau::grants(hotes),
+                "task": mission,
+                "user": utilisateur,
+                "ttl_seconds": i64::try_from(duree_s)
+                    .unwrap_or(i64::MAX)
+                    .saturating_add(agentd::reseau::MARGE_SECONDES),
+            }),
+        )
+        .await
+        .map_err(|e| format!("jeton de sortie du client refusé par capd : {}", e.message))?;
+    let jeton: Token = serde_json::from_value(brut)
+        .map_err(|e| format!("jeton illisible rendu par capd : {e}"))?;
+    agentd::reseau::en_tete(&jeton).map(Some)
 }
 
 fn delegation_fn(ctx: Arc<DelegationContext>) -> agentd::local::Delegate {
@@ -2210,12 +2276,19 @@ fn deleguer_pilote(
     let run = {
         let pilot = pilot_socket.clone();
         let (client, palier) = palier_de(driver);
+        let hotes = agentd::reseau::hotes(client, &ctx.hotes_des_clients);
+        let egress_token = bloquer(async {
+            jeton_de_sortie(&ctx.capd, client, child_id, user, &hotes, wall_time_s)
+                .await
+                .map_err(|e| (Code::SandboxError, e))
+        })?;
         let requete = pilotd::RunRequest {
             task: child_id.to_owned(),
             driver: client.to_owned(),
             model: palier.map(str::to_owned),
             intent: request.intent.trim().to_owned(),
             wall_time_s,
+            egress_token,
         };
         bloquer(async move {
             let client = Client::connect(&pilot).await.map_err(|e| {
@@ -2566,6 +2639,10 @@ async fn main() -> anyhow::Result<()> {
             jev,
             etat: fichier_etat,
             pulls: agentd::poids::Pulls::new(providers::catalogue::pulled_dir()),
+            hotes_des_clients: agentd::reseau::supplement(
+                std::env::var(agentd::reseau::HOTES_ENV).ok().as_deref(),
+            )
+            .map_err(anyhow::Error::msg)?,
             pairs: commun::Pairs::detecter()?,
         }))
         .await?;

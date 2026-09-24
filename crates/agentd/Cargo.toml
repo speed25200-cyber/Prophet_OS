@@ -17,6 +17,7 @@ ledger = { workspace = true }
 sandboxd = { workspace = true }
 blake3 = { workspace = true }
 providers = { workspace = true }
+base64 = { workspace = true }
 pilotd = { workspace = true }
 mcp-system = { workspace = true }
 serde = { workspace = true }

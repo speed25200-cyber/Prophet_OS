@@ -97,6 +97,14 @@ fn faux_codex(dir: &std::path::Path, cli: &std::path::Path) -> std::path::PathBu
              [ -f \"$PROPHET_MCP_CONFIG\" ] || exit 5\n\
              \"$P\" task attach \"$PROPHET_TASK\" --client codex >/dev/null\n\
              case \"$1\" in *attends*) sh -c 'sleep 30; true' {marque} & wait ;; esac\n\
+             case \"$1\" in *reseau*)\n\
+               port=${{1##* }}\n\
+               page=$(curl -s --max-time 10 \"http://127.0.0.1:$port/temoin\") || page=echec\n\
+               curl -s --max-time 2 --noproxy '*' \"http://127.0.0.1:$port/direct\" >/dev/null 2>&1 && d=direct:ouvert || d=direct:ferme\n\
+               \"$P\" task detach \"$PROPHET_TASK\" --text \"page:$page $d\" >/dev/null\n\
+               echo '{{\"item\":{{\"type\":\"agent_message\",\"text\":\"joint\"}}}}'\n\
+               exit 0 ;;\n\
+             esac\n\
              case \"$1\" in *sonde*)\n\
                \"$P\" --json task ls >/dev/null 2>&1 && r=liste:permise || r=liste:refusee\n\
                \"$P\" task cancel autre >/dev/null 2>&1 && r=\"$r annulation:permise\" || r=\"$r annulation:refusee\"\n\
@@ -341,6 +349,22 @@ impl Chain {
         );
         drop(ledger.joindre().await);
         daemons.push(ledger);
+        // Le vrai proxy de sortie : le réseau d'un client en cage ne passe que par lui (ADR 0056).
+        let egress_socket = dir.path().join("egress.sock");
+        if with_pilot {
+            let egress = Daemon::lancer_avec(
+                binaire_voisin("prophet-egress").to_str().unwrap(),
+                &egress_socket,
+                &dir.path().join("egress-state"),
+                &[("PROPHET_CAPD_SOCKET", caps.to_str().unwrap())],
+            );
+            egress
+                .attendre_reponse(
+                    b"GET http://sonde.invalide/ HTTP/1.1\r\nHost: sonde.invalide\r\n\r\n",
+                )
+                .await;
+            daemons.push(egress);
+        }
         let sandbox_socket = dir.path().join("sandbox.sock");
         if sandbox {
             let sandboxd = Daemon::lancer(
@@ -374,6 +398,7 @@ impl Chain {
                 ),
                 ("PROPHET_AGENTD_SOCKET", agent_socket.display().to_string()),
                 ("PROPHET_MCP_BRIDGE", pont),
+                ("PROPHET_EGRESS_SOCKET", egress_socket.display().to_string()),
                 // Dans la cage, seuls les clients de remplacement et la CLI s'ajoutent au système.
                 (
                     "PROPHET_PILOT_READ_ONLY",
@@ -403,6 +428,11 @@ impl Chain {
             daemons.push(pilot);
         }
         let mut env = vec![
+            // Le faux Codex joint aussi un hôte témoin, sur cette machine.
+            (
+                "PROPHET_CLIENT_HOSTS",
+                json!({"codex": ["127.0.0.1"]}).to_string(),
+            ),
             ("PROPHET_HOME", home.to_str().unwrap().to_owned()),
             ("PROPHET_CAPD_SOCKET", caps.to_str().unwrap().to_owned()),
             ("PROPHET_LEDGER_SOCKET", logs.to_str().unwrap().to_owned()),
@@ -973,6 +1003,63 @@ async fn le_client_en_mission_ne_joint_que_sa_seance() {
     ] {
         assert!(texte.contains(attendu), "{attendu} attendu dans : {info}");
     }
+}
+
+/// Le réseau du client ne sort que par egress (ADR 0056) : agentd lui fait émettre par capd un
+/// jeton borné aux hôtes de son éditeur (ici, un hôte témoin ajouté par l'administrateur), le
+/// lanceur le pose sur chaque requête de la cage, le vrai egress demande à capd et relaie. Le
+/// client lit ainsi la page témoin ; en direct, la même adresse ne mène nulle part.
+#[tokio::test]
+async fn le_reseau_du_client_passe_par_egress_sous_le_jeton_de_la_mission() {
+    use std::io::{BufRead as _, Write as _};
+    if !cage_disponible() {
+        return;
+    }
+    if !std::path::Path::new("/usr/bin/curl").exists() {
+        eprintln!("curl absent : essai du réseau du client non joué");
+        return;
+    }
+    let serveur = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = serveur.local_addr().unwrap().port();
+    let temoin = std::thread::spawn(move || {
+        let (flux, _) = serveur.accept().unwrap();
+        let mut lecteur = std::io::BufReader::new(flux.try_clone().unwrap());
+        let mut premiere = String::new();
+        lecteur.read_line(&mut premiere).unwrap();
+        loop {
+            let mut ligne = String::new();
+            if lecteur.read_line(&mut ligne).unwrap() == 0 || ligne == "\r\n" {
+                break;
+            }
+        }
+        let mut flux = flux;
+        flux.write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\nConnection: close\r\n\r\npage-temoin",
+        )
+        .unwrap();
+        premiere
+    });
+    let chain = Chain::new(vec![], true).await;
+    chain
+        .client
+        .call(
+            "task.prepare",
+            json!({"id":"reseau","intent":format!("reseau {port}"),"profile":"atelier","model":"codex"}),
+        )
+        .await
+        .unwrap();
+    chain
+        .client
+        .call("task.start", json!({"id":"reseau"}))
+        .await
+        .unwrap();
+    let info = chain.attendre("reseau").await;
+    assert_eq!(info["task"]["state"], "done", "{info}");
+    let texte = info["result"]["text"].as_str().unwrap_or_default();
+    assert!(texte.contains("page:page-temoin"), "{info}");
+    assert!(texte.contains("direct:ferme"), "{info}");
+    let requete = temoin.join().unwrap();
+    assert!(requete.starts_with("GET /temoin HTTP/1.1"), "{requete}");
 }
 
 /// Le vrai client, sur une machine où l'humain s'est connecté : le lanceur le dit connecté, une
