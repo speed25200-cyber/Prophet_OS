@@ -97,10 +97,11 @@ pub fn enter_namespaces(handshake: Option<&Handshake>) -> Result<Vec<&'static st
 }
 
 /// Entre dans les espaces de noms d'un client officiel lancé en mission (ADR 0056) : utilisateur,
-/// montage, processus, IPC et nom d'hôte — **sans espace réseau** : le client joint son éditeur
-/// par le réseau de l'hôte, tant qu'aucun relais ne le fait passer par egress. L'identité reste
-/// celle de l'humain (même uid, même gid, sans groupe supplémentaire) : ce que le client écrit
-/// dans son profil privé lui appartient dehors comme dedans, et aucun droit de plus ne s'y ajoute.
+/// montage, processus, réseau, IPC et nom d'hôte. Le réseau de la cage n'a que sa boucle locale
+/// ([`activer_la_boucle_locale`]) : le seul chemin vers le dehors est le relais vers egress que
+/// le lanceur y monte. L'identité reste celle de l'humain (même uid, même gid, sans groupe
+/// supplémentaire) : ce que le client écrit dans son profil privé lui appartient dehors comme
+/// dedans, et aucun droit de plus ne s'y ajoute.
 ///
 /// L'appelant doit être seul (aucun autre fil). L'espace de processus ne vaut que pour ses
 /// enfants : le premier `fork` qui suit y devient le processus 1, et c'est lui qui doit monter
@@ -114,9 +115,12 @@ pub fn entrer_pour_un_client() -> Result<Vec<&'static str>, ConfineError> {
     let flags = CloneFlags::CLONE_NEWUSER
         | CloneFlags::CLONE_NEWNS
         | CloneFlags::CLONE_NEWPID
+        | CloneFlags::CLONE_NEWNET
         | CloneFlags::CLONE_NEWIPC
         | CloneFlags::CLONE_NEWUTS;
-    unshare(flags).map_err(nomme("unshare(CLONE_NEWUSER|NEWNS|NEWPID|NEWIPC|NEWUTS)"))?;
+    unshare(flags).map_err(nomme(
+        "unshare(CLONE_NEWUSER|NEWNS|NEWPID|NEWNET|NEWIPC|NEWUTS)",
+    ))?;
     // Sans « deny », un processus non privilégié ne peut pas écrire sa carte de groupes.
     std::fs::write("/proc/self/setgroups", "deny")
         .map_err(|e| ConfineError::Step("écriture de /proc/self/setgroups", e))?;
@@ -124,7 +128,52 @@ pub fn entrer_pour_un_client() -> Result<Vec<&'static str>, ConfineError> {
         .map_err(|e| ConfineError::Step("écriture de /proc/self/uid_map", e))?;
     std::fs::write("/proc/self/gid_map", format!("{gid} {gid} 1\n"))
         .map_err(|e| ConfineError::Step("écriture de /proc/self/gid_map", e))?;
-    Ok(vec!["user", "mount", "pid", "ipc", "uts"])
+    Ok(vec!["user", "mount", "pid", "net", "ipc", "uts"])
+}
+
+/// Monte l'interface de bouclage de l'espace réseau courant : un espace neuf la crée éteinte, et
+/// sans elle aucun programme ne peut joindre `127.0.0.1` — ni le relais vers egress que la cage
+/// d'un client y écoute. Exige le droit d'administrer cet espace, que son créateur a.
+///
+/// # Erreurs
+/// Si le noyau refuse la prise ou le changement d'état de l'interface.
+pub fn activer_la_boucle_locale() -> Result<(), ConfineError> {
+    use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd};
+    // SAFETY: `socket` n'a pas d'effet mémoire ; le descripteur rendu est aussitôt possédé.
+    let brut = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0) };
+    if brut < 0 {
+        return Err(ConfineError::Step(
+            "socket(AF_INET) pour la boucle locale",
+            std::io::Error::last_os_error(),
+        ));
+    }
+    // SAFETY: `brut` vient d'être rendu par le noyau et n'appartient à personne d'autre.
+    let prise = unsafe { OwnedFd::from_raw_fd(brut) };
+    // SAFETY: `ifreq` est une structure C sans invariant, valide entièrement à zéro.
+    let mut demande: libc::ifreq = unsafe { std::mem::zeroed() };
+    for (case, octet) in demande.ifr_name.iter_mut().zip(b"lo") {
+        *case = *octet as libc::c_char;
+    }
+    // SAFETY: `demande` est une `ifreq` initialisée dont le nom se termine par un zéro ;
+    // `SIOCGIFFLAGS` n'y écrit que les drapeaux de l'interface.
+    if unsafe { libc::ioctl(prise.as_raw_fd(), libc::SIOCGIFFLAGS as _, &mut demande) } < 0 {
+        return Err(ConfineError::Step(
+            "ioctl(SIOCGIFFLAGS, lo)",
+            std::io::Error::last_os_error(),
+        ));
+    }
+    // SAFETY: après `SIOCGIFFLAGS`, le membre actif de l'union est celui des drapeaux.
+    unsafe {
+        demande.ifr_ifru.ifru_flags |= (libc::IFF_UP | libc::IFF_RUNNING) as libc::c_short;
+    }
+    // SAFETY: même structure, lue par le noyau pour poser les drapeaux de `lo`.
+    if unsafe { libc::ioctl(prise.as_raw_fd(), libc::SIOCSIFFLAGS as _, &demande) } < 0 {
+        return Err(ConfineError::Step(
+            "ioctl(SIOCSIFFLAGS, lo)",
+            std::io::Error::last_os_error(),
+        ));
+    }
+    Ok(())
 }
 
 /// Poignée de main entre le gestionnaire et l'amorçage, par deux tubes nommés.
