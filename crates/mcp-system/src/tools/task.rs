@@ -58,6 +58,9 @@ impl Tool for Status {
 #[derive(Debug)]
 pub struct Diff;
 
+/// Changements montrés au plus par `task.diff` ; les comptes restent entiers.
+const DIFF_LIGNES_MAX: usize = 200;
+
 impl Tool for Diff {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
@@ -87,7 +90,8 @@ impl Tool for Diff {
                         "modified": modified,
                         "deleted": deleted,
                         "bytes_written": diff.bytes_written(),
-                        "rendering": diff.render()
+                        "rendering": diff.render_limited(DIFF_LIGNES_MAX),
+                        "truncated": added + modified + deleted > DIFF_LIGNES_MAX
                     }))
                 }
                 Err(error) => CallResult::error(ErrorCode::Internal, error.to_string()),

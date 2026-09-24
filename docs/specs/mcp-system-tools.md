@@ -30,21 +30,21 @@
 | `proc.kill` | task courante | non | non | |
 | `http.fetch` | net.egress hôte | selon méthode (POST/PUT/DELETE = irréversible) | selon méthode | via egress, implémenté |
 | `task.status` | task courante | non | non | |
-| `task.diff` | task courante | non | non | |
+| `task.diff` | task courante | non | non | comptes entiers, rendu borné à 200 changements (`truncated`) |
 | `task.commit_request` | task courante | oui | non | déclenche approbation si fichiers sensibles |
 | `task.delegate` | task.spawn contexte | non | non | sous-mission à droits ⊆, autre contexte ou modèle, résultat rendu (ADR 0029) |
 | `approval.request` | task courante | non | non | |
 | `approval.wait` | task courante | non | non | |
 | `ledger.query` | ledger.read (ou read_all) | non | non | les derniers événements de la tâche (50 par défaut, 500 au plus, `limit`), filtrables par type (`kinds`) et à partir d'un numéro (`since_seq`), avec leur nombre total (`count`, `truncated`) |
 | `ledger.replay_summary` | ledger.read | non | non | |
-| `memory.remember` | memory.write espace | non | non | |
-| `memory.search` | memory.read espace | non | non | |
+| `memory.remember` | memory.write espace | non | non | un fait de 4 000 caractères au plus, 16 étiquettes (`tags`) retenues |
+| `memory.search` | memory.read espace | non | non | 10 entrées par défaut, 50 au plus, texte et étiquettes |
 | `memory.forget` | memory.write espace | oui | non | |
 | `memory.list` | memory.read espace | non | non | |
 | `secrets.list_refs` | task courante | non | non | noms seulement |
 | `secrets.use` | tool.call secrets.use | non | non | rend un handle |
 | `clock.now` | aucune | non | non | horloge de tâche (rejouable) |
-| `notify.human` | tool.call notify.human | non | non | hors bande |
+| `notify.human` | tool.call notify.human | non | non | hors bande ; urgence `basse`, `normale` (défaut) ou `haute`, rendue |
 | `doc.read` | fs.read chemin | non | non | texte et métadonnées d'un PDF, document bureautique, image, média, page, archive ; format reconnu aux octets |
 | `ui.apps` | tool.call ui.apps | non | non | applications et nombre de fenêtres, sans titre |
 | `ui.tree` | ui.read app | non | non | SUP, provenance accessibilité |

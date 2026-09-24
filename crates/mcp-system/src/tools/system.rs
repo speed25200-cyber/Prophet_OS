@@ -471,6 +471,17 @@ impl Tool for LedgerQuery {
     }
 }
 
+/// Caractères au plus d'un fait retenu : la mémoire garde des faits, pas des documents, et
+/// chaque recherche les rend au modèle.
+const MEMOIRE_TEXTE_MAX: usize = 4_000;
+
+/// Étiquettes au plus d'un fait, et caractères au plus de chacune.
+const MEMOIRE_ETIQUETTES_MAX: usize = 16;
+const MEMOIRE_ETIQUETTE_MAX: usize = 64;
+
+/// Entrées rendues au plus par une recherche.
+const MEMOIRE_RESULTATS_MAX: usize = 50;
+
 /// Enregistrement en mémoire.
 #[derive(Debug)]
 pub struct Remember;
@@ -484,8 +495,12 @@ impl Tool for Remember {
                 "type": "object",
                 "properties": {
                     "space": {"type": "string", "default": "work"},
-                    "text": {"type": "string"},
-                    "tags": {"type": "array", "items": {"type": "string"}}
+                    "text": {"type": "string", "maxLength": MEMOIRE_TEXTE_MAX},
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string", "maxLength": MEMOIRE_ETIQUETTE_MAX},
+                        "maxItems": MEMOIRE_ETIQUETTES_MAX
+                    }
                 },
                 "required": ["text"],
                 "additionalProperties": false
@@ -507,6 +522,39 @@ impl Tool for Remember {
         let Some(texte) = string_arg(args, "text") else {
             return CallResult::error(ErrorCode::Invalid, "argument `text` manquant");
         };
+        let longueur = texte.chars().count();
+        if longueur > MEMOIRE_TEXTE_MAX {
+            return CallResult::error(
+                ErrorCode::Invalid,
+                format!(
+                    "texte de {longueur} caractères, {MEMOIRE_TEXTE_MAX} au plus : retenez un fait, pas un document"
+                ),
+            );
+        }
+        let etiquettes: Vec<String> = match args.get("tags") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(liste))
+                if liste.len() <= MEMOIRE_ETIQUETTES_MAX
+                    && liste.iter().all(|t| {
+                        t.as_str()
+                            .is_some_and(|t| t.chars().count() <= MEMOIRE_ETIQUETTE_MAX)
+                    }) =>
+            {
+                liste
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            }
+            Some(_) => {
+                return CallResult::error(
+                    ErrorCode::Invalid,
+                    format!(
+                        "`tags` : au plus {MEMOIRE_ETIQUETTES_MAX} chaînes de {MEMOIRE_ETIQUETTE_MAX} caractères"
+                    ),
+                );
+            }
+        };
         let espace =
             memoryd::Space::new(string_arg(args, "space").unwrap_or_else(|| "work".to_owned()));
         let chemin = std::path::Path::new(&context.home).join(".prophet/memoire.db");
@@ -514,10 +562,9 @@ impl Tool for Remember {
         else {
             return CallResult::error(ErrorCode::Internal, "mémoire inaccessible");
         };
-        match store.remember(
-            &memoryd::NewEntry::fact(&espace, &texte).from_task(&context.task),
-            time::OffsetDateTime::now_utc(),
-        ) {
+        let mut entree = memoryd::NewEntry::fact(&espace, &texte).from_task(&context.task);
+        entree.tags = &etiquettes;
+        match store.remember(&entree, time::OffsetDateTime::now_utc()) {
             Ok(id) => CallResult::structured(json!({"id": id, "space": espace.0})),
             Err(erreur) => CallResult::error(ErrorCode::Internal, erreur.to_string()),
         }
@@ -538,7 +585,7 @@ impl Tool for Recall {
                 "properties": {
                     "space": {"type": "string", "default": "work"},
                     "query": {"type": "string"},
-                    "limit": {"type": "integer"}
+                    "limit": {"type": "integer", "minimum": 1, "maximum": MEMOIRE_RESULTATS_MAX, "default": 10}
                 },
                 "required": ["query"],
                 "additionalProperties": false
@@ -569,16 +616,29 @@ impl Tool for Recall {
         };
         let mut requete = memoryd::Query::in_space(espace, &question);
         if let Some(limite) = args.get("limit").and_then(Value::as_u64) {
-            requete.limit = limite as usize;
+            requete.limit = usize::try_from(limite)
+                .unwrap_or(MEMOIRE_RESULTATS_MAX)
+                .clamp(1, MEMOIRE_RESULTATS_MAX);
         }
         match store.search(&requete) {
             Ok(entries) => {
                 let resultats: Vec<Value> = entries
                     .iter()
                     .map(|e| {
+                        // Un fait retenu par un autre chemin que cet outil peut être plus long :
+                        // il est coupé ici, pas dans la mémoire.
+                        let texte = if e.text.chars().count() > MEMOIRE_TEXTE_MAX {
+                            let mut coupe: String =
+                                e.text.chars().take(MEMOIRE_TEXTE_MAX).collect();
+                            coupe.push('…');
+                            coupe
+                        } else {
+                            e.text.clone()
+                        };
                         json!({
                             "id": e.id,
-                            "text": e.text,
+                            "text": texte,
+                            "tags": e.tags,
                             "score": e.score,
                             "source_task": e.source_task,
                             "confidence": e.confidence
@@ -690,6 +750,9 @@ impl Tool for UseSecret {
 #[derive(Debug)]
 pub struct Notify;
 
+/// Les urgences qu'une notification peut porter.
+const URGENCES: [&str; 3] = ["basse", "normale", "haute"];
+
 impl Tool for Notify {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
@@ -699,7 +762,7 @@ impl Tool for Notify {
                 "type": "object",
                 "properties": {
                     "message": {"type": "string"},
-                    "urgency": {"type": "string", "enum": ["basse", "normale", "haute"]}
+                    "urgency": {"type": "string", "enum": URGENCES, "default": "normale"}
                 },
                 "required": ["message"],
                 "additionalProperties": false
@@ -721,9 +784,17 @@ impl Tool for Notify {
         let Some(message) = string_arg(args, "message") else {
             return CallResult::error(ErrorCode::Invalid, "argument `message` manquant");
         };
+        let urgence = string_arg(args, "urgency").unwrap_or_else(|| "normale".to_owned());
+        if !URGENCES.contains(&urgence.as_str()) {
+            return CallResult::error(
+                ErrorCode::Invalid,
+                format!("urgence inconnue : {urgence} (basse, normale ou haute)"),
+            );
+        }
         CallResult::structured(json!({
             "delivered": false,
             "message": message,
+            "urgency": urgence,
             "note": "aucun canal de notification en service ; le message figure au journal"
         }))
     }
@@ -1053,6 +1124,69 @@ mod tests {
         let inconnu = LedgerQuery.call(&json!({"kinds": ["pas.un.type"]}), &contexte);
         assert!(inconnu.is_error);
         assert_eq!(inconnu.structured.unwrap()["code"], json!("Invalid"));
+    }
+
+    /// La mémoire garde des faits, pas des documents : un texte trop long est refusé en le
+    /// disant, les étiquettes demandées sont retenues, et une recherche rend au plus cinquante
+    /// entrées, chacune bornée — le contexte du modèle n'est pas un entrepôt.
+    #[test]
+    fn la_memoire_retient_les_etiquettes_et_borne_ce_qu_elle_rend() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".prophet")).unwrap();
+        let mut contexte = contexte_de("task:01");
+        contexte.home = home.path().display().to_string();
+        let retenu = Remember.call(
+            &json!({"text": "L'utilisateur préfère les rapports en français.", "tags": ["langue", "rapports"]}),
+            &contexte,
+        );
+        assert!(!retenu.is_error, "{retenu:?}");
+        let trop_long = Remember.call(
+            &json!({"text": "x".repeat(MEMOIRE_TEXTE_MAX + 1)}),
+            &contexte,
+        );
+        assert!(trop_long.is_error);
+        assert_eq!(trop_long.structured.unwrap()["code"], json!("Invalid"));
+        for n in 0..60 {
+            let r = Remember.call(
+                &json!({"text": format!("fait numéro {n} sur les rapports")}),
+                &contexte,
+            );
+            assert!(!r.is_error, "{r:?}");
+        }
+        let trouve = Recall
+            .call(
+                &json!({"query": "rapports en français", "limit": 1000}),
+                &contexte,
+            )
+            .structured
+            .unwrap();
+        let resultats = trouve["results"].as_array().unwrap();
+        assert_eq!(resultats.len(), MEMOIRE_RESULTATS_MAX);
+        let prefere = resultats
+            .iter()
+            .find(|r| r["text"].as_str().unwrap().contains("préfère"))
+            .expect("le fait le plus proche est rendu");
+        assert_eq!(prefere["tags"], json!(["langue", "rapports"]));
+    }
+
+    #[test]
+    fn une_notification_dit_son_urgence_et_refuse_une_urgence_inconnue() {
+        let contexte = contexte_de("task:01");
+        let rendu = Notify
+            .call(
+                &json!({"message": "rapport prêt", "urgency": "haute"}),
+                &contexte,
+            )
+            .structured
+            .unwrap();
+        assert_eq!(rendu["urgency"], json!("haute"));
+        let defaut = Notify
+            .call(&json!({"message": "rapport prêt"}), &contexte)
+            .structured
+            .unwrap();
+        assert_eq!(defaut["urgency"], json!("normale"));
+        let inconnue = Notify.call(&json!({"message": "x", "urgency": "extrême"}), &contexte);
+        assert!(inconnue.is_error);
     }
 
     fn contexte_de(task: &str) -> ToolContext {
