@@ -1781,12 +1781,15 @@ donne le détail.
 de la réserve de microVM tournent sur le coureur KVM de la CI, qui les a verdis), pas de carte
 graphique (fluidité et consommation réelles à mesurer avec `prophet-surface --mesure` et
 `--repos`). Le premier appel réel de Jev
-attend une clé. Aucun compte Claude, ChatGPT ou Codex n'est connecté. Une décision revient à
-l'utilisateur : `task.spawn` d'agentd accepte un manifeste brut du compte de l'humain (c'est ce
-que fait `prophet task new`) ; le réserver aux profils du catalogue fermerait la dernière voie
-par laquelle un processus de la session fait planifier une mission sous un manifeste de sa main.
+attend une clé. Aucun compte Claude, ChatGPT ou Codex n'est connecté. `task.spawn` d'agentd
+accepte toujours un manifeste brut du compte de l'humain (c'est ce que fait `prophet task new`) :
+depuis l'ADR 0056, un client officiel en mission ne l'atteint plus (son seul socket ne mène qu'à
+sa séance), si bien que cette voie n'est plus ouverte qu'aux programmes que l'humain lance
+lui-même ; la réserver aux profils du catalogue reste un choix à faire avec lui. De même pour
+`approval.resolve` (ADR 0044) : la cage retire `capd.sock` aux clients, et seul un programme de
+l'humain hors de toute mission peut encore trancher à sa place.
 
-**Écart relevé, en partie résorbé.** M8-T4 à M8-T6 étaient cochés pour la ligne de commande,
+**Écart relevé, résorbé.** M8-T4 à M8-T6 étaient cochés pour la ligne de commande,
 l'environnement et la détection de session, alors que `prophet-pilotd` lançait les clients sans
 confinement. Depuis l'ADR 0056 (phase 1), chaque client lancé en mission tourne dans une cage
 (`prophet-pilot-cage`) : espaces de noms utilisateur, montage, processus, IPC et nom d'hôte ;
