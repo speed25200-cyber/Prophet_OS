@@ -18,6 +18,13 @@ pub enum Action {
     Apply,
     /// Annuler une publication dont les documents n'ont pas changé depuis.
     Undo,
+    /// Annuler une publication en laissant à l'humain les fichiers qu'il a changés depuis
+    /// (ADR 0058).
+    UndoKeepingChanges,
+    /// Garder sa version du fichier en conflit, et poursuivre (ADR 0058).
+    KeepMine,
+    /// Ne plus publier : rétablir ce qui a été publié, sans toucher ses changements.
+    RollBack,
 }
 
 enum Reply {
@@ -378,6 +385,9 @@ pub struct Missions {
     snapshot: Option<Inspection>,
     error: Option<String>,
     notice: Option<Notice>,
+    /// La mission dont l'annulation stricte vient d'être refusée : annuler en gardant ses
+    /// changements lui est proposé (ADR 0058).
+    undo_refused: Option<String>,
     /// Lire à voix haute le résultat d'une mission qu'on regarde finir (ADR 0036).
     announce: bool,
     /// Missions déjà lues : une fin ne se dit qu'une fois.
@@ -409,6 +419,7 @@ impl Default for Missions {
             snapshot: None,
             error: None,
             notice: None,
+            undo_refused: None,
             announce: crate::preparation::speech_ready(),
             announced: HashSet::new(),
             announcement: None,
@@ -450,6 +461,7 @@ impl Missions {
             self.snapshot = None;
             self.parcours = Parcours::default();
             self.error = None;
+            self.undo_refused = None;
             self.next_read = Instant::now();
             self.trail_next = Instant::now();
         }
@@ -534,11 +546,27 @@ impl Missions {
                         Action::Undo if v["undone"].as_str() == Some(&id) => {
                             Ok("Publication annulée : vos documents ont retrouvé leurs versions initiales.")
                         }
+                        Action::UndoKeepingChanges | Action::RollBack
+                            if v["undone"].as_str() == Some(&id) =>
+                        {
+                            Ok("Publication annulée : ce qu'elle avait écrit est rétabli, vos changements sont restés.")
+                        }
+                        Action::KeepMine if v["applied"].as_str() == Some(&id) => {
+                            Ok("Votre version est gardée ; le reste des versions est publié.")
+                        }
+                        Action::KeepMine if v["undone"].as_str() == Some(&id) => {
+                            Ok("Votre version est gardée ; l'annulation est terminée.")
+                        }
                         _ => Err(
                             "Accusé de réception incohérent ; vérifiez l'état de la mission."
                                 .into(),
                         ),
                     });
+                    // Une annulation stricte refusée : les documents ont changé depuis, ou
+                    // l'état ne le permet pas. L'humain peut alors annuler en gardant ses
+                    // changements ; la supervision le lui propose (ADR 0058).
+                    self.undo_refused =
+                        (action == Action::Undo && valid.is_err()).then(|| id.clone());
                     self.notice = Some(match valid {
                         Ok(message) => Notice {
                             task: id,
@@ -732,6 +760,12 @@ impl Missions {
             .as_ref()
             .filter(|n| Some(n.task.as_str()) == self.selected.as_deref())
     }
+    /// L'annulation stricte de la mission montrée vient d'être refusée : proposer d'annuler en
+    /// gardant ses changements (ADR 0058).
+    #[must_use]
+    pub fn undo_refused(&self) -> bool {
+        self.undo_refused.is_some() && self.undo_refused == self.selected
+    }
     /// Une commande ou sa relecture de confirmation est encore en cours.
     #[must_use]
     pub fn busy(&self) -> bool {
@@ -759,6 +793,11 @@ impl Missions {
             Action::Cancel => info.can_cancel,
             Action::Apply => info.can_apply,
             Action::Undo => info.can_undo,
+            Action::UndoKeepingChanges => {
+                info.can_undo && info.publication == Some(agentd::WorkspaceState::Committed)
+            }
+            Action::KeepMine => info.can_resolve,
+            Action::RollBack => info.can_resolve && !info.conflict_in_undo,
         }) {
             return Err("Cette commande n'est pas disponible dans l'état reçu.".into());
         }
@@ -768,13 +807,16 @@ impl Missions {
         self.action = true;
         self.notice = None;
         std::thread::spawn(move || {
-            let method = match action {
-                Action::Start => "task.start",
-                Action::Cancel => "task.cancel",
-                Action::Apply => "task.apply",
-                Action::Undo => "task.undo",
+            let (method, params) = match action {
+                Action::Start => ("task.start", json!({"id":id})),
+                Action::Cancel => ("task.cancel", json!({"id":id})),
+                Action::Apply => ("task.apply", json!({"id":id})),
+                Action::Undo => ("task.undo", json!({"id":id})),
+                Action::UndoKeepingChanges => ("task.undo", json!({"id":id, "keep_changes": true})),
+                Action::KeepMine => ("task.resolve", json!({"id":id, "choice":"keep_mine"})),
+                Action::RollBack => ("task.resolve", json!({"id":id, "choice":"roll_back"})),
             };
-            let result = rpc(socket, method, json!({"id":id}));
+            let result = rpc(socket, method, params);
             let _ = tx.send(Reply::Action(id, action, result));
         });
         Ok(())
@@ -902,6 +944,10 @@ mod tests {
             publication: None,
             can_apply: false,
             can_undo: false,
+            conflict: None,
+            conflict_in_undo: false,
+            can_resolve: false,
+            kept: Vec::new(),
             browsing: None,
             client_hosts: None,
         }
@@ -1213,6 +1259,80 @@ mod tests {
         let notice = missions.notice().unwrap();
         assert!(!notice.error, "{}", notice.text);
         assert!(notice.text.contains("annulée"), "{}", notice.text);
+    }
+
+    /// Trancher un conflit n'est offert qu'avec `can_resolve` ; « tout annuler » jamais pour
+    /// une annulation arrêtée ; annuler en gardant ses changements suit un refus de
+    /// l'annulation stricte, pour la mission montrée seulement (ADR 0058).
+    #[test]
+    fn trancher_un_conflit_et_annuler_en_gardant_ses_changements() {
+        let mut missions = Missions::default();
+        missions.select(Some("a"));
+        let mut done = inspection("a", State::Done);
+        done.publication = Some(agentd::WorkspaceState::Conflict);
+        done.conflict = Some("docs/a.txt".into());
+        missions.snapshot = Some(done.clone());
+        assert!(
+            missions.command(Action::KeepMine).is_err(),
+            "sans can_resolve"
+        );
+        done.can_resolve = true;
+        done.conflict_in_undo = true;
+        missions.snapshot = Some(done.clone());
+        assert!(
+            missions.command(Action::RollBack).is_err(),
+            "une annulation arrêtée ne s'annule pas"
+        );
+        assert!(!missions.undo_refused());
+        missions
+            .tx
+            .send(Reply::Action(
+                "a".into(),
+                Action::Undo,
+                Err("Conflit sur docs/a.txt".into()),
+            ))
+            .unwrap();
+        missions.update();
+        assert!(missions.undo_refused());
+        missions
+            .tx
+            .send(Reply::Action(
+                "a".into(),
+                Action::KeepMine,
+                Ok(json!({"applied":"a","changes":{"added":1},"kept":["docs/a.txt"]})),
+            ))
+            .unwrap();
+        missions.update();
+        let notice = missions.notice().unwrap();
+        assert!(!notice.error, "{}", notice.text);
+        assert!(notice.text.contains("gardée"), "{}", notice.text);
+        assert!(
+            !missions.undo_refused(),
+            "une autre commande efface la proposition"
+        );
+        missions
+            .tx
+            .send(Reply::Action(
+                "a".into(),
+                Action::UndoKeepingChanges,
+                Ok(json!({"undone":"a","state":"rolled_back","kept":["docs/a.txt"]})),
+            ))
+            .unwrap();
+        missions.update();
+        assert!(
+            missions
+                .notice()
+                .unwrap()
+                .text
+                .contains("vos changements sont restés")
+        );
+        missions
+            .tx
+            .send(Reply::Action("a".into(), Action::Undo, Err("refus".into())))
+            .unwrap();
+        missions.update();
+        missions.select(Some("b"));
+        assert!(!missions.undo_refused(), "la proposition suit la mission");
     }
 
     #[test]

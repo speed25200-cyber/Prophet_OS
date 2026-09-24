@@ -49,7 +49,7 @@ pub(crate) fn publication(state: WorkspaceState) -> &'static str {
             "Annulation interrompue : reprenez-la pour rétablir vos documents."
         }
         WorkspaceState::Conflict => {
-            "Publication interrompue sur un conflit. Les fichiers déplacés sont conservés ; une résolution explicite est nécessaire."
+            "Publication arrêtée sur un conflit : elle attend votre décision. Les fichiers déplacés sont conservés."
         }
         WorkspaceState::Committed => {
             "Versions publiées dans vos documents. Annulable tant qu'ils n'ont pas changé."
@@ -211,6 +211,25 @@ pub(crate) fn draw(
             {
                 command = Some(Action::Undo);
             }
+            // L'annulation stricte a été refusée : vos documents ont changé depuis. Annuler le
+            // reste en gardant vos changements se demande explicitement (ADR 0058).
+            if info.can_undo
+                && info.publication == Some(WorkspaceState::Committed)
+                && missions.undo_refused()
+                && ui
+                    .add_enabled_ui(!missions.busy(), |ui| {
+                        bouton(
+                            ui,
+                            "mission-undo-garder",
+                            "Annuler en gardant mes changements",
+                            false,
+                        )
+                    })
+                    .inner
+                    .clicked()
+            {
+                command = Some(Action::UndoKeepingChanges);
+            }
             // Échouée ou arrêtée : la même intention repasse par la préparation, que l'humain
             // relit et confirme ; rien ne part d'ici.
             if let Some(candidate) = relance(
@@ -230,6 +249,27 @@ pub(crate) fn draw(
         if let Some(state) = info.publication {
             ui.add_space(4.0);
             small(ui, publication(state));
+        }
+        if let Some(choix) = conflit(ui, info, missions.busy()) {
+            command = Some(choix);
+        }
+        if !info.kept.is_empty() {
+            ui.add_space(4.0);
+            small(
+                ui,
+                format!(
+                    "Laissés à votre version : {}",
+                    limited(
+                        &info
+                            .kept
+                            .iter()
+                            .map(|chemin| format!("~/{chemin}"))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        400
+                    )
+                ),
+            );
         }
         if let Some(browsing) = &info.browsing
             && let Some(url) = browsing["url"].as_str()
@@ -601,6 +641,73 @@ fn plan(ui: &mut egui::Ui, info: &Inspection, busy: bool, command: &mut Option<A
         ui.add_space(12.0);
         ui.label(RichText::new(reason).color(RED));
     }
+}
+
+/// Une publication arrêtée sur un conflit : le fichier, ce qui est sûr, et les deux décisions
+/// possibles (ADR 0058). Rend celle que l'humain prend.
+fn conflit(ui: &mut egui::Ui, info: &Inspection, busy: bool) -> Option<Action> {
+    let chemin = info.conflict.as_deref()?;
+    let mut choix = None;
+    ui.add_space(8.0);
+    Frame::new()
+        .fill(ATTENTE_VOILE)
+        .stroke(Stroke::new(1.0, hud::voile(ATTENTE, 150)))
+        .corner_radius(3)
+        .inner_margin(14)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            label(ui, "CONFLIT DE PUBLICATION");
+            ui.add_space(4.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(format!("~/{}", limited(chemin, 200)))
+                        .size(15.0)
+                        .monospace()
+                        .color(ENCRE),
+                )
+                .wrap(),
+            );
+            ui.add(
+                egui::Label::new(
+                    RichText::new(if info.conflict_in_undo {
+                        "Ce fichier a changé pendant l'annulation. Votre version n'a pas été touchée ; ce qui était déplacé reste conservé."
+                    } else {
+                        "Ce fichier a changé pendant la publication. Votre version n'a pas été écrasée ; ce qui était déplacé reste conservé."
+                    })
+                    .size(13.0)
+                    .color(MUTED),
+                )
+                .wrap(),
+            );
+            if !info.can_resolve {
+                return;
+            }
+            ui.add_space(8.0);
+            hud::rangee(ui, |ui| {
+                ui.add_enabled_ui(!busy, |ui| {
+                    if bouton(
+                        ui,
+                        "mission-garder-ma-version",
+                        if info.conflict_in_undo {
+                            "Garder ma version et finir l'annulation"
+                        } else {
+                            "Garder ma version et poursuivre"
+                        },
+                        true,
+                    )
+                    .clicked()
+                    {
+                        choix = Some(Action::KeepMine);
+                    }
+                    if !info.conflict_in_undo
+                        && bouton(ui, "mission-tout-annuler", "Tout annuler", false).clicked()
+                    {
+                        choix = Some(Action::RollBack);
+                    }
+                });
+            });
+        });
+    choix
 }
 
 fn result(
@@ -1341,6 +1448,135 @@ mod tests {
                 .write_image_data(&cible.pixels(&contexte).unwrap())
                 .unwrap();
         }
+    }
+
+    /// Une publication arrêtée sur un conflit, dessinée pour de vrai à deux largeurs : le fichier,
+    /// ce qui est sûr, et les deux décisions ; un clic sur « Garder ma version » la rend, et une
+    /// annulation arrêtée n'offre pas « Tout annuler » (ADR 0058).
+    #[test]
+    #[ignore = "needs_gpu: rendu wgpu hors écran du conflit de publication"]
+    fn un_conflit_de_publication_se_montre_et_se_tranche() {
+        let mut info: Inspection = serde_json::from_value(serde_json::json!({
+            "task": {"id":"notes-1","intent":"Range mes notes","agent":"org.prophet.atelier",
+                "user":"uid:1000","depth":0,"state":"done",
+                "budget":{"limits":{"tokens":20000,"wall_time_s":90,"steps":200,"approvals":3,"cost_eur":0.0},
+                          "spent":{"tokens":900,"wall_time_s":12,"steps":4,"approvals":0,"cost_eur":0.0,"quota_pct":0.0}},
+                "sandbox_level":0,"created":"2026-09-24T01:51:07Z","history":["pending","planned","running","done"]},
+            "plan": null, "result": null, "can_start": false, "can_cancel": false, "start_reason": null,
+            "publication": "conflict", "conflict": "Documents/notes/semaine-38-et-sa-suite-tres-longue.md",
+            "can_resolve": true, "kept": ["Documents/notes/lundi.md"]
+        }))
+        .unwrap();
+        let contexte = crate::gpu::Contexte::hors_ecran().unwrap();
+        let mut bureau =
+            crate::bureau::Bureau::nouveau(&contexte, "http://127.0.0.1:1/v1".into(), false);
+        bureau.figer_transitions();
+        let mut horloge = 8.0;
+        for (largeur, hauteur) in [(900_u32, 300_u32), (420, 360)] {
+            let cible = crate::gpu::Cible::nouvelle(&contexte, largeur, hauteur);
+            let mut textes = String::new();
+            let mut choix = None;
+            let mut bouton_garder = None;
+            for image in 0..4 {
+                let mut events = Vec::new();
+                if image == 3
+                    && let Some(centre) = bouton_garder
+                {
+                    events.push(egui::Event::PointerMoved(centre));
+                    for pressed in [true, false] {
+                        events.push(egui::Event::PointerButton {
+                            pos: centre,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        });
+                    }
+                }
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(largeur as f32, hauteur as f32),
+                    )),
+                    time: Some({
+                        horloge += 0.1;
+                        horloge
+                    }),
+                    focused: true,
+                    events,
+                    ..Default::default()
+                };
+                let mut output = bureau.ctx.clone().run_ui(input, |root| {
+                    egui::Frame::new().inner_margin(16).show(root, |ui| {
+                        if let Some(c) = conflit(ui, &info, false) {
+                            choix = Some(c);
+                        }
+                    });
+                });
+                bouton_garder = bureau
+                    .ctx
+                    .read_response(egui::Id::new("mission-garder-ma-version"))
+                    .map(|r| r.rect.center());
+                textes = output
+                    .shapes
+                    .iter()
+                    .filter_map(|c| match &c.shape {
+                        egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                bureau.rendre(&contexte, &cible, &mut output);
+                if image == 2
+                    && let Ok(dir) = std::env::var("PROPHET_CAPTURE_DIR")
+                {
+                    std::fs::create_dir_all(&dir).unwrap();
+                    let fichier = std::fs::File::create(
+                        std::path::Path::new(&dir)
+                            .join(format!("surface-conflit-de-publication-{largeur}.png")),
+                    )
+                    .unwrap();
+                    let mut png = png::Encoder::new(fichier, largeur, hauteur);
+                    png.set_color(png::ColorType::Rgba);
+                    png.set_depth(png::BitDepth::Eight);
+                    png.write_header()
+                        .unwrap()
+                        .write_image_data(&cible.pixels(&contexte).unwrap())
+                        .unwrap();
+                }
+            }
+            assert!(textes.contains("CONFLIT DE PUBLICATION"), "{textes}");
+            assert!(textes.contains("semaine-38"), "{textes}");
+            assert!(textes.contains("n'a pas été écrasée"), "{textes}");
+            assert!(textes.contains("TOUT ANNULER"), "{textes}");
+            assert_eq!(choix, Some(Action::KeepMine), "à {largeur} px");
+            let bord = bureau
+                .ctx
+                .read_response(egui::Id::new("mission-tout-annuler"))
+                .unwrap()
+                .rect;
+            assert!(
+                bord.right() <= largeur as f32,
+                "{bord:?} déborde à {largeur} px"
+            );
+        }
+        info.conflict_in_undo = true;
+        let mut textes = String::new();
+        let fin = egui::RawInput {
+            time: Some(horloge + 0.1),
+            ..Default::default()
+        };
+        let mut output = bureau.ctx.clone().run_ui(fin, |root| {
+            conflit(root, &info, false);
+        });
+        for c in &output.shapes {
+            if let egui::Shape::Text(t) = &c.shape {
+                textes.push_str(t.galley.text());
+            }
+        }
+        let cible = crate::gpu::Cible::nouvelle(&contexte, 420, 360);
+        bureau.rendre(&contexte, &cible, &mut output);
+        assert!(textes.contains("FINIR L'ANNULATION"), "{textes}");
+        assert!(!textes.contains("TOUT ANNULER"), "{textes}");
     }
 
     #[test]
